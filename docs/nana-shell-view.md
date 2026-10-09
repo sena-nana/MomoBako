@@ -1,15 +1,16 @@
 # 壳层绑定式视图：分块和改常驻的约定
 
-壳层正从「每条消息整块重挂」迁到 NanaUI 的绑定式视图：树只建一次，状态放进信号或 Store，绑定只改自己写的那个字段。这篇写分块的结构，以及把一块区域改成常驻时要做的事。总体数据流见 [迁移边界](./nana-migration.md) 的「壳层视图同步」。
+壳层用 NanaUI 的绑定式视图：树只建一次，状态放进信号或 Store，绑定只改自己写的那个字段。还整块重建的只剩浮层按身份换块和播放条岛。这篇写分块的结构，以及把一块区域改成常驻时要做的事。总体数据流见 [迁移边界](./nana-migration.md) 的「壳层视图同步」。
 
 ## 分块和各自的文件
 
-`ShellView`（`src-nana/src/shell/view_host.rs`）只做调度：写热信号和标题栏，按同一套流程调三块内容，再把各块的根放进 AppShell 和工作区的槽位。三块都实现 `ShellPart`（`view_part.rs`）：
+`ShellView`（`src-nana/src/shell/view_host.rs`）只做调度：写热信号和标题栏，按同一套流程调三块内容，再把侧栏和主区的根放进 AppShell 和工作区的槽位；浮层块自己把各块放进浮层层。三块都实现 `ShellPart`（`view_part.rs`）：
 
 | 方法 | 做什么 |
 | --- | --- |
 | `signals(model)` / `new(signals)` | 常驻的信号和 Store，在骨架的挂载闭包里建，跟骨架一起回收，整块重挂时不重建 |
-| `mount(cx, model, mode)` | 首次挂载；工作台排法变了时把根挪到新槽位，侧栏和主区外框都不重建，不等输入法组合 |
+| `root()` | 放进骨架槽位的根节点，这块没有内容时为 `None` |
+| `mount(cx, model, mode)` | 首次挂载，或工作台排法变了时调用，不等输入法组合。侧栏只在第一次排成工作台时建；主区外框只建一次，换排法时记下焦点和滚动交给 `Swap`。挪位置由 `ShellView::place` 和 `PrimaryPart::hold_solo` 做 |
 | `sync(model)` | 只写本块的信号。每次整体同步都调，组合输入中也调 |
 | `needs_remount(model)` | 有没有必须重挂才能跟上的变化 |
 | `remount(cx, model)` | 重挂需要重挂的部分 |
@@ -20,7 +21,7 @@
 | 块 | 模块 | 切换 | 现状 |
 | --- | --- | --- | --- |
 | 侧栏 | `view_part_sidebar.rs`，投影在 `sidebar_project.rs` | 无 | 常驻：`SidebarSignals`（几个信号加播放集、文件夹树、智能文件夹树三份 Store）建在骨架作用域里，同步只写变了的；第一次排成工作台时建，收起时跟着工作区停放，展开时原样回来 |
-| 主区 | `view_part_primary.rs`，路由在 `route_*.rs` | `dynamic(RouteKey)` | 所有路由（启动、文件、缺失仓库、空库、搜索含空库搜索、设置、日志、拓展、动作和播放集页）都常驻；文件页和播放集页里的播放条是旧视图岛 |
+| 主区 | `view_part_primary.rs`，路由在 `route_*.rs` | `dynamic(RouteKey)` | 所有路由（启动、文件、缺失仓库、空库、搜索含空库搜索、设置、日志、拓展、动作和播放集页）都常驻；播放条是旧视图岛，共三处：文件页工作台左列底部、预览页底部、播放集面板底部 |
 | 浮层 | `view_part_overlay.rs` | 按 `OverlayIdentity` 换块 | 常驻：浮层层一直在 AppShell 的 overlay 槽位里，各块按身份换进换出；身份不变时只经会话写信号；对话框走统一框架，靠 `open` 开合，换下的放完退场才卸 |
 
 并行改区域时各改各的文件：
@@ -33,7 +34,7 @@
 
 ## 主区的路由键和分支
 
-`RouteKey` 是身份键：启动状态、设置页、区域（有仓库、丢失、空库）和工作区面板合起来决定主区显示哪种页面，它本身就是 `dynamic` 的键。所有路由都常驻：
+`RouteKey` 是身份键：启动状态、设置页、区域（有仓库、丢失、空库）、工作区面板，以及是否停在播放集页（`ShellPage::Playlists`）合起来决定主区显示哪种页面，它本身就是 `dynamic` 的键。所有路由都常驻：
 
 - 分支只在进入路由时建一次，之后 `sync` 只写 `RouteSignals` 里它的信号。分支在刷新时由 `dynamic` 建，拿不到 `&ShellViewModel`，只能读信号；热信号要显式传进去（`hot::prop` 只在旧视图挂载期间有值）。
 - 换路由时同步只把新路由写进键（新路由的岛先挂好等着），下一次刷新 `dynamic` 换出新分支，分支的 `on_mount` 把岛放进占位节点。主区外框、路由容器、侧栏和浮层都不动。换走又在刷新前换回来时把键写回去，分支不换。
@@ -48,7 +49,7 @@
 
 ### 首页筛选栏
 
-筛选栏属于首页外框，有仓库的首页路由都可能显示它。信号 `FilterBarSignals` 在 `RouteSignals::filter`，除启动页和设置页以外每次同步都写（关着时不算候选和库类型快捷方式）。常驻首页路由（文件、搜索、播放集、日志、拓展和动作页）在外框里嵌 `inspect_search_view::resident_filter_bar(signals.filter)`，显隐跟「有仓库且筛选栏打开」走 `.visible`；文件页的 `FilesRouteSignals` 不另存筛选栏的状态，读的是同一份 `RouteSignals::filter`。首页外框和纵向滚动主体只有一套：`route_home::{home_page, home_scroll}`，缺失仓库和空库页也用它（不嵌筛选栏）；设置和启动页的整页滚动是 `route_home::scroll_route`。日志页的主体是不滚的裁剪盒 `route_home::home_fixed`：面板（`admin::style::fill_panel`）撑满主体，页头、工具条和筛选固定，日志列表占满剩下的高度、自己滚动，追踪时 `follow_end` 绑在列表上。滚动区里不要再套滚动区，原因见文末「NanaUI 缺口」。
+筛选栏属于首页外框，有仓库的首页路由都可能显示它。信号 `FilterBarSignals` 在 `RouteSignals::filter`，启动、设置、缺失仓库和空库页以外每次同步都写（关着时不算候选和库类型快捷方式）。常驻首页路由（文件、搜索、播放集、日志、拓展和动作页）在外框里嵌 `inspect_search_view::resident_filter_bar(signals.filter)`，显隐跟「有仓库且筛选栏打开」走 `.visible`；文件页的 `FilesRouteSignals` 不另存筛选栏的状态，读的是同一份 `RouteSignals::filter`。首页外框和纵向滚动主体只有一套：`route_home::{home_page, home_scroll}`，缺失仓库和空库页也用它（不嵌筛选栏）；设置和启动页的整页滚动是 `route_home::scroll_route`。日志页的主体是不滚的裁剪盒 `route_home::home_fixed`：面板（`admin::style::fill_panel`）撑满主体，页头、工具条和筛选固定，日志列表占满剩下的高度、自己滚动，追踪时 `follow_end` 绑在列表上。滚动区里不要再套滚动区，原因见文末「NanaUI 缺口」。
 
 ## 改成常驻的步骤
 
@@ -63,8 +64,8 @@
 ### Signal 还是 Store
 
 - 几个平铺的值、读者不多：`Signal<T>`，`T` 是投影里的一段结构，绑定用 `move || sig.with(|v| v.field.clone())` 取字段。值变了以后读者重跑，按字段比较，没变的字段不打补丁，成本很低。
-- 嵌套的状态，或者列表里每行的字段各自在变、行数又多：`store(..)` 加 `#[derive(Store)]`（壳层已开 `view-macro`），行用 `keyed(|item| item.id).each(..)`，行内绑定读 `item.title()` 这样的路径，改一行只重跑读这一行的绑定。整体 `set` 列表会让所有行的绑定重跑一遍再按字段比较，大列表写回时只改变了的项（`at(&key).set(..)`、`push`、`retain`）。
-- 投影出的整份新列表写回 Store 时按键做差异：删掉没有了的、按位置插入新的、只改内容变了的，顺序变了再排一次；键重复时两边都只认第一行。所有列表共用 `row_sync::sync_rows`（侧栏三份树、播放集条目、搜索结果、日志和插件面板），删、插、排只通知列表本身，留下的行一个绑定都不重跑。新日志到达只建新的一行。行内绑定用 `row_text` / `row_flag`，读 `try_with`，行已经删掉时读默认值。
+- 嵌套的状态，或者列表里每行的字段各自在变、行数又多：`store(..)` 加 `#[derive(Store)]`（壳层已开 `view-macro`），行用 `keyed(LogRowView::key).each(..)` 这样按行键建，行内绑定读 `item.title()` 这样的路径，改一行只重跑读这一行的绑定。整体 `set` 列表会让所有行的绑定重跑一遍再按字段比较，大列表写回时只改变了的项（`at(&key).set(..)`、`push`、`retain`）。
+- 投影出的整份新列表写回 Store 时按键做差异：删掉没有了的、按位置插入新的、只改内容变了的，顺序变了再排一次；键重复时两边都只认第一行。侧栏的播放集、文件夹树和智能文件夹树，以及播放集条目、搜索结果、日志和插件面板共用 `row_sync::sync_rows`，删、插、排只通知列表本身，留下的行一个绑定都不重跑；文件页的卡片仓另有自己的写法（`files_board.rs` 的 `write_cards`）。新日志到达只建新的一行。管理页的行内绑定用 `admin::bind::row_text` / `row_flag`，读 `try_with`，行已经删掉时读默认值；侧栏和播放集的行直接读 `item.try_with(..)`。
 - 行的类型不一定要派生 `Store`：行内绑定整行读 `item.try_with(..)`，也只在这一行变了时重跑。要按字段取下一层列表时（分组里的插件卡片 `group.cards()`）才派生。
 - 不要把整个 ViewModel 放进一个信号。
 
@@ -72,7 +73,7 @@
 
 - 跟着数据增删的行用 keyed `each`，长列表用 `each_virtual`（文件页已经在用）。key 是身份：有 id 用 id。行的结构由某个状态决定时（启动步骤的圆标由状态决定）把状态放进 key，状态变了整行重建，别的行不动；没有 id 的行（启动日志）用「位置 + 内容」。
 - `each(..).gap(n)` 的容器就是 `Stack::column(n)`，用它替换原来手写的那一列，不多一层节点。
-- 结构块的容器不能直接给一个 `Stack`。要替换一行有样式的芯片（筛选芯片行、结果行右侧）时用 `.horizontal(n)`，再用 `css!` 补上原来那个 `Stack` 写过的字段（`flex-wrap`、`justify-content`、`width`、`flex-grow` 等），改完跑 `scene_shots` 逐字节比较。竖排父容器里的 `dynamic` 容器不改排版：内容变了整块换、里面又没有可聚焦控件的小块（插件卡片的芯片、原因和四段）可以这样包，可有可无时再给容器 `.visible(..)`。
+- `dynamic` 和 `when` 的容器不能直接给一个 `Stack`；`each` 可以用 `.container(元素)` 把行直接建进给定的元素（播放集条目这样建进 `ReorderList`）。要替换一行有样式的芯片（筛选芯片行、结果行右侧）时用 `.horizontal(n)`，再用 `css!` 补上原来那个 `Stack` 写过的字段（`flex-wrap`、`justify-content`、`width`、`flex-grow` 等），改完跑 `scene_shots` 逐字节比较。竖排父容器里的 `dynamic` 容器不改排版：内容变了整块换、里面又没有可聚焦控件的小块（插件卡片的芯片、原因和四段）可以这样包，可有可无时再给容器 `.visible(..)`。
 - 一行里固定几个、可有可无的块（日志卡片的来源芯片和元数据芯片）直接建出来，各自 `.visible(..)`，不用嵌套列表。
 - 滚动容器写 key，并让 key 带上内容身份（例如 `workspace-page-scroll-{区域}-{面板}`）：换内容时从顶部开始，同一内容重挂时 `remount_state` 按键路径找回偏移。常驻以后滚动容器不再重建，偏移自然留着。
 
@@ -90,23 +91,23 @@
 - 发意图消息，参数是建节点时就确定、之后不会变的值（行的 id、常量），由归约按当时的 ViewModel 决定怎么做；或者
 - 用 `sig.get_untracked()` 现读信号里的值。
 
-不要在处理器里捕获建视图那一刻从 ViewModel 抄来的、之后会变的值。旧视图里的拖放标志（`file_drop_flags`）就是这样抄下来的，它能用是因为内容每次都整块重挂；改常驻时要换成意图消息或者读信号。文件列的拖放现在发 `FilesMessage::HostDrop`，归约时按当时的仓库条件收成宿主拖放消息。设置页的复制按钮、日志的暂停、插件卡片的启用和动作页的执行都是点下去时现读信号。
+不要在处理器里捕获建视图那一刻从 ViewModel 抄来的、之后会变的值。旧视图里的拖放标志（`file_drop_flags`）就是这样抄下来的，它能用是因为内容每次都整块重挂；改常驻时要换成意图消息或者读信号。文件列的拖放现在发 `FilesMessage::HostDrop`，归约时按当时的仓库条件收成宿主拖放消息；空库页把这组标志投影进信号，事件里现读（`route_empty.rs`）。设置页的复制按钮、日志的暂停、插件卡片的启用和动作页的执行都是点下去时现读信号。
 
 `style::action` 按钮禁用时整体 45% 不透明。绑定禁用用 `admin::bind::ActionDisabled`，禁用标志和透明度一起写；只绑 `fields::button::disabled` 会留着建按钮时的透明度。
 
 ### 常驻路由里的旧视图岛
 
-常驻路由里还嵌着别的模块的旧视图时（文件页和播放集页里的播放条），分支里给它留一个占位节点（`NodeRef`），在 `view_part_primary.rs` 的 `islands` 里按路由登记成 `Island { slot, build, stamp }`：
+常驻路由里还嵌着别的模块的旧视图时（文件页和播放集页里的播放条），分支里给它留一个占位节点（`NodeRef`），在路由自己的 `islands` 里登记成 `Island { slot, build, stamp }`（`route_files.rs`、`route_playlists.rs`），`view_part_primary.rs` 的 `islands` 按路由转发：
 
 - 进路由时主区块按当前 ViewModel 把岛的内容挂成脱离树的一块，分支挂好（`on_mount`）时放进占位节点；
 - 之后 `stamp(model)` 变了才当场重建这一块，记下并找回岛里的焦点、选区和滚动，常驻部分不动；焦点在主区、输入法还在组合时照常延后；
-- `stamp` 按这块内容真正读到的值算版本。用 `model.revision` 会每次归约都重建；内容会自己发消息的岛（播放条量到宽度就发 `BarResized`）这样做还会量了又建、建了又量，变成每帧重建。播放条的版本是 `player_view::bar_stamp`，三处播放条岛共用；
+- `stamp` 按这块内容真正读到的值算版本。用 `model.revision` 会每次归约都重建；内容会自己发消息的岛（播放条量到宽度就发 `BarResized`）这样做还会量了又建、建了又量，变成每帧重建。播放条的版本是 `player_view::bar_stamp`，三处播放条岛（文件页工作台左列底部、预览页底部、播放集面板底部）共用；
 - 占位节点要排成和原来直接放在那里一样（`Stack::column(0)` 高度随内容），不能放进会自己重建的结构块里：结构块换分支时占位节点跟着换，岛要到下一次同步才放得回去。要显隐时用 `.visible`；
-- 岛是过渡办法：那块改成常驻（或者对话框挪进浮层块）以后删掉登记。
+- 岛是过渡办法：那块改成常驻以后删掉登记。
 
 ### 测试
 
-- 投影的单测：取值、相等性，以及哪些消息改投影、哪些不改（`view_part_sidebar_tests.rs`）。
+- 投影的单测：取值、相等性，以及哪些消息改投影、哪些不改（侧栏的在 `sidebar_project_tests.rs`）。
 - 用 `view_harness::ShellHarness`：
   - `assert_same_as_fresh_mount()`：增量更新后的文档和同一 ViewModel 新挂的文档逐个比较，每一步更新后都调。先比无障碍树（角色、名称、值、布局盒），再按文档顺序比每个节点（含不进无障碍树的容器）的组装路径、组件类型、无障碍状态（禁用、选中、勾选、忙、无效）和整份样式，只绑在样式和状态上的字段也比得到。路径里 `#v0`、`#adopt-1` 这类自动起名的段不比：先挂后插的行和一次建出的行名字不同，结构一样。滚动偏移、焦点和悬停不比。
   - 「N 次无关更新后节点 id 不变」：用 `harness.keyed("键")` 记下节点，`apply` 几条无关消息并 `flush` 后再取，应该是同一个节点；相关更新后绑定的字段原地变，结构变了的那一行才换（`route_startup_tests.rs`）。
@@ -114,7 +115,7 @@
   - `route_branch()`、`sidebar_root()`、`content_roots()` 判断哪一块换了（`view_part_primary_tests.rs`）。
   - 常驻路由里的输入框：组合输入中后台消息和相关消息都不换节点、不断预编辑；按键消息排在后台消息后面时刚打的字不回滚；新列表项到达时已有行的节点不换（`route_search_tests.rs`、`route_admin_tests.rs`）。
 - 藏起（`.visible(false)`）的块排过一次版才退出无障碍树，取节点前先 `flush`（`ShellHarness::mount` 已经排过）。
-- 改完跑 `scene_shots` 出全部场景，和改动前逐字节比较。
+- 改完用 `scene_shots` 出受影响的场景（`NANA_SCENES` 点名，命令见 [离屏验收证据](./nana-offscreen-evidence.md)），和改动前逐字节比较。
 
 ## 全局状态区
 
@@ -153,7 +154,7 @@
 **忙碌。** Vue `isBusy`：启动以后在读资源库列表（`workspace.list_loading`）、读仓库摘要（`workspace.snapshot_loading`）或读素材详情（`inspect.detail_loading`）。显示「正在同步仓库状态」，前面的转圈读热信号。启动中由启动页显示进度。
 
 **同步进度。** 第三档是仓库同步的进度。文件夹分组的「刷新」照 Vue `refreshFileBrowserTree` 同步整个仓库（`tree_sync.rs`，请求在 `sync_dispatch.rs`，同步走启动时同一条 `PROTOCOL_REPOSITORY_SYNC`）：
-- 进度记在 `tree_sync.progress`（`SyncProgress`，照 Vue `RepositorySyncProgress` 记阶段、文案、第几步、一共几步和百分比，初值是空闲 0/3），依次是「扫描文件夹结构」1/3 → 「写入索引结果」2/3 → 「刷新文件夹树」3/3 → 「刷新完成」，前三档在状态区显示：转圈、文案、右边弱色的百分比，占满一行。失败和忙碌优先。
+- 进度记在 `tree_sync.progress`（`SyncProgress`，照 Vue `RepositorySyncProgress` 记阶段、文案、第几步、一共几步和百分比，初值是空闲 0/3），依次是「扫描文件夹结构」1/3 → 「写入索引结果」2/3 → 「刷新文件夹树」3/3 → 「刷新完成」。2/3 和 3/3 在同一次归约里连写（照 Vue），状态区实际看到的是 1/3 和 3/3：转圈、文案、右边弱色的百分比，占满一行。失败和忙碌优先。
 - 同步完一起重读仓库摘要、硬链接候选和目录树（回收站面板不读树），都成功后非静默地重读当前目录，读完才算完成；虚拟视图不读目录。任务弹层里同时有一条「刷新文件树」的操作进度。
 - 任何一段失败写进状态区（来源 `Sync`，「刷新文件夹树失败：」接原因），重读里成功的几份照样写进去。刷新途中换了仓库，这一轮作废。
 - 刷新期间按钮转圈并禁用：条件是 Vue 的「正在读目录」（`tree_sync::loading_file_browser`：非静默读目录或正在刷新），加上目录树自己在读。按钮的禁用和归约的拦截读同一个 `tree_sync::refresh_blocked`。
@@ -219,7 +220,7 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 
 - `dynamic` 没有同步重建单个结构块的公开入口（`run_structural_now` 是 crate 内部的），分支只能在下一次刷新时换，而 `update` 里又不能刷新。换路由时因此只写键，岛先挂好、分支挂好时再放进占位节点。
 - 结构块的容器只收 `class` / `class_when` / `css` / `visible`，不能给一个现成的 `Stack` 或 `node_ref`。路由容器的排版只好开 `view-macro` 写 `css!`，找容器靠键。
-- `mount_view_detached` 挂出的根不在装配键表里，根节点的键路径是父节点的路径，自己的键不出现。`remount_state` 对根节点按父路径加类型找回，能用，但根的键（例如 `settings-scroll`）查不到。
+- `mount_view_detached` 挂出的根不在装配键表里，根节点的键路径是父节点的路径，自己的键不出现。`remount_state` 对根节点按父路径加类型找回，能用，但根自己的键查不到。
 - （已补）`activate_overlay` 要求宿主已经在树里，视图层原来没有声明式的 `open`，浮层块只好借 `when(placed, ..)` 在放进槽位后的那次刷新里激活。现在 `Dialog` / `ConfirmDialog` 有 `.open` / `.model`，插进树、插槽装好以后自己打开，写假时连退场一起关上。
 - 元素上没有声明式的拖放目标，要靠 `on_mount` 调 `set_drop_target_node`。
 - （已补）AppShell 原来只在自己投影时按「有没有子节点」决定 overlay 槽位挡不挡点击，浮层块只好每次换块都换掉 overlay 槽位、重新装配。现在 AppShell 盯着槽位的子节点（增删、显隐都重新判断，隐藏的不算），浮层层改成常驻的槽位内容。
@@ -231,7 +232,7 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 
 搜索、设置和管理页改常驻时遇到的：
 
-- 控件表里没有的可绑定字段要自己写 `FieldWrite`：`ScrollView.follow_end`、`TextInput.read_only`、`Button.icon`、整份 `NodeStyle`（都在 `admin::bind`），以及按地址重新编码的 `QrCode`（`source_auth_page::QrPayload`）。
+- 控件表里没有的可绑定字段要自己写 `FieldWrite`：`ScrollView.follow_end`、`TextInput.read_only`、`Button.icon`、整份 `NodeStyle`（`admin::bind`；文件页另有一份 `StyleField` 和 `Button.icon` 在 `files_bind.rs`），以及按地址重新编码的 `QrCode`（`source_auth_page::QrPayload`）。
 - 滚动范围（`scroll_content_extent`）是全部后代布局盒的并集，不在里层的滚动区或裁剪盒处停下。滚动区里再套一个滚动区时，里层溢出的内容会撑出外层的滚动范围，外层能滚进一片空白。日志页因此不用 `home_scroll`，改用不滚的 `home_fixed`，只有日志列表一层滚动。
 - `css!` 的 `min-width: 0` 除了 `min_width` 还写 `allow_shrink`，和构建器的 `min_width(Px(0))` 字段不完全相同；现在布局不读它，画面一样。
 - `StorePath` 没有 `with_untracked`，同步里比较 Store 的现值用 `untrack(|| store.with(..))`。
@@ -242,6 +243,6 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 - `each` 的容器只有 `Stack::column(n)` 和 `Stack::row(n)`，换行的药丸行（面包屑、标签片）要再写 `css! { flex-wrap: wrap; row-gap: 8px; }`；一行里「标签片 + 末尾的加号」只好把加号也当成一项。
 - `each` / `each_virtual` 的数据源要 `Readable`，闭包不行，派生的列表要包一层 `computed`。
 - `El<C, K>` 的子节点类型写在类型参数里，带子节点的元素没法在函数之间传递后再 `.visible(..)`，只好把显隐当参数传进去。
-- 无障碍树在布局之前不认 `layout.hidden`（`resolved.visible` 要排过版才算），不排版就查标签的测试会看到藏着的节点。
-- `Store` 没有不追踪的 `try_with`，建视图时取初值要 `untrack`。`Icon` 没有 `PartialEq`，比较要用 `as_ptr`。
+- `Store` 没有不追踪的 `try_with`，建视图时取初值要 `untrack`。
+- （已补）`Icon` 有 `PartialEq`，按指针比较，不用再写 `as_ptr`。
 - 每个新建的节点第一次布局都会发 `SizeChanged`。监听它、再发消息改状态的旧视图要是每次归约都整块重挂，就会量了又建、建了又量（文件列表的 `ListResized`、播放条的 `BarResized`）。
