@@ -14,9 +14,9 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use momobako_nana::acceptance_document_at_width;
+use momobako_nana::acceptance_document_for_model;
 use momobako_nana::appearance::{self, Appearance};
-use momobako_nana::shell::{acceptance_gap_models, ShellPage, ShellViewModel};
+use momobako_nana::shell::{acceptance_gap_models, mount_shell, ShellMessage, ShellPage, ShellViewModel};
 use nana_ui_devtools::agent::{AgentSession, RuntimeAgentSession, protocol::ThemeName};
 use nana_ui_devtools::offscreen;
 
@@ -72,13 +72,17 @@ fn catalog() -> Vec<(&'static str, ShellViewModel)> {
     scenes
 }
 
-fn shoot(model: ShellViewModel, width: u32, height: u32, theme: ThemeName, dir: &std::path::Path, stem: &str) {
+fn shoot(mut model: ShellViewModel, width: u32, height: u32, theme: ThemeName, dir: &std::path::Path, stem: &str) {
     let appearance = Appearance::for_mode(&model, mode_of(theme));
-    let document = acceptance_document_at_width(model, width as f32).expect("文档");
+    model.set_viewport_width(width as f32);
+    let document = acceptance_document_for_model(model.clone()).expect("文档");
     let mut session = RuntimeAgentSession::new(document, width, height).expect("会话");
     session.set_theme(theme).expect("主题");
     assert!(appearance::install(session.document_mut(), appearance).is_some(), "外观安装失败");
     session.flush().expect("布局");
+    if !settle_feedback(&mut session, &mut model) {
+        eprintln!("{stem}：尺寸回报四轮后还没停，视图可能在反复重建");
+    }
     settle_dialogs(&mut session);
     session.screenshot_png(dir.join(format!("{stem}.png"))).expect("截图");
     let nodes = session
@@ -101,6 +105,23 @@ fn shoot(model: ShellViewModel, width: u32, height: u32, theme: ThemeName, dir: 
         .join("\n");
     fs::write(dir.join(format!("{stem}.nodes.txt")), nodes).expect("节点清单");
     let _ = AgentSession::describe(&session);
+}
+
+/// 视图量到自己的尺寸后发给程序的消息（播放条宽、文件列表宽）在真窗口里下一帧就归约、重排；
+/// 离屏会话没有程序循环，这里照样归约、同步几轮，截到的是稳定以后的画面。回报停下来时返回真。
+fn settle_feedback(session: &mut RuntimeAgentSession, model: &mut ShellViewModel) -> bool {
+    for _ in 0..4 {
+        let queued = session.document_mut().context_mut().take_program_messages();
+        if queued.is_empty() {
+            return true;
+        }
+        for message in queued {
+            model.reduce(*message.downcast::<ShellMessage>().expect("壳层消息"));
+        }
+        mount_shell(session.document_mut(), model).expect("同步");
+        session.flush().expect("回报后的布局");
+    }
+    session.document_mut().context_mut().take_program_messages().is_empty()
 }
 
 /// 框架激活的对话框开着时，把它的进场动效走完再截图。离屏会话没有帧时钟，不推进就截到透明度
