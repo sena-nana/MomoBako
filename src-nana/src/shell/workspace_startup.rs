@@ -27,7 +27,7 @@ pub enum StartupStatus {
 }
 
 /// 单个启动步骤在步骤条上的状态。
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum StartupStepState {
     Pending,
     Current,
@@ -45,7 +45,7 @@ pub struct StartupStepItem {
 }
 
 /// 一条加载日志：级别、本地时间、消息和明细。
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct StartupLog {
     pub level: &'static str,
     /// 本地时间「时:分:秒」。

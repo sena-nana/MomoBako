@@ -2,7 +2,7 @@
 //!
 //! 外框是白底 `Lg` 圆角的一层（主区独占时外面再包一层壳层底色），放进工作区的主区或 AppShell 的
 //! body。外框里只有一个结构块 `dynamic(RouteSlot)`：
-//! - 常驻路由的分支只在进入路由时建一次，之后同步只写它的信号（现在还没有常驻路由）；
+//! - 常驻路由（现在是启动页）的分支只在进入路由时建一次，之后同步只写它的信号；
 //! - 其余路由仍由旧视图函数整块建出。换到这种路由时，同步在本线程把新内容挂成脱离树的一块放进
 //!   交接处，把路由和版本号写进键；下一次刷新 `dynamic` 换出新分支，分支的 `on_mount` 把这块内容
 //!   挂进路由容器、卸掉上一块，再找回焦点、选区和滚动。留在同一个旧视图路由里、内容变了时不经过
@@ -25,6 +25,7 @@ use nana_ui::runtime::{
 
 use super::hot::HotSignals;
 use super::remount_state::{self, KeptState};
+use super::route_startup::{StartupSignals, StartupView};
 use super::view_part::{composing_under, first_root, mount_detached, BodyMode, PartCx, PartId, ShellPart, Swap};
 use super::{MainRegion, ShellPage, ShellViewModel, WorkspacePanel};
 
@@ -82,20 +83,23 @@ impl RouteKey {
     }
 }
 
-/// 常驻路由：分支只在进入时建一次，之后同步只写信号。现在还没有。
-fn resident(_route: RouteKey) -> bool {
-    false
+/// 常驻路由：分支只在进入时建一次，之后同步只写信号。
+fn resident(route: RouteKey) -> bool {
+    matches!(route, RouteKey::Startup)
 }
 
 /// 常驻路由的分支。非常驻路由返回 `None`。
-fn resident_view(_route: RouteKey, _signals: RouteSignals, _hot: HotSignals) -> Option<AnyView> {
-    None
+fn resident_view(route: RouteKey, signals: RouteSignals, hot: HotSignals) -> Option<AnyView> {
+    match route {
+        RouteKey::Startup => Some(super::route_startup::view(signals.startup, hot)),
+        _ => None,
+    }
 }
 
 /// 整块重挂的路由内容。常驻路由返回 `None`。
 fn legacy_view(route: RouteKey, model: &ShellViewModel) -> Option<AnyView> {
     let view = match route {
-        RouteKey::Startup => super::route_startup::view(model),
+        RouteKey::Startup => return None,
         RouteKey::Settings => super::route_settings::view(model),
         RouteKey::Files => super::route_files::view(model),
         RouteKey::Search => super::route_search::view(model),
@@ -109,17 +113,23 @@ fn legacy_view(route: RouteKey, model: &ShellViewModel) -> Option<AnyView> {
     Some(view)
 }
 
-/// 常驻路由的信号，在骨架作用域里建，进出路由都不重建。现在还没有常驻路由。
+/// 常驻路由的信号，在骨架作用域里建，进出路由都不重建。
 #[derive(Clone, Copy)]
-pub(crate) struct RouteSignals;
+pub(crate) struct RouteSignals {
+    startup: StartupSignals,
+}
 
 impl RouteSignals {
-    fn new(_model: &ShellViewModel) -> Self {
-        Self
+    fn new(model: &ShellViewModel) -> Self {
+        Self { startup: StartupSignals::new(model) }
     }
 
     /// 只写当前路由的投影：别的常驻路由进来之前会先写一次再建分支。
-    fn write(&self, _route: RouteKey, _model: &ShellViewModel) {}
+    fn write(&self, route: RouteKey, model: &ShellViewModel) {
+        if route == RouteKey::Startup {
+            self.startup.write(StartupView::project(model));
+        }
+    }
 }
 
 /// `dynamic` 的键：路由加上旧视图分支的版本。常驻路由的版本固定是 0，换到旧视图路由时加一。
