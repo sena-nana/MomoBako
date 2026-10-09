@@ -1,17 +1,10 @@
-//! 窗口准备阶段的动效时钟、预取、分隔条回写，以及关闭、托盘和几何恢复。
+//! 窗口准备阶段的动效时钟、预取、分隔条回写，全局 Escape，以及关闭、托盘和几何恢复。
 
-use std::cell::Cell;
+use nana_ui::runtime::{component_descriptors, Entity, Workspace};
+use nana_ui::{ApplicationWindow, InputPayload, KeyState, RegionId, RuntimeProgramContext, RuntimeProgramUpdate};
 
-use nana_ui::runtime::{component_descriptors, Entity, StableNodeId, Workspace};
-use nana_ui_core::{DropAccepts, DropEffect};
-use nana_ui::{ApplicationWindow, RegionId, RuntimeProgramContext, RuntimeProgramUpdate};
-
-use crate::shell::{ShellMessage, ShellView, ShellViewModel, WindowAction};
+use crate::shell::{GapMessage, ShellMessage, ShellView, ShellViewModel, SidebarMessage, WindowAction};
 use crate::{host_api, MomoBakoApplication};
-
-thread_local! {
-    static ESCAPE_KEY: Cell<bool> = const { Cell::new(false) };
-}
 
 /// 托盘和图标失败原因。窗口几何会话跟这一扇主窗口走。
 pub(crate) struct HostSession {
@@ -56,8 +49,6 @@ pub(crate) fn after_update(app: &mut MomoBakoApplication, context: &RuntimeProgr
 pub(crate) fn prepare_motion(shell: &mut ShellViewModel, view: Option<&mut ShellView>, window: &mut ApplicationWindow) {
     crate::shell::poll_media_keys(shell);
     crate::drag_out::apply_result(shell);
-    take_escape(shell);
-    note_dismissed_dialog(shell, &window.document);
     drive_prefetch(shell);
     if shell.input.live_gesture.is_some() || shell.sidebar.hover_since_ms.is_some() {
         shell.sidebar.tick_hover(16);
@@ -98,93 +89,21 @@ fn drive_prefetch(shell: &mut ShellViewModel) {
     shell.files.poll_thumbnail_prefetch(now, &paths);
 }
 
-fn take_escape(shell: &mut ShellViewModel) {
-    let pressed = ESCAPE_KEY.with(|flag| flag.replace(false));
-    if pressed {
-        shell.reduce(ShellMessage::Sidebar(crate::shell::SidebarMessage::Gap(crate::shell::GapMessage::Escape)));
-    }
-}
-
-fn note_dismissed_dialog(shell: &mut ShellViewModel, document: &nana_ui::runtime::RuntimeDocument) {
-    if !dialog_layer_open(shell) {
-        return;
-    }
-    let document_id = document.document();
-    let present = document.context().world().project_accessibility(document_id).into_iter().any(|node| {
-        matches!(node.role, nana_ui::runtime::AccessibilityRole::Dialog | nana_ui::runtime::AccessibilityRole::AlertDialog)
-    });
-    if present {
-        return;
-    }
-    eprintln!("Nana 对话框已从树上消失，按 Escape 关掉壳层状态");
-    shell.reduce(ShellMessage::Sidebar(crate::shell::SidebarMessage::Gap(crate::shell::GapMessage::Escape)));
-}
-
-fn dialog_layer_open(shell: &ShellViewModel) -> bool {
-    shell.sidebar.folder_dialog.open
-        || shell.sidebar.folder_delete_open()
-        || shell.sidebar.smart_draft.open
-        || shell.sidebar.smart_delete_open()
-        || shell.playlist_dialog_open
-        || shell.input.source_playlist.is_some()
-        || shell.workspace.delete_dialog_open()
-}
-
-/// `roots` 下面文件区或空库标记的父节点接受系统文件拖放。事件由视图收成 `HostDrag`。
-pub(crate) fn bind_file_drop(document: &mut nana_ui::runtime::RuntimeDocument, roots: &[StableNodeId]) {
-    let document_id = document.document();
-    let hosts: Vec<_> = {
-        let world = document.context().world();
-        crate::shell::components_under(world, document_id, component_descriptors::TEXT.type_id, roots)
-            .into_iter()
-            .filter_map(|id| {
-                let text = world.text(id)?;
-                text.starts_with("momobako-drop:").then(|| drop_host(world, id))
-            })
-            .collect()
+/// 运行时路由完一个输入事件以后的全局 Escape：按下、不是连发、控件没有自己处理掉（`consumed`
+/// 为假），而且 ViewModel 里还有能关的一层时，发一条关掉最上面一层的消息。
+///
+/// 焦点在哪都一样：对话框、弹层和右键菜单的开合都记在 ViewModel 里，关哪一层由
+/// [`crate::shell::escape_layer`] 按先后决定，归约时 `dismiss_top` 照同一个顺序关。下拉框的选项、
+/// 数字框这类控件自己处理 Escape 时运行时会标 `prevent_default`，这里不再重复处理。
+pub(crate) fn escape_message(shell: &ShellViewModel, payload: &InputPayload, consumed: bool) -> Option<ShellMessage> {
+    let InputPayload::Key(key) = payload else {
+        return None;
     };
-    for id in hosts {
-        if let Err(error) = document.context_mut().set_drop_target_node(id, DropAccepts::files().effect(DropEffect::Copy)) {
-            eprintln!("Nana 文件拖放目标没有挂上：{error}");
-        }
+    if consumed || key.state != KeyState::Pressed || key.repeat || key.logical.0 != "Escape" {
+        return None;
     }
-}
-
-fn drop_host(world: &nana_ui::runtime::UiWorld, marker: nana_ui::runtime::StableNodeId) -> nana_ui::runtime::StableNodeId {
-    world.parent_id(marker).unwrap_or(marker)
-}
-
-/// 焦点在按钮或输入框上时，Escape 关掉最上面一层。对话框遮罩会先吞掉按键，由 `note_dismissed_dialog` 补上。
-/// 只登记 `roots` 下面新挂的节点；常驻节点在骨架挂好时登记一次。
-pub(crate) fn bind_escape(document: &mut nana_ui::runtime::RuntimeDocument, roots: &[StableNodeId]) {
-    let document_id = document.document();
-    let (inputs, buttons) = {
-        let world = document.context().world();
-        (
-            crate::shell::components_under(world, document_id, component_descriptors::TEXT_INPUT.type_id, roots),
-            crate::shell::components_under(world, document_id, component_descriptors::BUTTON.type_id, roots),
-        )
-    };
-    for id in inputs {
-        let entity = Entity::<nana_ui::runtime::TextInput>::from_stable_id(id);
-        if let Err(error) = document.context_mut().on_key(entity, note_escape_key) {
-            eprintln!("Nana Escape 没有接到输入框：{error}");
-        }
-    }
-    for id in buttons {
-        let entity = Entity::<nana_ui::runtime::Button>::from_stable_id(id);
-        if let Err(error) = document.context_mut().on_key(entity, note_escape_key) {
-            eprintln!("Nana Escape 没有接到按钮：{error}");
-        }
-    }
-}
-
-fn note_escape_key(key: &nana_ui::KeyInput) -> bool {
-    if key.state == nana_ui::KeyState::Pressed && !key.repeat && key.logical.0 == "Escape" {
-        ESCAPE_KEY.with(|flag| flag.set(true));
-        return true;
-    }
-    false
+    crate::shell::escape_layer(shell)?;
+    Some(ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::Escape)))
 }
 
 /// 分隔条的松手被 Nana 工作区吃掉。指针捕获结束时才写入宽度。

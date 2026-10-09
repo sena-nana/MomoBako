@@ -3,11 +3,12 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{text, widget, AnyView, IntoView};
+use nana_ui::runtime::view::{node_ref, on_mount, text, widget, AnyView, IntoView, NodeRef};
 use nana_ui::runtime::{
     Activate, AlignSpec, ConfirmDialog, FileDropEvent, JustifySpec, LengthSpec, RadiusTier, SemanticColorRole, Stack,
     Text, TextHorizontalAlignment,
 };
+use nana_ui_core::{DropAccepts, DropEffect};
 use super::{HostDragPhase, InputMessage};
 use crate::shell::{MainRegion, ShellMessage, ShellViewModel, WorkspacePanel};
 
@@ -104,14 +105,17 @@ pub(crate) fn empty_repository_panel(model: &ShellViewModel) -> AnyView {
     if dragging {
         panel = panel.surface(SemanticColorRole::AccentSoft).outline(SemanticColorRole::Accent, 1.0);
     }
+    let drop = node_ref();
+    accept_file_drops(drop);
     widget(crate::shell::startup_view::fill_section())
+        .node_ref(drop)
         .on_cx({
             let flags = file_drop_flags(model);
             move |_, event: &FileDropEvent, cx| {
                 cx.dispatch_program_all(file_drop_message(&flags, event));
             }
         })
-        .children((drop_marker("empty"), widget(panel).children(rows).key("empty-panel").into_any()))
+        .children((widget(panel).children(rows).key("empty-panel").into_any(),))
         .key("empty-repository-page")
         .into_any()
 }
@@ -123,14 +127,18 @@ fn centered_text(value: impl Into<String>, size: f32, weight: u16, color: Semant
     node
 }
 
-/// 隐藏标记。挂载后按它的父节点登记文件拖放目标。
-pub(crate) fn drop_marker(kind: &str) -> AnyView {
-    let mut marker = nana_ui::runtime::Text::new(format!("momobako-drop:{kind}"));
-    let layout = std::sync::Arc::make_mut(&mut marker.style.layout);
-    layout.hidden = true;
-    layout.width = Some(LengthSpec::Px(0.0));
-    layout.height = Some(LengthSpec::Px(0.0));
-    widget(marker).into_any()
+/// `target` 建好后登记成系统文件拖放目标：接受文件、复制效果，整块子树都算。事件由视图的
+/// `FileDropEvent` 处理器收成 `HostDrag`。在建 `target` 的那段视图里调用，跟着它的作用域走。
+pub(crate) fn accept_file_drops(target: NodeRef) {
+    on_mount(move |cx| {
+        let Some(id) = target.get_untracked() else {
+            eprintln!("Nana 文件拖放目标没有建出来，不登记拖放");
+            return;
+        };
+        if let Err(error) = cx.set_drop_target_node(id, DropAccepts::files().effect(DropEffect::Copy)) {
+            eprintln!("Nana 文件拖放目标没有挂上：{error}");
+        }
+    });
 }
 
 /// 有待确认的关闭时用确认对话框。只有说明、尚未进入确认时保留一行文字。

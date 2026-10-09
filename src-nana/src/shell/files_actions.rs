@@ -22,6 +22,16 @@ pub(super) struct ExportDraft {
     pub busy: bool,
 }
 
+/// 文件页里 Escape 能关掉的一层。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FilesLayer {
+    EntryMenu,
+    ImportMenu,
+    Export,
+    Hardlink,
+    Dialog,
+}
+
 impl FilesState {
     /// 自定义缩略图不锁整页变更。失败由调度器记错误。
     pub(crate) fn queue_thumbnail(&mut self, effect: FilesEffect) {
@@ -703,31 +713,46 @@ impl FilesState {
         self.effects.push(FilesEffect::DecodeThumbnails { paths: vec![path.to_string()] });
     }
 
-    /// Escape 关掉文件页最上面的一层：右键菜单、导入菜单、文件对话框、导出对话框。
-    /// 变更进行中的对话框不关。没有可关的返回 false，交给壳层继续处理。
-    pub(crate) fn dismiss_overlay(&mut self) -> bool {
+    /// Escape 现在能关掉文件页的哪一层：右键菜单、导入菜单、导出对话框、硬链接确认、文件对话框。
+    /// 导出中和变更进行中的对话框不关，没有可关的为 `None`。
+    pub(crate) fn escape_layer(&self) -> Option<FilesLayer> {
         if self.entry_menu.is_some() {
-            self.entry_menu = None;
-            self.menu_branch = None;
-            self.menu_pending = None;
-            return true;
+            Some(FilesLayer::EntryMenu)
+        } else if self.import_open {
+            Some(FilesLayer::ImportMenu)
+        } else if self.export.open && !self.export.busy {
+            Some(FilesLayer::Export)
+        } else if self.dialog == FileDialog::Hardlink && !self.mutating {
+            Some(FilesLayer::Hardlink)
+        } else if self.dialog != FileDialog::Closed && !self.mutating {
+            Some(FilesLayer::Dialog)
+        } else {
+            None
         }
-        if self.import_open {
-            self.import_open = false;
-            self.eagle_open = false;
-            return true;
+    }
+
+    /// Escape 关掉文件页最上面的一层，顺序见 [`Self::escape_layer`]。没有可关的返回 false，交给壳层继续处理。
+    pub(crate) fn dismiss_overlay(&mut self) -> bool {
+        match self.escape_layer() {
+            Some(FilesLayer::EntryMenu) => {
+                self.entry_menu = None;
+                self.menu_branch = None;
+                self.menu_pending = None;
+                true
+            }
+            Some(FilesLayer::ImportMenu) => {
+                self.import_open = false;
+                self.eagle_open = false;
+                true
+            }
+            Some(FilesLayer::Export) => {
+                self.close_export();
+                true
+            }
+            Some(FilesLayer::Hardlink) => self.skip_hardlink(),
+            Some(FilesLayer::Dialog) => self.close_dialog(),
+            None => false,
         }
-        if self.export.open && !self.export.busy {
-            self.close_export();
-            return true;
-        }
-        if self.dialog == FileDialog::Hardlink && !self.mutating {
-            return self.skip_hardlink();
-        }
-        if self.dialog != FileDialog::Closed && !self.mutating {
-            return self.close_dialog();
-        }
-        false
     }
 
     /// 展开或收起导入菜单。收起时 Eagle 的复制和剪切一起收起。

@@ -96,7 +96,7 @@ describe("nana parity sidebar", () => {
     expect(live).toContain('labeled_id(&window, "文件夹名称")');
     expect(live).toContain("焦点在对话框输入框时 Escape 应该关掉它");
     const host = read("src-nana/src/window_host.rs");
-    expect(host).toContain("fn note_dismissed_dialog");
+    expect(host).toContain("fn escape_message");
     expect(host).toContain("GapMessage::Escape");
   });
 });

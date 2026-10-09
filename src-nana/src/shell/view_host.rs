@@ -1,60 +1,39 @@
-//! 常驻的壳层视图 `ShellView`。
+//! 常驻的壳层视图 `ShellView`：只做调度。
 //!
 //! 骨架只挂一次：AppShell、标题栏（字段绑定，搜索框受控）、工作区（资源区宽度跟侧栏呈现宽度）
-//! 和一个认出这棵骨架的隐藏标记。现有视图函数整块建成三块内容——侧栏、主区、浮层——挂好后放进
-//! 骨架组合控件的槽位：有侧栏时侧栏和主区放进工作区的资源区和主区，工作区是 AppShell 的 body；
-//! 主区独占时它自己是 body；浮层是 AppShell 的 overlay。槽位根节点拿到的区域样式、布局补丁和整棵
-//! 重挂时一样；组合控件只在自己投影时打补丁，所以槽位根节点上不放绑定。
+//! 和一个认出这棵骨架的隐藏标记。内容分三块，各在自己的模块里：侧栏（`view_part_sidebar.rs`）、
+//! 主区（`view_part_primary.rs`，按路由键切换分支）和浮层（`view_part_overlay.rs`，按浮层键切换）。
+//! 三块实现同一个接口 [`ShellPart`]：挂载、同步、是否需要重挂、组合延后。这里按同一套流程调它们，
+//! 再把各块的根放进骨架组合控件的槽位：有侧栏时侧栏和主区放进工作区的资源区和主区，工作区是
+//! AppShell 的 body；主区独占时它自己是 body；浮层是 AppShell 的 overlay。组合控件只在自己投影时
+//! 给槽位根节点打补丁，所以槽位根节点上不放绑定。
 //!
-//! 数据流：`ShellMessage → reduce → 服务副作用 → ShellView::sync`。同步先写热信号和标题栏字段
-//! （新挂的内容按信号当前值建），再按块重挂内容。焦点在某块里、输入法还有预编辑时，这块延后
-//! 重挂，`prepare` 每帧经 [`ShellView::retry_deferred`] 检查，组合结束后补挂。动效帧和播放推进
-//! 只走 [`ShellView::sync_hot`]。这里只写信号，不刷新绑定，刷新由输入路由和帧开头完成。
+//! 数据流：`ShellMessage → reduce → 服务副作用 → ShellView::sync`。同步先写热信号和标题栏字段，
+//! 再让每一块写自己的信号、按需重挂。焦点在某块里、输入法还有预编辑时，这块的重挂延后，`prepare`
+//! 每帧经 [`ShellView::retry_deferred`] 检查，组合结束后补挂。动效帧和播放推进只走
+//! [`ShellView::sync_hot`]。这里只写信号，不刷新绑定，刷新由输入路由和帧开头完成。
 
 use std::cell::RefCell;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use nana_ui::runtime::view::{detached, entity_ref, node_ref, widget, with_refs, AnyView};
+use nana_ui::runtime::view::{detached, entity_ref, node_ref, widget, with_refs};
 use nana_ui::runtime::{
-    AppContext, AppShell, DocumentId, Entity, FrameworkError, LengthSpec, MountedView, RuntimeDocument, StableNodeId, Text,
-    UiWorld, Workspace, WorkspaceRegionSlot,
+    AppContext, AppShell, Entity, FrameworkError, LengthSpec, RuntimeDocument, StableNodeId, Text, Workspace,
+    WorkspaceRegionSlot,
 };
 use nana_ui::RegionId;
 
 use super::hot::{self, HotSignals, ModelField, MotionFrame, PlaybackView, TitleBarView, TitleSignals};
-use super::{ShellViewModel, StartupStatus};
-
-/// 工作台怎么排：有侧栏时是资源区加主区，启动未就绪或侧栏收起时主区独占一行。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum BodyMode {
-    Workbench,
-    Solo,
-}
-
-/// 侧栏呈现宽度大于半像素、启动已就绪时才放侧栏。折叠动画走完才换成主区独占。
-pub(crate) fn body_mode(model: &ShellViewModel) -> BodyMode {
-    let presented = model.motion.sidebar_presented_width();
-    if presented > 0.5 && model.workspace.startup.status == StartupStatus::Ready {
-        BodyMode::Workbench
-    } else {
-        BodyMode::Solo
-    }
-}
-
-/// 一块按需重挂的内容。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Part {
-    Sidebar,
-    Primary,
-    Overlay,
-}
-
-const PARTS: [Part; 3] = [Part::Sidebar, Part::Primary, Part::Overlay];
+use super::view_part::{body_mode, BodyMode, PartCx, PartId, ShellPart, Swap};
+use super::view_part_overlay::OverlayPart;
+use super::view_part_primary::PrimaryPart;
+use super::view_part_sidebar::SidebarPart;
+use super::ShellViewModel;
 
 /// 同步计数，测试用来确认动效帧不重挂、组合输入会延后。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ViewStats {
-    /// 重挂的内容块数。
+    /// 重挂的内容块（或主区分支）数。
     pub remounts: u64,
     /// 因输入法组合而延后的次数。
     pub deferred: u64,
@@ -76,18 +55,18 @@ pub(crate) struct ShellView {
     mode: BodyMode,
     /// 最近写进工作区资源区的侧栏呈现宽度。
     sidebar_width: f32,
-    sidebar: Option<MountedView>,
-    primary: Option<MountedView>,
-    overlay: Option<MountedView>,
+    sidebar: SidebarPart,
+    primary: PrimaryPart,
+    overlay: OverlayPart,
     /// 等输入法组合结束才重挂的块。
-    deferred: Vec<Part>,
-    /// 最近一次整体同步时 ViewModel 的归约次数。
+    deferred: Vec<PartId>,
+    /// 最近一次整体同步时 ViewModel 的版本。
     revision: u64,
     stats: ViewStats,
 }
 
 impl ShellView {
-    /// 挂骨架，再把三块内容按 `model` 挂进槽位。骨架里的信号都建在这次挂载的作用域里。
+    /// 挂骨架，再把三块内容按 `model` 挂进槽位。骨架和各块的常驻信号都建在这次挂载的作用域里。
     pub(crate) fn mount(document: &mut RuntimeDocument, model: &ShellViewModel) -> Result<Self, FrameworkError> {
         let document_id = document.document();
         let marker_text = format!("{MARKER_PREFIX}{}", NEXT_MARKER.fetch_add(1, Ordering::Relaxed));
@@ -99,6 +78,7 @@ impl ShellView {
             let hot = HotSignals::new(motion, &playback);
             let title = TitleSignals::new(&title_view);
             let query = ModelField::new(&title_view.query);
+            let parts = (SidebarPart::signals(model), PrimaryPart::signals(model), OverlayPart::signals(model));
             let shell = entity_ref::<AppShell>();
             let workspace = entity_ref::<Workspace>();
             let marker = node_ref();
@@ -109,12 +89,12 @@ impl ShellView {
                     .title_bar(super::title_bar::title_bar(title, query.signal(), &title_view.query))
                     .entity_ref(shell),
             );
-            made = Some((hot, title, query));
+            made = Some((hot, title, query, parts));
             with_refs(view, (shell, workspace, marker))
         })?;
-        let (hot, title, query) = made.expect("骨架挂载闭包已经运行");
+        let (hot, title, query, (sidebar, primary, overlay)) = made.expect("骨架挂载闭包已经运行");
         super::title_bar::bind_window_controls(document)?;
-        register(document, &[shell.stable_id()]);
+        let mode = body_mode(model);
         let mut view = Self {
             marker,
             marker_text,
@@ -123,17 +103,26 @@ impl ShellView {
             hot,
             title,
             query,
-            mode: body_mode(model),
+            mode,
             sidebar_width: motion.sidebar_width,
-            sidebar: None,
-            primary: None,
-            overlay: None,
+            sidebar: SidebarPart::new(sidebar),
+            primary: PrimaryPart::new(primary),
+            overlay: OverlayPart::new(overlay),
             deferred: Vec::new(),
             revision: model.revision,
             stats: ViewStats::default(),
         };
-        view.remount(document, model, view.mode, &PARTS)?;
-        Ok(view)
+        let mut swap = Swap::default();
+        let mut error = None;
+        {
+            let mut cx = PartCx { document: &mut *document, hot, stats: &mut view.stats };
+            absorb(&mut swap, &mut error, PartId::Sidebar, view.sidebar.mount(&mut cx, model, mode));
+            absorb(&mut swap, &mut error, PartId::Primary, view.primary.mount(&mut cx, model, mode));
+            absorb(&mut swap, &mut error, PartId::Overlay, view.overlay.mount(&mut cx, model, mode));
+        }
+        view.place(document.context_mut(), mode)?;
+        swap.finish(document);
+        error.map_or(Ok(view), Err)
     }
 
     /// 这个视图是不是挂在 `document` 里。按标记节点的文字认，换了文档（哪怕节点编号相同）也认得出。
@@ -155,16 +144,22 @@ impl ShellView {
     /// 测试用：浮层和主区内容现在的根节点。
     #[cfg(test)]
     pub(crate) fn content_roots(&self) -> (Option<StableNodeId>, Option<StableNodeId>) {
-        let first = |view: &Option<MountedView>| view.as_ref().and_then(|view| view.roots().first().copied());
-        (first(&self.overlay), first(&self.primary))
+        (self.overlay.root(), self.primary.root())
     }
 
-    /// ViewModel 有没有骨架之外要重挂的变化：归约过，或者工作台排法换了。
+    /// 测试用：侧栏内容现在的根节点。
+    #[cfg(test)]
+    pub(crate) fn sidebar_root(&self) -> Option<StableNodeId> {
+        self.sidebar.root()
+    }
+
+    /// ViewModel 有没有骨架之外要同步的变化：版本变了，或者工作台排法换了。
     pub(crate) fn stale(&self, model: &ShellViewModel) -> bool {
         model.revision != self.revision || body_mode(model) != self.mode
     }
 
-    /// 整体同步：写热信号和标题栏，再重挂三块内容。正在组合输入的块延后，排法变了则不再等。
+    /// 整体同步：写热信号和标题栏；排法变了时侧栏和主区从头挂；再让每一块写信号、按需重挂。
+    /// 正在组合输入的块延后重挂，排法变了则不再等。
     pub(crate) fn sync(&mut self, document: &mut RuntimeDocument, model: &ShellViewModel) -> Result<(), FrameworkError> {
         if !self.alive() {
             eprintln!("Nana 壳层骨架已随文档回收，跳过同步");
@@ -172,21 +167,23 @@ impl ShellView {
         }
         self.write_signals(document, model)?;
         let mode = body_mode(model);
-        let mut parts = Vec::new();
-        for part in PARTS {
-            if mode == self.mode && self.composing(document, part) {
-                if !self.deferred.contains(&part) {
-                    self.deferred.push(part);
+        let mut swap = Swap::default();
+        let mut error = None;
+        {
+            let mut cx = PartCx { document: &mut *document, hot: self.hot, stats: &mut self.stats };
+            if mode != self.mode {
+                if !self.deferred.is_empty() {
+                    eprintln!("Nana 工作台排法变了，正在组合输入的内容也一起重挂：{:?}", self.deferred);
+                    self.deferred.clear();
                 }
-                self.stats.deferred += 1;
-                continue;
+                absorb(&mut swap, &mut error, PartId::Sidebar, self.sidebar.mount(&mut cx, model, mode));
+                absorb(&mut swap, &mut error, PartId::Primary, self.primary.mount(&mut cx, model, mode));
             }
-            parts.push(part);
+            absorb(&mut swap, &mut error, PartId::Sidebar, step(&mut self.sidebar, &mut cx, model, &mut self.deferred));
+            absorb(&mut swap, &mut error, PartId::Primary, step(&mut self.primary, &mut cx, model, &mut self.deferred));
+            absorb(&mut swap, &mut error, PartId::Overlay, step(&mut self.overlay, &mut cx, model, &mut self.deferred));
         }
-        if mode != self.mode && !self.deferred.is_empty() {
-            eprintln!("Nana 工作台排法变了，正在组合输入的内容也一起重挂：{:?}", self.deferred);
-        }
-        self.remount(document, model, mode, &parts)?;
+        self.settle(document, mode, swap, error)?;
         self.revision = model.revision;
         Ok(())
     }
@@ -202,11 +199,24 @@ impl ShellView {
 
     /// 因输入法组合延后的块，组合已经结束的按当前 ViewModel 补挂。
     pub(crate) fn retry_deferred(&mut self, document: &mut RuntimeDocument, model: &ShellViewModel) -> Result<(), FrameworkError> {
-        let ready = self.deferred.iter().copied().filter(|part| !self.composing(document, *part)).collect::<Vec<_>>();
-        if ready.is_empty() || !self.alive() {
+        if self.deferred.is_empty() || !self.alive() {
             return Ok(());
         }
-        self.remount(document, model, self.mode, &ready)
+        let mut swap = Swap::default();
+        let mut error = None;
+        {
+            let mut cx = PartCx { document: &mut *document, hot: self.hot, stats: &mut self.stats };
+            for id in self.deferred.clone() {
+                let result = match id {
+                    PartId::Sidebar if !self.sidebar.composing(cx.document) => step(&mut self.sidebar, &mut cx, model, &mut self.deferred),
+                    PartId::Primary if !self.primary.composing(cx.document) => step(&mut self.primary, &mut cx, model, &mut self.deferred),
+                    PartId::Overlay if !self.overlay.composing(cx.document) => step(&mut self.overlay, &mut cx, model, &mut self.deferred),
+                    _ => continue,
+                };
+                absorb(&mut swap, &mut error, id, result);
+            }
+        }
+        self.settle(document, self.mode, swap, error)
     }
 
     /// 写热投影和标题栏投影；搜索框草稿只在 ViewModel 的值变了时写。侧栏呈现宽度变了时写进工作区。
@@ -233,149 +243,29 @@ impl ShellView {
         Ok(())
     }
 
-    /// 焦点在这块内容里，而且输入法正在组合（预编辑非空）。
-    fn composing(&self, document: &RuntimeDocument, part: Part) -> bool {
-        let world = document.context().world();
-        let Some(focused) = world.focused(document.document()) else {
-            return false;
-        };
-        self.roots(part).iter().any(|root| world.is_descendant_or_self(focused, *root))
-            && world.ime(focused).is_some_and(|ime| !ime.text.is_empty())
-    }
-
-    fn roots(&self, part: Part) -> Vec<StableNodeId> {
-        self.slot(part).as_ref().map(|view| view.roots().to_vec()).unwrap_or_default()
-    }
-
-    fn slot(&self, part: Part) -> &Option<MountedView> {
-        match part {
-            Part::Sidebar => &self.sidebar,
-            Part::Primary => &self.primary,
-            Part::Overlay => &self.overlay,
-        }
-    }
-
-    fn slot_mut(&mut self, part: Part) -> &mut Option<MountedView> {
-        match part {
-            Part::Sidebar => &mut self.sidebar,
-            Part::Primary => &mut self.primary,
-            Part::Overlay => &mut self.overlay,
-        }
-    }
-
-    /// 按 `mode` 重挂 `parts`：先记下旧内容里的焦点、选区和滚动，建新内容，放进槽位，卸掉旧的，
-    /// 给新内容补登 Escape、拖放和字段名，最后在新内容里找回记下的状态。
-    ///
-    /// 建任何一块失败时卸掉已经建好的新块，旧内容原样留着。
-    fn remount(
+    /// 各块的根放进槽位，再卸掉换下来的旧内容、找回状态。放不进槽位时记日志，下一次同步再放。
+    fn settle(
         &mut self,
         document: &mut RuntimeDocument,
-        model: &ShellViewModel,
         mode: BodyMode,
-        parts: &[Part],
+        swap: Swap,
+        error: Option<FrameworkError>,
     ) -> Result<(), FrameworkError> {
-        let kept = parts
-            .iter()
-            .map(|part| (*part, super::remount_state::capture(document, &self.roots(*part))))
-            .collect::<Vec<_>>();
-        let mut fresh: Vec<(Part, Option<MountedView>)> = Vec::new();
-        for part in parts {
-            match self.build(document, model, mode, *part) {
-                Ok(view) => fresh.push((*part, view)),
-                Err(error) => {
-                    eprintln!("Nana 壳层内容挂载失败 {part:?}：{error}");
-                    discard(document.context_mut(), fresh);
-                    return Err(error);
-                }
-            }
+        let placed = self.place(document.context_mut(), mode);
+        match &placed {
+            Ok(()) => self.mode = mode,
+            Err(placing) => eprintln!("Nana 壳层内容放进槽位失败：{placing}"),
         }
-        let first_root = |view: &Option<MountedView>| view.as_ref().and_then(|view| view.roots().first().copied());
-        let root_of = |part: Part| match fresh.iter().find(|(fresh_part, _)| *fresh_part == part) {
-            Some((_, view)) => first_root(view),
-            None => first_root(self.slot(part)),
-        };
-        let (sidebar, primary, overlay) = (root_of(Part::Sidebar), root_of(Part::Primary), root_of(Part::Overlay));
-        if let Err(error) = self.place(document.context_mut(), mode, sidebar, primary, overlay) {
-            eprintln!("Nana 壳层内容放进槽位失败，放回原来的内容：{error}");
-            let restored = self.place(
-                document.context_mut(),
-                self.mode,
-                first_root(&self.sidebar),
-                first_root(&self.primary),
-                first_root(&self.overlay),
-            );
-            if let Err(error) = restored {
-                eprintln!("Nana 原来的壳层内容也放不回槽位：{error}");
-            }
-            discard(document.context_mut(), fresh);
-            return Err(error);
-        }
-        self.mode = mode;
-        let mut placed_roots = Vec::new();
-        for (part, view) in fresh {
-            if let Some(view) = &view {
-                placed_roots.push((part, view.roots().to_vec()));
-            }
-            if let Some(old) = std::mem::replace(self.slot_mut(part), view)
-                && let Err(error) = old.unmount(document.context_mut())
-            {
-                eprintln!("Nana 卸掉旧的壳层内容失败 {part:?}：{error}");
-            }
-            self.deferred.retain(|deferred| *deferred != part);
-            self.stats.remounts += 1;
-        }
-        for (_, roots) in &placed_roots {
-            register(document, roots);
-        }
-        for (part, state) in kept {
-            if let Some((_, roots)) = placed_roots.iter().find(|(placed, _)| *placed == part) {
-                state.restore(document, roots);
-            }
-        }
-        Ok(())
-    }
-
-    /// 建一块内容，挂成脱离树的根，建的时候把热信号交给视图函数。没有这块（侧栏收起、没有浮层）时返回 `None`。
-    fn build(
-        &self,
-        document: &mut RuntimeDocument,
-        model: &ShellViewModel,
-        mode: BodyMode,
-        part: Part,
-    ) -> Result<Option<MountedView>, FrameworkError> {
-        let document_id = document.document();
-        let hot = self.hot;
-        let view = move || -> Option<AnyView> {
-            hot::with_signals(hot, || match part {
-                Part::Sidebar => (mode == BodyMode::Workbench).then(|| super::render::sidebar_view(model)),
-                Part::Primary => Some(super::render::primary_view(model, mode)),
-                Part::Overlay => super::render::overlay_view(model),
-            })
-        };
-        let context = document.context_mut();
-        let mounted = context.mount_view_detached(document_id, view)?;
-        match mounted.roots().len() {
-            0 => {
-                mounted.unmount(context)?;
-                Ok(None)
-            }
-            1 => Ok(Some(mounted)),
-            count => {
-                eprintln!("Nana 壳层内容 {part:?} 应该只有一个根，实际 {count} 个，只放第一个");
-                Ok(Some(mounted))
-            }
+        swap.finish(document);
+        match error {
+            Some(error) => Err(error),
+            None => placed,
         }
     }
 
     /// 把三块内容的根放进槽位。有侧栏时工作区是 body；主区独占时清空工作区的区域，主区自己是 body。
-    fn place(
-        &self,
-        context: &mut AppContext,
-        mode: BodyMode,
-        sidebar: Option<StableNodeId>,
-        primary: Option<StableNodeId>,
-        overlay: Option<StableNodeId>,
-    ) -> Result<(), FrameworkError> {
+    fn place(&self, context: &mut AppContext, mode: BodyMode) -> Result<(), FrameworkError> {
+        let (sidebar, primary, overlay) = (self.sidebar.root(), self.primary.root(), self.overlay.root());
         match mode {
             BodyMode::Workbench => {
                 let regions = place_regions(context, self.workspace, sidebar, primary)?;
@@ -395,13 +285,36 @@ impl ShellView {
     }
 }
 
-/// 卸掉建好了却没放上去的新内容。
-fn discard(context: &mut AppContext, fresh: Vec<(Part, Option<MountedView>)>) {
-    for (part, view) in fresh {
-        if let Some(view) = view
-            && let Err(error) = view.unmount(context)
-        {
-            eprintln!("Nana 卸掉没放上去的壳层内容失败 {part:?}：{error}");
+/// 一块的常规同步：写信号；有变化要重挂时，组合中就记下延后，否则重挂。
+fn step<P: ShellPart>(
+    part: &mut P,
+    cx: &mut PartCx<'_>,
+    model: &ShellViewModel,
+    deferred: &mut Vec<PartId>,
+) -> Result<Swap, FrameworkError> {
+    part.sync(model);
+    if !part.needs_remount(model) {
+        deferred.retain(|id| *id != P::ID);
+        return Ok(Swap::default());
+    }
+    if part.composing(cx.document) {
+        if !deferred.contains(&P::ID) {
+            deferred.push(P::ID);
+        }
+        cx.stats.deferred += 1;
+        return Ok(Swap::default());
+    }
+    deferred.retain(|id| *id != P::ID);
+    part.remount(cx, model)
+}
+
+/// 收下一块的结果：成功的并进收尾，失败的记日志，留下第一个错误。失败的块保留旧内容。
+fn absorb(swap: &mut Swap, error: &mut Option<FrameworkError>, part: PartId, result: Result<Swap, FrameworkError>) {
+    match result {
+        Ok(done) => swap.merge(done),
+        Err(failed) => {
+            eprintln!("Nana 壳层内容 {part:?} 挂载失败：{failed}");
+            error.get_or_insert(failed);
         }
     }
 }
@@ -452,27 +365,6 @@ fn hidden_marker(text: &str) -> Text {
     layout.width = Some(LengthSpec::Px(0.0));
     layout.height = Some(LengthSpec::Px(0.0));
     marker
-}
-
-/// 新挂进来的节点补登命令式的处理：Escape、系统文件拖放和对话框下拉框的字段名。只扫这些根下面。
-fn register(document: &mut RuntimeDocument, roots: &[StableNodeId]) {
-    crate::window_host::bind_escape(document, roots);
-    crate::window_host::bind_file_drop(document, roots);
-    super::sidebar_view::bind_field_labels(document, roots);
-}
-
-/// 文档里组件类型是 `component`、落在 `roots`（含自身）下面的节点。按组件索引取候选再往上查祖先，
-/// 不遍历整棵子树。
-pub(crate) fn components_under(
-    world: &UiWorld,
-    document: DocumentId,
-    component: &str,
-    roots: &[StableNodeId],
-) -> Vec<StableNodeId> {
-    world
-        .nodes_of_component(document, component)
-        .filter(|id| roots.iter().any(|root| world.is_descendant_or_self(*id, *root)))
-        .collect()
 }
 
 thread_local! {

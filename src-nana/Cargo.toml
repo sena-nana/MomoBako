@@ -16,7 +16,8 @@ symphonia = { version = "0.6.1", default-features = false, features = ["mp3", "f
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
 unarc-rs = "0.6.1"
 momobako-backend = { path = "../src-backend" }
-nana-ui = { git = "https://github.com/sena-nana/NanaUI.git", rev = "e2780d929bb452182a34d266e459958378bf363d", features = ["hosted", "bundled-fonts", "components", "icons-tabler"] }
+# view-macro：结构块容器的 `css!` 和 `#[derive(Store)]`，绑定式视图要用。
+nana-ui = { git = "https://github.com/sena-nana/NanaUI.git", rev = "e2780d929bb452182a34d266e459958378bf363d", features = ["hosted", "bundled-fonts", "components", "icons-tabler", "view-macro"] }
 nana-ui-core = { git = "https://github.com/sena-nana/NanaUI.git", rev = "e2780d929bb452182a34d266e459958378bf363d" }
 nana-ui-platform = { git = "https://github.com/sena-nana/NanaUI.git", rev = "e2780d929bb452182a34d266e459958378bf363d", features = ["clipboard"] }
 

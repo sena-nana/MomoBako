@@ -4,7 +4,7 @@
 //! 右列是 300px 宽的详情卡片。双击或「预览」打开预览页时，整块换成预览页，播放条在预览页底部。
 //! 外边距由壳层主区统一给，这里只负责两列本身；面板固定高度，列表和详情各自滚动。
 
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::view::{node_ref, widget, AnyView, IntoView};
 use nana_ui::runtime::{AlignSpec, FileDropEvent, LengthSpec, PositionSpec, SemanticColorRole, Stack};
 
 use super::{ShellMessage, ShellPage, ShellViewModel};
@@ -40,7 +40,10 @@ pub(super) fn entry_menu(model: &ShellViewModel) -> Option<AnyView> {
 pub(super) fn live_file_column(model: &ShellViewModel) -> AnyView {
     let previewing = model.page == ShellPage::SelectedFile && model.files.preview_open(model.inspect.target_path.as_deref());
     let body = if previewing { preview_page(model) } else { workbench(model) };
+    let drop = node_ref();
+    super::input::accept_file_drops(drop);
     widget(Stack::fill_column(0.0).min_width(LengthSpec::Px(0.0)).min_height(LengthSpec::Px(0.0)))
+        .node_ref(drop)
         .on_cx({
             let flags = super::input::file_drop_flags(model);
             move |_, event: &FileDropEvent, cx| {
@@ -48,7 +51,6 @@ pub(super) fn live_file_column(model: &ShellViewModel) -> AnyView {
             }
         })
         .children((
-            super::input::drop_marker("files"),
             super::input::close_prompt(model),
             body,
             super::workspace_dialogs::file_dialog(model),
