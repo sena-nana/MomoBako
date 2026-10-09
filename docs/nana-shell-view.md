@@ -19,8 +19,8 @@
 
 | 块 | 模块 | 切换 | 现状 |
 | --- | --- | --- | --- |
-| 侧栏 | `view_part_sidebar.rs` | 无 | 整块重挂；`SidebarProjection` 列出侧栏视图读到的全部状态，相等时不重挂 |
-| 主区 | `view_part_primary.rs`，路由在 `route_*.rs` | `dynamic(RouteSlot)`，按 `RouteKey` | 启动页常驻；其余路由的分支整块重挂 |
+| 侧栏 | `view_part_sidebar.rs`，投影在 `sidebar_project.rs` | 无 | 常驻：`SidebarSignals`（几个信号加播放集、文件夹树、智能文件夹树三份 Store）建在骨架作用域里，同步只写变了的；排法变了（收起再展开）才整块重挂 |
+| 主区 | `view_part_primary.rs`，路由在 `route_*.rs` | `dynamic(RouteSlot)`，按 `RouteKey` | 启动页、缺失仓库页、空库页常驻；播放集页已写成投影加绑定（`player_playlist_page.rs`），路由仍是旧视图，接上播放条的旧视图岛后再登记常驻；其余路由的分支整块重挂 |
 | 浮层 | `view_part_overlay.rs` | 按 `OverlayKey` 换整块 | 各浮层整块重挂；没有浮层时槽位为空 |
 
 并行改区域时各改各的文件：
@@ -56,7 +56,7 @@
 ### Signal 还是 Store
 
 - 几个平铺的值、读者不多：`Signal<T>`，`T` 是投影里的一段结构，绑定用 `move || sig.with(|v| v.field.clone())` 取字段。值变了以后读者重跑，按字段比较，没变的字段不打补丁，成本很低。
-- 嵌套的状态，或者列表里每行的字段各自在变、行数又多：`store(..)` 加 `#[derive(Store)]`（壳层已开 `view-macro`），行用 `keyed(|item| item.id).each(..)`，行内绑定读 `item.title()` 这样的路径，改一行只重跑读这一行的绑定。整体 `set` 列表会让所有行的绑定重跑一遍再按字段比较，大列表写回时只改变了的项（`at(&key).set(..)`、`push`、`retain`）。
+- 嵌套的状态，或者列表里每行的字段各自在变、行数又多：`store(..)` 加 `#[derive(Store)]`（壳层已开 `view-macro`），行用 `keyed(|item| item.id).each(..)`，行内绑定读 `item.title()` 这样的路径，改一行只重跑读这一行的绑定。整体 `set` 列表会让所有行的绑定重跑一遍再按字段比较，大列表写回时只改变了的项（`at(&key).set(..)`、`push`、`retain`）。投影出的整份新列表用 `sidebar_project.rs` 的 `sync_rows` 写回：它按键删、插、改、排，没变的行一个绑定都不重跑（侧栏的三份列表和播放集页的条目都用它）。
 - 不要把整个 ViewModel 放进一个信号。
 
 ### 列表和滚动
@@ -109,3 +109,7 @@
 - 不挂在 `OverlayHost` 下的 `Dialog` 收不到 Escape 和点外面的关闭请求（`DialogCloseRequested` 只发给 `activate_overlay` 打开的对话框），壳层的 Escape 全局处理。
 - 元素上没有声明式的拖放目标，要靠 `on_mount` 调 `set_drop_target_node`。
 - AppShell 只在自己投影时按「有没有子节点」决定 overlay 槽位挡不挡点击；槽位里的内容由结构块在刷新时换，它不会跟着重新判断。所以浮层块在没有浮层时把槽位清空，不用常驻的浮层根。
+- `TreeView` 是一个自绘节点：`nodes` 只能整份绑定，展开、计数变了都整树重投影；行不是节点，放不了行内按钮、右侧计数、右键菜单和行级无障碍。侧栏的文件夹树和智能文件夹树改成按显示顺序展开的扁平行，放进按键对照的 Store，用 `keyed(..).each` 建：展开只插子级，三角、当前目录和计数原地改。
+- `ReorderList` 拖动时按自己的直接子节点取行的盒子（`reorder_row_boxes`），`each` 总会多一层容器，也没有把行直接放进现成控件的入口（只有 `each_virtual` 有 `.within`），所以条目放不进带键的 `each`。播放集页改用按条目顺序做键的 `dynamic`：增删、重排时整个列表重建，当前播放和条目字段原地绑定。
+- `#[derive(Store)]` 给每个字段生成同名访问器，但 `Item` 自己有 `id()`（键的哈希），名叫 `id` 的字段在行上读不到，行结构里的编号字段要换个名字（`playlist_id`、`item_id`）。
+- 结构块先删旧分支再建新分支，删的时候焦点被清空；`on_cleanup` 拿不到 `AppContext`，没有在换分支之前能读焦点的回调。播放集页要在换列表之前记焦点，只好分两步：`watch_effect` 看到条目顺序变了先登记 `on_mount`，回调里（旧列表还在）记下焦点和滚动，再把顺序写进 `dynamic` 的键；下一轮换出新列表，新列表的 `on_mount` 按键路径找回。两步在同一次刷新里完成。

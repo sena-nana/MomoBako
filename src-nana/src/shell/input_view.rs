@@ -1,19 +1,15 @@
-//! 关闭确认、系统文件拖放和空库页。验收场景不挂关闭条，避免改掉旧的命中目标。
+//! 关闭确认和系统文件拖放。空库页在 `route_empty.rs`。验收场景不挂关闭条，避免改掉旧的命中目标。
 
 use std::path::PathBuf;
-use std::sync::Arc;
 
-use nana_ui::runtime::view::{node_ref, on_mount, text, widget, AnyView, IntoView, NodeRef};
-use nana_ui::runtime::{
-    Activate, AlignSpec, ConfirmDialog, FileDropEvent, JustifySpec, LengthSpec, RadiusTier, SemanticColorRole, Stack,
-    Text, TextHorizontalAlignment,
-};
+use nana_ui::runtime::view::{on_mount, text, widget, AnyView, IntoView, NodeRef};
+use nana_ui::runtime::{Activate, ConfirmDialog, FileDropEvent};
 use nana_ui_core::{DropAccepts, DropEffect};
 use super::{HostDragPhase, InputMessage};
 use crate::shell::{MainRegion, ShellMessage, ShellViewModel, WorkspacePanel};
 
-/// 挂上拖放时从壳层抄下来的仓库条件。事件回调里不再借壳层。
-#[derive(Clone)]
+/// 挂上拖放时从壳层抄下来的仓库条件。事件回调里不再借壳层；常驻视图把它放进信号，事件到达时现读。
+#[derive(Clone, Debug, PartialEq)]
 pub(crate) struct FileDropFlags {
     has_repository: bool,
     missing_repository: bool,
@@ -64,67 +60,6 @@ pub(crate) fn file_drop_message(flags: &FileDropFlags, event: &FileDropEvent) ->
 
 fn path_text(path: &PathBuf) -> String {
     path.to_string_lossy().into_owned()
-}
-
-/// 空库页，对应 `EmptyRepositoryState.vue`：标题、拖入说明和附加失败的错误。
-///
-/// 整节都是拖放目标，悬停和放下走同一条宿主拖放消息；拖着文件夹经过时面板换成
-/// `--accent-soft` 底和 1px 强调色描边。
-pub(crate) fn empty_repository_panel(model: &ShellViewModel) -> AnyView {
-    let dragging = model.input.dragging_repository_folder;
-    let error = &model.input.empty_repository_error;
-    let mut rows = vec![
-        widget(centered_text("还没有可用资源库", 18.0, 600, SemanticColorRole::Text, 18.0 * 1.55)).key("empty-title").into_any(),
-        widget(centered_text("拖入一个本地文件夹创建资源库。", 13.0, 400, SemanticColorRole::Muted, 13.0 * 1.55))
-            .key("empty-detail")
-            .into_any(),
-    ];
-    if !error.is_empty() {
-        let mut copy = centered_text(error.clone(), 13.0, 400, SemanticColorRole::Danger, 13.0 * 1.45);
-        Arc::make_mut(&mut copy.style.layout).width = Some(LengthSpec::Fill);
-        rows.push(
-            widget(
-                Stack::column(0.0)
-                    .width(LengthSpec::Fill)
-                    .padding_xy(10.0, 8.0)
-                    .painter(crate::shell::shell_tint::SoftFill::err())
-                    .with_layout(|layout| layout.max_width = Some(LengthSpec::Px(420.0))),
-            )
-            .children((widget(copy).key("empty-error"),))
-            .into_any(),
-        );
-    }
-    let mut panel = Stack::column(10.0)
-        .width(LengthSpec::Fill)
-        .min_height(LengthSpec::Px(220.0))
-        .padding_xy(16.0, 28.0)
-        .radius(RadiusTier::Md)
-        .align(AlignSpec::Center)
-        .justify(JustifySpec::Center)
-        .with_layout(|layout| layout.max_width = Some(LengthSpec::Px(520.0)));
-    if dragging {
-        panel = panel.surface(SemanticColorRole::AccentSoft).outline(SemanticColorRole::Accent, 1.0);
-    }
-    let drop = node_ref();
-    accept_file_drops(drop);
-    widget(crate::shell::startup_view::fill_section())
-        .node_ref(drop)
-        .on_cx({
-            let flags = file_drop_flags(model);
-            move |_, event: &FileDropEvent, cx| {
-                cx.dispatch_program_all(file_drop_message(&flags, event));
-            }
-        })
-        .children((widget(panel).children(rows).key("empty-panel").into_any(),))
-        .key("empty-repository-page")
-        .into_any()
-}
-
-/// 居中的一段字，行高写成像素。对应 `.empty-state-page` 的 `text-align: center`。
-fn centered_text(value: impl Into<String>, size: f32, weight: u16, color: SemanticColorRole, line_height: f32) -> Text {
-    let mut node = Text::new(value).font_size(size).font_weight(weight).color(color).line_height(line_height);
-    node.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
-    node
 }
 
 /// `target` 建好后登记成系统文件拖放目标：接受文件、复制效果，整块子树都算。事件由视图的
