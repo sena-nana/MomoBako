@@ -1,4 +1,4 @@
-//! 搜索面板和筛选栏的展示数据：候选项、色块颜色、结果芯片、范围和摘要文案、库类型快捷方式。
+//! 搜索面板和筛选栏的展示数据：候选项、色块颜色、结果芯片、范围和摘要文案、空结果说明、库类型快捷方式。
 //!
 //! 对应 Vue `useSearchUi.ts` 的 `rebuildFilterOptions`、`filterColorStyle`、`searchResultContext`、
 //! `searchResultScopeLabel`、`searchSummary`，以及 `useWorkspaceViewState.ts` 的
@@ -192,6 +192,20 @@ pub(crate) fn summary(model: &ShellViewModel) -> String {
     } else {
         format!("当前查询: {query}")
     }
+}
+
+/// 结果区没有结果时的标题和说明。还没有条件时等条件；带条件的搜索跑完没有命中时，按页头同样的范围
+/// 写明哪里没有匹配的文件。搜索失败时返回 `None`：错误行已经写明，不再说成没有命中或等待条件。
+pub(crate) fn empty_result(model: &ShellViewModel) -> Option<(&'static str, String)> {
+    let inspect = &model.inspect;
+    if !inspect.search_error.is_empty() {
+        return None;
+    }
+    if !inspect.searched {
+        return Some(("等待搜索条件", "输入关键词、标签或评分条件后，这里会展示结果。".into()));
+    }
+    let scope = if inspect.filters.has_active_filters() { repository_name(model) } else { "全部资源库".into() };
+    Some(("没有匹配的文件", format!("{scope}里没有符合当前条件的文件。调整关键词、标签或评分条件后再试。")))
 }
 
 /// Vue `activeLibrarySearchShortcuts`：当前视图的文件或搜索结果里有该库类型的条目时，

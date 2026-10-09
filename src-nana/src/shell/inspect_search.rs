@@ -438,7 +438,7 @@ impl InspectState {
         self.run_filtered_search(active_repo);
     }
 
-    /// Vue `runSearch`：按当前查询和筛选搜索。没有任何条件时清空结果，不发请求。
+    /// Vue `runSearch`：按当前查询和筛选搜索。没有任何条件时清空结果，不发请求，结果区回到等条件。
     fn run_search(&mut self, active_repo: Option<&str>) {
         self.search_generation += 1;
         let generation = self.search_generation;
@@ -446,6 +446,7 @@ impl InspectState {
         if !request.has_criteria() {
             self.results.clear();
             self.searching = false;
+            self.searched = false;
             self.search_error.clear();
             return;
         }
@@ -461,12 +462,13 @@ impl InspectState {
             self.search_generation += 1;
             self.results.clear();
             self.searching = false;
+            self.searched = false;
             return;
         }
         self.run_search(active_repo);
     }
 
-    /// 只接受最近一次请求的结果。失败时保留上一批结果并写出错误。
+    /// 只接受最近一次请求的结果。成功时哪怕一条都没有也算跑完；失败时保留上一批结果并写出错误。
     fn note_search(&mut self, generation: u64, result: Result<Vec<SearchRow>, String>) {
         if generation != self.search_generation {
             eprintln!("Nana 忽略过期的搜索结果");
@@ -476,6 +478,7 @@ impl InspectState {
         match result {
             Ok(rows) => {
                 self.results = rows;
+                self.searched = true;
                 self.search_error.clear();
             }
             Err(error) => {
@@ -508,6 +511,7 @@ impl InspectState {
         self.filters = SearchFilters::default();
         self.filter_bar_open = false;
         self.searching = false;
+        self.searched = false;
         self.search_error.clear();
         self.search_ui.reveal_hit = None;
     }

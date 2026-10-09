@@ -144,6 +144,26 @@ fn scope_and_summary_follow_filters_and_query() {
     assert_eq!(summary(&model), "按当前资源库筛选结果。");
 }
 
+/// 还没有条件时等条件；带条件的搜索跑完没有命中时按页头的范围写明哪里没有；搜索失败时只留错误行。
+#[test]
+fn empty_result_tells_waiting_from_no_match_and_names_the_scope() {
+    let mut model = shell();
+    assert_eq!(empty_result(&model), Some(("等待搜索条件", "输入关键词、标签或评分条件后，这里会展示结果。".to_string())));
+    model.inspect.query = "封面".into();
+    model.inspect.searched = true;
+    assert_eq!(
+        empty_result(&model),
+        Some(("没有匹配的文件", "全部资源库里没有符合当前条件的文件。调整关键词、标签或评分条件后再试。".to_string()))
+    );
+    model.inspect.filters.tags = vec!["参考".into()];
+    assert_eq!(
+        empty_result(&model),
+        Some(("没有匹配的文件", "默认资源库里没有符合当前条件的文件。调整关键词、标签或评分条件后再试。".to_string()))
+    );
+    model.inspect.search_error = "搜索失败：索引损坏".into();
+    assert_eq!(empty_result(&model), None, "失败不说成没有命中");
+}
+
 #[test]
 fn shortcuts_show_only_when_entries_or_results_belong_to_the_library() {
     let mut model = shell();

@@ -1,7 +1,7 @@
 //! 搜索结果面板，对应 Vue `pages/workspace/SearchPanel.vue`。
 //!
 //! 页头是范围眉题、「搜索结果」、摘要和仓库数、结果数两个计数胶囊。下面依次是搜索中提示、
-//! 空状态（没有资源库 / 等待搜索条件）或结果列表。结果行左边是文件图标块，中间是文件名和
+//! 空状态（没有资源库 / 等待搜索条件 / 跑完没有命中）或结果列表。结果行左边是文件图标块，中间是文件名和
 //! 「仓库 / 路径」，右边是格式、前三个标签、颜色、形状和评分芯片。
 //! 筛选栏的视图在 `search_filter_bar.rs`，放在哪里由壳层决定。
 
@@ -42,7 +42,7 @@ pub(super) fn search_panel(model: &ShellViewModel) -> AnyView {
     if model.workspace.repositories.is_empty() {
         rows.push(empty_state("还没有可搜索的资源库", "先在资源库页面添加一个仓库，再执行跨仓库搜索。"));
     } else if !inspect.searching && inspect.results.is_empty() {
-        rows.push(empty_state("等待搜索条件", "输入关键词、标签或评分条件后，这里会展示结果。"));
+        rows.extend(presenter::empty_result(model).map(|(title, message)| empty_state(title, &message)));
     } else {
         rows.push(results(model));
     }
