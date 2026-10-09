@@ -860,3 +860,27 @@ fn asmr_shortcuts_publish_onto_the_filter_bar() {
     assert_eq!(model.inspect.shortcuts[0].label, "ASMR 作品");
     assert_eq!(model.inspect.shortcuts[0].metadata, "libraryKind=asmr");
 }
+
+/// 选中的勾选框：NanaUI 的「✓」用主题勾选框配方的选中字色，选中底要和它拉开对比，勾上了才看得出来。
+/// 以前选中底是 `accent-soft`，白色的勾落在几乎同色的浅底上，浅色主题下看不见。
+#[test]
+fn a_checked_native_checkbox_keeps_its_mark_visible() {
+    use nana_ui::theme::{builtin_theme_arc, ComponentRecipeId, ThemeAppearance};
+
+    fn luminance(color: [f32; 4]) -> f32 {
+        let channel = |value: f32| if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) };
+        0.2126 * channel(color[0]) + 0.7152 * channel(color[1]) + 0.0722 * channel(color[2])
+    }
+    let checkbox = super::style::native_checkbox(nana_ui::runtime::Checkbox::new("", true), 18.0);
+    let fill_role = checkbox.style.interaction.selected.background.expect("选中底色");
+    for mode in [ThemeAppearance::Light, ThemeAppearance::Dark] {
+        let theme = builtin_theme_arc(mode);
+        let colors = theme.style_model();
+        let fill = colors.color(fill_role).as_rgba_array();
+        let mark = colors.color(theme.recipes().foreground(ComponentRecipeId::Checkbox, true)).as_rgba_array();
+        assert!(fill[3] >= 1.0, "{mode:?}：选中底要不透明，勾的对比才不随下面的底变");
+        let (light, dark) = (luminance(fill).max(luminance(mark)), luminance(fill).min(luminance(mark)));
+        let contrast = (light + 0.05) / (dark + 0.05);
+        assert!(contrast >= 3.0, "{mode:?}：选中勾选框的「✓」和底色对比只有 {contrast:.2}");
+    }
+}
