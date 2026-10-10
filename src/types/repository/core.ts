@@ -1545,10 +1545,13 @@ export type SourceEntryActionContribution = {
   playerTypeId?: string;
 };
 
-/** 来源下载（`download-entry` / `download-directory`）载荷里的去处：用户选的本地目录，或者目标资源库。 */
+/**
+ * 来源下载（`download-entry` / `download-directory`）载荷里的去处：用户选的本地目录，或者目标资源库。下载到其他
+ * 资源库时宿主给这次下载新建一个空的暂存目录放在 `stagingPath`，插件把文件都写在里面，宿主导入以后清掉。
+ */
 export type SourceDownloadDestination =
   | { kind: "localFolder"; path: string }
-  | { kind: "repository"; repoId: string; path?: string; parentPath?: string };
+  | { kind: "repository"; repoId: string; path?: string; parentPath?: string; stagingPath?: string };
 
 /**
  * 来源下载里一项的结果。`paths` 只列这次写下的文件；下载到本地目录时，目录里已有的同名文件保留原样、不写入，

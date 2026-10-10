@@ -263,9 +263,10 @@ fn a_track_result_lists_kept_files_only_when_there_are_some() {
     assert!(clean.get("skippedEntries").is_none());
 }
 
-/// 本地目录保留已有文件；下载到其他资源库时放进插件管理的暂存目录，暂存过的同名文件可以替换。
+/// 本地目录保留已有文件；下载到其他资源库时写进宿主给这次下载新建的暂存目录（同样不覆盖），宿主没给时放进插件
+/// 自己的旧暂存目录，暂存过的同名文件可以替换。
 #[test]
-fn only_local_folders_keep_existing_files() {
+fn downloads_land_where_the_destination_says() {
     let data = TempDir::new("targets");
     let runtime = runtime(data.path());
     let local = DownloadDestination {
@@ -273,17 +274,29 @@ fn only_local_folders_keep_existing_files() {
         path: Some(" D:/Music ".into()),
         repo_id: None,
         parent_path: None,
+        staging_path: None,
     };
     let target = resolve_download_target(&runtime, &local, None).expect("本地目录");
     assert_eq!((target.root, target.policy), (PathBuf::from("D:/Music"), WritePolicy::KeepExisting));
 
-    let repository = DownloadDestination {
+    let staged = DownloadDestination {
         kind: "repository".into(),
         path: Some("D:/third".into()),
         repo_id: Some("third-repo".into()),
         parent_path: None,
+        staging_path: Some("D:/MomoCache/netease/.momo/cache/download-staging/third-repo/run-1".into()),
     };
-    let target = resolve_download_target(&runtime, &repository, Some("D:/MomoCache/netease")).expect("暂存目录");
+    let target = resolve_download_target(&runtime, &staged, Some("D:/MomoCache/netease")).expect("宿主的暂存目录");
+    assert_eq!(
+        (target.root, target.policy),
+        (
+            PathBuf::from("D:/MomoCache/netease/.momo/cache/download-staging/third-repo/run-1"),
+            WritePolicy::KeepExisting
+        )
+    );
+
+    let legacy = DownloadDestination { staging_path: Some("  ".into()), ..staged };
+    let target = resolve_download_target(&runtime, &legacy, Some("D:/MomoCache/netease")).expect("旧暂存目录");
     assert_eq!(
         (target.root, target.policy),
         (
