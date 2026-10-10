@@ -6,7 +6,7 @@ use nana_ui::runtime::{component_descriptors, AppShell, ContextMenu, Entity, Pos
 
 use super::OverlayKey;
 use crate::backend::services::repository::TaskProgressSnapshot;
-use crate::shell::files::{FileDialog, FilesMessage};
+use crate::shell::files::{BranchSource, FileDialog, FilesMessage};
 use crate::shell::player::PlayerMessage;
 use crate::shell::view_harness::ShellHarness;
 use crate::shell::workspace::WorkspaceRepository;
@@ -202,7 +202,7 @@ fn repository_switcher_adds_rows_without_rebuilding_the_rest() {
 }
 
 #[test]
-fn entry_menu_toggles_its_submenu_without_rebuilding_rows() {
+fn entry_menu_opens_its_submenu_without_rebuilding_rows() {
     let mut harness = ShellHarness::mount(scene("live-menu"));
     assert_eq!(OverlayKey::of(&harness.model), Some(OverlayKey::EntryMenu));
     let root = harness.content_roots().0.expect("右键菜单在浮层里");
@@ -210,7 +210,7 @@ fn entry_menu_toggles_its_submenu_without_rebuilding_rows() {
         .map(|key| harness.keyed(key).unwrap_or_else(|| panic!("菜单缺少 {key}")));
     assert!(harness.find("刷新缩略图").is_none(), "子菜单一开始收着");
 
-    harness.apply(ShellMessage::Files(FilesMessage::ToggleMenuBranch("thumbnail".into())));
+    harness.apply(ShellMessage::Files(FilesMessage::MenuBranchChanged { branch: "thumbnail".into(), source: BranchSource::Pointer, inside: true }));
     harness.flush();
     assert_eq!(harness.content_roots().0, Some(root), "展开子菜单不该重挂菜单");
     assert!(harness.find("刷新缩略图").is_some(), "子菜单没有展开");

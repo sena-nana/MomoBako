@@ -4,8 +4,10 @@
 //! 暂停追踪、重置筛选、清空日志，下面是级别和来源两组筛选芯片，再下面是日志卡片列表。
 //! 每条日志一张主背景卡片：级别徽章、来源芯片、时间、动作、消息、上下文标签和可展开的上下文。
 //!
-//! 页头、工具条和筛选固定，日志列表（`.logs-workbench__list`）占满面板剩余高度、自己滚动：追踪时
-//! 跟随末尾，暂停后停在原位。Vue 的列表不定高、实际滚不起来，这里按它的意图给列表定高。
+//! 照 Vue 的结构，页面主体（`.workspace-page__body`）和日志列表（`.logs-workbench__list`）都是滚动区。
+//! 面板至少撑满主体，列表分走页头、工具条和筛选以下的高度、自己滚动：追踪时跟随末尾，暂停后停在原位。
+//! Vue 的列表不定高、实际滚不起来，这里按它的意图给列表定高；列表最低 360（Vue 的 `min-height`），
+//! 窗口矮到放不下时主体滚动，页头和列表都滚得到。
 //!
 //! 面板只建一次，只读 [`LogsSignals`]：计数、下拉框、按钮和芯片的选中态按字段绑定；日志卡片按
 //! 日志 id 做键，卡片里的文字、可有可无的芯片和上下文都是绑定和显隐，新日志到达只多建一张卡片。
@@ -69,19 +71,22 @@ pub(crate) fn logs_panel(signals: LogsSignals) -> AnyView {
             .key("admin-log-scroll")
             .into_any(),
     ];
-    style::fill_panel(body, "admin-log-panel")
+    style::workbench_panel(body, "admin-log-panel")
 }
 
-/// 日志列表的滚动区：分走面板里页头、工具条和筛选以外的高度。不设最小高（Vue 写的 360 建立在列表
-/// 不定高上）：窗口矮到放不下时列表先让出高度，滚动区始终整个落在面板里，跟随末尾时最新一条看得见。
+/// `.logs-workbench__list` 的最小高。
+const LIST_MIN_HEIGHT: f32 = 360.0;
+
+/// 日志列表的滚动区：高度从 [`LIST_MIN_HEIGHT`] 起伸展，分走面板里页头、工具条和筛选以外的高度。
+/// 基准写定 360，面板按内容量高度时列表只算 360、不按里面的日志算；里面的日志再多也只把列表自己的
+/// 盒子算进主体的滚动范围，窗口放得下时主体不滚。
 fn list_scroll() -> ScrollView {
     ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
         layout.width = Some(LengthSpec::Fill);
-        layout.height = Some(LengthSpec::Fill);
-        layout.flex_basis = Some(LengthSpec::Px(0.0));
+        layout.height = Some(LengthSpec::Px(LIST_MIN_HEIGHT));
+        layout.min_height = Some(LengthSpec::Px(LIST_MIN_HEIGHT));
         layout.flex_grow = Some(1.0);
-        layout.flex_shrink = Some(1.0);
-        layout.min_height = Some(LengthSpec::Px(0.0));
+        layout.flex_shrink = Some(0.0);
     })
 }
 

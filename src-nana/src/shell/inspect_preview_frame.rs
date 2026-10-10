@@ -63,7 +63,6 @@ struct MainKey {
 /// 预览页的常驻信号。元数据编辑区的信号在 [`MetadataSignals`]，和文件详情共用。
 #[derive(Clone, Copy)]
 pub(crate) struct PreviewSignals {
-    radius: Signal<f32>,
     head: Signal<HeadView>,
     main: Signal<MainKey>,
     content: Signal<PreviewSnapshot>,
@@ -76,7 +75,6 @@ impl PreviewSignals {
     /// 在常驻作用域里建信号，初值是这一刻的投影。
     pub(crate) fn new(model: &ShellViewModel) -> Self {
         Self {
-            radius: signal(radius(model)),
             head: signal(head_view(model)),
             main: signal(main_key(model)),
             content: signal(PreviewSnapshot::project(model, None)),
@@ -88,7 +86,6 @@ impl PreviewSignals {
 
     /// 写入投影，只写变了的；预览框内容的身份没变时不抄大块数据。
     pub(crate) fn write(&self, model: &ShellViewModel) {
-        self.radius.try_set_if_changed(radius(model));
         self.head.try_set_if_changed(head_view(model));
         self.main.try_set_if_changed(main_key(model));
         if self.content.defined_at().is_some() {
@@ -104,10 +101,6 @@ impl PreviewSignals {
 /// ASMR 队列和播放列表面板：只在预览页打开时投影，藏着的预览页不建它们。
 fn panels(model: &ShellViewModel) -> Option<AsmrPanels> {
     super::super::files_view::previewing(model).then(|| inspect_asmr::preview_panels(model)).flatten()
-}
-
-fn radius(model: &ShellViewModel) -> f32 {
-    crate::theme_map::radius_2xl(model.admin.corner_radius as f32)
 }
 
 fn main_key(model: &ShellViewModel) -> MainKey {
@@ -142,20 +135,18 @@ fn head_view(model: &ShellViewModel) -> HeadView {
 
 /// 预览页。`bar` 是页底播放条的占位节点，里面的播放条是旧视图岛。
 pub(super) fn preview_page(signals: PreviewSignals, metadata: MetadataSignals, bar: NodeRef) -> AnyView {
-    let radius = signals.radius;
     let main = dynamic(signals.main, move |key: &MainKey| main(key, signals, metadata)).css(fill_container());
-    widget(Stack::column(0.0).style(page_style(radius.get_untracked())))
-        .prop::<NodeStyle, StyleField>(move || page_style(radius.get()))
+    widget(Stack::column(0.0).style(page_style()))
         .children((header(signals.head), main, widget(Stack::column(0.0)).node_ref(bar).key("files-island-preview-bar")))
         .key("inspect-preview-page")
         .into_any()
 }
 
-/// 外框：bg-elev 圆角面板，裁掉溢出，四边留 1px。
-fn page_style(radius: f32) -> NodeStyle {
+/// 外框：bg-elev、`--radius-2xl` 的面板，裁掉溢出，四边留 1px。
+fn page_style() -> NodeStyle {
     Stack::fill_column(0.0)
         .surface(SemanticColorRole::Surface)
-        .radius_px(radius)
+        .radius(RadiusTier::Xxl)
         .min_height(LengthSpec::Px(0.0))
         .with_layout(|layout| {
             layout.flex_basis = Some(LengthSpec::Px(0.0));

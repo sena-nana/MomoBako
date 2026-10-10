@@ -145,7 +145,8 @@ pub const CORNER_RADIUS_RANGE: std::ops::RangeInclusive<f32> = 0.0..=20.0;
 /// 圆角半径基数换成主题半径刻度。
 ///
 /// Vue 的刻度都从 `--app-corner-radius` 乘出来：Lilia 给 xs=0.5r、sm=0.75r、md=r、lg=1.25r，
-/// MomoBako 另加 xl=1.5r、2xl=2r。Nana `RadiusTier` 只到 Xl，2xl 用 [`radius_2xl`] 按像素给。
+/// MomoBako 另加 xl=1.5r、2xl=2r（`src/styles/index.css`）。2xl 落到 `RadiusTier::Xxl`，
+/// 播放条、文件卡、预览页和工作台面板这类大块表面写这一档，装主题后跟着设置变。
 /// 其余控件尺寸沿用 Nana 默认度量。
 pub fn corner_metrics(radius: f32) -> ThemeMetrics {
     let radius = clamp_corner_radius(radius);
@@ -155,13 +156,9 @@ pub fn corner_metrics(radius: f32) -> ThemeMetrics {
         radius_md: radius,
         radius_lg: radius * 1.25,
         radius_xl: radius * 1.5,
+        radius_xxl: radius * 2.0,
         ..UI_METRICS
     }
-}
-
-/// Vue `--radius-2xl`：两倍基数，用在播放条、详情卡这类大卡片上。
-pub fn radius_2xl(radius: f32) -> f32 {
-    clamp_corner_radius(radius) * 2.0
 }
 
 /// 非有限或越界的半径收回到 0–20，非有限时用默认 8。
@@ -246,10 +243,10 @@ mod tests {
     fn corner_scale_follows_the_vue_radius_tokens() {
         let metrics = corner_metrics(8.0);
         assert_eq!(
-            [metrics.radius_xs, metrics.radius_sm, metrics.radius_md, metrics.radius_lg, metrics.radius_xl],
-            [4.0, 6.0, 8.0, 10.0, 12.0]
+            [metrics.radius_xs, metrics.radius_sm, metrics.radius_md, metrics.radius_lg, metrics.radius_xl, metrics.radius_xxl],
+            [4.0, 6.0, 8.0, 10.0, 12.0, 16.0]
         );
-        assert_eq!(radius_2xl(8.0), 16.0);
+        assert_eq!(corner_metrics(40.0).radius_xxl, 40.0);
         assert_eq!(corner_metrics(40.0).radius_md, 20.0);
         assert_eq!(corner_metrics(-3.0).radius_md, 0.0);
         assert_eq!(corner_metrics(f32::NAN).radius_md, DEFAULT_CORNER_RADIUS_PX);

@@ -300,30 +300,17 @@ pub(crate) fn pill_look(tone: PillTone) -> (Stack, Role) {
     }
 }
 
-/// `.search-workbench__panel`：`bg-elev` 底、1px 透明边加 22 内边距、竖排间距 16，
-/// 撑满主区剩余高度。Vue 用 `--radius-2xl`，按渲染层口径先用 `Xl`。
+/// `.search-workbench__panel`：`bg-elev` 底、`--radius-2xl`、1px 透明边加 22 内边距、竖排间距 16，
+/// 撑满主区剩余高度。
 pub(crate) fn workbench_panel(body: Vec<AnyView>, key: &'static str) -> AnyView {
     let panel = pad(Stack::fill_column(16.0), 23.0, 23.0, 23.0, 23.0)
         .surface(Role::Surface)
-        .radius(RadiusTier::Xl)
+        .radius(RadiusTier::Xxl)
         .with_layout(|layout| {
             layout.height = Some(LengthSpec::Shrink);
             layout.min_height = Some(LengthSpec::MinContent);
             layout.flex_grow = Some(1.0);
             layout.flex_shrink = Some(0.0);
-        });
-    widget(panel).children(body).key(key).into_any()
-}
-
-/// 外观同 [`workbench_panel`]，高度不随内容长：正好撑满不滚动的主体，里面自己滚动的那一块（日志列表）
-/// 分走剩下的高度。窗口矮到页头等固定块都放不下时，超出面板的部分裁在面板里。
-pub(crate) fn fill_panel(body: Vec<AnyView>, key: &'static str) -> AnyView {
-    let panel = pad(Stack::fill_column(16.0), 23.0, 23.0, 23.0, 23.0)
-        .surface(Role::Surface)
-        .radius(RadiusTier::Xl)
-        .with_layout(|layout| {
-            layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
-            layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
         });
     widget(panel).children(body).key(key).into_any()
 }

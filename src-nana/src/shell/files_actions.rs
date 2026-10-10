@@ -657,7 +657,7 @@ impl FilesState {
         if !self.selected.iter().any(|item| item == path) {
             self.activate_row(ctx, path, SelectionMode::Replace);
         }
-        self.menu_branch = None;
+        self.menu_branch = MenuBranch::default();
         self.menu_pending = None;
         self.entry_menu = Some(EntryMenu { path: path.to_string(), x, y });
     }
@@ -718,7 +718,7 @@ impl FilesState {
         match self.escape_layer() {
             Some(FilesLayer::EntryMenu) => {
                 self.entry_menu = None;
-                self.menu_branch = None;
+                self.menu_branch = MenuBranch::default();
                 self.menu_pending = None;
                 true
             }

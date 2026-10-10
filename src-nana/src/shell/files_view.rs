@@ -4,13 +4,13 @@
 //! 右列是 300px 宽的详情卡片。双击或「预览」打开预览页时，整块换成预览页，播放条在预览页底部。
 //! 外边距由壳层主区统一给，这里只负责两列本身；面板固定高度，列表和详情各自滚动。
 //!
-//! 常驻：文件列只建一次。工作台和预览页都留着，按「是否在预览」`.visible` 显隐；排法（窄窗口上下排）、
-//! 卡片圆角和外部文件拖入的描边按字段绑定。播放条、关闭确认和文件对话框是别的模块的旧视图，
-//! 这里只留占位节点，内容由主区块按岛刷新（见 `route_files.rs`）。外部文件拖放的处理器只发意图消息，
-//! 当时能不能放、放到哪由归约按当时的 ViewModel 决定。
+//! 常驻：文件列只建一次。工作台和预览页都留着，按「是否在预览」`.visible` 显隐；排法（窄窗口上下排）
+//! 和外部文件拖入的描边按字段绑定，卡片圆角是主题的 2xl 档，跟着设置里的圆角半径变。播放条、关闭确认
+//! 和文件对话框是别的模块的旧视图，这里只留占位节点，内容由主区块按岛刷新（见 `route_files.rs`）。
+//! 外部文件拖放的处理器只发意图消息，当时能不能放、放到哪由归约按当时的 ViewModel 决定。
 
 use nana_ui::runtime::view::{node_ref, signal, widget, AnyView, IntoView, NodeRef, Signal};
-use nana_ui::runtime::{AlignSpec, FileDropEvent, LengthSpec, NodeStyle, PositionSpec, SemanticColorRole, Stack};
+use nana_ui::runtime::{AlignSpec, FileDropEvent, LengthSpec, NodeStyle, PositionSpec, RadiusTier, SemanticColorRole, Stack};
 
 use super::hot::HotSignals;
 use super::inspect_metadata_view::MetadataSignals;
@@ -50,12 +50,11 @@ pub(super) fn entry_menu(model: &ShellViewModel) -> Option<AnyView> {
     menu::entry_menu(model)
 }
 
-/// 文件列的样子：在不在预览、排法、卡片圆角和外部文件拖入。
+/// 文件列的样子：在不在预览、排法和外部文件拖入。
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ColumnLook {
     previewing: bool,
     stacked: bool,
-    radius: f32,
     dragging: bool,
 }
 
@@ -64,7 +63,6 @@ impl ColumnLook {
         Self {
             previewing: previewing(model),
             stacked: model.viewport_width <= STACKED_VIEWPORT_PX,
-            radius: card_radius(model),
             dragging: model.input.dragging_files,
         }
     }
@@ -192,7 +190,7 @@ fn workbench_style(stacked: bool) -> NodeStyle {
     frame.min_width(LengthSpec::Px(0.0)).min_height(LengthSpec::Px(0.0)).node_style()
 }
 
-/// `.files-browser`：抬升底色的大卡片。外部文件拖进来时描强调色边。
+/// `.files-browser`：抬升底色、`--radius-2xl` 的大卡片。外部文件拖进来时描强调色边。
 ///
 /// Vue 给卡片 `overflow: hidden` 裁圆角，导入菜单也一起被裁，窗口矮时下面几项点不到。
 /// 这里卡片不裁：列表的滚动区自己裁内容，留在卡片里的内容都在圆角以内，导入菜单可以伸出卡片。
@@ -212,7 +210,7 @@ fn card_style(look: ColumnLook) -> NodeStyle {
         .min_height(LengthSpec::Px(0.0))
         .padding(1.0)
         .surface(SemanticColorRole::Surface)
-        .radius_px(look.radius)
+        .radius(RadiusTier::Xxl)
         .with_layout(|layout| layout.position = PositionSpec::Relative);
     if look.dragging {
         card = card.outline(SemanticColorRole::Accent, 1.0);
@@ -226,7 +224,7 @@ fn drop_hint(look: Signal<ColumnLook>) -> AnyView {
         .align(AlignSpec::Center)
         .justify(nana_ui::runtime::JustifySpec::Center)
         .outline(SemanticColorRole::Accent, 1.0)
-        .radius(nana_ui::runtime::RadiusTier::Xl)
+        .radius(RadiusTier::Xl)
         .with_layout(|layout| {
             layout.position = PositionSpec::Absolute;
             layout.offset_top = Some(LengthSpec::Px(12.0));
@@ -244,11 +242,6 @@ fn drop_hint(look: Signal<ColumnLook>) -> AnyView {
         .children((widget(style::text("拖放到此处添加", 14.0, 700, SemanticColorRole::Accent, 21.7)).key("file-drop-hint"),))
         .key("file-drop-overlay")
         .into_any()
-}
-
-/// Vue `--radius-2xl`：圆角基数的两倍，跟着设置里的圆角半径走。
-pub(super) fn card_radius(model: &ShellViewModel) -> f32 {
-    crate::theme_map::radius_2xl(model.admin.corner_radius as f32)
 }
 
 /// 壳层消息的简写。

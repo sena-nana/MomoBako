@@ -26,7 +26,7 @@ pub(crate) fn key_part(text: &str) -> String {
     text.replace('%', "%25").replace('/', "%2F")
 }
 
-/// 播放条岛的版本：播放条读到的状态（`player_bar.rs` 的 `BarProps`、窄排法、圆角）和岛该不该有内容
+/// 播放条岛的版本：播放条读到的状态（`player_bar.rs` 的 `BarProps`、窄排法）和岛该不该有内容
 /// （在不在预览、显不显示播放表面、点开的播放集）。
 ///
 /// 播放条量到自己的宽度后会发 `BarResized`，每次归约都重建会量了又建、建了又量，所以这里不按 ViewModel
@@ -54,7 +54,7 @@ pub(super) fn bar_stamp(model: &ShellViewModel) -> u64 {
         let ready = model.files.rows.iter().any(|row| row.texture_ready && row.thumbnail_path.as_deref() == thumbnail);
         (thumbnail, ready).hash(&mut hasher);
     }
-    (player.bar_width.to_bits(), model.narrow_viewport(), model.admin.corner_radius.to_bits()).hash(&mut hasher);
+    (player.bar_width.to_bits(), model.narrow_viewport()).hash(&mut hasher);
     hasher.finish()
 }
 
