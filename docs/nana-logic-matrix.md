@@ -216,7 +216,7 @@
 
 ## Phase 7 宿主输入
 
-这些行由 `src-nana/src/shell/input_tests.rs` 覆盖状态机。内部移动走已有的 `momobako.entry.move`，外部导入走 `momobako.entry.import`，空库附加走 `momobako.repository.attach`。这些调用没有替身测试。打开路径、打开网址和目录揭示记录带 `reveal` 的 `OpenExternal`，由 `host_bridge` 启动系统程序，不记访问；拖出文件记录 `DragOut`，Windows 上由宿主调用和 Tauri 相同的系统拖放，失败才写文案。关闭设置里的 `confirm` 总是先询问；`quit` 在壳层或元数据没有未保存修改时关闭进程，有修改时询问；`minimizeToTray` 记录托盘请求并隐藏窗口，不退出进程。保存和打开对话框排队为 `WindowCommand::OpenFileDialog`。主窗口位置、尺寸和最大化写到 `nana-main-window-state.json`，启动时恢复。关闭确认是浮层层里的 `ConfirmDialog`，排在最上层；验收场景里没有待确认的关闭。标了「已离屏」的行写明场景；离屏不替代真窗口验收。
+这些行由 `src-nana/src/shell/input_tests.rs` 覆盖状态机。内部移动走已有的 `momobako.entry.move`，外部导入走 `momobako.entry.import`，空库附加走 `momobako.repository.attach`。这些调用没有替身测试。打开路径、打开网址和目录揭示记录带 `reveal` 的 `OpenExternal`，由 `host_bridge` 启动系统程序（揭示走 NanaUI `reveal_in_file_manager`，路径里有空格、中文照常），不记访问；拖出文件记录 `DragOut`，Windows 上由宿主调用和 Tauri 相同的系统拖放，失败才写文案。关闭设置里的 `confirm` 总是先询问；`quit` 在壳层或元数据没有未保存修改时关闭进程，有修改时询问；`minimizeToTray` 记录托盘请求并隐藏窗口，不退出进程。保存和打开对话框排队为 `WindowCommand::OpenFileDialog`。主窗口位置、尺寸和最大化写到 `nana-main-window-state.json`，启动时恢复。关闭确认是浮层层里的 `ConfirmDialog`，排在最上层；验收场景里没有待确认的关闭。标了「已离屏」的行写明场景；离屏不替代真窗口验收。
 
 实况文件列和空库面板挂上时用 `set_drop_target_node` 登记拖放目标（`input::accept_file_drops`），`FileDropEvent` 收成 `HostDrag`，由 `pointer_gesture.rs` 的 `live_file_drop_imports_and_empty_drop_attaches` 覆盖：有仓库时悬停再放下导入外部路径，空库放下附加第一条文件夹。拖放几何和放置决定仍由消息归约覆盖。卸载拖放只清标记，不清错误。
 
