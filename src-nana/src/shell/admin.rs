@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 
 use crate::backend::services::repository::{
     ApiDesignSnapshot, CacheSnapshot, PluginConfigSnapshot, PluginHookExecutionRecord, PluginManifest, RepositoryAction,
-    RepositorySummary, SystemLogRecord,
+    RepositorySummary, SystemLogRecord, SystemLogWriteRequest,
 };
 use crate::backend::services::runtime::ExternalApiConnectionStatus;
 
@@ -59,6 +59,8 @@ pub(crate) mod source_provision;
 pub(crate) mod source_target;
 #[path = "source_target_view.rs"]
 mod source_target_view;
+#[path = "source_download.rs"]
+pub(crate) mod source_download;
 
 pub(crate) use actions_view::{actions_panel, ActionsSignals, ActionsView};
 pub(crate) use logs_state::{LogsSignals, LogsView};
@@ -150,8 +152,12 @@ pub enum AdminMessage {
         payload: serde_json::Value,
         repository_id: Option<String>,
     },
-    /// 文件插件动作结束。成功写到文件活动，失败写到文件错误。
+    /// 文件插件动作（清理缓存、重新获取播放资源）结束。成功刷新资源库，失败写到文件错误。
     FilePluginFinished { method: String, result: Result<serde_json::Value, String> },
+    /// 来源下载结束（到本地或到其他资源库）：插件交回的结果，带着开始时的下载回来（`source_download.rs`）。
+    DownloadFinished { run: source_download::DownloadRun, result: Result<serde_json::Value, String> },
+    /// 宿主写系统日志的结果。写不进去时只记标准错误。
+    LogsWritten(Result<(), String>),
     /// 文件右键里的「下载到其他资源库」：一个候选直接下载，几个候选弹出「选择目标资源库」（`source_target.rs`）。
     BeginRepositoryDownload(source_target::RepositoryDownload),
     /// 「选择目标资源库」里点了一个资源库。
@@ -186,6 +192,8 @@ pub enum PluginCallOrigin {
     /// 来源登录流程里的一步。
     SourceAuth(SourceStep),
     FileMenu,
+    /// 来源下载到本地：结果回 [`AdminMessage::DownloadFinished`]。
+    Download(source_download::DownloadRun),
     /// API Playground 的插件调用。
     Playground,
 }
@@ -240,16 +248,11 @@ pub enum AdminEffect {
     /// 建来源歌单对应的播放集（已经有就不建），再把目录加进去。
     CreateSourcePlaylist { repo_id: String, playlist_id: String, name: String, player_type_id: String, path: String },
     /// 来源下载到其他资源库：调用插件（载荷里已经写好目标），把下载回来的文件导入目标资源库的 `parent_path`
-    /// （没有这个文件夹时先在 `target_path` 下建）并同步它。结果回 [`AdminMessage::FilePluginFinished`]。
-    DownloadToRepository {
-        plugin_id: String,
-        method: String,
-        payload: serde_json::Value,
-        repository_id: Option<String>,
-        target_repo_id: String,
-        target_path: String,
-        parent_path: Option<String>,
-    },
+    /// （没有这个文件夹时先在目标资源库下建）并同步它。插件、来源资源库和目标资源库都在 `run` 里，结果回
+    /// [`AdminMessage::DownloadFinished`]。
+    DownloadToRepository { run: source_download::DownloadRun, payload: serde_json::Value, parent_path: Option<String> },
+    /// 写系统日志（来源下载里失败的条目这类要留给「日志」页的记录），结果回 [`AdminMessage::LogsWritten`]。
+    WriteLogs(Vec<SystemLogWriteRequest>),
     /// 来源登录成功后更新已有仓库的后端配置。
     UpdateBackendConfig { repo_id: String, backend_config: serde_json::Value, step: SourceStep },
     /// 需要本地缓存的来源仓库写入缓存目录，并迁移旧缓存。
@@ -307,8 +310,6 @@ pub struct AdminState {
     /// 展开了上下文的日志。
     pub log_context_open: std::collections::BTreeSet<String>,
     pub popover_open: bool,
-    /// 在途的来源下载：插件方法和它在任务弹层里的仓库操作行。
-    download_operation: Option<(String, super::repo_operation::OperationId)>,
     /// 开着的「选择目标资源库」：等着的下载和候选。
     pub(crate) download_target: Option<source_target::TargetPick>,
     pub actions: Vec<RepositoryAction>,
@@ -364,7 +365,6 @@ impl Default for AdminState {
             log_signature: String::new(),
             log_context_open: std::collections::BTreeSet::new(),
             popover_open: false,
-            download_operation: None,
             download_target: None,
             actions: Vec::new(),
             active_action_id: None,
@@ -442,19 +442,6 @@ impl AdminState {
     pub fn note_backends(&mut self, repositories: &[RepositorySummary]) {
         self.backends = support::backend_counts(repositories);
         self.repository_summaries = repositories.to_vec();
-    }
-
-    /// 记下来源下载在任务弹层里的进度行，插件方法回来时收尾。
-    pub(crate) fn note_download_operation(&mut self, method: String, operation: super::repo_operation::OperationId) {
-        self.download_operation = Some((method, operation));
-    }
-
-    /// 方法 `method` 的调用回来了：是在途的下载就交出它的进度行。
-    pub(crate) fn take_download_operation(&mut self, method: &str) -> Option<super::repo_operation::OperationId> {
-        if self.download_operation.as_ref().is_some_and(|(pending, _)| pending == method) {
-            return self.download_operation.take().map(|(_, operation)| operation);
-        }
-        None
     }
 
     pub fn queue_actions(&mut self, repo_id: Option<String>) {

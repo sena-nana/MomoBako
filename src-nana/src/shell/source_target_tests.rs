@@ -128,24 +128,25 @@ fn downloading_to_another_repository_asks_for_the_target_first() {
     let row = model.operation.shown().expect("进度行");
     assert_eq!((row.label.as_str(), row.detail.as_str(), row.value, row.indeterminate), ("下载单曲", "正在下载 晴天.mp3", 36.0, true));
     let effects = model.admin.take_effects();
-    let (method, payload) = effects
+    let (run, payload) = effects
         .iter()
         .find_map(|effect| match effect {
-            AdminEffect::DownloadToRepository { method, payload, repository_id, target_repo_id, target_path, parent_path, .. } => {
-                assert_eq!(repository_id.as_deref(), Some("acceptance-repo"), "插件按当前资源库取来源凭据");
-                assert_eq!((target_repo_id.as_str(), target_path.as_str(), parent_path), ("third-repo", "D:/third", &None));
-                Some((method.clone(), payload.clone()))
+            AdminEffect::DownloadToRepository { run, payload, parent_path } => {
+                assert_eq!(run.repository_id.as_deref(), Some("acceptance-repo"), "插件按当前资源库取来源凭据");
+                let target = run.target.as_ref().expect("目标资源库");
+                assert_eq!((target.repo_id.as_str(), target.path.as_str(), parent_path), ("third-repo", "D:/third", &None));
+                Some((run.clone(), payload.clone()))
             }
             _ => None,
         })
         .unwrap_or_else(|| panic!("没有下载到其他资源库：{effects:?}"));
-    assert_eq!(method, "media.downloadTrackPackage");
+    assert_eq!(run.method, "media.downloadTrackPackage");
     assert_eq!(payload["destination"], json!({ "kind": "repository", "repoId": "third-repo", "path": "D:/third" }));
     assert_eq!(payload["managedCacheRoot"], "D:/MomoCache/netease");
 
     model.workspace.take_effects();
-    let result = json!({ "completed": [{ "paths": ["D:/stage/晴天.mp3"] }], "failed": [{ "songId": 1, "error": "版权" }] });
-    model.reduce(ShellMessage::Admin(AdminMessage::FilePluginFinished { method, result: Ok(result) }));
+    let result = json!({ "paths": ["D:/stage/晴天.mp3", "D:/stage/晴天.lrc"] });
+    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Ok(result) }));
     let row = model.operation.shown().expect("进度行");
     assert_eq!((row.label.as_str(), row.detail.as_str()), ("加载资源库", "读取已注册资源库"), "刷新接手进度行");
     assert!(
@@ -204,10 +205,19 @@ fn cancelling_or_failing_downloads_nothing_more() {
 
     let mut failed = scene("source-download-target");
     failed.reduce(ShellMessage::Admin(AdminMessage::ChooseDownloadRepository("second-repo".into())));
-    let method = "media.downloadTrackPackage".to_string();
-    failed.reduce(ShellMessage::Admin(AdminMessage::FilePluginFinished { method, result: Err("导入目标资源库失败：磁盘已满".into()) }));
+    let run = failed
+        .admin
+        .take_effects()
+        .into_iter()
+        .find_map(|effect| match effect {
+            AdminEffect::DownloadToRepository { run, .. } => Some(run),
+            _ => None,
+        })
+        .expect("开始下载到第二资源库");
+    failed.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Err("导入目标资源库失败：磁盘已满".into()) }));
     assert!(failed.operation.shown().is_none(), "失败时进度行收起");
     assert_eq!(failed.files.error, "导入目标资源库失败：磁盘已满");
+    assert_eq!(crate::shell::status::StatusLine::project(&failed), crate::shell::status::StatusLine::Hidden, "文件列已经写着，状态区不重复");
 }
 
 /// 只有一个候选时照 Vue 直接用它，不弹选择；一个都没有时菜单里「下载单曲到其他资源库」禁用，写出原因，别的照常。
@@ -221,7 +231,8 @@ fn the_number_of_targets_decides_whether_to_ask() {
         .admin
         .take_effects()
         .iter()
-        .any(|effect| matches!(effect, AdminEffect::DownloadToRepository { target_repo_id, .. } if target_repo_id == "second-repo")));
+        .any(|effect| matches!(effect, AdminEffect::DownloadToRepository { run, .. }
+            if run.target.as_ref().is_some_and(|target| target.repo_id == "second-repo"))));
 
     let mut alone = menu_open();
     alone.workspace.repositories.retain(|repository| repository.repo_id == "acceptance-repo");

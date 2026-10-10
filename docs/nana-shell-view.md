@@ -138,6 +138,7 @@
 | `SmartFolder` | 智能文件夹删除失败（编辑对话框没开着）；查询、读列表失败 | `sidebar.rs` 归约；`sidebar.smart_error` |
 | `FolderTree` | 文件夹树读取失败 | `sidebar.tree_error` |
 | `Sync` | 刷新文件夹树：同步仓库，或之后重读摘要、硬链接候选、目录树失败 | `tree_sync.rs` |
+| `Download` | 来源下载里插件报告失败的条目：「{动作名}「{名称}」有 N 项失败，原因见「日志」。」，每一条的原因写进系统日志 | `source_download.rs` |
 | `Files` | 文件操作失败 | `files.error` |
 
 文案先写失败的对象（「定位失败：」「无法读取文件元数据：」），后接系统返回的原因。`files.error`、`sidebar.tree_error`、`sidebar.smart_error` 三个字段被盯着（`observe_failures`）：新写一次记一次，字段清掉时它记下的那一条一起清。宿主在归约以外写下的失败（服务派发、拖出结果）在 `update` 同步视图之前、`prepare` 里收进来。
@@ -149,6 +150,7 @@
 - 消息本身（`status::starts_operation`）：打开、定位、拖出（过了 Vue 的守卫：有仓库、有路径、能拖出），换仓库、刷新资源库列表、重试启动、打开智能文件夹；
 - 忙碌标志由假变真、换了文件（`status::Activity`）：读目录（非静默）、文件变更、刷新文件夹树（按钮禁用时被拦下的点击不算）、保存元数据、搜索、导出、智能文件夹增改删、插件操作、执行仓库动作，以及选中别的文件（Vue `selectAsset`）。
 - 后台的静默刷新不清。Vue 结构更新后的静默刷新会经 `refreshRepositoryActions` 顺带清掉错误，用户还没看到的失败就被抹掉了，这里不照抄。
+- 来源下载收尾的刷新不清。下载记下失败的条目以后照 Vue `context.refreshRepo()` 刷新资源库（`WorkspaceState::refresh_after_download`），这一轮是下载本身的收尾，`RefreshRun::keeps_status` 为真时它读列表、选仓库和重读目录的忙碌标志不算开始；用户开始下一个操作时照常清。
 
 清只作用在归约开始时已经记下的失败上：同一次归约里新记的失败按序号留着。
 
