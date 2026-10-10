@@ -2,12 +2,13 @@
 //!
 //! - [`row_text`]、[`row_flag`]：列表行里的字段绑定，行已经删掉时读默认值；
 //! - [`row_draft`]：列表行里受控输入框的草稿，行里的 ViewModel 值相对上次投影变了才写回；
-//! - [`StyleField`]、[`ButtonIcon`]、[`ReadOnly`]、[`FollowEnd`]：控件表里没有的可绑定字段。
+//! - [`StyleField`]、[`ReadOnly`]、[`FollowEnd`]：控件表里没有的可绑定字段；按钮图标用各页共用的
+//!   [`ButtonIcon`]（`field_bind.rs`）。
 
 use nana_ui::runtime::view::{untrack, watch_effect, FieldWrite, StorePath, StyledComponent};
 use nana_ui::runtime::{Button, NodeStyle, ScrollView, TextInput};
-use nana_ui_core::Icon;
 
+pub(crate) use super::super::field_bind::ButtonIcon;
 use super::super::hot::ModelField;
 
 /// 行里的一段文字。行已经删掉时读空串，不去读不存在的行。
@@ -64,21 +65,6 @@ impl FieldWrite<Button, bool> for ActionDisabled {
 
     fn differs(target: &Button, disabled: &bool) -> bool {
         target.disabled != *disabled || target.style.layout.opacity != disabled.then_some(super::style::DISABLED_OPACITY)
-    }
-}
-
-/// 按钮的前置图标：暂停和恢复、执行中的转圈。
-pub(crate) struct ButtonIcon;
-
-impl FieldWrite<Button, Option<Icon>> for ButtonIcon {
-    const FIELD: &'static str = "Button.icon";
-
-    fn write(target: &mut Button, icon: Option<Icon>) {
-        target.icon = icon;
-    }
-
-    fn differs(target: &Button, icon: &Option<Icon>) -> bool {
-        target.icon != *icon
     }
 }
 
