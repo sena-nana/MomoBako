@@ -4,7 +4,7 @@
 
 use serde_json::Value;
 
-use super::super::admin::source_download::DownloadRun;
+use super::super::admin::source_download::{DownloadDestination, DownloadRun};
 use super::super::admin::{AdminEffect, PluginCallOrigin};
 use super::super::ShellViewModel;
 
@@ -36,7 +36,8 @@ pub(super) fn submit_download(model: &mut ShellViewModel, path: String) {
             serde_json::json!({ "kind": "localFolder", "path": trimmed }),
         );
     }
-    let run = DownloadRun::begin(model, pending.progress, pending.plugin_id.clone(), pending.method.clone(), pending.repository_id.clone(), None);
+    let destination = DownloadDestination::LocalFolder(trimmed.to_string());
+    let run = DownloadRun::begin(model, pending.progress, pending.plugin_id.clone(), pending.method.clone(), pending.repository_id.clone(), destination);
     model.admin.push_effect(AdminEffect::CallPlugin {
         plugin_id: pending.plugin_id,
         method: pending.method,

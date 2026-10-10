@@ -134,7 +134,7 @@ fn downloading_to_another_repository_asks_for_the_target_first() {
         .find_map(|effect| match effect {
             AdminEffect::DownloadToRepository { run, payload, parent_path } => {
                 assert_eq!(run.repository_id.as_deref(), Some("acceptance-repo"), "插件按当前资源库取来源凭据");
-                let target = run.target.as_ref().expect("目标资源库");
+                let target = run.target().expect("目标资源库");
                 assert_eq!((target.repo_id.as_str(), target.path.as_str(), parent_path), ("third-repo", "D:/third", &None));
                 Some((run.clone(), payload.clone()))
             }
@@ -233,7 +233,7 @@ fn the_number_of_targets_decides_whether_to_ask() {
         .take_effects()
         .iter()
         .any(|effect| matches!(effect, AdminEffect::DownloadToRepository { run, .. }
-            if run.target.as_ref().is_some_and(|target| target.repo_id == "second-repo"))));
+            if run.target().is_some_and(|target| target.repo_id == "second-repo"))));
 
     let mut alone = menu_open();
     alone.workspace.repositories.retain(|repository| repository.repo_id == "acceptance-repo");

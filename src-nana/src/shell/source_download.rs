@@ -10,9 +10,10 @@
 //! 写进状态区（来源 [`FailureSource::Download`]），每一条的名称和原因写进系统日志，提示里写明去「日志」看原因。
 //! 收尾的刷新不清这条提示（`RefreshRun::keeps_status`），用户开始下一个操作时照常清掉；全部成功时不提示。
 //!
-//! 同名跳过：下载到其他资源库时，下载回来的文件按 `skipExisting` 导入目标资源库（`admin_dispatch`）：目标里已有
-//! 同名文件的保留原文件、不导入，其余照常导入，跳过的条数写进状态区（只有跳过时是提醒）、路径写进日志。Vue 的导入
-//! 遇到一个同名就整批失败，重复下载同一个歌单时新下的文件一个也进不去。
+//! 同名跳过：去处里已有的同名文件都保留原文件。下载到本地时插件不覆盖目录里已有的文件，结果的 `skippedEntries` 列出
+//! 保留了哪些（插件原来直接覆盖，Vue 也没有提示）；下载到其他资源库时，下载回来的文件按 `skipExisting` 导入目标
+//! 资源库（`admin_dispatch`），目标里已有同名文件的不导入、其余照常导入（Vue 的导入遇到一个同名就整批失败）。两种都
+//! 把条数写进状态区（只有跳过时是提醒）、路径写进日志。
 //!
 //! 什么也没下到：插件报告的是一批（结果里有 `completed` 数组）却一项也没有、也没有交回文件时，状态区用警告色提醒
 //! 「没有下载到任何条目」。Nana 下载歌单不列目录，由插件按歌单标识取来源里完整的歌单；网易云插件取不到歌单详情时
@@ -29,8 +30,8 @@ use super::super::ShellViewModel;
 use super::source_target::TargetCandidate;
 use super::AdminEffect;
 
-/// 来源下载的结果：插件交回的载荷（失败的条目在 `failed` 里），以及导入目标资源库时因为目标里已有同名文件而跳过的
-/// 条目（目标资源库里的相对路径；下载到本地时为空）。
+/// 来源下载的结果：插件交回的载荷（失败的条目在 `failed` 里，下载到本地时保留的同名文件在 `skippedEntries` 里），
+/// 以及导入目标资源库时因为目标里已有同名文件而跳过的条目（目标资源库里的相对路径；下载到本地时为空）。
 #[derive(Clone, Debug, PartialEq)]
 pub struct DownloadOutcome {
     pub payload: Value,
@@ -54,6 +55,15 @@ impl DownloadOutcome {
     }
 }
 
+/// 下载的去处。
+#[derive(Clone, Debug, PartialEq)]
+pub enum DownloadDestination {
+    /// 用户在「选择下载目录」里选的目录。
+    LocalFolder(String),
+    /// 「下载到其他资源库」的目标资源库。
+    Repository(TargetCandidate),
+}
+
 /// 一次开始了的来源下载：任务弹层里的进度行，收尾的提示和日志要用的名字。下载结果带着它回来。
 #[derive(Clone, Debug, PartialEq)]
 pub struct DownloadRun {
@@ -65,8 +75,7 @@ pub struct DownloadRun {
     pub method: String,
     /// 点下载时的当前资源库：插件按它取来源凭据，失败的日志也记在它名下。
     pub repository_id: Option<String>,
-    /// 下载到其他资源库时的目标资源库；下载到本地时为空。
-    pub target: Option<TargetCandidate>,
+    pub destination: DownloadDestination,
 }
 
 impl DownloadRun {
@@ -77,11 +86,19 @@ impl DownloadRun {
         plugin_id: String,
         method: String,
         repository_id: Option<String>,
-        target: Option<TargetCandidate>,
+        destination: DownloadDestination,
     ) -> Self {
         let operation = model.operation.start(OperationStart::new(progress.label.clone(), progress.preparing(), 10.0));
         model.operation.update(operation, OperationPatch::step(progress.running(), 36.0).with_indeterminate(true));
-        Self { operation, progress, plugin_id, method, repository_id, target }
+        Self { operation, progress, plugin_id, method, repository_id, destination }
+    }
+
+    /// 下载到其他资源库时的目标资源库；下载到本地时没有。
+    pub fn target(&self) -> Option<&TargetCandidate> {
+        match &self.destination {
+            DownloadDestination::Repository(target) => Some(target),
+            DownloadDestination::LocalFolder(_) => None,
+        }
     }
 }
 
@@ -127,9 +144,8 @@ struct Notice {
 
 /// 下载结果里要告诉用户的，全部成功时没有：
 /// - 有失败的条目：写几项失败、去「日志」看原因，每一条写一条日志；
-/// - 导入目标资源库时跳过了同名文件：写目标资源库里已有几个同名文件、保留了原文件没有导入，跳过的路径写一条日志；
-/// - 插件报告的是一批、却一项也没有（网易云下载歌单时取不到歌单详情就什么也不下，照样交回空结果）：提醒没有下载到
-///   任何条目。
+/// - 去处里已有同名文件（[`kept_notice`]）：写已有几个同名文件、保留了原文件，保留的路径写一条日志；
+/// - 插件报告的是一批、却一项也没有：提醒没有下载到任何条目。
 ///
 /// 有失败的条目时是失败，只有跳过或空结果时是提醒。
 fn notice(run: &DownloadRun, outcome: &DownloadOutcome, failed: &[FailedItem]) -> Option<Notice> {
@@ -140,12 +156,7 @@ fn notice(run: &DownloadRun, outcome: &DownloadOutcome, failed: &[FailedItem]) -
         parts.push(format!("{label}「{subject}」有 {} 项失败，原因见「日志」", failed.len()));
         logs.extend(failed.iter().map(|item| item.log(run)));
     }
-    if !outcome.skipped.is_empty() {
-        let target = run.target.as_ref().map_or("目标资源库", |target| target.name.as_str());
-        let kept = format!("目标资源库「{target}」已有 {} 个同名文件，保留原文件、没有导入", outcome.skipped.len());
-        let context = json!({ "method": run.method, "subject": subject, "skippedPaths": outcome.skipped });
-        let mut log = host_log(run, "warn", "downloadImportSkipped", format!("{label}「{subject}」：{kept}。"), context);
-        log.repo_id = run.target.as_ref().map(|target| target.repo_id.clone()).or(log.repo_id);
+    if let Some((kept, log)) = kept_notice(run, outcome) {
         logs.push(log);
         parts.push(if failed.is_empty() { format!("{label}「{subject}」：{kept}") } else { kept });
     }
@@ -161,6 +172,39 @@ fn notice(run: &DownloadRun, outcome: &DownloadOutcome, failed: &[FailedItem]) -
         return Some(Notice { message, warning: true, logs: vec![log] });
     }
     None
+}
+
+/// 去处里已有、保留了原文件的同名文件：下载到本地时是插件没有覆盖的（结果的 `skippedEntries` 和
+/// `completed[].skippedEntries`），下载到其他资源库时是导入时跳过的（导入结果的 `skippedEntries`）。交回状态区里的
+/// 半句话和一条警告日志；没有时为空。
+fn kept_notice(run: &DownloadRun, outcome: &DownloadOutcome) -> Option<(String, SystemLogWriteRequest)> {
+    let (label, subject) = (&run.progress.label, &run.progress.subject);
+    let (kept, action, paths, repo_id) = match &run.destination {
+        DownloadDestination::LocalFolder(_) => {
+            let paths = kept_paths(&outcome.payload);
+            let kept = format!("下载目录里已有 {} 个同名文件，保留原文件、没有写入", paths.len());
+            (kept, "downloadLocalSkipped", paths, run.repository_id.clone())
+        }
+        DownloadDestination::Repository(target) => {
+            let kept = format!("目标资源库「{}」已有 {} 个同名文件，保留原文件、没有导入", target.name, outcome.skipped.len());
+            (kept, "downloadImportSkipped", outcome.skipped.clone(), Some(target.repo_id.clone()))
+        }
+    };
+    if paths.is_empty() {
+        return None;
+    }
+    let mut context = json!({ "method": run.method, "subject": subject, "skippedPaths": paths });
+    if let DownloadDestination::LocalFolder(folder) = &run.destination {
+        context["folder"] = json!(folder);
+    }
+    let mut log = host_log(run, "warn", action, format!("{label}「{subject}」：{kept}。"), context);
+    log.repo_id = repo_id;
+    Some((kept, log))
+}
+
+/// 下载到本地时插件保留、没有写入的同名文件：`skippedEntries` 和 `completed[].skippedEntries`，去掉空白和重复。
+fn kept_paths(payload: &Value) -> Vec<String> {
+    super::source_target::listed_paths(payload, "skippedEntries")
 }
 
 /// 插件报告失败的一条：结果里 `failed[]` 的一项，网易云是 `{ songId, songName, error }`。
