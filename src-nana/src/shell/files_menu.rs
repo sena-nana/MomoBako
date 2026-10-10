@@ -1,8 +1,10 @@
 //! 文件右键菜单，对应 Vue `useWorkspaceContextMenu.ts` 和 `ContextMenuHost.vue`。
 //!
 //! 外观照 `.ctx-menu`：抬升底、`--border-strong` 描边、`Md` 圆角、内边距 4、行间距 1，
-//! 行高 28、13px/500、13px 图标；「加入播放列表」「缩略图」带 › 并展开子菜单，子菜单贴在
-//! 这一行右边 4px。菜单按指针落点放置，靠右或靠下放不下时夹回窗口内 4px。
+//! 行高 28、13px/500、13px 图标；「加入播放列表」「缩略图」带 ›，子菜单贴在这一行右边 4px。
+//! 子菜单照 `.ctx-menu__slot:hover` / `:focus-within`：指针或键盘焦点进到分组那一行（含子菜单）
+//! 就展开，都离开就收起，没有延迟；点分组本身不收起（按下时焦点落在分组上）。禁用的分组不展开。
+//! 菜单按指针落点放置，靠右或靠下放不下时夹回窗口内 4px。
 //! 回收站里的「彻底删除」要点两次：第一次只把这一行变成待确认。点菜单外关闭。
 //!
 //! 菜单常驻：同一个目标、同一个落点的菜单打开期间，条目按内容做键，变了的那一行才重建；
@@ -14,14 +16,14 @@ use std::sync::Arc;
 use nana_ui::icons_tabler::{CHECK, CLIPBOARD, EYE, FILES, FOLDER_OPEN, PENCIL, PHOTO, PHOTO_OFF, PHOTO_PLUS, REFRESH, ROTATE, TRASH};
 use nana_ui::runtime::view::{computed, each, signal, widget, AnyView, FieldWrite, IntoView, Signal, StyledComponent};
 use nana_ui::runtime::{
-    Activate, AlignSpec, IconGlyph, LengthSpec, ListItem, NodeStyle, PositionSpec, RadiusTier, SecondaryPress,
-    SemanticColorRole, SemanticPaint, Stack,
+    Activate, AlignSpec, FocusWithinChanged, IconGlyph, LengthSpec, ListItem, NodeStyle, PointerHoverChanged, PositionSpec,
+    RadiusTier, SecondaryPress, SemanticColorRole, SemanticPaint, Stack,
 };
 use nana_ui_core::{Icon, LengthAtom, SemanticColorMix};
 
 use super::super::admin::AdminMessage;
 use super::super::entry_actions::{self, FilePluginAction, FilePluginDispatch};
-use super::super::files::{FileContext, FileDialog, FileRow, FilesMessage};
+use super::super::files::{BranchSource, FileContext, FileDialog, FileRow, FilesMessage};
 use super::super::input::{repository_absolute, InputMessage};
 use super::super::player::PlayerMessage;
 use super::super::view_part_overlay::session::Projected;
@@ -36,6 +38,8 @@ const ITEM_HEIGHT: f32 = 28.0;
 const ITEM_GAP: f32 = 1.0;
 /// 菜单离窗口边至少 4px（`SB_MENU_EDGE_PADDING`）。
 const EDGE: f32 = 4.0;
+/// 子菜单离这一行右缘的距离（`.ctx-menu__submenu { left: calc(100% + 4px) }`）。
+const SUBMENU_GAP: f32 = 4.0;
 
 /// 点菜单项时发的消息，存成数据：能比较（按调试文本），条目变了就知道。`ShellMessage` 不能克隆，
 /// 每次点击现做一条。
@@ -79,7 +83,7 @@ fn admin(message: AdminMessage) -> MenuAction {
     MenuAction::Admin(message)
 }
 
-/// 菜单里的一行。`children` 非空时是带 › 的分组，点它只展开子菜单。
+/// 菜单里的一行。`children` 非空时是带 › 的分组，悬停或聚焦时展开子菜单，点它不做别的。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct MenuEntry {
     pub id: String,
@@ -147,7 +151,7 @@ impl EntryMenuView {
         Some(Self {
             width: menu_width(&entries),
             height: menu_height(entries.len()),
-            branch: model.files.menu_branch.clone(),
+            branch: model.files.menu_branch.open().map(str::to_string),
             entries,
         })
     }
@@ -237,48 +241,56 @@ fn close() -> ShellMessage {
     ShellMessage::Files(FilesMessage::CloseEntryMenu)
 }
 
-/// 一行和它的子菜单。子菜单相对这一行绝对定位在右边 4px，展开哪个分组只切换显隐。
+/// 一行和它的子菜单（`.ctx-menu__slot`）。可用的分组挂上指针和焦点的进出：子树里包括子菜单，
+/// 在分组和子菜单之间移动不算离开。展开哪个分组只切换子菜单的显隐。
 fn slot(view: Signal<EntryMenuView>, entry: MenuEntry) -> AnyView {
-    let submenu = (!entry.children.is_empty()).then(|| {
-        let id = entry.id.clone();
-        let child_width = menu_width(&entry.children);
-        let rows = entry.children.iter().map(item).collect::<Vec<_>>();
-        let panel = Stack::column(ITEM_GAP)
-            .width(LengthSpec::Px(child_width))
-            .padding(MENU_PADDING)
-            .surface(SemanticColorRole::Surface)
-            .outline(SemanticColorRole::BorderStrong, 1.0)
-            .radius(RadiusTier::Md)
-            .with_layout(|layout| {
-                layout.position = PositionSpec::Absolute;
-                layout.offset_top = Some(LengthSpec::Px(0.0));
-                layout.z_index = Some(1);
-            });
-        widget(style::with_shadows(panel, vec![style::shadow(10.0, 28.0, -10.0, 0.55)]))
-            .visible(move || view.with(|view| view.branch.as_deref() == Some(id.as_str())))
-            .prop::<f32, OffsetLeft>(move || view.with(|view| view.width - MENU_PADDING * 2.0 - 2.0 + 4.0))
-            .children(rows)
-            .key(format!("file-menu-sub-{}", entry.id))
-            .into_any()
-    });
-    widget(Stack::column(0.0).width(LengthSpec::Fill).with_layout(|layout| layout.position = PositionSpec::Relative))
-        .children((item(&entry), submenu))
+    let frame = Stack::column(0.0).width(LengthSpec::Fill).with_layout(|layout| layout.position = PositionSpec::Relative);
+    if entry.children.is_empty() || entry.disabled {
+        return widget(frame).children((item(&entry),)).into_any();
+    }
+    let (pointer, focus) = (entry.id.clone(), entry.id.clone());
+    widget(frame)
+        .children((item(&entry), submenu(view, &entry)))
+        .on_cx(move |_, event: &PointerHoverChanged, cx| {
+            cx.dispatch_program_all(branch_changed(&pointer, BranchSource::Pointer, event.hovered));
+        })
+        .on_cx(move |_, event: &FocusWithinChanged, cx| {
+            cx.dispatch_program_all(branch_changed(&focus, BranchSource::Focus, event.focused));
+        })
         .into_any()
 }
 
-/// 子菜单离这一行左边的距离：父菜单宽减去内边距和描边，再右移 4。
-struct OffsetLeft;
+fn branch_changed(branch: &str, source: BranchSource, inside: bool) -> ShellMessage {
+    ShellMessage::Files(FilesMessage::MenuBranchChanged { branch: branch.to_string(), source, inside })
+}
 
-impl FieldWrite<Stack, f32> for OffsetLeft {
-    const FIELD: &'static str = "Stack.style.layout.offset_left";
-
-    fn write(target: &mut Stack, left: f32) {
-        Arc::make_mut(&mut target.node_style_mut().layout).offset_left = Some(LengthSpec::Px(left));
-    }
-
-    fn differs(target: &Stack, left: &f32) -> bool {
-        target.node_style().layout.offset_left != Some(LengthSpec::Px(*left))
-    }
+/// 子菜单（`.ctx-menu__submenu`）：从这一行右缘起，先是 4px 透明接缝，再是菜单面板。
+///
+/// 整块接住指针：接缝盖住父菜单右侧的内边距和描边，面板的内边距和行距落在它上面。指针从分组移进
+/// 子菜单、在子菜单里移动，都还在这一行的子树里，子菜单不闪关。Vue 的子菜单离这一行也是 4px，
+/// 但中间是父菜单的内边距，不属于 `.ctx-menu__slot`，指针慢慢移过去时 `:hover` 先断一下。
+fn submenu(view: Signal<EntryMenuView>, entry: &MenuEntry) -> AnyView {
+    let id = entry.id.clone();
+    let rows = entry.children.iter().map(item).collect::<Vec<_>>();
+    let panel = Stack::column(ITEM_GAP)
+        .width(LengthSpec::Px(menu_width(&entry.children)))
+        .padding(MENU_PADDING)
+        .surface(SemanticColorRole::Surface)
+        .outline(SemanticColorRole::BorderStrong, 1.0)
+        .radius(RadiusTier::Md);
+    let bridge = Stack::column(0.0).hittable().with_layout(|layout| {
+        layout.position = PositionSpec::Absolute;
+        layout.offset_top = Some(LengthSpec::Px(0.0));
+        layout.offset_left = Some(LengthSpec::Percent(100.0));
+        layout.width = Some(LengthSpec::Shrink);
+        layout.padding_left = Some(LengthSpec::Px(SUBMENU_GAP));
+        layout.z_index = Some(1);
+    });
+    widget(bridge)
+        .visible(move || view.with(|view| view.branch.as_deref() == Some(id.as_str())))
+        .children((widget(style::with_shadows(panel, vec![style::shadow(10.0, 28.0, -10.0, 0.55)])).children(rows),))
+        .key(format!("file-menu-sub-{}", entry.id))
+        .into_any()
 }
 
 /// `.ctx-menu__item`：图标、文字、分组的 ›。危险项是错误色，待确认时浅红底、600 字重。
@@ -325,15 +337,14 @@ fn item(entry: &MenuEntry) -> AnyView {
     let mut node = widget(ListItem::new(entry.label.clone()).disabled(entry.disabled).style(style))
         .content(content)
         .key(format!("file-menu-{}", entry.id));
-    if !entry.disabled {
-        let action = if !entry.children.is_empty() {
-            Some(files(FilesMessage::ToggleMenuBranch(entry.id.clone())))
-        } else if entry.confirm_label.is_some() && !pending {
+    // 分组没有自己的动作（Vue `selectContextMenuItem` 遇到 `children` 直接返回），子菜单由所在的那一行管。
+    if !entry.disabled && entry.children.is_empty() {
+        let action = if entry.confirm_label.is_some() && !pending {
             Some(files(FilesMessage::ArmMenuConfirm(entry.id.clone())))
         } else {
             entry.action.clone()
         };
-        let close_after = entry.children.is_empty() && (entry.confirm_label.is_none() || pending);
+        let close_after = entry.confirm_label.is_none() || pending;
         node = node.on_cx(move |_, _: &Activate, cx| {
             if close_after {
                 cx.dispatch_program_all(close());
@@ -515,3 +526,7 @@ fn thumbnail_entries(row: &FileRow, repo_id: Option<String>) -> Vec<MenuEntry> {
             .message(files(FilesMessage::RefreshThumbnail(row.path.clone()))),
     ]
 }
+
+#[cfg(test)]
+#[path = "files_menu_tests.rs"]
+mod tests;
