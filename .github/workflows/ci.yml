@@ -43,6 +43,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-cargo-
 
+      - name: Test backend
+        run: corepack yarn test:backend
+
       - name: Verify MomoBako
         run: corepack yarn verify
 

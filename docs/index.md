@@ -28,8 +28,9 @@ cargo run -p momobako-nana
 yarn dev
 yarn tauri:dev
 yarn verify
+yarn test:backend
 ```
 
 `cargo run -p momobako-nana` 从仓库根目录启动默认桌面端，服务数据写在当前目录的 `.service-data`。`yarn dev` 仅启动 Vite 前端。`yarn tauri:dev` 仍会先完整构建、打包并暂存外置插件，再启动 Tauri 对照窗口。
 
-`yarn verify` 会串行运行前端测试、前端构建和 Tauri Rust 编译检查。
+`yarn verify` 会串行运行前端测试、前端构建和 Tauri Rust 编译检查。`yarn test:backend` 运行 `momobako-backend` 的单元测试（`cargo test -p momobako-backend --locked`），不在 `yarn verify` 里，CI 单独执行。
