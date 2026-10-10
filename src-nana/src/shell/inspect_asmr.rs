@@ -680,8 +680,6 @@ mod tests {
             pixel_width: 0,
             pixel_height: 0,
             texture_ready: false,
-            thumbnail_rgba: None,
-            page_rgba: None,
             palette: Vec::new(),
             size_label: String::new(),
             modified_at: String::new(),

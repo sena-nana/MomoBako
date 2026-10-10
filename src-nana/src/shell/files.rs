@@ -73,10 +73,6 @@ pub struct FileRow {
     pub pixel_height: u32,
     /// 宿主已经能为这条路径注册纹理。
     pub texture_ready: bool,
-    /// 已有像素缩小后的缩略图。没有像素时为 `None`，视图改画类型图标。
-    pub thumbnail_rgba: Option<(u32, u32, Vec<u8>)>,
-    /// 详情预览用的整页像素，四周留着页边。网格缩略图是同一张页图的缩小。
-    pub page_rgba: Option<(u32, u32, Vec<u8>)>,
     /// 元数据色板，最多五枚 `#RRGGBB`。
     pub palette: Vec<String>,
     /// 列表里的大小文案。空字符串表示目录没有单独的大小。
@@ -112,8 +108,6 @@ impl FileRow {
             pixel_width: metadata_u32(&entry.metadata, "width"),
             pixel_height: metadata_u32(&entry.metadata, "height"),
             texture_ready: false,
-            thumbnail_rgba: None,
-            page_rgba: None,
             palette: super::palette::from_metadata_map(&entry.metadata),
             size_label: entry.size_label.clone().unwrap_or_default(),
             modified_at: entry.modified_at.clone().unwrap_or_default(),

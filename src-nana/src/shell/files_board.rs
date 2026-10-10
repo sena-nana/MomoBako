@@ -175,9 +175,6 @@ fn fingerprint(row: &FileRow) -> u64 {
     row.texture_ready.hash(&mut hasher);
     row.pixel_width.hash(&mut hasher);
     row.pixel_height.hash(&mut hasher);
-    if let Some((width, height, rgba)) = &row.thumbnail_rgba {
-        (width, height, rgba.as_ptr() as usize, rgba.len()).hash(&mut hasher);
-    }
     hasher.finish()
 }
 

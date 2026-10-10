@@ -6,10 +6,9 @@
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::sync::Arc;
 
 use nana_ui::runtime::{
-    Gradient, ImageFit, LayoutBox, LengthSpec, PaintContext, Painter, RadiusTier, SemanticColorRole, Stack, Text,
+    Gradient, LayoutBox, LengthSpec, PaintContext, Painter, RadiusTier, SemanticColorRole, Stack, Text,
     TextHorizontalAlignment,
 };
 use nana_ui_core::{BoxShadowSpec, Icon, ThemeAppearance};
@@ -220,8 +219,6 @@ pub(crate) struct PreviewPainter {
     pub icon: Option<Icon>,
     pub icon_size: f32,
     pub radius: RadiusTier,
-    /// 已经缩小好的像素，PNG data URL。
-    pub image: Option<Arc<str>>,
 }
 
 /// Vue `--thumbnail-placeholder-bg`：浅色 #d8dce2，深色 #3a3a3a。
@@ -263,10 +260,6 @@ impl Painter for PreviewPainter {
                 cx.rounded_rect(bounds, radius, nana_ui::runtime::BoxPaint::fill(folder_gradient(bounds)));
             }
         }
-        if let Some(image) = &self.image {
-            cx.image(bounds, Arc::clone(image), ImageFit::Cover, radius);
-            return;
-        }
         if let Some(icon) = self.icon {
             let size = self.icon_size;
             let rect = LayoutBox {
@@ -285,8 +278,6 @@ impl Painter for PreviewPainter {
         self.icon.map(|icon| icon.name()).hash(&mut hasher);
         self.icon_size.to_bits().hash(&mut hasher);
         format!("{:?}", self.radius).hash(&mut hasher);
-        self.image.as_deref().map(str::len).hash(&mut hasher);
-        self.image.as_deref().map(|url| &url[url.len().saturating_sub(64)..]).hash(&mut hasher);
         hasher.finish()
     }
 }
