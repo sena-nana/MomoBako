@@ -37,10 +37,6 @@ export type {
   PluginSettingsPageContribution,
   SourceAuthenticationContribution,
   SourceContribution,
-  SourceDownloadDestination,
-  SourceDownloadEntryResult,
-  SourceDownloadFailure,
-  SourceDownloadResult,
   SourceEntryActionContribution,
   SourceEntryActionOperation,
   SourceMediaContribution,
@@ -49,3 +45,9 @@ export type {
   PluginDataFilePreviewSourceResponse,
   ToolPageContribution,
 } from "./core";
+export type {
+  SourceDownloadDestination,
+  SourceDownloadEntryResult,
+  SourceDownloadFailure,
+  SourceDownloadResult,
+} from "./sourceDownload";
