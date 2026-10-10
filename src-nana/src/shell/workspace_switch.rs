@@ -107,10 +107,12 @@ impl WorkspaceState {
         true
     }
 
-    /// 启动或换仓库途中又选了仓库：旧的同步和摘要结果作废，从这个仓库的同步重新走。
+    /// 启动或换仓库途中又选了仓库：旧的同步和摘要结果作废，从这个仓库的同步重新走。和 Vue `selectRepository`
+    /// 换仓库一样立即换上活动仓库。
     fn restart_loading(&mut self, repository: WorkspaceRepository) {
         self.list_generation = self.list_generation.saturating_add(1);
         self.assign_active(Some(repository.repo_id.clone()));
+        self.startup.active_applied = true;
         if repository.status == "missing" {
             self.presence = RepositoryPresence::Missing;
             self.reset_library_category();

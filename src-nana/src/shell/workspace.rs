@@ -259,19 +259,30 @@ impl WorkspaceState {
         true
     }
 
-    /// 开始一轮启动：记下「流程开始」和「开始读取资源库列表」，步骤条进入第 1 步。
+    /// 开始一轮启动：记下「流程开始」和「开始读取资源库列表」，步骤条进入第 1 步。「流程开始」的活动仓库是
+    /// 上一轮留下的（[`Self::logged_active_repo_id`]），重试时和 Vue 一样带着失败那一轮已经换上的仓库。
     fn begin_startup(&mut self) {
-        self.startup.begin_with(self.active_repo_id.as_deref(), self.last_active_repo_id.as_deref());
+        let active = self.logged_active_repo_id();
+        self.startup.begin_with(active.as_deref(), self.last_active_repo_id.as_deref());
         self.startup.set_progress(1, "加载仓库列表", "读取已注册资源库，并匹配上次打开的工作区。");
         self.startup.log("info", "首屏启动开始读取资源库列表。", &[("step", Some("1"))]);
     }
 
-    /// 启动失败：停在当前步骤，日志带上正在加载的目标资源库。
-    /// Vue 在首屏加载完成前不写 `activeRepoId`，所以日志里只有 `targetRepoId`。
+    /// 加载日志里的活动仓库，照 Vue `activeRepoId` 的时机：首屏启动换上目标（读完摘要、选中缺失仓库、列表为空）
+    /// 以前还是这一轮开始时的值，换仓库一开始就是目标。Nana 的 `active_repo_id` 在选中时就换成目标，日志不能直接用它。
+    fn logged_active_repo_id(&self) -> Option<String> {
+        if self.startup.active_applied || self.startup.mode == StartupMode::Switch {
+            self.active_repo_id.clone()
+        } else {
+            self.startup.base_repo_id.clone()
+        }
+    }
+
+    /// 启动失败：停在当前步骤，日志照 Vue 带上活动仓库（读完摘要以后才是这次的仓库）和正在加载的目标资源库。
     /// 换仓库失败照 Vue 不写日志（`StartupState::log` 跳过），任务弹层这一行取消。
     fn fail_startup(&mut self, error: impl Into<String>) {
-        let target = self.active_repo_id.clone();
-        self.startup.fail_with(error, None, target.as_deref());
+        let (active, target) = (self.logged_active_repo_id(), self.active_repo_id.clone());
+        self.startup.fail_with(error, active.as_deref(), target.as_deref());
         self.presence = RepositoryPresence::LoadError;
         self.snapshot_loading = false;
         if self.startup.mode == StartupMode::Switch {
@@ -397,6 +408,7 @@ impl WorkspaceState {
                     ],
                 );
                 self.startup.index = Some(counts);
+                self.startup.active_applied = true;
                 self.remember_repository(Some(repo_id.clone()));
                 if self.startup.mode == StartupMode::Switch {
                     self.operation.update(super::repo_operation::OperationPatch::step("加载资源索引", 46.0));
@@ -694,6 +706,7 @@ impl WorkspaceState {
         if self.repositories.is_empty() {
             self.startup.log("warn", "首屏启动未找到可加载的资源库。", &[("repositoryCount", Some("0"))]);
             self.assign_active(None);
+            self.startup.active_applied = true;
             self.remember_repository(None);
             self.reset_library_category();
             self.presence = RepositoryPresence::Empty;
@@ -734,6 +747,7 @@ impl WorkspaceState {
                     ("repositoryPath", next.as_ref().map(|item| item.path.as_str())),
                 ],
             );
+            self.startup.active_applied = true;
             self.remember_repository(Some(next_id));
             self.reset_library_category();
             self.presence = RepositoryPresence::Missing;

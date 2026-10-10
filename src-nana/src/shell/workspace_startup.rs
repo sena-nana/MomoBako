@@ -124,6 +124,11 @@ pub struct StartupState {
     pub index: Option<IndexCounts>,
     /// 启动结束时读的设置包还没回来：回来时记「应用配置与插件设置加载完成」和「流程完成」。
     pub settings_pending: bool,
+    /// 这一轮开始时加载日志里的活动仓库（Vue `ensureRepositoryWorkspace` 开始时的 `activeRepoId`）。
+    pub base_repo_id: Option<String>,
+    /// 这一轮已经换上了活动仓库：首屏启动读完摘要、选中缺失仓库或列表为空时，换仓库一开始就换（Vue 在这些时候
+    /// 写 `activeRepoId`）。换上以前，加载日志里的活动仓库还是 [`Self::base_repo_id`]。
+    pub active_applied: bool,
 }
 
 impl Default for StartupState {
@@ -140,6 +145,8 @@ impl Default for StartupState {
             logs: Vec::new(),
             index: None,
             settings_pending: false,
+            base_repo_id: None,
+            active_applied: false,
         }
     }
 }
@@ -150,10 +157,12 @@ impl StartupState {
         self.begin_with(None, None);
     }
 
-    /// 重新开始一轮启动，并记下「首屏启动流程开始。」，明细带当前和上次打开的资源库。
+    /// 重新开始一轮启动，并记下「首屏启动流程开始。」，明细带当前和上次打开的资源库。`active_repo_id` 也是这一轮
+    /// 换上活动仓库以前日志里的活动仓库。
     pub fn begin_with(&mut self, active_repo_id: Option<&str>, remembered_repo_id: Option<&str>) {
         *self = Self {
             status: StartupStatus::Loading,
+            base_repo_id: active_repo_id.map(str::to_string),
             ..Self::default()
         };
         let total = STARTUP_TOTAL_STEPS.to_string();
@@ -169,6 +178,7 @@ impl StartupState {
     pub fn begin_switch(&mut self) {
         self.mode = StartupMode::Switch;
         self.settings_pending = false;
+        self.active_applied = true;
         self.set_progress(1, "切换资源库", "准备目标资源库，清理上一个资源库的首屏状态。");
     }
 
