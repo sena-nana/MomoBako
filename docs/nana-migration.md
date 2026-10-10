@@ -69,6 +69,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 - **日志**：日志页按级别、来源和关键字筛选，可以暂停追踪、清空；页面主体和日志列表都能滚，列表在筛选下面分走面板剩下的高度、最矮 72（有意小于 Vue 的 360，矮窗口里追踪时最新一条不用滚页面就看得到），窗口放得下时只有列表滚（`route_admin.rs`、`admin_logs_view.rs`）。每次切到日志面板照 Vue 读最近 200 条历史日志（读的时候手上没有日志就写「正在加载系统日志」），之后经宿主事件合并新记录。
 - **任务**：侧栏底部的「任务」打开任务弹层（`admin_view.rs`），列出当前的仓库操作和宿主观察到的运行中任务（排队、运行和取消中，结束就拿掉）；「任务」右上角的计数是弹层的行数，和 Vue 的 `activeTaskCount` 一样。弹层里没有取消按钮，Vue 的 `TaskPopover.vue` 也没有；点弹层外面、头部的关闭按钮和 Escape 都关掉它。
   - 仓库操作只有一个槽位（`repo_operation.rs`，Vue `operationProgress`）：最后开始的操作占着它，旧操作的更新和完成不再生效；等待时每 220 ms 往上爬到 88，完成停在 100% 再过 180 ms 收起，失败立即收起。
+  - 每一行进度条的宽度照 Vue `.progress-bar__fill` 按 0.18 s 过渡到新值，减少动态效果时直接跳到新值（`motion.rs` 的 `set_task_fills`）。
   - 出这一行的操作：加载资源库（换仓库、刷新）、挂载资源库、创建资源库、重定向资源库、刷新文件树、来源下载，复制、移动、导入、ZIP 和 Eagle 导入、多选删除和还原，以及非静默的读目录（「读取目录」「读取回收站」「读取文件树」：回收站和快捷访问、刷新时重读目录、仓库动作完成后的重读、搜索命中所在目录）。点文件夹、双击进入和面包屑在 Vue 里是静默读取，不出。见 `operation_row_tests.rs`、`workspace_switch_tests.rs`。
 - **宿主操作**：标题栏的最小化、最大化、关闭；关闭行为按设置确认、退出或最小化到托盘（`src-nana/src/window_host.rs`）；托盘在 Windows 上用 `tray-icon`（`src-nana/src/tray.rs`）；主窗口几何下次启动恢复；打开和定位启动系统程序；拖出文件在 Windows 上用 `drag` crate（`src-nana/src/drag_out.rs`）；剪贴板读写系统剪贴板（`src-nana/src/host_bridge.rs`）；文件区和空库页接收系统文件拖入（`input::accept_file_drops`）；Escape 由运行时交给激活的对话框，其余按 `escape_layer` 关最上面一层。
 

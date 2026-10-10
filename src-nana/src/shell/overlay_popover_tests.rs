@@ -207,6 +207,70 @@ fn indeterminate_progress_breathes_in_the_task_popover() {
     assert!(!harness.model.motion.active(), "弹层关着时不为呼吸要帧");
 }
 
+/// 任务弹层里进度条填充的宽度百分比。
+fn fill_width(harness: &ShellHarness, task_id: &str) -> f32 {
+    let id = harness.keyed(&format!("admin-task-fill-{task_id}")).unwrap_or_else(|| panic!("没有 {task_id} 的进度条"));
+    match harness.document().context().world().node_style(id).and_then(|style| style.layout.width) {
+        Some(nana_ui::runtime::LengthSpec::Percent(percent)) => percent,
+        other => panic!("填充宽度不是百分比：{other:?}"),
+    }
+}
+
+/// 进度条填充照 `.progress-bar__fill` 的 `transition: width 0.18s ease`：新出现的行直接是目标宽度，进度推进时从原来的
+/// 宽度过渡过去，走完 180ms 停在新值；过渡只改填充的宽度，不重建这一行。减少动态效果时直接跳到新值。
+#[test]
+fn task_progress_widths_transition_like_vue() {
+    let mut harness = ShellHarness::mount(scene("live-files-plain"));
+    harness.apply(ShellMessage::Admin(AdminMessage::ToggleTaskPopover));
+    harness.apply(ShellMessage::TaskProgressLoaded(vec![task("task-1", 40.0)]));
+    harness.flush();
+    let row = harness.keyed("admin-task-task-1").expect("任务行");
+    assert_eq!(fill_width(&harness, "task-1"), 40.0, "新出现的行不过渡");
+
+    harness.apply(ShellMessage::TaskProgressLoaded(vec![task("task-1", 80.0)]));
+    harness.flush();
+    assert_eq!(fill_width(&harness, "task-1"), 40.0, "推进的这一刻还在原来的宽度");
+    assert_eq!(text(&harness, "admin-task-percent-task-1"), "80%", "百分比直接写新值");
+    harness.frame();
+    let moving = fill_width(&harness, "task-1");
+    assert!(moving > 40.0 && moving < 80.0, "过渡中：{moving}");
+    assert!(matches!(harness.window.demand, nana_ui::FrameDemand::Continuous(_)), "过渡要帧");
+    for _ in 0..12 {
+        harness.frame();
+    }
+    assert_eq!(fill_width(&harness, "task-1"), 80.0, "180ms 以后停在新值");
+    assert_eq!(harness.keyed("admin-task-task-1"), Some(row), "过渡不重建这一行");
+
+    harness.model.motion.set_reduced(true);
+    harness.apply(ShellMessage::TaskProgressLoaded(vec![task("task-1", 20.0)]));
+    harness.flush();
+    assert_eq!(fill_width(&harness, "task-1"), 20.0, "减少动态效果时直接跳到新值");
+    harness.assert_same_as_fresh_mount();
+}
+
+/// 仓库操作行在准备帧里每 220ms 往上爬一级：宽度同样过渡过去，不是一格一格跳。
+#[test]
+fn a_climbing_repository_operation_transitions_its_width() {
+    let mut harness = ShellHarness::mount(scene("live-files-plain"));
+    harness.apply(ShellMessage::Admin(AdminMessage::ToggleTaskPopover));
+    harness.apply(ShellMessage::Sidebar(SidebarMessage::RefreshFolderTree));
+    harness.flush();
+    let start = fill_width(&harness, "workspace-operation");
+    assert_eq!(start, 12.0, "「刷新文件树」从 12% 起步");
+    // 220ms 爬一级到 17%：爬的那一帧还在原来的宽度附近，之后几帧走到新值。
+    for _ in 0..14 {
+        harness.frame();
+    }
+    let climbed = harness.model.operation.shown().map(|row| row.value as f32).expect("仓库操作行");
+    assert_eq!(climbed, 17.0);
+    let moving = fill_width(&harness, "workspace-operation");
+    assert!(moving > start && moving < climbed, "过渡中：{moving}");
+    for _ in 0..12 {
+        harness.frame();
+    }
+    assert_eq!(fill_width(&harness, "workspace-operation"), climbed);
+}
+
 #[test]
 fn repository_switcher_adds_rows_without_rebuilding_the_rest() {
     let mut harness = ShellHarness::mount(scene("repo-switcher"));

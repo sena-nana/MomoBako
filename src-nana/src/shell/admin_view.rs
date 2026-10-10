@@ -2,7 +2,8 @@
 //!
 //! 任务弹层照 `TaskPopover.vue`：340 宽，贴在侧栏底部任务按钮上方；每个任务一块，
 //! 来源加进度条（标签、细节、百分比）。任务弹层常驻：任务按键增删行，进度、标签和细节只改
-//! 绑定的字段；点弹层外面关闭（Vue 的外部按下）。
+//! 绑定的字段；进度条的填充宽度照 `.progress-bar__fill` 按 0.18s 过渡（动效时钟在 `motion.rs`，逐帧的
+//! 宽度经热信号写进来）；点弹层外面关闭（Vue 的外部按下）。
 
 use std::sync::Arc;
 
@@ -10,7 +11,7 @@ use nana_ui::runtime::view::{computed, each, fields, signal, widget, AnyView, Fi
 use nana_ui::runtime::{Activate, AlignSpec, IconButton, JustifySpec, LengthSpec, ListItem, ScrollAxes, ScrollView, Stack};
 use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
 
-use super::super::hot::{self, FillPercentField, OpacityField};
+use super::super::hot::{self, FillPercentField, OpacityField, TaskFills};
 use super::super::view_part_overlay::session::Projected;
 use super::super::{ShellMessage, ShellViewModel};
 use super::icons;
@@ -49,23 +50,36 @@ impl TaskPopoverView {
         if !model.admin.popover_open {
             return None;
         }
-        let tasks = model.task_rows();
-        let keys = style::unique_keys(tasks.iter().map(|task| task.id.as_str()));
-        let rows = tasks
-            .iter()
-            .zip(keys)
-            .map(|(task, key)| TaskRowView {
-                key,
-                source: task.source.clone(),
-                label: task.label.clone(),
-                detail: task.detail.clone(),
-                percent: (!task.indeterminate).then(|| task.value.clamp(0.0, 100.0).round()),
-                fill: ((task.value.clamp(0.0, 100.0).round() / 100.0) as f32) * 100.0,
-            })
-            .collect::<Vec<_>>();
+        let rows = task_row_views(model);
         // 侧栏底部按钮离窗口底边 36（按钮高 26、下边距 10）。
         Some(Self { anchor: estimated_height(rows.len()) + 8.0 + 36.0, rows })
     }
+}
+
+/// 弹层的行：任务编号做键（重复时加序号），百分比按 Vue `clampPercent` 夹到 0–100 再取整。
+fn task_row_views(model: &ShellViewModel) -> Vec<TaskRowView> {
+    let tasks = model.task_rows();
+    let keys = style::unique_keys(tasks.iter().map(|task| task.id.as_str()));
+    tasks
+        .iter()
+        .zip(keys)
+        .map(|(task, key)| TaskRowView {
+            key,
+            source: task.source.clone(),
+            label: task.label.clone(),
+            detail: task.detail.clone(),
+            percent: (!task.indeterminate).then(|| task.value.clamp(0.0, 100.0).round()),
+            fill: task.value.clamp(0.0, 100.0).round() as f32,
+        })
+        .collect()
+}
+
+/// 弹层开着时各行进度条的目标填充宽度（行键、百分比），交给动效时钟按 0.18s 过渡；关着时为空。
+pub(crate) fn task_fill_targets(model: &ShellViewModel) -> Vec<(String, f32)> {
+    if !model.admin.popover_open {
+        return Vec::new();
+    }
+    task_row_views(model).into_iter().map(|row| (row.key, row.fill)).collect()
 }
 
 /// 任务弹层。左边对齐任务按钮（x=64），顶边在按钮上方「估计高度 + 8」处。
@@ -73,6 +87,7 @@ pub(crate) fn task_popover(model: &ShellViewModel) -> Option<AnyView> {
     let view = signal(TaskPopoverView::project(model)?);
     Projected::register(view, TaskPopoverView::project);
     let pulse = Pulse { signal: hot::current(|signals| signals.pulse), rest: model.motion.pulse_opacity() };
+    let fills = hot::current(|signals| signals.task_fills);
     let header = widget(style::spread(8.0, AlignSpec::Center).with_layout(|layout| layout.min_height = Some(LengthSpec::Px(24.0))))
         .children((
             widget(label("任务", 13.0, 700, Role::Text)).key("admin-task-title"),
@@ -94,7 +109,7 @@ pub(crate) fn task_popover(model: &ShellViewModel) -> Option<AnyView> {
     let keys = computed(move || view.with(|view| view.rows.iter().map(|row| row.key.clone()).collect::<Vec<_>>()));
     let list = widget(scroll)
         .visible(move || view.with(|view| !view.rows.is_empty()))
-        .children((each(keys, Clone::clone, move |key: String| task_item(view, key, pulse)).gap(10.0).key("admin-task-list"),))
+        .children((each(keys, Clone::clone, move |key: String| task_item(view, key, pulse, fills)).gap(10.0).key("admin-task-list"),))
         .key("admin-task-list-scroll")
         .into_any();
     let popover = pad(column(10.0), 10.0, 10.0, 10.0, 10.0)
@@ -183,7 +198,7 @@ impl Pulse {
 }
 
 /// 一个任务：`bg` 底、`border-soft` 边线、sm 圆角、内边距 9；来源加进度条。字段按键从投影里取。
-fn task_item(view: Signal<TaskPopoverView>, key: String, pulse: Pulse) -> AnyView {
+fn task_item(view: Signal<TaskPopoverView>, key: String, pulse: Pulse, fills: Option<Signal<TaskFills>>) -> AnyView {
     let pick = {
         let key = key.clone();
         move |read: fn(&TaskRowView) -> String| {
@@ -196,24 +211,29 @@ fn task_item(view: Signal<TaskPopoverView>, key: String, pulse: Pulse) -> AnyVie
             widget(label(String::new(), 12.0, 600, Role::Faint))
                 .key(format!("admin-task-source-{key}"))
                 .prop::<String, fields::text::value>(pick(|row| row.source.clone())),
-            progress_bar(view, &key, pulse, pick(|row| row.label.clone()), pick(|row| row.detail.clone())),
+            progress_bar(view, &key, pulse, fills, pick(|row| row.label.clone()), pick(|row| row.detail.clone())),
         ))
         .key(format!("admin-task-{key}"))
         .into_any()
 }
 
-/// `ProgressBar.vue`：6 高的药丸轨道，填充至少 18 宽；下面是标签、细节和百分比，间距 7。不确定进度
-/// （`.progress-bar--indeterminate`）不写百分比，填充按 `progress-pulse` 呼吸（减少动态效果时不呼吸）。
+/// `ProgressBar.vue`：6 高的药丸轨道，填充至少 18 宽；下面是标签、细节和百分比，间距 7。填充宽度照
+/// `transition: width 0.18s ease` 取动效时钟这一帧的值（`fills`；不经 `ShellView` 建树时没有，直接用目标宽度）。
+/// 不确定进度（`.progress-bar--indeterminate`）不写百分比，填充按 `progress-pulse` 呼吸（减少动态效果时不呼吸）。
 fn progress_bar(
     view: Signal<TaskPopoverView>,
     key: &str,
     pulse: Pulse,
+    fills: Option<Signal<TaskFills>>,
     task_label: impl Fn() -> String + Send + 'static,
     detail: impl Fn() -> String + Send + 'static,
 ) -> AnyView {
     let id = key.to_string();
     let fill_id = id.clone();
-    let fill = move || view.with(|view| view.rows.iter().find(|row| row.key == fill_id).map_or(0.0, |row| row.fill));
+    let fill = move || {
+        let target = view.with(|view| view.rows.iter().find(|row| row.key == fill_id).map_or(0.0, |row| row.fill));
+        fills.and_then(|fills| fills.with(|fills| fills.get(&fill_id))).unwrap_or(target)
+    };
     let percent = move || view.with(|view| view.rows.iter().find(|row| row.key == id).and_then(|row| row.percent));
     let breathing = {
         let percent = percent.clone();
