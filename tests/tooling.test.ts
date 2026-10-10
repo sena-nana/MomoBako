@@ -29,6 +29,7 @@ describe("MomoBako 工具链", () => {
       dev: "vite",
       "tauri:dev": "yarn plugins:build && yarn plugins:package && yarn plugins:stage:dev && node scripts/tauri-dev.ts",
       "tauri:dev:with-plugins": "yarn tauri:dev",
+      "test:backend": "cargo test -p momobako-backend --locked",
       verify: "yarn typecheck:node-scripts && yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml",
     });
     expect(deps.vitepress).toBeDefined();
@@ -124,11 +125,12 @@ describe("MomoBako 工具链", () => {
     });
   });
 
-  it("GitHub CI 使用 MomoBako 验证和文档构建配置", () => {
+  it("GitHub CI 使用 MomoBako 验证、后端单测和文档构建配置", () => {
     const ci = read(".github/workflows/ci.yml");
 
     expect(ci).toContain("Verify MomoBako");
     expect(ci).toContain("Build External Plugins");
+    expect(ci).toContain("corepack yarn test:backend");
     expect(ci).toContain("corepack yarn verify");
     expect(ci).toContain("working-directory: External/Plugins");
     expect(ci).toContain("corepack yarn package");

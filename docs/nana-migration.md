@@ -86,7 +86,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 - **拖放**：拖入的放置决定由输入归约测试覆盖，拖出调用系统拖放；和资源管理器之间的真实拖放没有验收。
 - **托盘**：只在 Windows 上建；点击和菜单没有在真窗口里验收。
 - **UIA/AccessKit**：`hosted` 带 AccessKit 平台适配器；测试只读 NanaUI 自己的无障碍树，读屏器看到的结果没有验收。
-- **发布包**：仓库里没有 `momobako-nana` 的打包脚本；CI 和发布流程（`.github/workflows/`）只跑 `yarn verify` 和 Tauri 打包。
+- **发布包**：仓库里没有 `momobako-nana` 的打包脚本；CI 和发布流程（`.github/workflows/`）只跑 `yarn verify`、`yarn test:backend` 和 Tauri 打包。
 - **全局快捷键**：没有实现。Vue 和 Tauri 端（`src/`、`src-tauri/src`）也没有注册全局快捷键，宿主请求里不留占位变体。
 - **Vue 插件组件不进原生树**：插件前端注册的 Vue 组件（设置页、工具页、预览、播放器）不在原生树里运行。插件设置只画清单 `contributes.settings.fields` 声明的字段；第三方工具页只画页头和「这个工具页由插件的前端组件绘制，Nana 原生界面不能运行它。」（`admin_gap.rs`）；插件清单声明的预览贡献不登记：Vue 里它们由插件前端的 `registerPreview` 组件绘制，随附插件声明的扩展名都已有内置视图（`native_preview::builtin_view`），认不出的扩展名照 Vue 没有预览插件时一样只画缩略图或类型图标；只有播放器贡献、扩展名又不是音视频或图片的条目写「暂不支持播放 {扩展名} 文件」（`player_clip.rs`）。
 
@@ -101,6 +101,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 | `cargo test -p momobako-nana --test live_visual`、`--test live_surfaces` | 实况视图的布局、点击和输入 |
 | `NANA_SCENES=… NANA_SIZES=… NANA_THEMES=… cargo test -p momobako-nana --test scene_shots -- --nocapture` | 按场景名出截图和节点清单，场景定义在 `src-nana/src/shell/acceptance*.rs` |
 | `cargo check -p momobako-backend -p momobako-nana` | 共享领域边界的编译 |
+| `yarn test:backend` | `momobako-backend` 单测，等于 `cargo test -p momobako-backend --locked`，不在 `yarn verify` 里 |
 | `yarn verify` | 前端测试、前端构建和 `src-tauri` 编译检查，不含 `momobako-nana` |
 
 和 Vue 对照时用本机的 `tmp/vue-mock`（`tmp/` 被 git 忽略，不在仓库里）：模拟 Tauri IPC，在无头 Edge 里渲染 `src/` 的真实页面，和 Nana 用同名场景、同一份夹具。做法见 [Nana 与 Vue 对照](./nana-vue-parity.md#对照方法)。

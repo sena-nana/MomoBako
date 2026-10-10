@@ -24,10 +24,11 @@ cargo run -p momobako-nana
 yarn dev
 yarn tauri:dev
 yarn verify
+yarn test:backend
 ```
 
 `cargo run -p momobako-nana` 从仓库根目录启动默认桌面端，服务数据写在当前目录的 `.service-data`。`yarn dev` 仅启动 Vite 前端。`yarn tauri:dev` 仍会先完整构建、打包并暂存外置插件，再启动 Tauri 对照窗口。
 
 原生插件共享仓库根 `Cargo.lock` 与 `target/`。日常增量调试可运行 `yarn plugins:build:dev <目录名或 pluginId>`；发布产物使用 `yarn plugins:build` 与 `yarn plugins:package`，生成带目标三元组的可复现 v2 `.momoplug`。
 
-`yarn verify` 会串行运行前端测试、前端构建和 Tauri Rust 编译检查。
+`yarn verify` 会串行运行前端测试、前端构建和 Tauri Rust 编译检查。`yarn test:backend` 运行 `momobako-backend` 的单元测试（`cargo test -p momobako-backend --locked`），不在 `yarn verify` 里，CI 单独执行。
