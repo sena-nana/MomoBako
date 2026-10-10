@@ -6,7 +6,8 @@
 //!    宿主走启动时同一条 `PROTOCOL_REPOSITORY_SYNC`。刷新开始时忙碌标志由假变真，状态区清掉上一次失败；
 //! 2. 刷新：同步完成后进度经「写入索引结果」2/3 到「刷新文件夹树」3/3，宿主一起重读仓库摘要、硬链接
 //!    候选和目录树（回收站面板不读树）；
-//! 3. 读目录：照 Vue 非静默地重读当前目录（回收站读回收站），读完进度是「刷新完成」，操作进度收起。
+//! 3. 读目录：照 Vue 非静默地重读当前目录（回收站读回收站），任务弹层的仓库操作行由这次读目录接手，
+//!    换成「读取目录」（「读取回收站」）；读完进度是「刷新完成」。
 //!
 //! 任何一段失败：失败写进全局状态区（来源 [`FailureSource::Sync`]），操作进度取消，同步进度标成失败。
 //! 同步进度的扫描、写入、刷新三档在侧栏状态区显示（失败和忙碌优先）。刷新期间文件夹分组的刷新按钮
@@ -16,8 +17,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::backend::services::repository::RepositorySnapshot;
 
-use super::admin::OperationProgress;
 use super::files::{FileContext, HardlinkPrompt};
+use super::repo_operation::{OperationId, OperationPatch, OperationStart};
 use super::sidebar::SidebarTree;
 use super::status::FailureSource;
 use super::{ShellMessage, ShellViewModel, StartupStatus, WorkspacePanel};
@@ -80,12 +81,14 @@ enum Stage {
     Directory,
 }
 
-/// 进行中的一轮刷新。`token` 认出这一轮的结果，`repo_id` 是发起时的仓库。
+/// 进行中的一轮刷新。`token` 认出这一轮的结果，`repo_id` 是发起时的仓库，`operation` 是这一轮在
+/// 任务弹层里的仓库操作行。
 #[derive(Clone, Debug)]
 struct Run {
     token: u64,
     repo_id: String,
     stage: Stage,
+    operation: OperationId,
 }
 
 /// 文件夹树刷新的状态。
@@ -164,19 +167,13 @@ pub(super) fn begin(model: &mut ShellViewModel) {
     let Some(repo_id) = model.workspace.active_repo_id.clone() else {
         return;
     };
+    let operation = model.operation.start(OperationStart::new("刷新文件树", "同步并读取目录结构", 12.0));
     let state = &mut model.tree_sync;
     state.issued += 1;
     let token = state.issued;
-    state.run = Some(Run { token, repo_id: repo_id.clone(), stage: Stage::Syncing });
+    state.run = Some(Run { token, repo_id: repo_id.clone(), stage: Stage::Syncing, operation });
     state.progress.set(SyncPhase::Scanning, "扫描文件夹结构", 1);
     state.effects.push(TreeSyncEffect::Sync { token, repo_id });
-    model.admin.operation = Some(OperationProgress {
-        label: "刷新文件树".into(),
-        detail: "同步并读取目录结构".into(),
-        value: 12.0,
-        indeterminate: false,
-        updated_at_ms: now_ms(),
-    });
 }
 
 /// 归约宿主送回的结果。不是这类消息时交回主归约。
@@ -212,9 +209,8 @@ fn synced(model: &mut ShellViewModel, token: u64, result: Result<u64, String>) {
         Ok(scanned) => scanned,
         Err(error) => return fail(model, error),
     };
-    if let Some(operation) = model.admin.operation.as_mut() {
-        operation.detail = format!("已扫描 {scanned} 个文件");
-        operation.value = 58.0;
+    if let Some(operation) = model.tree_sync.run.as_ref().map(|run| run.operation) {
+        model.operation.update(operation, OperationPatch::step(format!("已扫描 {scanned} 个文件"), 58.0));
     }
     let tree = model.workspace.panel != WorkspacePanel::Trash;
     let state = &mut model.tree_sync;
@@ -269,26 +265,30 @@ fn current_repo(model: &mut ShellViewModel) -> Option<String> {
         return Some(repo_id);
     }
     eprintln!("Nana 仓库已经换走，放弃这一轮文件夹树刷新：{repo_id}");
-    model.tree_sync.run = None;
+    if let Some(run) = model.tree_sync.run.take() {
+        model.operation.cancel(run.operation);
+    }
     model.tree_sync.progress = SyncProgress::default();
-    model.admin.operation = None;
     None
 }
 
-/// 收尾：进度「刷新完成」，操作进度收起。
+/// 收尾：进度「刷新完成」，操作进度走到 100% 再收起。重读目录时进度行已经换成「读取目录」，
+/// 这一轮的完成不再碰它（Vue `finishOperationProgress` 对过期编号什么也不做）。
 fn complete(model: &mut ShellViewModel) {
-    model.tree_sync.run = None;
+    if let Some(run) = model.tree_sync.run.take() {
+        model.operation.finish(run.operation);
+    }
     model.tree_sync.progress.set(SyncPhase::Complete, "刷新完成", 3);
-    model.admin.operation = None;
 }
 
 /// 失败：写进全局状态区，取消操作进度，同步进度标成失败。
 fn fail(model: &mut ShellViewModel, error: String) {
     eprintln!("Nana 刷新文件夹树失败：{error}");
     model.status.fail(FailureSource::Sync, format!("刷新文件夹树失败：{error}"));
-    model.tree_sync.run = None;
+    if let Some(run) = model.tree_sync.run.take() {
+        model.operation.cancel(run.operation);
+    }
     model.tree_sync.progress.set(SyncPhase::Error, error, 3);
-    model.admin.operation = None;
 }
 
 /// 操作进度的更新时间：墙钟毫秒。任务中心的条目按它排先后。

@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use crate::backend::services::repository::{FileBrowserEntry, FileBrowserSnapshot};
 use crate::settings;
 
+use super::repo_operation::{OperationPatch, OperationRequests, OperationStart};
 use super::workspace::{LibraryCategory, WorkspacePanel};
 
 /// 首屏分页，对应 `FILE_BROWSER_INITIAL_PAGE_SIZE`。
@@ -361,36 +362,43 @@ pub enum FilesMessage {
 }
 
 /// 文件变更在任务弹层里的进度行，照 Vue `startOperationProgress` / `updateOperationProgress`：
-/// 种类、当前阶段和百分比。
+/// 开始时的种类、阶段和百分比，以及协议完成以后那一步。
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct FileOperation {
-    pub label: String,
-    pub detail: String,
-    pub value: f32,
-    pub indeterminate: bool,
-    /// 变更完成、重读目录时 Vue「刷新文件索引」那一步的百分比。删除和还原没有这一步。
-    pub refresh_value: Option<f32>,
-    /// 上一次变化的时间（毫秒），任务弹层按它和运行中的任务一起排序。
-    pub updated_at_ms: i64,
+    pub start: OperationStart,
+    /// 协议完成、等着目录读回来时 Vue「刷新文件索引」那一步的百分比（复制、导入）。没有这一步的变更
+    /// （删除、还原、移动）重读目录时进度行换成「读取目录」，和 Vue 刷新目录时的非静默读取一样。
+    pub refresh_value: Option<f64>,
 }
 
 impl FileOperation {
     /// Vue 文件变更开始以后的第一步：种类、阶段说明和百分比。
-    pub(super) fn step(label: impl Into<String>, detail: impl Into<String>, value: f32, refresh_value: Option<f32>) -> Self {
-        Self {
-            label: label.into(),
-            detail: detail.into(),
-            value,
-            indeterminate: false,
-            refresh_value,
-            updated_at_ms: super::tree_sync::now_ms(),
-        }
+    pub(super) fn step(label: impl Into<String>, detail: impl Into<String>, value: f64, refresh_value: Option<f64>) -> Self {
+        Self { start: OperationStart::new(label, detail, value), refresh_value }
     }
 
     /// 从文件夹导入，对话框和拖入都是（Vue `importEntriesToWorkspace`）。
     pub(super) fn import() -> Self {
         Self::step("导入文件", "导入文件到当前资源库", 24.0, Some(84.0))
     }
+}
+
+/// 文件表面这次占着仓库操作行的是什么：一次变更，或者一次非静默的读目录。
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FilesOperation {
+    Mutation { refresh_value: Option<f64> },
+    Read,
+}
+
+/// 读目录时任务弹层出不出进度行：Vue `loadFileBrowserForDirectory` 只有非静默、非追加的读取才出，
+/// 标题看读的是回收站、带不带目录树（「读取回收站」「读取文件树」「读取目录」）。
+/// 侧栏点文件夹、双击进入目录和面包屑在 Vue 里都是静默读取，不出这一行。
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum ReadProgress {
+    #[default]
+    Silent,
+    Directory,
+    Tree,
 }
 
 /// 目录条目、选择、对话框和进行中的变更。
@@ -413,7 +421,9 @@ pub struct FilesState {
     pub(super) dialog: FileDialog,
     /// 导出对话框。默认关闭，首页不提供入口。
     pub(super) export: ExportDraft,
-    pub(super) operation: Option<FileOperation>,
+    /// 对任务弹层「仓库操作」行的请求，归约结束时交给壳层的槽位。
+    pub(super) operation: OperationRequests,
+    operation_kind: Option<FilesOperation>,
     prefetch_due_ms: Option<u64>,
     prefetch_clock: u64,
     pub(super) name_draft: String,
@@ -451,12 +461,47 @@ pub struct FilesState {
 }
 
 impl FilesState {
-    pub(super) fn operation_percent(&self) -> Option<f32> {
-        self.operation.as_ref().map(|operation| operation.value)
+    /// 非静默地读目录，任务弹层出「读取目录」这一行（Vue `loadFileBrowserForDirectory`）：
+    /// 读回收站是「读取回收站」，带目录树是「读取文件树」；说明写正在读的目录，根目录写「正在读取根目录」。
+    pub(super) fn report_read(&mut self, path: &str, trash: bool, read: ReadProgress) {
+        let label = match read {
+            ReadProgress::Silent => return,
+            _ if trash => "读取回收站",
+            ReadProgress::Tree => "读取文件树",
+            ReadProgress::Directory => "读取目录",
+        };
+        let detail = if !path.is_empty() {
+            format!("正在读取 {path}")
+        } else if trash {
+            "正在读取回收站".into()
+        } else {
+            "正在读取根目录".into()
+        };
+        self.operation.start(OperationStart::new(label, detail, 14.0).indeterminate());
+        self.operation_kind = Some(FilesOperation::Read);
     }
 
-    pub(super) fn operation_indeterminate(&self) -> bool {
-        self.operation.as_ref().is_some_and(|operation| operation.indeterminate)
+    /// 文件表面占着的进度行到头了：成功时读目录先走到「整理目录条目」92% 再完成，变更直接完成；
+    /// 失败时取消。没有占着进度行时什么也不做。
+    fn settle_operation(&mut self, succeeded: bool) {
+        let Some(kind) = self.operation_kind.take() else {
+            return;
+        };
+        if !succeeded {
+            self.operation.cancel();
+            return;
+        }
+        if kind == FilesOperation::Read {
+            self.operation.update(OperationPatch::step("整理目录条目", 92.0));
+        }
+        self.operation.finish();
+    }
+
+    /// 变更的结果到了：只收尾变更自己的进度行，在读的目录留给读目录收尾。
+    fn settle_mutation(&mut self, succeeded: bool) {
+        if matches!(self.operation_kind, Some(FilesOperation::Mutation { .. })) {
+            self.settle_operation(succeeded);
+        }
     }
 
     /// 虚拟列表还有下一页时，空闲 `PREFETCH_IDLE_MS` 后再解码缩略图。
@@ -605,8 +650,14 @@ impl FilesState {
     }
 
     /// 替换进行中的浏览。上一页还没回来时，新的目录请求覆盖 pending，而不是被丢掉。
+    /// 面包屑和双击进入目录在 Vue 里是静默读取，任务弹层不出进度行。
     pub(super) fn request_browse(&mut self, ctx: &FileContext, path: &str) -> bool {
-        self.queue_browse(ctx, path, false, false, false)
+        self.queue_browse(ctx, path, false, false, ReadProgress::Silent)
+    }
+
+    /// 同 [`Self::request_browse`]，但按 `read` 在任务弹层出「读取目录」这一行（Vue 的非静默读取）。
+    pub(super) fn request_browse_reporting(&mut self, ctx: &FileContext, path: &str, read: ReadProgress) -> bool {
+        self.queue_browse(ctx, path, false, false, read)
     }
 
     pub(super) fn load_more(&mut self, ctx: &FileContext) -> bool {
@@ -662,6 +713,9 @@ impl FilesState {
         self.has_more = !virtual_view && self.rows.len() < snapshot.total_entries;
         self.error.clear();
         self.finish_loading();
+        if !append {
+            self.settle_operation(true);
+        }
         let rows = self.rows.clone();
         self.prune_against(&rows);
         self.arm_thumbnail_prefetch();
@@ -760,6 +814,7 @@ impl FilesState {
         eprintln!("Nana 读取文件列表失败：{error}");
         self.error = error.to_string();
         self.finish_loading();
+        self.settle_operation(false);
         true
     }
 
@@ -911,7 +966,9 @@ impl FilesState {
             && !self.mutating
     }
 
-    fn queue_browse(&mut self, ctx: &FileContext, path: &str, append: bool, keep_selection: bool, allow_category: bool) -> bool {
+    /// 读一个目录的首页，替换进行中的浏览并清掉错误。`keep_selection` 时选择留着、读完按新列表修剪；
+    /// `allow_category` 时分类视图也能读（变更以后重读）；`read` 决定任务弹层出不出「读取目录」这一行。
+    fn queue_browse(&mut self, ctx: &FileContext, path: &str, keep_selection: bool, allow_category: bool, read: ReadProgress) -> bool {
         if self.mutating {
             eprintln!("Nana 文件变更进行中，不能切换目录");
             return false;
@@ -925,34 +982,31 @@ impl FilesState {
             return false;
         };
         let path = normalize_path(path);
-        let trash = if append { self.trash } else { ctx.trash };
+        let trash = ctx.trash;
         self.pending = Some(BrowsePending {
             repo_id: repo_id.clone(),
             path: path.clone(),
             trash,
-            append,
+            append: false,
             silent: false,
         });
-        if append {
-            self.loading_more = true;
-        } else {
-            self.loading = true;
-            self.loading_more = false;
-            self.virtual_rows.clear();
-            if !keep_selection {
-                self.selected.clear();
-                self.primary = None;
-                self.anchor = None;
-            }
+        self.loading = true;
+        self.loading_more = false;
+        self.virtual_rows.clear();
+        if !keep_selection {
+            self.selected.clear();
+            self.primary = None;
+            self.anchor = None;
         }
         self.error.clear();
+        self.report_read(&path, trash, read);
         self.effects.push(FilesEffect::Browse {
             repo_id,
             path,
             trash,
-            offset: if append { self.rows.len() } else { 0 },
-            limit: if append { APPEND_PAGE_SIZE } else { INITIAL_PAGE_SIZE },
-            append,
+            offset: 0,
+            limit: INITIAL_PAGE_SIZE,
+            append: false,
         });
         true
     }
@@ -961,7 +1015,6 @@ impl FilesState {
         self.loading = false;
         self.loading_more = false;
         self.pending = None;
-        self.operation = None;
     }
 }
 

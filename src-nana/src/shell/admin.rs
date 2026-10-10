@@ -128,7 +128,6 @@ pub enum AdminMessage {
     ToggleTaskPopover,
     /// 弹层头部的关闭按钮和弹层外的点击层。Escape 走全局的 [`crate::shell::escape_layer`]。
     CloseTaskPopover,
-    SetOperation(Option<OperationProgress>),
     SelectAction(String),
     RunAction(Option<String>),
     ActionsLoaded { repo_id: String, result: Result<Vec<RepositoryAction>, String> },
@@ -174,14 +173,7 @@ pub enum PluginCallOrigin {
     Playground,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct OperationProgress {
-    pub label: String,
-    pub detail: String,
-    pub value: f64,
-    pub indeterminate: bool,
-    pub updated_at_ms: i64,
-}
+pub use super::repo_operation::OperationProgress;
 
 /// 拓展页左侧的一个工具页。Nana 只能画内置的三个；其它插件的工具页没有原生控件。
 #[derive(Clone, Debug, PartialEq)]
@@ -286,7 +278,6 @@ pub struct AdminState {
     /// 展开了上下文的日志。
     pub log_context_open: std::collections::BTreeSet<String>,
     pub popover_open: bool,
-    pub operation: Option<OperationProgress>,
     pub actions: Vec<RepositoryAction>,
     pub active_action_id: Option<String>,
     pub actions_loading: bool,
@@ -340,7 +331,6 @@ impl Default for AdminState {
             log_signature: String::new(),
             log_context_open: std::collections::BTreeSet::new(),
             popover_open: false,
-            operation: None,
             actions: Vec::new(),
             active_action_id: None,
             actions_loading: false,
@@ -532,18 +522,9 @@ impl ShellViewModel {
     }
 
     /// 任务弹层的行：仓库操作加运行中的任务，按更新时间降序。侧栏「任务」的计数也是这些行的个数，
-    /// 和 Vue `TaskPopover.vue` 的 `activeTaskCount` 一样。
-    ///
-    /// Vue 的仓库操作只有一个槽位（`operationProgress`）：文件变更进行中时是它，否则是刷新文件夹树。
+    /// 和 Vue `TaskPopover.vue` 的 `activeTaskCount` 一样。仓库操作只有一个槽位，见 `repo_operation.rs`。
     pub(crate) fn task_rows(&self) -> Vec<support::PopoverRow> {
-        let files = self.files.operation.as_ref().map(|operation| OperationProgress {
-            label: operation.label.clone(),
-            detail: operation.detail.clone(),
-            value: f64::from(operation.value),
-            indeterminate: operation.indeterminate,
-            updated_at_ms: operation.updated_at_ms,
-        });
-        support::popover_rows(&self.task_progress, files.as_ref().or(self.admin.operation.as_ref()))
+        support::popover_rows(&self.task_progress, self.operation.shown())
     }
 
     pub(crate) fn set_audio_preference(&mut self, plugin_id: Option<String>) {

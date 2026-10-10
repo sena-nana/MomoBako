@@ -20,7 +20,8 @@ use super::super::{ShellMessage, ShellViewModel};
 use super::api::{ApiMessage, HttpResponse};
 use super::support::{self, action_can_run};
 use super::tool_native::{self, ImportButton, ImportView};
-use super::{AdminEffect, AdminMessage, OperationProgress, PluginCallOrigin, ToolPageEntry};
+use super::super::repo_operation::OperationStart;
+use super::{AdminEffect, AdminMessage, PluginCallOrigin, ToolPageEntry};
 
 fn send(model: &mut ShellViewModel, message: AdminMessage) {
     model.reduce(ShellMessage::Admin(message));
@@ -578,13 +579,7 @@ fn task_popover_merges_repository_operation_and_closes() {
         error: None,
         updated_at: "1970-01-01T00:00:00.020Z".into(),
     }]));
-    send(&mut model, AdminMessage::SetOperation(Some(OperationProgress {
-        label: "导入".into(),
-        detail: "复制".into(),
-        value: 8.0,
-        indeterminate: false,
-        updated_at_ms: 50,
-    })));
+    let operation = model.operation.start(OperationStart::new("导入", "复制", 8.0));
     let rows = model.task_rows();
     assert_eq!((rows[0].id.as_str(), rows[0].source.as_str()), ("workspace-operation", "资源库"));
     assert_eq!((rows[1].id.as_str(), rows[1].source.as_str(), rows[1].detail.as_str()), ("task-1", "任务", "scanning"));
@@ -597,7 +592,7 @@ fn task_popover_merges_repository_operation_and_closes() {
     assert!(crate::shell::escape_layer(&model).is_some(), "任务弹层是 Escape 能关的一层");
     model.reduce(ShellMessage::Sidebar(crate::shell::SidebarMessage::Gap(crate::shell::GapMessage::Escape)));
     assert!(!model.admin.popover_open);
-    model.admin.operation = None;
+    model.operation.cancel(operation);
     model.task_progress.clear();
     assert!(model.task_rows().is_empty());
 }

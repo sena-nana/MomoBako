@@ -502,7 +502,7 @@ fn running_tasks_feed_the_popover_and_the_footer_count() {
 
     model.reduce(ShellMessage::Sidebar(SidebarMessage::SidebarTreeLoaded { repo_id: REPO.into(), result: Ok(Default::default()) }));
     model.reduce(ShellMessage::Sidebar(SidebarMessage::RefreshFolderTree));
-    assert!(model.admin.operation.is_some(), "刷新文件夹树是一行仓库操作");
+    assert!(model.operation.shown().is_some(), "刷新文件夹树是一行仓库操作");
     assert_eq!(SidebarView::project(&model).footer.tasks, 2, "仓库操作也算一行");
 
     model.reduce(ShellMessage::TaskProgressLoaded(Vec::new()));

@@ -59,6 +59,10 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, view: Option<&mut Shell
     if shell.observe_failures() {
         shell.mark_surface_dirty();
     }
+    // 仓库操作行往上爬、完成后收起，任务弹层和「任务」计数跟着整体同步。
+    if shell.operation.tick(16) {
+        shell.mark_surface_dirty();
+    }
     if shell.motion.active() {
         shell.motion.advance(shell.motion.now_ms().saturating_add(16));
     }
@@ -81,7 +85,7 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, view: Option<&mut Shell
         overlay_leaving = view.overlay_leaving();
     }
     let busy = shell.motion.active() || tracking || overlay_leaving;
-    window.demand = if busy || shell.files.prefetch_pending() || shell.inspect.timers_pending() {
+    window.demand = if busy || shell.files.prefetch_pending() || shell.inspect.timers_pending() || shell.operation.pending() {
         nana_ui::FrameDemand::Continuous(std::num::NonZeroU32::new(30).expect("30"))
     } else {
         nana_ui::FrameDemand::OnDemand
