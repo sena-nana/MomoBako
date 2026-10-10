@@ -831,6 +831,38 @@ fn file_plugin_call_keeps_repository_and_writes_activity() {
     assert_eq!(model.files.error, "media.clearTrackCache 调用失败。");
 }
 
+/// 「创建播放列表」照 Vue `runPlaylistAction` 在本地建播放集，不调用插件；建好以后刷新资源库，
+/// 缺仓库或缺歌单标识时只报错，失败写进文件列表的错误。
+#[test]
+fn source_playlist_is_created_locally_then_the_repository_refreshes() {
+    let playlist = |id: Option<&str>| super::super::entry_actions::SourcePlaylist {
+        playlist_id: id.map(str::to_string),
+        name: "夜曲".into(),
+        player_type_id: "momobako.playlist.audio-sequence".into(),
+        path: "playlists/night".into(),
+    };
+    let mut model = ShellViewModel::default();
+    send(&mut model, AdminMessage::CreateSourcePlaylist { playlist: playlist(Some("netease-3")), repository_id: Some("repo".into()) });
+    match model.admin.take_effects().as_slice() {
+        [AdminEffect::CreateSourcePlaylist { repo_id, playlist_id, name, player_type_id, path }] => {
+            assert_eq!((repo_id.as_str(), playlist_id.as_str(), name.as_str()), ("repo", "netease-3", "夜曲"));
+            assert_eq!((player_type_id.as_str(), path.as_str()), ("momobako.playlist.audio-sequence", "playlists/night"));
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    model.workspace.take_effects();
+    send(&mut model, AdminMessage::SourcePlaylistFinished(Ok(())));
+    assert!(matches!(model.workspace.take_effects().as_slice(), [crate::shell::WorkspaceEffect::RefreshRepositories { .. }]));
+    send(&mut model, AdminMessage::SourcePlaylistFinished(Err("播放集已存在".into())));
+    assert_eq!(model.files.error, "播放集已存在");
+
+    send(&mut model, AdminMessage::CreateSourcePlaylist { playlist: playlist(None), repository_id: Some("repo".into()) });
+    assert_eq!(model.files.error, "来源目录缺少播放列表标识");
+    send(&mut model, AdminMessage::CreateSourcePlaylist { playlist: playlist(Some("netease-3")), repository_id: None });
+    assert_eq!(model.files.error, "没有当前资源库，不能创建播放列表。");
+    assert!(model.admin.take_effects().is_empty(), "缺仓库或缺歌单标识都不建");
+}
+
 #[test]
 fn slashes_and_repeated_ids_in_external_data_still_mount() {
     assert_eq!(super::style::key_part("a/b%c"), "a%2Fb%25c");

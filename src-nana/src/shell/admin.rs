@@ -147,6 +147,10 @@ pub enum AdminMessage {
     },
     /// 文件插件动作结束。成功写到文件活动，失败写到文件错误。
     FilePluginFinished { method: String, result: Result<serde_json::Value, String> },
+    /// 文件右键里的「创建播放列表」：在本地建来源歌单对应的播放集，再把目录加进去（Vue `runPlaylistAction`）。
+    CreateSourcePlaylist { playlist: super::entry_actions::SourcePlaylist, repository_id: Option<String> },
+    /// 来源播放集建好、目录加进去了，或者哪一步失败了。
+    SourcePlaylistFinished(Result<(), String>),
     /// 来源登录：连接新账号或重新登录。`repo_id` 为空是连接新账号。
     BeginSourceAuth { plugin_id: String, repo_id: Option<String> },
     /// 来源登录：查询仓库登录状态。
@@ -222,6 +226,8 @@ pub enum AdminEffect {
         repository_id: Option<String>,
         origin: PluginCallOrigin,
     },
+    /// 建来源歌单对应的播放集（已经有就不建），再把目录加进去。
+    CreateSourcePlaylist { repo_id: String, playlist_id: String, name: String, player_type_id: String, path: String },
     /// 来源登录成功后更新已有仓库的后端配置。
     UpdateBackendConfig { repo_id: String, backend_config: serde_json::Value, step: SourceStep },
     /// 需要本地缓存的来源仓库写入缓存目录，并迁移旧缓存。

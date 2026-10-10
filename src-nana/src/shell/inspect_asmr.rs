@@ -686,6 +686,7 @@ mod tests {
             tags: Vec::new(),
             thumbnail_custom: false,
             provider_id: None,
+            provider_item_id: None,
             source_payload: None,
             metadata,
         }];

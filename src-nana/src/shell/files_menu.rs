@@ -476,7 +476,7 @@ fn playlist_entries(model: &ShellViewModel, row: &FileRow) -> Vec<MenuEntry> {
         .collect()
 }
 
-/// 来源插件的条目动作。需要目录或名称的先弹对应对话框。
+/// 来源插件的条目动作。下载先弹目录对话框；「创建播放列表」在本地建播放集。
 fn plugin_entry(action: &FilePluginAction, repository_id: Option<String>) -> MenuEntry {
     let message = match &action.dispatch {
         FilePluginDispatch::Call { plugin_id, method, payload } => admin(AdminMessage::CallFilePlugin {
@@ -492,12 +492,9 @@ fn plugin_entry(action: &FilePluginAction, repository_id: Option<String>) -> Men
             repository_id,
             progress: progress.clone(),
         }),
-        FilePluginDispatch::AskName { plugin_id, method, payload } => input(InputMessage::OpenSourcePlaylist {
-            plugin_id: plugin_id.clone(),
-            method: method.clone(),
-            payload: payload.clone(),
-            repository_id,
-        }),
+        FilePluginDispatch::CreatePlaylist(playlist) => {
+            admin(AdminMessage::CreateSourcePlaylist { playlist: playlist.clone(), repository_id })
+        }
     };
     MenuEntry::new(&action.value.replace('/', "-"), action.label.clone(), None).message(message)
 }
