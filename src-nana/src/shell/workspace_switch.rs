@@ -16,7 +16,7 @@ use crate::backend::services::repository::RepositorySummary;
 
 use super::super::repo_operation::{OperationPatch, OperationStart};
 use super::super::search_collate::compare_zh;
-use super::startup::StartupStatus;
+use super::startup::{StartupMode, StartupStatus};
 use super::{RepositoryPresence, WorkspaceEffect, WorkspacePanel, WorkspaceRepository, WorkspaceState};
 
 /// 同一个仓库的刷新走到哪一步。
@@ -257,9 +257,16 @@ impl WorkspaceState {
         self.operation.finish();
     }
 
-    /// 启动或换仓库在读列表、第 1 步就结束（空列表、目标缺失）：结束启动，换仓库的「加载资源库」完成。
+    /// 启动或换仓库的加载走完了（空列表、目标缺失时在选定以后，可用的仓库在读完首屏目录以后）：换仓库到这里结束，
+    /// 任务弹层的「加载资源库」完成；首屏启动照 Vue 先在第 4 步等设置包和播放器类型（`StartupState::await_settings`），
+    /// 都回来再结束。
     pub(super) fn finish_loading_run(&mut self) {
         self.snapshot_loading = false;
+        if self.startup.mode == StartupMode::Launch {
+            let repo_id = self.active_repo_id.clone();
+            self.startup.await_settings(repo_id.as_deref());
+            return;
+        }
         self.startup.finish();
         self.operation.finish();
     }

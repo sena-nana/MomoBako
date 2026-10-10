@@ -5,7 +5,7 @@
 use crate::backend::services::repository::{FileBrowserEntry, FileBrowserSnapshot};
 
 use super::admin::{AdminEffect, AdminMessage};
-use super::data_load_tests::{browser, snapshot, summary};
+use super::data_load_tests::{answer_settings, browser, snapshot, summary};
 use super::repo_operation::FINISH_LINGER_MS;
 use super::route_startup::StartupView;
 use super::status::StatusLine;
@@ -32,6 +32,7 @@ fn ready_on_alpha() -> ShellViewModel {
     ] {
         model.reduce(message);
     }
+    answer_settings(&mut model);
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
     model.workspace.take_effects();
     model.sidebar.take_effects();
@@ -179,10 +180,11 @@ fn a_failed_switch_stays_on_the_startup_page_until_retry_succeeds() {
     model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(ALPHA, "ready"), summary(BETA, "ready")]) });
     assert!(sync_requested(&mut model, BETA), "重试接着加载换过去的仓库");
     finish_switch(&mut model, BETA);
+    assert_eq!(model.workspace.startup.status, StartupStatus::Loading, "重试是完整启动，读完首屏目录等设置包");
+    answer_settings(&mut model);
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
     assert_eq!(model.workspace.active_repo_id.as_deref(), Some(BETA));
     assert_eq!(body_mode(&model), BodyMode::Workbench);
-    assert!(model.admin.take_effects().iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)), "重试是完整启动，结束时读设置包");
 }
 
 /// 附加本地文件夹成功（Vue `attachRepository`）：任务弹层先是「挂载资源库」，成功以后新仓库放进列表、
@@ -359,6 +361,7 @@ fn relocating_a_missing_repository_resyncs_it_in_place() {
     let mut model = ShellViewModel::default();
     let generation = model.workspace.prepare_initial_list();
     model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(ALPHA, "missing")]) });
+    answer_settings(&mut model);
     assert_eq!(model.workspace.main_region(), MainRegion::MissingRepository);
     model.reduce(ShellMessage::MissingPathChanged("D:/找回的素材".into()));
     model.reduce(ShellMessage::MissingSubmitPath);

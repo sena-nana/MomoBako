@@ -30,7 +30,7 @@
 | `lifecycle.ts` `loadInitialRepository` | 选中仓库 `status == missing` | 不同步，立即记住 id | 结束启动，主区为缺失 | 缺失面板；不进入文件列表 | 已离屏（`missing`） |
 | `lifecycle.ts` `loadInitialRepository` | 选中仓库可同步 | `SyncRepository` | 选择顺序是当前 id、记住的 id（还在列表里时）、第一项；读完摘要后才记住（Vue `rememberLastActiveRepository`） | 第 2 步“扫描资源库文件” | 已离屏（`loading`，走记住的 id） |
 | `lifecycle.ts` `readLastActiveRepositoryId` / `rememberLastActiveRepository` | 冷启动读；启动、换仓库和同一个仓库的刷新读完摘要时写，选中缺失仓库时立即写，列表空了（启动、刷新、删掉最后一个）时清掉 | 设置目录的 `last-repository.json`，键同 Vue 本地存储 `momobako.lastActiveRepositoryId`；值变了才写 | 记着的仓库不在列表里时退回第一项；文件缺失、损坏或值不是非空字符串当作没有记住；读写失败只记日志，不影响启动 | 加载日志「首屏启动流程开始。」「首屏启动已选定资源库。」的 `rememberedRepoId` | 已测试（`workspace_remember_tests.rs`，未离屏） |
-| `lifecycle.ts` `emitStartupLog` | 首屏启动的每一步 | 无新请求；同步结果带回同步计数（后端 `SyncResult`） | 照 Vue 依次记：流程开始（totalSteps、activeRepoId、rememberedRepoId）、开始读列表、列表完成（三个计数）、已选定（仓库状态、名称、路径）、开始同步、同步完成（scannedFiles、createdAssets、updatedAssets、deletedAssets、createdEvents、hardlinkCandidates）、开始读摘要、摘要完成（assetCount、playlistCount、defaultAssetId）、开始首屏、首屏完成（playlistCount）；进工作区时记开始加载应用配置与插件设置（step、repoId），设置包回来（失败也算）记设置完成和流程完成（activeRepoId、assetCount、playlistCount）；空库和缺失仓库同样以这三条收尾，计数是 0；失败记「首屏启动流程失败。」（step、stepLabel、error、activeRepoId、targetRepoId）。日志里的 activeRepoId 照 Vue `activeRepoId` 的时机：首屏启动读完摘要（缺失仓库、空列表是选中时）以后才是这次的仓库，之前是这一轮开始时的值，重试时带着上一轮已经换上的仓库；换仓库不记 | 启动页「加载日志」最近 8 条，明细 `键: 值 · 键: 值` | 已测试（`startup_log_tests.rs`，未离屏） |
+| `lifecycle.ts` `emitStartupLog` | 首屏启动的每一步 | 无新请求；同步结果带回同步计数（后端 `SyncResult`） | 照 Vue 依次记：流程开始（totalSteps、activeRepoId、rememberedRepoId）、开始读列表、列表完成（三个计数）、已选定（仓库状态、名称、路径）、开始同步、同步完成（scannedFiles、createdAssets、updatedAssets、deletedAssets、createdEvents、hardlinkCandidates）、开始读摘要、摘要完成（assetCount、playlistCount、defaultAssetId）、开始首屏、首屏完成（playlistCount）；接着在第 4 步记开始加载应用配置与插件设置（step、repoId），设置包和随后的播放器类型都回来（失败也算）记设置完成和流程完成（activeRepoId、assetCount、playlistCount），这时才进工作区；空库和缺失仓库同样以这三条收尾，计数是 0；失败记「首屏启动流程失败。」（step、stepLabel、error、activeRepoId、targetRepoId）。日志里的 activeRepoId 照 Vue `activeRepoId` 的时机：首屏启动读完摘要（缺失仓库、空列表是选中时）以后才是这次的仓库，之前是这一轮开始时的值，重试时带着上一轮已经换上的仓库；换仓库不记 | 启动页「加载日志」最近 8 条，明细 `键: 值 · 键: 值` | 已测试（`startup_log_tests.rs`，未离屏） |
 | `lifecycle.ts` 同步结果 | 代次不匹配，或启动已不是加载中 | 丢弃 | 不改已完成步骤和活动仓库 | 保持当前步骤 | 已测试（未离屏） |
 | `lifecycle.ts` 同步成功 | 代次匹配 | `LoadSnapshot` → `get_repository_snapshot` | 进入第 3 步；没有活动仓库则失败 | 第 3 步“读取仓库摘要” | 已测试（未离屏） |
 | `lifecycle.ts` 摘要与首屏 | 活动仓库匹配且步骤已到 3 / 4 | 摘要成功后根目录浏览 | 成功则结束启动并进入有仓库；失败则加载错误 | 第 4 步“读取首屏目录”，或错误面板 | 已测试（未离屏） |
@@ -185,7 +185,7 @@
 
 ## Phase 6 设置、插件、日志和任务
 
-这些行由 `src-nana/src/shell/admin_tests.rs` 覆盖状态机，读取时机由 `data_load_tests.rs` 从启动消息和用户操作出发覆盖。设置包一次读五项：`PluginViewModel` 的 `list_plugins`、`list_plugin_hook_executions`、`get_cache_snapshot`、`get_api_design_snapshot`，加 `SystemViewModel::get_external_api_connection_status`；照 Vue `loadSettingsData` 的时机读：启动结束时（有仓库、空库和缺失仓库都读）、打开设置页、插件面板「刷新」，拓展页还没有插件列表时也补读一次。插件列表换新（设置包读回，或安装、删除、启停之后）就用 `list_playlist_players` 重读播放器类型，和 Vue 同步前端插件注册表的时机一致。打开设置页还读一次设置目录里的应用设置（`SettingsLoaded`）。安装、删除、启停、配置读写和数据目录走同一个 `PluginViewModel`。外部连接导出走 `SystemViewModel::write_binary_file`。仓库动作列表走 `RepositoryInteractionViewModel::list_repository_actions`，执行走 `MutsukiTaskViewModel::execute` 的 `momobako.repository.action.run`，完成后用 `FileBrowserViewModel::get_file_browser` 刷新当前目录。这些调用没有替身测试。圆角写到设置目录旁边的 `corners.json`，缺文件或坏 JSON 用平台默认，用户改过才写回。音频播放器偏好仍走阶段 5 的偏好文件，不写入 `ApplicationSettings.default_playlist_player_type_id`。日志页每次打开都用 `SystemViewModel::list_system_logs` 读最近 200 条历史日志（Vue `setActivePanel('logs')` 的 `loadSystemLogsInWorkspace`）。标了「已离屏」的行写明场景。
+这些行由 `src-nana/src/shell/admin_tests.rs` 覆盖状态机，读取时机由 `data_load_tests.rs` 从启动消息和用户操作出发覆盖。设置包一次读五项：`PluginViewModel` 的 `list_plugins`、`list_plugin_hook_executions`、`get_cache_snapshot`、`get_api_design_snapshot`，加 `SystemViewModel::get_external_api_connection_status`；照 Vue `loadSettingsData` 的时机读：首屏启动第 4 步（有仓库、空库和缺失仓库都读；设置包和随后的播放器类型都回来才离开启动页）、打开设置页、插件面板「刷新」，拓展页还没有插件列表时也补读一次。插件列表换新（设置包读回，或安装、删除、启停之后）就用 `list_playlist_players` 重读播放器类型，和 Vue 同步前端插件注册表的时机一致。打开设置页还读一次设置目录里的应用设置（`SettingsLoaded`）。安装、删除、启停、配置读写和数据目录走同一个 `PluginViewModel`。外部连接导出走 `SystemViewModel::write_binary_file`。仓库动作列表走 `RepositoryInteractionViewModel::list_repository_actions`，执行走 `MutsukiTaskViewModel::execute` 的 `momobako.repository.action.run`，完成后用 `FileBrowserViewModel::get_file_browser` 刷新当前目录。这些调用没有替身测试。圆角写到设置目录旁边的 `corners.json`，缺文件或坏 JSON 用平台默认，用户改过才写回。音频播放器偏好仍走阶段 5 的偏好文件，不写入 `ApplicationSettings.default_playlist_player_type_id`。日志页每次打开都用 `SystemViewModel::list_system_logs` 读最近 200 条历史日志（Vue `setActivePanel('logs')` 的 `loadSystemLogsInWorkspace`）。标了「已离屏」的行写明场景。
 
 设置页在页面是设置或设置错误时出现。动作、工具页和日志还要求启动就绪且主区有仓库；任务弹层只要侧栏在。工具页从空列表开始，读到插件清单后按清单里的工具页声明填上。剪贴板写入系统剪贴板，插件目录定位交给宿主。保存对话框和打开对话框会发出 Nana 的 `OpenFileDialog`，系统对话框的结果仍要设备验证。插件页的安装、删除和启停都经 `PluginsReplaced` 回写列表，不切页。设置页读到插件配置时留在设置页。非法数字不提交。日志里的插件和仓库选项按字典序。
 
@@ -197,7 +197,7 @@
 | `useCornerStyle` 圆角 | 样式或半径 | 写入 `corners.json` | 只接受 smooth 和 round；半径钳在 0–20；未知样式和坏数字忽略；缺文件不立刻写回 | “平滑” / “普通” | 已测试（未离屏） |
 | `Settings.vue` 后端计数 | 仓库列表成功 | 无 | 按后端插件累计，保留首次出现的顺序 | “本地 (2)” / “无” | 已测试（未离屏） |
 | `Settings.vue` 外部连接 | 复制或导出 | 有路径时 `write_binary_file`，没有替身；复制交给宿主剪贴板；导出先发 `OpenFileDialog` | 空值不复制；令牌取前 10 和后 6 位；取消导出不写文件；写出成功后记文件名；剪贴板写入失败才显示失败文案 | “Token 已复制。” / “复制失败：系统剪贴板写入失败” / “external-api.json 已导出。” / “导出失败：{原因}” | 已测试（未离屏） |
-| `Settings.vue` 设置包 | 启动结束、打开设置页、插件面板「刷新」，或拓展页还没有插件列表 | 五项读取（插件、钩子记录、缓存、API 设计、外部连接），没有替身；读回后重读播放器类型 | 任一失败则五份都不写入，保留上一份 | 插件管理面板的错误条写原文，例如“读取插件目录失败：拒绝访问。 (os error 5)” | 已离屏（`settings-error`，只走全败分支：和 Vue 场景一样插件目录一直读不到，启动结束和打开设置页两次都失败） |
+| `Settings.vue` 设置包 | 首屏启动第 4 步（读回来以前停在启动页，见阶段 1）、打开设置页、插件面板「刷新」，或拓展页还没有插件列表 | 五项读取（插件、钩子记录、缓存、API 设计、外部连接），没有替身；读回后重读播放器类型 | 任一失败则五份都不写入，保留上一份 | 插件管理面板的错误条写原文，例如“读取插件目录失败：拒绝访问。 (os error 5)” | 已离屏（`settings-error`，只走全败分支：和 Vue 场景一样插件目录一直读不到，启动结束和打开设置页两次都失败） |
 | `repository.select` | Vue 设置页监听前端插件 SDK 的插件事件 | 无 | Nana 不运行前端插件，没有这条事件，不做 | 无 | 不做 |
 | `PluginManagerPanel.vue` 分组和搜索 | 插件列表或关键词 | 无 | 分类顺序是来源、库类型、解析、预览、服务、未分类；未知分类进未分类；搜索不区分大小写 | “3 个插件” | 已测试（未离屏） |
 | `PluginManagerPanel.vue` 删除 | 用户插件确认，或非用户插件 | `delete_plugin`，没有替身 | 先进入待确认，取消不请求；非用户插件忽略；成功文案在列表替换后出现 | 确认框标题“删除插件”，按钮“删除”（忙时“删除中...”） / “插件已删除。” | 已测试（未离屏） |
@@ -246,7 +246,7 @@
 
 这些行由 `src-nana/src/shell/host_events.rs` 和 `workspace_refresh.rs` 覆盖，硬链接候选的静默刷新在 `files_tests.rs`。日志和结构更新从 `host_event_channel` 进入壳层。实时日志按 id 合并，时间再 id 降序，最多 500 条；暂停时不标记滚动。启动仍在加载且分类是 `repository.sync` 时，才把消息追加到启动日志；记录里的仓库和当前仓库都非空且不同则忽略。结构更新只在启动完成、仓库匹配且不是缺失仓库时刷新：目录树、智能文件夹、播放集、仓库动作、文件或回收站的静默目录重读，以及静默的仓库列表、摘要和硬链接候选。播放集和智能文件夹面板改为重读当前项。分类视图不按目录重读。静默重读失败只记日志，不把整页改成错误，也不弹出硬链接对话框。
 
-启动未完成或仓库已经缺失时仍忽略整次结构更新，不重置内容。这批路径的状态机测试已经覆盖，离屏场景不替代设备矩阵。
+工作区内容还没读好（首屏启动读完首屏目录以前，`WorkspaceState::content_loaded`）或仓库已经缺失时仍忽略整次结构更新，不重置内容；首屏启动只在等设置包的那段照常静默刷新，和 Vue 读完摘要以后一样。这批路径的状态机测试已经覆盖，离屏场景不替代设备矩阵。
 
 | 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
 | --- | --- | --- | --- | --- | --- |

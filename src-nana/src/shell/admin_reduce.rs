@@ -464,9 +464,9 @@ fn apply_bundle(
     external: Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>,
 ) {
     model.admin.loading_settings = false;
-    // 启动结束时读的设置包：成功失败都照 Vue 记下「应用配置与插件设置加载完成」和「首屏启动流程完成」。
-    let repo_id = model.workspace.active_repo_id.clone();
-    model.workspace.startup.note_settings_finished(repo_id.as_deref());
+    // 首屏启动在等的设置包：成功时插件列表换新、接着读播放器类型，启动等它回来；失败照 Vue 吃掉错误，启动就此结束。
+    let complete = plugins.is_ok() && hooks.is_ok() && cache.is_ok() && api.is_ok() && external.is_ok();
+    model.workspace.note_settings_loaded(complete);
     match (plugins, hooks, cache, api, external) {
         (Ok(plugins), Ok(hooks), Ok(cache), Ok(api), Ok(external)) => {
             publish_plugins(model, &plugins);

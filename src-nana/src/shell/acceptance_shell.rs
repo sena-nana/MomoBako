@@ -14,7 +14,9 @@ use super::super::input::InputMessage;
 use super::super::sidebar::GapMessage;
 use super::super::workspace::{WorkspaceEffect, WorkspaceRepository};
 use super::super::{ShellMessage, ShellViewModel, SidebarMessage};
-use super::base_scene::{acceptance_model, dir, file, settle, summary, Base, REPO_ID, REPO_NAME, REPO_PATH};
+use super::base_scene::{
+    acceptance_model, answer_admin_reads, dir, file, playlist_players, settle, summary, Base, REPO_ID, REPO_NAME, REPO_PATH,
+};
 
 /// Vue `error` 场景里同步命令抛出的错误。
 const SYNC_ERROR: &str = "无法读取仓库目录，请检查路径和权限";
@@ -55,12 +57,12 @@ pub(super) fn seed_error(model: &mut ShellViewModel) {
     settle(model);
 }
 
-/// 空库：资源库列表为空，启动完成后进空库页，侧栏只剩没有仓库时的提示。
+/// 空库：资源库列表为空，等完设置包和播放器类型、启动结束后进空库页，侧栏只剩没有仓库时的提示。
 pub(super) fn seed_empty(model: &mut ShellViewModel) {
     model.workspace.last_active_repo_id = Some(REPO_ID.into());
     let generation = model.workspace.prepare_initial_list();
-    model.workspace.apply_repository_list(Some(generation), Ok(Vec::new()));
-    model.bind_sidebar_repository();
+    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(Vec::new()) });
+    answer_admin_reads(model, &playlist_players(), None);
     settle(model);
 }
 
@@ -81,12 +83,12 @@ fn live_visual() -> ShellViewModel {
     .model()
 }
 
-/// Vue `missing`：唯一的资源库目录丢失，启动直接进缺失仓库页。
+/// Vue `missing`：唯一的资源库目录丢失，不同步，等完设置包和播放器类型就进缺失仓库页。
 fn missing() -> ShellViewModel {
     let mut model = acceptance_model();
     let generation = model.workspace.prepare_initial_list();
-    model.workspace.apply_repository_list(Some(generation), Ok(vec![repository("默认资源库", "missing")]));
-    model.bind_sidebar_repository();
+    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary("默认资源库", "missing")]) });
+    answer_admin_reads(&mut model, &playlist_players(), None);
     settle(&mut model);
     model
 }

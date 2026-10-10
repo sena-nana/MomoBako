@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use crate::shell::data_load_tests::{browser, snapshot, summary};
+use crate::shell::data_load_tests::{answer_settings, browser, snapshot, summary};
 use crate::shell::{ShellMessage, ShellViewModel, SidebarMessage, StartupStatus, SyncCounts, WorkspaceEffect};
 
 use super::LAST_ACTIVE_REPOSITORY_KEY;
@@ -35,12 +35,13 @@ fn cold_start(file: &std::path::Path, repositories: &[(&str, &str)]) -> ShellVie
     model
 }
 
-/// 把启动或换仓库剩下的三步答完：同步、摘要、首屏目录。
-fn finish_loading(model: &mut ShellViewModel, repo_id: &str) {
+/// 把首屏启动剩下的答完：同步、摘要、首屏目录，以及启动结束前等的设置包和播放器类型。
+fn finish_launch(model: &mut ShellViewModel, repo_id: &str) {
     let generation = model.workspace.list_generation;
     model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(SyncCounts::default()) });
     model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(repo_id)) });
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser(repo_id))));
+    answer_settings(model);
 }
 
 fn synced(effects: &[WorkspaceEffect]) -> Option<&str> {
@@ -76,7 +77,7 @@ fn a_cold_start_opens_the_remembered_repository() {
         log_detail(&model, "首屏启动已选定资源库。")
     );
 
-    finish_loading(&mut model, "repo-b");
+    finish_launch(&mut model, "repo-b");
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
     assert_eq!(model.repository_id.as_deref(), Some("repo-b"));
     assert!(!persists(&model.workspace.take_effects()), "记着的就是它，不重写");
@@ -112,7 +113,7 @@ fn switching_writes_the_new_repository_after_its_summary() {
     let dir = temp_dir("switch");
     let file = remembered_file(&dir, "alpha");
     let mut model = cold_start(&file, &[("alpha", "ready"), ("beta", "ready")]);
-    finish_loading(&mut model, "alpha");
+    finish_launch(&mut model, "alpha");
     model.workspace.take_effects();
 
     model.reduce(ShellMessage::Sidebar(SidebarMessage::OpenRepositorySwitcher));
@@ -139,7 +140,7 @@ fn switching_to_a_missing_repository_remembers_it_at_once() {
     let dir = temp_dir("missing");
     let file = remembered_file(&dir, "alpha");
     let mut model = cold_start(&file, &[("alpha", "ready"), ("gone", "missing")]);
-    finish_loading(&mut model, "alpha");
+    finish_launch(&mut model, "alpha");
     model.workspace.take_effects();
 
     model.reduce(ShellMessage::Sidebar(SidebarMessage::OpenRepositorySwitcher));
@@ -191,7 +192,7 @@ fn a_failed_write_does_not_disturb_startup() {
     fs::write(&blocker, "不是目录").expect("占位文件");
     let file = blocker.join("last-repository.json");
     let mut model = cold_start(&file, &[("repo-a", "ready")]);
-    finish_loading(&mut model, "repo-a");
+    finish_launch(&mut model, "repo-a");
     assert!(persists(&model.workspace.take_effects()));
     model.workspace.save_last_repository_file(&file);
     assert!(!file.exists());

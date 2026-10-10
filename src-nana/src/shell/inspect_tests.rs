@@ -521,6 +521,8 @@ fn search_route_appears_only_after_startup_with_a_repository() {
         tree: None,
         entries: Vec::new(),
     })));
+    assert_eq!(RouteKey::of(&model), RouteKey::Startup, "首屏启动还在等设置包");
+    crate::shell::data_load_tests::answer_settings(&mut model);
     model.workspace.panel = WorkspacePanel::Search;
     assert_eq!(RouteKey::of(&model), RouteKey::Search);
     model.workspace.panel = WorkspacePanel::Files;

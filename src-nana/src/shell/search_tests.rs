@@ -428,6 +428,7 @@ fn a_failed_switch_drops_the_pending_hit() {
     model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) });
     model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot("other", &[])) });
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser("other", "", &[]))));
+    crate::shell::data_load_tests::answer_settings(&mut model);
     assert_eq!(model.workspace.startup.status, super::super::super::StartupStatus::Ready);
     assert!(
         !model.files.take_effects().iter().any(|effect| matches!(effect, FilesEffect::Browse { path, .. } if path == "pics")),

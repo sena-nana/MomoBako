@@ -20,7 +20,9 @@ pub const SIDEBAR_WIDTH_KEY: &str = "momobako.sidebarWidth";
 
 #[path = "workspace_startup.rs"]
 mod startup;
-pub use startup::{IndexCounts, StartupLog, StartupMode, StartupState, StartupStatus, StartupStepItem, StartupStepState, SyncCounts};
+pub use startup::{
+    IndexCounts, SettingsWait, StartupLog, StartupMode, StartupState, StartupStatus, StartupStepItem, StartupStepState, SyncCounts,
+};
 #[path = "workspace_switch.rs"]
 mod switch;
 pub use switch::{RefreshRun, RefreshStage};
@@ -425,9 +427,13 @@ impl WorkspaceState {
         }
     }
 
-    /// 首屏目录到了：启动（含换仓库）结束，任务弹层的「加载资源库」完成；失败停在第 4 步。
+    /// 首屏目录到了：换仓库到这里结束、任务弹层的「加载资源库」完成；首屏启动接着等设置包（[`Self::finish_loading_run`]）。
+    /// 失败停在第 4 步。已经在等设置包时再来的目录不算。
     pub fn note_first_screen_finished(&mut self, result: Result<(), String>) {
-        if self.startup.status != StartupStatus::Loading || self.startup.current_step < 4 {
+        if self.startup.status != StartupStatus::Loading
+            || self.startup.current_step < 4
+            || self.startup.settings != SettingsWait::None
+        {
             return;
         }
         match result {
@@ -438,18 +444,45 @@ impl WorkspaceState {
                     "首屏启动首屏目录与关联数据加载完成。",
                     &[("step", Some("4")), ("playlistCount", Some(playlists.as_str()))],
                 );
-                self.startup.finish();
                 self.presence = RepositoryPresence::Ready;
-                self.snapshot_loading = false;
-                if self.startup.mode == StartupMode::Switch {
-                    self.operation.finish();
-                }
+                self.finish_loading_run();
             }
             Err(error) => {
                 eprintln!("Nana 读取首屏目录失败：{error}");
                 self.fail_startup(error);
             }
         }
+    }
+
+    /// 首屏启动等的设置包回来了（失败也算）。`players_requested`：插件列表换了新的、排下了播放器类型的读取，接着等它；
+    /// 否则首屏启动到这里结束。不是首屏启动在等的设置包（打开设置页、插件面板「刷新」）什么也不做。
+    pub fn note_settings_loaded(&mut self, players_requested: bool) {
+        if self.startup.settings != SettingsWait::Bundle {
+            return;
+        }
+        if players_requested {
+            self.startup.settings = SettingsWait::Players;
+        } else {
+            self.finish_launch();
+        }
+    }
+
+    /// 首屏启动等的播放器类型回来了（失败也算）：首屏启动结束。别的时候读回的播放器类型什么也不做。
+    pub fn note_players_loaded(&mut self) {
+        if self.startup.settings == SettingsWait::Players {
+            self.finish_launch();
+        }
+    }
+
+    fn finish_launch(&mut self) {
+        let repo_id = self.active_repo_id.clone();
+        self.startup.finish_launch(repo_id.as_deref());
+    }
+
+    /// 工作区的内容已经读好：启动结束了，或者首屏启动读完首屏目录、只在等设置包。Vue 这时已经换上了
+    /// `activeRepoId`，结构更新照常静默刷新，Nana 在等设置包的这段也一样，不丢掉外面的改动。
+    pub fn content_loaded(&self) -> bool {
+        self.startup.status == StartupStatus::Ready || self.startup.settings != SettingsWait::None
     }
 
     pub fn toggle_sidebar(&mut self) {

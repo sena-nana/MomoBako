@@ -144,11 +144,11 @@ impl Base {
     }
 }
 
-/// 回答启动排下的管理读取：绑定仓库时的仓库动作（Vue 模拟 IPC 答空列表）、启动结束时的设置包，
-/// 以及插件列表到了以后的播放器类型。`plugins_error` 有值时设置包读失败，插件列表没到也就不读播放器类型。
-/// 没排下的读取不编造应答，只记日志：说明产品启动已经不读它们了。
+/// 回答启动排下的管理读取：绑定仓库时的仓库动作（Vue 模拟 IPC 答空列表）、首屏启动在第 4 步等的设置包，
+/// 以及插件列表到了以后的播放器类型；这两样都回来，首屏启动才结束。`plugins_error` 有值时设置包读失败，插件列表
+/// 没到也就不读播放器类型。没排下的读取不编造应答，只记日志：说明产品启动已经不读它们了。
 /// 后台的硬链接候选和成员索引在夹具里都是空的，不回答也是同样的状态。
-fn answer_admin_reads(model: &mut ShellViewModel, players: &[PlaylistPlayerContribution], plugins_error: Option<&str>) {
+pub(super) fn answer_admin_reads(model: &mut ShellViewModel, players: &[PlaylistPlayerContribution], plugins_error: Option<&str>) {
     let effects = model.admin.take_effects();
     for effect in &effects {
         if let AdminEffect::LoadActions { repo_id } = effect {
@@ -156,7 +156,7 @@ fn answer_admin_reads(model: &mut ShellViewModel, players: &[PlaylistPlayerContr
         }
     }
     if !effects.iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)) {
-        eprintln!("Nana 验收底子：启动结束时没有读设置包");
+        eprintln!("Nana 验收底子：首屏启动没有读设置包");
         return;
     }
     if let Some(error) = plugins_error {
