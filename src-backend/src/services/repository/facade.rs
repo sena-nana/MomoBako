@@ -713,10 +713,7 @@ impl RepositoryState {
         browser::create_file(self, request)
     }
 
-    pub fn import_entries(
-        &self,
-        request: FileImportRequest,
-    ) -> Result<FileBrowserSnapshot, String> {
+    pub fn import_entries(&self, request: FileImportRequest) -> Result<FileImportResponse, String> {
         browser::import_entries_cancellable(self, request, &NeverCancelled)
     }
 
@@ -724,7 +721,7 @@ impl RepositoryState {
         &self,
         request: FileImportRequest,
         cancellation: &dyn CancellationCheck,
-    ) -> Result<FileBrowserSnapshot, String> {
+    ) -> Result<FileImportResponse, String> {
         browser::import_entries_cancellable(self, request, cancellation)
     }
 

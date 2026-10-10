@@ -93,7 +93,7 @@ impl DownloadTarget {
 }
 
 /// 来源目录要建成的播放集。标识是「来源-歌单」，名称取来源的歌单名、没有时用目录名，播放器类型取动作声明的、
-/// 默认音频顺序播放。来源载荷里没有歌单标识、条目也没有来源标识时 `playlist_id` 为空，点了只报错。
+/// 默认音频顺序播放。来源载荷里没有歌单标识、目录也没有来源标识时 `playlist_id` 为空，点了只报错。
 #[derive(Clone, Debug, PartialEq)]
 pub struct SourcePlaylist {
     pub playlist_id: Option<String>,
@@ -106,7 +106,7 @@ impl SourcePlaylist {
     /// 照 Vue `runPlaylistAction` 从动作声明和目录行算出要建的播放集。
     fn of(action: &Value, row: &FileRow) -> Self {
         let provider = row.provider_id.clone().unwrap_or_else(|| "source".into());
-        let item = source_number(row, "playlistId").map(|id| id.to_string()).or_else(|| row.provider_item_id.clone());
+        let item = source_identifier(row, "playlistId");
         Self {
             playlist_id: item.map(|item| format!("{provider}-{item}")),
             name: playlist_name(row),
@@ -116,27 +116,31 @@ impl SourcePlaylist {
     }
 }
 
-/// 来源下载在任务弹层里的进度行（Vue `runDownloadAction`）：种类是动作名；选好去处先是「准备下载 …」，
-/// 调用插件时单曲是「正在下载 …」。下载目录时 Vue 先列出目录里的文件再写「正在处理 N 个文件」，
-/// Nana 不列目录，停在「准备下载目录」。
+/// 来源下载在任务弹层里的进度行（Vue `runDownloadAction`）：种类是动作名；选好去处先是「准备下载 …」，调用插件时
+/// 「正在下载 …」。下载目录（歌单）也一样：Vue 先分页列出目录里的文件、写「正在处理 N 个文件」，把曲目作为 `tracks`
+/// 交给插件；Nana 不列目录、不带 `tracks`，由插件按歌单标识取来源里完整的歌单（理由见 `docs/nana-vue-parity.md`），
+/// 调用插件这一段就是在下载。
 #[derive(Clone, Debug, PartialEq)]
 pub struct DownloadProgress {
+    /// 动作名，例如「下载歌单」。
     pub label: String,
-    pub preparing: String,
-    pub running: Option<String>,
+    /// 下载的条目名：右键的那个文件或目录，收尾的提示和日志也用它。
+    pub subject: String,
 }
 
 impl DownloadProgress {
-    fn of(label: &str, row: &FileRow, operation: &str) -> Self {
-        if operation == "download-directory" {
-            Self { label: label.to_string(), preparing: "准备下载目录".into(), running: None }
-        } else {
-            Self {
-                label: label.to_string(),
-                preparing: format!("准备下载 {}", row.name),
-                running: Some(format!("正在下载 {}", row.name)),
-            }
-        }
+    fn of(label: &str, row: &FileRow) -> Self {
+        Self { label: label.to_string(), subject: row.name.clone() }
+    }
+
+    /// 选好去处时的进度行文案。
+    pub fn preparing(&self) -> String {
+        format!("准备下载 {}", self.subject)
+    }
+
+    /// 调用插件时的进度行文案。
+    pub fn running(&self) -> String {
+        format!("正在下载 {}", self.subject)
     }
 }
 
@@ -187,7 +191,7 @@ fn prepare(plugin: &PluginManifest, action: &Value, row: &FileRow, context: &Sou
                 .into_iter()
                 .map(|target| {
                     let payload = call_payload(row, &operation, context);
-                    let progress = DownloadProgress::of(&label, row, &operation);
+                    let progress = DownloadProgress::of(&label, row);
                     let plugin_id = plugin.plugin_id.clone();
                     let method = method.clone();
                     let (dispatch, unavailable) = match target {
@@ -289,7 +293,7 @@ fn entry_login_expired(row: &FileRow) -> bool {
 
 /// 调用插件的载荷，照 Vue 各动作的载荷：歌曲、歌单标识，音质，公开的来源载荷，以及当前资源库的本地缓存目录
 /// （`managedCacheRoot`，没有时写 null）；重新获取播放资源多一个 `forceRefresh`，下载多一个歌单名。下载的
-/// `destination` 选好去处以后再写。
+/// `destination` 选好去处以后再写。下载目录不带 `tracks`（Vue 带目录里列出的曲目），插件按歌单标识自己取。
 fn call_payload(row: &FileRow, operation: &str, context: &SourceContext) -> Value {
     let mut payload = Map::new();
     if let Some(song_id) = source_number(row, "songId") {
@@ -338,12 +342,35 @@ fn public_payload(payload: Option<&Value>) -> Value {
     Value::Object(public)
 }
 
+/// 条目在来源里的数字标识：先看来源载荷，再看元数据。都没有时，只有条目自己那一种标识退回它的来源标识
+/// （`providerItemId`，条目在来源里的标识）：单曲的 `songId`、歌单目录的 `playlistId`。Vue `sourceNumber` 不分键，
+/// 单曲没有 `playlistId` 时也拿歌曲的标识去填，这里不照抄。
 fn source_number(row: &FileRow, key: &str) -> Option<i64> {
     row.source_payload
         .as_ref()
         .and_then(|payload| payload.get(key))
         .and_then(number_of)
         .or_else(|| row.metadata.get(key).and_then(number_of))
+        .or_else(|| own_item_id(row, key).and_then(|id| id.parse().ok()))
+}
+
+/// 来源标识的文字（Vue `sourceNumber(..) ?? entry.providerItemId`）：数字标识照 [`source_number`]；条目自己那一种
+/// 标识不是数字时原样用它的来源标识。
+fn source_identifier(row: &FileRow, key: &str) -> Option<String> {
+    source_number(row, key).map(|id| id.to_string()).or_else(|| own_item_id(row, key).map(str::to_string))
+}
+
+/// `key` 是条目自己那一种标识时（文件是单曲的 `songId`，目录是歌单的 `playlistId`），条目的来源标识；空白的不算。
+fn own_item_id<'a>(row: &'a FileRow, key: &str) -> Option<&'a str> {
+    let own = match row.kind.as_str() {
+        "file" => "songId",
+        "directory" => "playlistId",
+        _ => return None,
+    };
+    if own != key {
+        return None;
+    }
+    row.provider_item_id.as_deref().map(str::trim).filter(|id| !id.is_empty())
 }
 
 fn number_of(value: &Value) -> Option<i64> {

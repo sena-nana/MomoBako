@@ -2,7 +2,8 @@
 //!
 //! 结构照 Vue `SecondaryPanel.vue`：仓库头 → 状态 → 快捷方式 → 快捷访问 → 动作 → 播放集 →
 //! 文件夹 → 智能文件夹，底部是设置、拓展、任务和日志。文件夹树、仓库弹层和对话框在子模块里。
-//! 状态是全局状态区（`status.rs`）：最近一次失败，没有失败时是忙碌行，再没有时是刷新文件夹树的同步进度。
+//! 状态是全局状态区（`status.rs`）：最近一次失败（要提醒的结果用警告色），没有时是忙碌行，再没有时是刷新文件夹树的
+//! 同步进度。
 //!
 //! 侧栏常驻：树只建一次，文字、当前态、禁用和计数按 [`SidebarSignals`] 绑定；可有可无的分组、
 //! 说明和角标用 `.visible`，节点留着、不占布局；列表用带键的 `each`。事件处理器只发意图消息，
@@ -133,33 +134,52 @@ fn sidebar_sections(signals: SidebarSignals, spin: Signal<f32>) -> AnyView {
 }
 
 /// 侧栏顶部的全局状态区，对应 `WorkspaceSidebarStatus.vue`：有失败时是错误条（`.workspace-state--error`），
-/// 没有失败、在读资源库或素材详情时是忙碌行（`.workspace-state`：转圈加「正在同步仓库状态」），
-/// 再没有时是刷新文件夹树的同步进度（`.workspace-state--progress`），都没有时整块藏起来、不占间距。
-/// 三块都留着，按投影互换。
+/// 要提醒的结果是警告色的提醒条，没有这两样、在读资源库或素材详情时是忙碌行（`.workspace-state`：转圈加
+/// 「正在同步仓库状态」），再没有时是刷新文件夹树的同步进度（`.workspace-state--progress`），都没有时整块藏起来、
+/// 不占间距。四块都留着，按投影互换。
 fn status_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
-    let failure = move || status.with(|status| match status {
-        StatusLine::Failure(message) => message.clone(),
-        _ => String::new(),
-    });
-    let mut copy = parts::label_text(failure(), 12.0, 400, Some(SemanticColorRole::Danger)).line_height(18.0);
+    (notice_bar(status, false), notice_bar(status, true), busy_line(status, spin), progress_line(status, spin)).into_any()
+}
+
+/// 失败条或提醒条：浅色语义底、同色 12px 字，文案可以折行。失败照 `.workspace-state--error`（`--err-soft` 底、
+/// `--err` 字）；提醒是 DESIGN.md 8.1 的 Warning（`--warn-soft` 底、`--warn` 字，和添加资源库弹层的提示一样）。
+fn notice_bar(status: Signal<StatusLine>, warning: bool) -> AnyView {
+    let message = move || {
+        status.with(|status| match status {
+            StatusLine::Failure(message) if !warning => message.clone(),
+            StatusLine::Warning(message) if warning => message.clone(),
+            _ => String::new(),
+        })
+    };
+    let role = if warning { SemanticColorRole::Warning } else { SemanticColorRole::Danger };
+    let mut copy = parts::label_text(message(), 12.0, 400, Some(role)).line_height(18.0);
     {
         let layout = Arc::make_mut(&mut copy.style.layout);
         layout.width = Some(LengthSpec::Fill);
         layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
     }
-    let error = widget(
-        Stack::column(0.0)
-            .padding_xy(8.0, 6.0)
-            .min_height(LengthSpec::Px(30.0))
-            .justify(nana_ui::runtime::JustifySpec::Center)
-            .radius(RadiusTier::Sm)
-            .painter(super::shell_tint::SoftFill::err())
-            .with_layout(state_margin),
-    )
-    .visible(move || status.with(|status| matches!(status, StatusLine::Failure(_))))
-    .children((widget(copy).prop::<String, fields::text::value>(failure).key("sidebar-status-error"),))
-    .key("sidebar-status");
-    (error, busy_line(status, spin), progress_line(status, spin)).into_any()
+    let bar = Stack::column(0.0)
+        .padding_xy(8.0, 6.0)
+        .min_height(LengthSpec::Px(30.0))
+        .justify(nana_ui::runtime::JustifySpec::Center)
+        .radius(RadiusTier::Sm)
+        .with_layout(state_margin);
+    let (bar, key, text_key) = if warning {
+        (bar.surface(SemanticColorRole::WarningSoft), "sidebar-status-warning", "sidebar-status-warning-text")
+    } else {
+        (bar.painter(super::shell_tint::SoftFill::err()), "sidebar-status", "sidebar-status-error")
+    };
+    widget(bar)
+        .visible(move || {
+            status.with(|status| match status {
+                StatusLine::Failure(_) => !warning,
+                StatusLine::Warning(_) => warning,
+                _ => false,
+            })
+        })
+        .children((widget(copy).prop::<String, fields::text::value>(message).key(text_key),))
+        .key(key)
+        .into_any()
 }
 
 /// 同步进度（`.workspace-state--progress`）：和忙碌行同一副底色和转圈，占满一行，左边是这一步的文案，

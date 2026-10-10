@@ -299,7 +299,7 @@ fn dispatch_import(
     };
     let tasks = services.tasks.clone();
     let executor = services.executor.clone();
-    let request = FileImportRequest { repo_id, parent_path: parent, source_paths: sources };
+    let request = FileImportRequest { repo_id, parent_path: parent, source_paths: sources, skip_existing: false };
     if let Err(error) = context.run_task(Task::new(async move {
         let result = executor.block_on(tasks.execute(PROTOCOL_ENTRY_IMPORT, request)).map(|_| ());
         protocol_message(result, false)

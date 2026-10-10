@@ -98,6 +98,16 @@ fn labels(actions: &[FilePluginAction]) -> Vec<&str> {
     actions.iter().map(|action| action.label.as_str()).collect()
 }
 
+/// 调用插件的那几种动作带的载荷；本地建播放集没有载荷。
+fn payload_of(action: &FilePluginAction) -> Option<&Value> {
+    match &action.dispatch {
+        FilePluginDispatch::Call { payload, .. }
+        | FilePluginDispatch::AskFolder { payload, .. }
+        | FilePluginDispatch::AskRepository { payload, .. } => Some(payload),
+        FilePluginDispatch::CreatePlaylist(_) => None,
+    }
+}
+
 /// 单曲：清理缓存和重新获取播放资源直接调用插件，载荷照 Vue 带上本地缓存目录（`managedCacheRoot`），网易云插件
 /// 据此清到、取到真正的播放缓存；不公开 cookie。下载没声明去处，分「到本地」「到其他资源库」两项，都先问去处。
 #[test]
@@ -119,7 +129,7 @@ fn track_actions_carry_the_managed_cache_root_and_split_downloads_by_target() {
             assert_eq!(payload["managedCacheRoot"], "D:/cache");
             assert_eq!(payload["playlistName"], "song", "没有歌单名时用条目名");
             assert!(payload.get("destination").is_none(), "去处选好以后再写");
-            assert_eq!(progress.preparing, "准备下载 song");
+            assert_eq!(progress.preparing(), "准备下载 song");
         }
         other => panic!("到本地不是先问目录：{other:?}"),
     }
@@ -148,7 +158,8 @@ fn a_declared_target_is_the_only_download_entry() {
             assert_eq!(method, "media.downloadPlaylistPackage");
             assert_eq!(payload["playlistId"], 3);
             assert_eq!(payload["playlistName"], "夜曲");
-            assert_eq!(progress.preparing, "准备下载目录");
+            assert!(payload.get("tracks").is_none(), "不列目录、不带曲目，插件按歌单标识取来源里完整的歌单");
+            assert_eq!((progress.preparing(), progress.running()), ("准备下载 夜曲合集".into(), "正在下载 夜曲合集".into()));
             assert_eq!(parent_path.as_deref(), Some("夜曲"), "导入到以歌单命名的文件夹");
         }
         other => panic!("不是先选资源库：{other:?}"),
@@ -207,6 +218,57 @@ fn playlist_from_directory_builds_a_local_playlist() {
     let actions = actions_for(&[manifest()], &directory, &ready());
     let FilePluginDispatch::CreatePlaylist(playlist) = &actions[1].dispatch else { panic!("不是本地建播放集") };
     assert_eq!(playlist.playlist_id, None, "两样标识都没有：点了只报错");
+}
+
+/// 来源载荷和元数据里没有标识时（第三方来源的条目），只有条目自己那一种标识退回它的来源标识（`providerItemId`）：
+/// 单曲的 `songId`、歌单目录的 `playlistId`。Vue `sourceNumber` 不分键，单曲的 `playlistId` 也填成歌曲标识、歌单
+/// 目录的 `songId` 也填成歌单标识，插件会拿错的标识去取；这里不填。
+#[test]
+fn only_the_entry_own_identifier_falls_back_to_the_provider_item_id() {
+    let mut track = row();
+    track.provider_item_id = Some("77".into());
+    track.source_payload = Some(serde_json::json!({"entryKind": "track"}));
+    let actions = actions_for(&[manifest()], &track, &ready());
+    assert_eq!(labels(&actions), ["清理播放缓存", "重新获取播放资源", "下载单曲到本地", "下载单曲到其他资源库"]);
+    for action in &actions {
+        let payload = payload_of(action).expect("单曲动作都调用插件");
+        assert_eq!(payload["songId"], 77, "{}：歌曲标识退回条目的来源标识", action.label);
+        assert!(payload.get("playlistId").is_none(), "{}：单曲不拿自己的标识去填歌单标识", action.label);
+    }
+
+    let mut folder = directory();
+    folder.provider_item_id = Some("55".into());
+    folder.source_payload = Some(serde_json::json!({"entryKind": "playlist-folder", "playlistName": "夜曲"}));
+    let actions = actions_for(&[manifest()], &folder, &ready());
+    let payload = payload_of(&actions[0]).expect("下载歌单调用插件");
+    assert_eq!(payload["playlistId"], 55, "歌单标识退回目录的来源标识");
+    assert!(payload.get("songId").is_none(), "歌单目录不拿自己的标识去填歌曲标识");
+    let FilePluginDispatch::CreatePlaylist(playlist) = &actions[1].dispatch else { panic!("不是本地建播放集") };
+    assert_eq!(playlist.playlist_id.as_deref(), Some("netease-55"));
+
+    folder.provider_item_id = Some("  ".into());
+    let actions = actions_for(&[manifest()], &folder, &ready());
+    let FilePluginDispatch::CreatePlaylist(playlist) = &actions[1].dispatch else { panic!("不是本地建播放集") };
+    assert_eq!(playlist.playlist_id, None, "空白的来源标识不算，点了只报错");
+}
+
+/// 老载荷没写条目种类：照 Vue `actionMatches` 的老规则，文件有歌曲标识才算单曲、目录有歌单标识才算歌单目录，
+/// 标识可以是条目自己的来源标识；文件的来源标识不会让它被当成歌单目录。
+#[test]
+fn legacy_payloads_match_by_the_entry_own_identifier() {
+    let mut track = row();
+    track.source_payload = Some(serde_json::json!({}));
+    track.provider_item_id = Some("77".into());
+    assert_eq!(labels(&actions_for(&[manifest()], &track, &ready())), ["清理播放缓存", "重新获取播放资源", "下载单曲到本地", "下载单曲到其他资源库"]);
+    track.provider_item_id = None;
+    assert!(actions_for(&[manifest()], &track, &ready()).is_empty(), "没有歌曲标识的文件不算单曲");
+
+    let mut folder = directory();
+    folder.source_payload = Some(serde_json::json!({"playlistName": "夜曲"}));
+    folder.provider_item_id = Some("55".into());
+    assert_eq!(labels(&actions_for(&[manifest()], &folder, &ready())), ["下载歌单", "创建播放列表"]);
+    folder.provider_item_id = None;
+    assert!(actions_for(&[manifest()], &folder, &ready()).is_empty(), "没有歌单标识的目录不算歌单目录");
 }
 
 /// 插件 SDK 只约定了五种 operation 和两种下载去处。约定以外的 operation 不出菜单，声明了 method 也不调用（Vue

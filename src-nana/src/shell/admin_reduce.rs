@@ -5,7 +5,6 @@
 
 use crate::backend::services::repository::{PluginConfigSnapshot, PluginManifest, RepositoryAction};
 
-use super::super::repo_operation::OperationPatch;
 use super::super::status::FailureSource;
 use super::super::workspace_refresh::SilentMessage;
 use super::super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
@@ -265,6 +264,9 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
             model.admin.push_effect(AdminEffect::CallPlugin { plugin_id, method, payload, repository_id, origin: PluginCallOrigin::FileMenu });
         }
         AdminMessage::FilePluginFinished { method, result } => finish_file_plugin(model, &method, result),
+        AdminMessage::DownloadFinished { run, result } => super::source_download::finish(model, run, result),
+        AdminMessage::LogsWritten(Ok(())) => {}
+        AdminMessage::LogsWritten(Err(error)) => eprintln!("Nana 系统日志没有写进去：{error}"),
         AdminMessage::BeginRepositoryDownload(download) => super::source_target::begin(model, download),
         AdminMessage::ChooseDownloadRepository(repo_id) => super::source_target::choose(model, &repo_id),
         AdminMessage::CancelDownloadRepository => super::source_target::cancel(model),
@@ -566,30 +568,16 @@ fn note_logs_cleared(model: &mut ShellViewModel, result: Result<(), String>) {
     }
 }
 
+/// 清理缓存、重新获取播放资源的结果。成功和 Vue 来源动作完成后的 `context.refreshRepo()` 一样重读资源库列表，再按
+/// 当前仓库同步、重读摘要和目录；失败写进文件列。下载的收尾在 `source_download.rs`。
 fn finish_file_plugin(model: &mut ShellViewModel, method: &str, result: Result<serde_json::Value, String>) {
-    let download = model.admin.take_download_operation(method);
     match result {
-        // 和 Vue 来源动作完成后的 `context.refreshRepo()` 一样重读资源库列表，再按当前仓库同步、重读摘要和目录。
-        // 下载的进度行照 Vue 写「下载完成」（有失败的条目时「下载完成，N 项失败」）再完成；刷新开始的「加载资源库」
-        // 会接着顶掉它。
-        Ok(payload) => {
+        Ok(_) => {
             model.files.error.clear();
-            if let Some(operation) = download {
-                let failed = super::source_target::failed_count(&payload);
-                if failed > 0 {
-                    eprintln!("Nana 来源下载有 {failed} 项失败：{method}");
-                }
-                let detail = if failed > 0 { format!("下载完成，{failed} 项失败") } else { "下载完成".into() };
-                model.operation.update(operation, OperationPatch::step(detail, 100.0).with_indeterminate(false));
-                model.operation.finish(operation);
-            }
             model.workspace.request_repository_refresh();
         }
         Err(error) => {
             eprintln!("Nana 文件插件动作失败：{method}：{error}");
-            if let Some(operation) = download {
-                model.operation.cancel(operation);
-            }
             model.files.error = if error.is_empty() { format!("{method} 调用失败。") } else { error };
         }
     }

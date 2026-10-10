@@ -13,6 +13,7 @@ import type {
   FileCreateRequest,
   FileDeleteRequest,
   FileImportRequest,
+  FileImportResponse,
   FileMoveRequest,
   EagleLibraryImportRequest,
   EagleLibraryImportResponse,
@@ -141,7 +142,7 @@ export function createFile(request: FileCreateRequest) {
 }
 
 export function importEntries(request: FileImportRequest) {
-  return invokeCommand<FileBrowserSnapshot>("import_entries", { request });
+  return invokeCommand<FileImportResponse>("import_entries", { request });
 }
 
 export function importArchiveEntries(request: FileArchiveImportRequest) {
