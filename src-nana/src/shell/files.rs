@@ -1,29 +1,61 @@
-//! 文件浏览与变更状态。
+//! 文件浏览与变更状态（文件表面的 ViewModel）。
 //!
 //! 对应 Vue `workspace/files.ts`、`fileOperations.ts`、
 //! `useFileBrowserPanelViewModel.ts`、`CopyTargetDialog.vue` 和
-//! `HardlinkCandidateDialog.vue`。分页、选择、只读虚拟视图和变更守卫在这里归约。
-//! 框选、修饰键、系统对话框、拖放、缩略图空闲预取和操作进度条不在这里完成。
-
-
-use std::fs;
-use std::path::{Path, PathBuf};
+//! `HardlinkCandidateDialog.vue`。这里放列表行、对话框、服务请求、消息和状态本身，归约按功能分在子模块：
+//! - `files_reduce.rs`：壳层入口、消息分派和 Escape 分层；
+//! - `files_browse.rs`：读目录、分页和静默重读；
+//! - `files_selection.rs`：单击、双击、右键和框选的选择规则；
+//! - `files_mutation.rs`：变更守卫、对话框提交和变更结果；
+//! - `files_hardlink.rs`：硬链接候选的读取、确认和跳过；
+//! - `files_export.rs`：资源库导出对话框；
+//! - `files_thumbnail.rs`：缩略图的空闲预取、尺寸写回和自定义缩略图；
+//! - `files_display.rs`：素材展示方式和它的持久化；
+//! - `files_operation.rs`：任务弹层「仓库操作」行上属于文件表面的部分。
+//!
+//! 框选手势、修饰键、系统对话框、拖放手势和缩略图解码不在这里完成。
 
 use crate::backend::services::repository::{FileBrowserEntry, FileBrowserSnapshot};
-use crate::settings;
 
 use super::repo_operation::OperationRequests;
 use super::workspace::{LibraryCategory, WorkspacePanel};
 
+#[path = "files_browse.rs"]
+mod browse;
+#[path = "files_display.rs"]
+mod display;
+#[path = "files_export.rs"]
+mod export;
+#[path = "files_hardlink.rs"]
+mod hardlink;
+#[path = "files_menu_branch.rs"]
+mod menu_branch;
+#[path = "files_mutation.rs"]
+mod mutation;
 #[path = "files_operation.rs"]
 mod operation;
-use operation::FilesOperation;
-pub(super) use operation::{FileOperation, ReadProgress};
+#[path = "files_reduce.rs"]
+mod reduce;
+#[path = "files_selection.rs"]
+mod selection;
+#[path = "files_thumbnail.rs"]
+mod thumbnail;
 
-/// 首屏分页，对应 `FILE_BROWSER_INITIAL_PAGE_SIZE`。
-pub const INITIAL_PAGE_SIZE: usize = 80;
-/// 继续加载的分页，对应 `FILE_BROWSER_APPEND_PAGE_SIZE`。
-pub const APPEND_PAGE_SIZE: usize = 160;
+#[path = "local_time.rs"]
+pub(crate) mod local_time;
+
+use browse::BrowsePending;
+use export::ExportDraft;
+use operation::FilesOperation;
+
+pub use display::{display_mode_path, DisplayMode};
+pub(crate) use hardlink::hardlink_label;
+pub use hardlink::HardlinkPrompt;
+pub use menu_branch::BranchSource;
+pub(crate) use menu_branch::MenuBranch;
+pub(super) use operation::{FileOperation, ReadProgress};
+pub use reduce::FilesLayer;
+pub(super) use reduce::reduce_message;
 
 /// 列表行。合并键是 `kind:path`，避免同名文件和文件夹互相覆盖。
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -130,74 +162,6 @@ pub struct VirtualQuery {
     pub rows: Vec<FileRow>,
 }
 
-/// 硬链接确认框只保留文案需要的字段。
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct HardlinkPrompt {
-    pub id: String,
-    pub new_path: String,
-    pub existing_path: String,
-    pub size_label: String,
-}
-
-impl HardlinkPrompt {
-    pub fn message(&self) -> String {
-        format!(
-            "{} 与 {} 内容哈希一致，大小 {}。确认后会将新文件加入硬链接关联。",
-            self.new_path, self.existing_path, self.size_label
-        )
-    }
-}
-
-/// 素材展示方式。未知值回到自适应。
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum DisplayMode {
-    #[default]
-    Adaptive,
-    Masonry,
-    Grid,
-    List,
-}
-
-impl DisplayMode {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Adaptive => "自适应",
-            Self::Masonry => "瀑布流",
-            Self::Grid => "网格",
-            Self::List => "列表",
-        }
-    }
-
-    pub fn storage_value(self) -> &'static str {
-        match self {
-            Self::Adaptive => "adaptive",
-            Self::Masonry => "masonry",
-            Self::Grid => "grid",
-            Self::List => "list",
-        }
-    }
-
-    /// 只接受 Vue 存下去的值和中文标签。空串和其他值都是自适应。
-    pub fn parse(raw: &str) -> Self {
-        match raw.trim() {
-            "adaptive" | "自适应" => Self::Adaptive,
-            "masonry" | "瀑布流" => Self::Masonry,
-            "grid" | "网格" => Self::Grid,
-            "list" | "列表" => Self::List,
-            other => {
-                if !other.is_empty() {
-                    eprintln!("Nana 未知的素材展示方式，改用自适应：{other}");
-                }
-                Self::Adaptive
-            }
-        }
-    }
-
-    pub fn is_list(self) -> bool {
-        self == Self::List
-    }
-}
-
 /// 点击行时的选择方式，由点下去时按着的修饰键决定（`input::HeldModifiers`）。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum SelectionMode {
@@ -254,16 +218,6 @@ impl FileContext {
 /// 仓库可写：状态不是 missing，且能力里有 `write`。
 pub fn repository_is_writable(status: &str, capabilities: &[String]) -> bool {
     status != "missing" && capabilities.iter().any(|capability| capability == "write")
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct BrowsePending {
-    repo_id: String,
-    path: String,
-    trash: bool,
-    append: bool,
-    /// 结构更新触发的重读。不打开加载态，失败也不把整页改成错误。
-    silent: bool,
 }
 
 /// 归约后交给宿主的服务请求。
@@ -426,73 +380,8 @@ pub struct FilesState {
 }
 
 impl FilesState {
-    /// 虚拟列表还有下一页时，空闲 `PREFETCH_IDLE_MS` 后再解码缩略图。
-    pub fn schedule_thumbnail_prefetch(&mut self, has_more: bool, now_ms: u64) {
-        self.prefetch_due_ms = has_more.then_some(now_ms.saturating_add(super::motion::PREFETCH_IDLE_MS));
-    }
-
-    pub fn poll_thumbnail_prefetch(&mut self, now_ms: u64, paths: &[String]) -> bool {
-        if self.prefetch_due_ms.is_some_and(|due| now_ms >= due) {
-            self.prefetch_due_ms = None;
-            if !paths.is_empty() {
-                self.effects.push(FilesEffect::DecodeThumbnails { paths: paths.to_vec() });
-            }
-            return true;
-        }
-        false
-    }
-
-    pub fn enqueue(&mut self, effect: FilesEffect) {
-        self.mutating = true;
-        self.effects.push(effect);
-    }
-
     pub fn take_effects(&mut self) -> Vec<FilesEffect> {
         std::mem::take(&mut self.effects)
-    }
-
-    /// 仓库动作的 `selectedCount` 只数多选路径，不含单独的主选。
-    pub(crate) fn selected_paths(&self) -> &[String] {
-        &self.selected
-    }
-
-    /// 测试直接放入多选路径。生产选择仍走文件消息。
-    #[cfg(test)]
-    pub(crate) fn set_selected_paths(&mut self, paths: Vec<String>) {
-        self.selected = paths;
-    }
-
-    /// 拖放移动复用文件阶段的移动请求。空白来源不进入进行中。
-    pub(crate) fn enqueue_move(&mut self, repo_id: String, sources: Vec<String>, parent: String) {
-        if sources.is_empty() {
-            return;
-        }
-        if repo_id.is_empty() {
-            eprintln!("Nana 拖放移动缺少仓库");
-            return;
-        }
-        self.begin(Some(FileOperation::step("移动文件", "移动到目标文件夹", 36.0, Some(82.0))));
-        self.effects.push(FilesEffect::Move { repo_id, sources, parent });
-    }
-
-    /// 拖放导入复用文件阶段的导入请求。空白来源不进入进行中。
-    pub(crate) fn enqueue_import(&mut self, repo_id: String, parent: Option<String>, sources: Vec<String>) {
-        if sources.is_empty() {
-            return;
-        }
-        if repo_id.is_empty() {
-            eprintln!("Nana 拖放导入缺少仓库");
-            return;
-        }
-        self.begin(Some(FileOperation::import()));
-        self.effects.push(FilesEffect::Import { repo_id, parent, sources });
-    }
-
-    /// 框选和拖放起点写入多选、主选和锚点。
-    pub(crate) fn set_drag_selection(&mut self, paths: Vec<String>, primary: Option<String>, anchor: Option<String>) {
-        self.selected = paths;
-        self.primary = primary;
-        self.anchor = anchor;
     }
 
     pub fn entry_names(&self) -> Vec<String> {
@@ -509,448 +398,18 @@ impl FilesState {
         }
         self.rows.clone()
     }
-
-    pub(super) fn current_hardlink(&self) -> Option<&HardlinkPrompt> {
-        self.hardlinks.iter().find(|prompt| !self.skipped_hardlinks.iter().any(|id| id == &prompt.id))
-    }
-
-    pub(super) fn can_create(&self, ctx: &FileContext) -> bool {
-        self.structure_allowed(ctx)
-    }
-
-    pub(super) fn can_import(&self, ctx: &FileContext) -> bool {
-        self.structure_allowed(ctx)
-    }
-
-    pub(super) fn can_transfer(&self, ctx: &FileContext) -> bool {
-        self.structure_allowed(ctx) && !self.selected.is_empty() && !self.selection_has_virtual()
-    }
-
-    pub(super) fn can_rename(&self, ctx: &FileContext) -> bool {
-        ctx.repo_id.is_some()
-            && ctx.writable
-            && !ctx.missing
-            && !ctx.trash
-            && !ctx.smart_folder
-            && !self.mutating
-            && self.selected.len() == 1
-            && !self.selection_has_virtual()
-    }
-
-    pub(super) fn can_delete(&self, ctx: &FileContext) -> bool {
-        ctx.repo_id.is_some()
-            && ctx.writable
-            && !ctx.missing
-            && !ctx.smart_folder
-            && !self.mutating
-            && !self.selected.is_empty()
-            && !self.selection_has_virtual()
-    }
-
-    pub(super) fn can_restore(&self, ctx: &FileContext) -> bool {
-        ctx.repo_id.is_some()
-            && ctx.writable
-            && ctx.trash
-            && !ctx.missing
-            && !self.mutating
-            && !self.selected.is_empty()
-            && !self.selection_has_virtual()
-    }
-
-    pub(super) fn can_empty_trash(&self, ctx: &FileContext) -> bool {
-        ctx.repo_id.is_some() && ctx.writable && ctx.trash && !ctx.missing && !self.mutating
-    }
-
-    pub(super) fn can_load_more(&self, ctx: &FileContext) -> bool {
-        !ctx.is_virtual()
-            && ctx.trash == self.trash
-            && ctx.repo_id.is_some()
-            && self.has_more
-            && !self.loading
-            && !self.loading_more
-            && !self.mutating
-    }
-
-    /// 替换进行中的浏览。上一页还没回来时，新的目录请求覆盖 pending，而不是被丢掉。
-    /// 面包屑和双击进入目录在 Vue 里是静默读取，任务弹层不出进度行。
-    pub(super) fn request_browse(&mut self, ctx: &FileContext, path: &str) -> bool {
-        self.queue_browse(ctx, path, false, false, ReadProgress::Silent)
-    }
-
-    /// 同 [`Self::request_browse`]，但按 `read` 在任务弹层出「读取目录」这一行（Vue 的非静默读取）。
-    pub(super) fn request_browse_reporting(&mut self, ctx: &FileContext, path: &str, read: ReadProgress) -> bool {
-        self.queue_browse(ctx, path, false, false, read)
-    }
-
-    pub(super) fn load_more(&mut self, ctx: &FileContext) -> bool {
-        if !self.can_load_more(ctx) {
-            return false;
-        }
-        let repo_id = ctx.repo_id.clone().unwrap_or_default();
-        let path = self.current_path.clone();
-        self.pending = Some(BrowsePending {
-            repo_id: repo_id.clone(),
-            path: path.clone(),
-            trash: self.trash,
-            append: true,
-            silent: false,
-        });
-        self.loading_more = true;
-        self.effects.push(FilesEffect::Browse {
-            repo_id,
-            path,
-            trash: self.trash,
-            offset: self.rows.len(),
-            limit: APPEND_PAGE_SIZE,
-            append: true,
-        });
-        true
-    }
-
-    /// 应用目录快照。pending 与仓库、路径或回收站不一致时保留原列表。
-    /// `pending == None` 表示启动或侧栏发起的替换。追加按 `kind:path` 去重。
-    /// `has_more` 看合并后的条数是否小于 `total_entries`；虚拟视图永远不再分页。
-    pub(super) fn apply_browser(&mut self, snapshot: &FileBrowserSnapshot, virtual_view: bool) -> bool {
-        let append = self.pending.as_ref().is_some_and(|pending| pending.append);
-        if let Some(pending) = &self.pending {
-            let same = pending.repo_id == snapshot.repo_id
-                && pending.path == normalize_path(&snapshot.current_path)
-                && pending.trash == (snapshot.special_location.as_deref() == Some("trash"));
-            if !same {
-                eprintln!("Nana 忽略过期的文件列表：{}", snapshot.repo_id);
-                self.finish_loading();
-                return false;
-            }
-        }
-        let incoming: Vec<FileRow> = snapshot.entries.iter().map(FileRow::from_entry).collect();
-        if append {
-            self.rows = merge_rows(&self.rows, &incoming);
-        } else {
-            self.rows = incoming;
-            self.virtual_rows.clear();
-        }
-        self.current_path = normalize_path(&snapshot.current_path);
-        self.trash = snapshot.special_location.as_deref() == Some("trash");
-        self.total_entries = snapshot.total_entries;
-        self.has_more = !virtual_view && self.rows.len() < snapshot.total_entries;
-        self.error.clear();
-        self.finish_loading();
-        if !append {
-            self.settle_operation(true);
-        }
-        let rows = self.rows.clone();
-        self.prune_against(&rows);
-        self.arm_thumbnail_prefetch();
-        true
-    }
-
-    /// 还有缩略图或下一页时，等空闲间隔再解码，不在快照到达的同一拍发出请求。
-    fn arm_thumbnail_prefetch(&mut self) {
-        let needs = self.has_more || !self.undecoded_thumbnail_paths().is_empty();
-        self.schedule_thumbnail_prefetch(needs, self.prefetch_clock);
-    }
-
-    pub fn undecoded_thumbnail_paths(&self) -> Vec<String> {
-        self.rows
-            .iter()
-            .filter(|row| !row.texture_ready)
-            .filter_map(|row| row.thumbnail_path.clone())
-            .filter(|path| !path.trim().is_empty())
-            .collect()
-    }
-
-    pub fn prefetch_pending(&self) -> bool {
-        self.prefetch_due_ms.is_some()
-    }
-
-    /// 实况帧把空闲时钟向前拨。没有待预取时停在原地。
-    pub fn tick_prefetch(&mut self, step_ms: u64) -> u64 {
-        if self.prefetch_due_ms.is_some() {
-            self.prefetch_clock = self.prefetch_clock.saturating_add(step_ms);
-        }
-        self.prefetch_clock
-    }
-
-    /// 用解码出的原始宽高替换布局。同一路径的行一起更新。
-    pub(super) fn note_thumbnail_sizes(&mut self, frames: &[super::thumbs::ThumbnailFrame]) {
-        for frame in frames {
-            if frame.natural_width == 0 || frame.natural_height == 0 {
-                continue;
-            }
-            for row in self.rows.iter_mut().chain(self.virtual_rows.iter_mut()) {
-                if row.thumbnail_path.as_deref() == Some(frame.path.as_str()) {
-                    row.pixel_width = frame.natural_width;
-                    row.pixel_height = frame.natural_height;
-                    row.texture_ready = true;
-                }
-            }
-        }
-    }
-
-    /// 静默重读当前目录。不改变加载文案和选择；虚拟视图直接返回。
-    pub(super) fn reload_silent(&mut self, ctx: &FileContext) -> bool {
-        if self.mutating {
-            eprintln!("Nana 文件变更进行中，跳过静默刷新");
-            return false;
-        }
-        if ctx.smart_folder || ctx.category_virtual {
-            eprintln!("Nana 虚拟视图不按目录静默刷新");
-            return false;
-        }
-        let Some(repo_id) = ctx.repo_id.clone() else {
-            eprintln!("Nana 静默刷新没有活动仓库");
-            return false;
-        };
-        let path = self.current_path.clone();
-        let trash = ctx.trash;
-        let limit = INITIAL_PAGE_SIZE.max(self.rows.len());
-        self.pending = Some(BrowsePending {
-            repo_id: repo_id.clone(),
-            path: path.clone(),
-            trash,
-            append: false,
-            silent: true,
-        });
-        self.effects.push(FilesEffect::Browse {
-            repo_id,
-            path,
-            trash,
-            offset: 0,
-            limit,
-            append: false,
-        });
-        true
-    }
-
-    /// 只有文件表面自己发起的加载失败才吃掉错误。启动失败仍交给壳层切到错误页。
-    /// 静默刷新失败只记日志，保留当前列表和页面。
-    pub(super) fn note_load_failed(&mut self, error: &str) -> bool {
-        if self.pending.as_ref().is_some_and(|pending| pending.silent) {
-            eprintln!("Nana 静默刷新目录失败：{error}");
-            self.pending = None;
-            return true;
-        }
-        if !self.loading && !self.loading_more {
-            return false;
-        }
-        eprintln!("Nana 读取文件列表失败：{error}");
-        self.error = error.to_string();
-        self.finish_loading();
-        self.settle_operation(false);
-        true
-    }
-
-    pub(super) fn set_virtual_rows(&mut self, rows: Vec<FileRow>) {
-        self.virtual_rows = rows;
-        let rows = self.virtual_rows.clone();
-        self.prune_against(&rows);
-    }
-
-    pub(super) fn reduce(&mut self, ctx: &FileContext, message: FilesMessage) {
-        match message {
-            FilesMessage::SetDisplayMode(mode) => {
-                self.display_mode = mode;
-                self.effects.push(FilesEffect::PersistDisplayMode);
-            }
-            FilesMessage::ActivateRow(path) => {
-                self.activate_row(ctx, &path, SelectionMode::Replace);
-            }
-            FilesMessage::OpenRow(path) => {
-                self.select_only = None;
-                self.click_load = None;
-                self.open_row(ctx, &path);
-            }
-            FilesMessage::OpenEntryMenu { path, x, y } => self.open_entry_menu(ctx, &path, x, y),
-            FilesMessage::CloseEntryMenu => {
-                self.entry_menu = None;
-                self.menu_branch = MenuBranch::default();
-                self.menu_pending = None;
-            }
-            FilesMessage::ArmMenuConfirm(item) => self.menu_pending = Some(item),
-            FilesMessage::MenuBranchChanged { branch, source, inside } if self.entry_menu.is_some() => self.menu_branch.note(source, branch, inside),
-            // 菜单关掉以后才到的进出（节点拆掉时的离开）不再记。
-            FilesMessage::MenuBranchChanged { .. } => {}
-            FilesMessage::ListResized(width) => self.note_list_width(width),
-            FilesMessage::ToggleTags { path, expanded } => self.tags_open = Some((path, !expanded)),
-            FilesMessage::SetTagDraft(value) => self.tag_draft = value,
-            // 这两条要改检视草稿，在 `reduce_message` 里转成检视消息。
-            FilesMessage::ToggleTagMenu | FilesMessage::SubmitTagDraft(_) => {}
-            FilesMessage::CopyText(text) => {
-                if text.is_empty() {
-                    eprintln!("Nana 没有可复制的文字");
-                } else {
-                    self.effects.push(FilesEffect::CopyText(text));
-                }
-            }
-            FilesMessage::RefreshThumbnail(path) => self.refresh_thumbnail(&path),
-            FilesMessage::OpenPath(path) => {
-                self.select_only = None;
-                self.click_load = None;
-                self.request_browse(ctx, &path);
-            }
-            FilesMessage::LoadMore => {
-                self.load_more(ctx);
-            }
-            FilesMessage::OpenDialog(dialog) => {
-                self.open_dialog(ctx, dialog);
-            }
-            FilesMessage::OpenEagle(mode) => {
-                self.open_eagle(ctx, &mode);
-            }
-            FilesMessage::ToggleImportMenu => self.toggle_import_menu(),
-            FilesMessage::ToggleEagleImport => self.toggle_eagle_menu(),
-            FilesMessage::SetCreateName(value) => self.create_name = value,
-            FilesMessage::SubmitCreateFile => {
-                self.submit_inline_file(ctx);
-            }
-            FilesMessage::DraftChanged(value) => self.set_draft(value),
-            FilesMessage::CloseDialog => {
-                self.close_dialog();
-            }
-            FilesMessage::SubmitDialog => {
-                self.submit_dialog(ctx);
-            }
-            FilesMessage::SetExportField { field, value } => self.set_export_field(&field, value),
-            FilesMessage::CloseExport => self.close_export(),
-            FilesMessage::SubmitExport => self.submit_export(ctx),
-            FilesMessage::ChooseExportOutput => {}
-            FilesMessage::ExportFinished(result) => self.note_export(result),
-            FilesMessage::DeleteSelected => {
-                self.delete_selected(ctx);
-            }
-            FilesMessage::RestoreSelected => {
-                self.restore_selected(ctx);
-            }
-            FilesMessage::RestoreAll => {
-                self.mutate_trash(ctx, "restoreAll", Vec::new(), None);
-            }
-            FilesMessage::EmptyTrash => {
-                self.mutate_trash(ctx, "empty", Vec::new(), None);
-            }
-            FilesMessage::SkipHardlink => {
-                self.skip_hardlink();
-            }
-            FilesMessage::ConfirmHardlink => {
-                self.confirm_hardlink(ctx);
-            }
-            FilesMessage::MutationSnapshot { result, created_name } => match result {
-                Ok(snapshot) => self.apply_mutation_snapshot(ctx, snapshot, created_name),
-                Err(error) => self.note_mutation_failed(error),
-            },
-            FilesMessage::ProtocolFinished { result, reload, hardlinks } => {
-                self.note_protocol_finished(ctx, result, reload, hardlinks);
-            }
-            FilesMessage::HardlinksLoaded(result) => self.note_hardlinks(result),
-            FilesMessage::HardlinksRefreshed(result) => self.note_hardlinks_silent(result),
-            FilesMessage::HardlinksChecked(Ok(prompts)) => self.note_hardlinks_synced(prompts),
-            FilesMessage::HardlinksChecked(Err(error)) => eprintln!("Nana 后台读取硬链接候选失败：{error}"),
-            FilesMessage::HardlinkConfirmed(result) => self.note_hardlink_confirmed(result),
-            FilesMessage::NoteError(error) => self.note_error(error),
-            FilesMessage::ThumbnailSaved { path, thumbnail_path, custom } => self.note_custom_thumbnail(&path, thumbnail_path, custom),
-            // 要读仓库和面板，在 `reduce_message` 里转成宿主拖放消息。
-            FilesMessage::HostDrop(_) => {}
-        }
-    }
-
-    /// 从展示方式文件读取。文件缺失、损坏或值未知时使用自适应。
-    pub fn load_display_mode_file(&mut self, path: &Path) {
-        match fs::read_to_string(path) {
-            Ok(raw) => self.display_mode = display_mode_from_file(&raw),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                self.display_mode = DisplayMode::Adaptive;
-            }
-            Err(error) => {
-                eprintln!("Nana 读取展示方式失败：{error}");
-                self.display_mode = DisplayMode::Adaptive;
-            }
-        }
-    }
-
-    pub fn save_display_mode_file(&self, path: &Path) {
-        if let Some(parent) = path.parent() {
-            if let Err(error) = fs::create_dir_all(parent) {
-                eprintln!("Nana 创建展示方式目录失败：{error}");
-            }
-        }
-        let body = format!("{{\"mode\":\"{}\"}}\n", self.display_mode.storage_value());
-        if let Err(error) = fs::write(path, body) {
-            eprintln!("Nana 保存展示方式失败：{error}");
-        }
-    }
-
-    fn structure_allowed(&self, ctx: &FileContext) -> bool {
-        ctx.repo_id.is_some()
-            && ctx.writable
-            && !ctx.missing
-            && !ctx.trash
-            && !ctx.smart_folder
-            && !ctx.category_virtual
-            && !self.mutating
-    }
-
-    /// 读一个目录的首页，替换进行中的浏览并清掉错误。`keep_selection` 时选择留着、读完按新列表修剪；
-    /// `allow_category` 时分类视图也能读（变更以后重读）；`read` 决定任务弹层出不出「读取目录」这一行。
-    fn queue_browse(&mut self, ctx: &FileContext, path: &str, keep_selection: bool, allow_category: bool, read: ReadProgress) -> bool {
-        if self.mutating {
-            eprintln!("Nana 文件变更进行中，不能切换目录");
-            return false;
-        }
-        if ctx.smart_folder || (ctx.category_virtual && !allow_category) {
-            eprintln!("Nana 虚拟视图不能按目录分页");
-            return false;
-        }
-        let Some(repo_id) = ctx.repo_id.clone() else {
-            eprintln!("Nana 目录浏览没有活动仓库");
-            return false;
-        };
-        let path = normalize_path(path);
-        let trash = ctx.trash;
-        self.pending = Some(BrowsePending {
-            repo_id: repo_id.clone(),
-            path: path.clone(),
-            trash,
-            append: false,
-            silent: false,
-        });
-        self.loading = true;
-        self.loading_more = false;
-        self.virtual_rows.clear();
-        if !keep_selection {
-            self.selected.clear();
-            self.primary = None;
-            self.anchor = None;
-        }
-        self.error.clear();
-        self.report_read(&path, trash, read);
-        self.effects.push(FilesEffect::Browse {
-            repo_id,
-            path,
-            trash,
-            offset: 0,
-            limit: INITIAL_PAGE_SIZE,
-            append: false,
-        });
-        true
-    }
-
-    fn finish_loading(&mut self) {
-        self.loading = false;
-        self.loading_more = false;
-        self.pending = None;
-    }
 }
 
-include!("files_actions.rs");
+/// 与 Vue `normalizeRepositoryRelativePath` 相同：去空白、反斜杠转正斜杠、去掉首尾斜杠。
+pub(super) fn normalize_path(path: &str) -> String {
+    path.trim().replace('\\', "/").trim_matches('/').to_string()
+}
 
-#[path = "files_selection.rs"]
-mod selection;
-#[path = "files_menu_branch.rs"]
-mod menu_branch;
-pub use menu_branch::BranchSource;
-pub(crate) use menu_branch::MenuBranch;
-
-#[path = "local_time.rs"]
-pub(crate) mod local_time;
+/// 变更请求里的父目录：根目录写成 `None`。
+fn parent_path(path: &str) -> Option<String> {
+    let path = normalize_path(path);
+    if path.is_empty() { None } else { Some(path) }
+}
 
 #[cfg(test)]
 #[path = "files_tests.rs"]

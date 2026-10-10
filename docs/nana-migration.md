@@ -20,7 +20,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 | --- | --- | --- |
 | 领域服务数据 | 当前目录下的 `.service-data` | `src-backend/src/services/runtime/mod.rs` |
 | 应用设置 | `%LOCALAPPDATA%\MomoBako\settings.json`，没有这个变量时依次退到 `%APPDATA%`、当前目录 | `src-nana/src/settings.rs` |
-| 侧栏、展示方式、圆角 | 设置文件旁的 `sidebar.json`、`file-display.json`、`corners.json` | `workspace.rs`、`files_actions.rs`、`admin_support.rs` |
+| 侧栏、展示方式、圆角 | 设置文件旁的 `sidebar.json`、`file-display.json`、`corners.json` | `workspace.rs`、`files_display.rs`、`admin_support.rs` |
 | 播放设置、播放会话、播放器偏好 | 设置文件旁的 `playback-settings.json`、`playback-sessions.json`、`playlist-player-preferences.json` | `player_support.rs` |
 | 主窗口位置、尺寸和最大化 | 应用数据目录下的 `com.momobako.desktop/nana-main-window-state.json` | `src-nana/src/window_state.rs` |
 
