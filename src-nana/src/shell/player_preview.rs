@@ -2,7 +2,7 @@
 //!
 //! 和 Vue `FilePreviewPane` 一样：预览音视频时，文件作为临时条目插到当前项后面并接管播放条
 //! （`playEntry`）；预览的正是已经装好的当前项时不重装，预览页跟着播放条那份会话走。
-//! 离开预览页后临时条目留作当前项继续播放。播放时钟只有一份，在这里每帧往前拨，
+//! 离开预览页后临时条目留作当前项继续播放。播放时钟只有一份，在这里每帧按真实流逝的时间往前拨，
 //! 到头按自然结束切下一项，图片按停留时长切。
 
 use crate::backend::services::repository::PlaybackSessionState;
@@ -154,13 +154,18 @@ impl PlayerState {
         self.set_playing(true, inspect);
     }
 
-    /// 播放时钟：播放中每帧往前拨 `step_ms`，把新进度写回预览页。到头（音视频到时长、
+    /// 播放时钟在走：在播放，而且当前项已经装好。宿主据此一直要帧，进度条和停留计时才跟得上真实时间。
+    pub(crate) fn clock_running(&self) -> bool {
+        self.session.status == "playing" && self.item_loaded()
+    }
+
+    /// 播放时钟：播放中每帧往前拨 `step_ms`（两帧之间真实流逝的毫秒数），把新进度写回预览页。到头（音视频到时长、
     /// 图片到停留时长）按自然结束切下一项，没有下一项就停在末尾。返回这一帧是只往前走还是切了项。
     ///
     /// 算法：只有一份时钟。条目没装好、不在播放时不动；到头先把会话停在时长处并停掉游标，
     /// 再交给 `play_next(true)`，单曲循环、随机和列表循环的取舍都在那里。
     pub(crate) fn advance_clock(&mut self, step_ms: u64, inspect: &mut InspectState) -> ClockStep {
-        if self.session.status != "playing" || !self.item_loaded() {
+        if !self.clock_running() {
             return ClockStep::Idle;
         }
         let duration = self.session.duration_ms.unwrap_or(0);

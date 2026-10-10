@@ -4,8 +4,11 @@
 //! 的工作区起步（`acceptance_base.rs`），状态经过真实消息归约。
 
 use super::{InspectEffect, ShellPage, ShellViewModel};
+use crate::frame_clock::FrameStep;
 
-/// 等检视延时最多推进的帧数。一帧 16ms，产品的搜索等 250ms、自动保存等 260ms。
+/// 离屏场景没有真实帧时钟，一帧按 16ms 推进。
+const SCENE_FRAME: FrameStep = FrameStep::millis(16);
+/// 等检视延时最多推进的帧数：64 帧约 1 秒，产品的搜索等 250ms、自动保存等 260ms。
 const TIMER_FRAMES: usize = 64;
 
 /// 按页面填上对应的产品表面。加载页保持启动步骤，其余页面进入已有仓库或空库。
@@ -42,7 +45,7 @@ fn seed_base(model: &mut ShellViewModel) {
 /// 同一批里别的请求和场景无关，一起丢掉。等满 `TIMER_FRAMES` 帧还没有就返回空。
 fn await_inspect_effect<T>(model: &mut ShellViewModel, pick: impl Fn(InspectEffect) -> Option<T>) -> Option<T> {
     for _ in 0..TIMER_FRAMES {
-        super::poll_timers(model);
+        super::poll_timers(model, SCENE_FRAME);
         if let Some(found) = model.inspect.take_effects().into_iter().find_map(&pick) {
             return Some(found);
         }

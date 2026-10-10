@@ -127,17 +127,18 @@ impl LiveTimers {
     }
 }
 
-/// 准备阶段拨一帧，返回计时器或播放时钟有没有动。
+/// 准备阶段拨一帧，返回计时器或播放时钟有没有动。搜索和自动保存的延时按 `step.ui_ms` 走，
+/// 播放时钟（音视频进度、图片停留）按 `step.media_ms` 走，见 `frame_clock.rs`。
 ///
 /// 搜索、保存这类计时器触发和播放切项会改界面结构，标脏让随后整体同步；只是播放进度往前走时
 /// 不标脏，进度和时间由热信号跟上。
-pub(crate) fn poll_timers(model: &mut super::super::ShellViewModel) -> bool {
+pub(crate) fn poll_timers(model: &mut super::super::ShellViewModel, step: crate::frame_clock::FrameStep) -> bool {
     let writable = model.workspace.active_repository().is_some_and(|repository| {
         super::super::files::repository_is_writable(&repository.status, &repository.capabilities)
     });
     let repo_id = model.workspace.active_repo_id.clone();
-    let fired = model.inspect.poll_own(16, writable, repo_id.as_deref());
-    let playback = super::bridge::advance_playback(model, 16);
+    let fired = model.inspect.poll_own(step.ui_ms, writable, repo_id.as_deref());
+    let playback = super::bridge::advance_playback(model, step.media_ms);
     if fired || playback == ClockStep::Changed {
         model.mark_surface_dirty();
     }

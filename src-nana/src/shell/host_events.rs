@@ -44,16 +44,14 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
     None
 }
 
-/// 实时日志并入管理列表。同步分类在启动加载中才进入启动日志。
+/// 实时日志并入管理列表。同步分类在启动加载中才进入启动日志，明细是记录的 `context`。
 fn note_log(model: &mut ShellViewModel, record: SystemLogRecord) {
-    let sync_log = record.category == SYNC_LOG_CATEGORY;
-    let record_repo = record.source.repo_id.clone();
-    let level = record.level.clone();
-    let message = record.message.clone();
+    let mirrored = (record.category == SYNC_LOG_CATEGORY)
+        .then(|| (record.source.repo_id.clone(), record.level.clone(), record.message.clone(), record.context.clone()));
     model.admin.merge_log(record);
-    if !sync_log {
+    let Some((record_repo, level, message, context)) = mirrored else {
         return;
-    }
+    };
     let active = model.workspace.active_repo_id.as_deref().unwrap_or("");
     if let Some(repo_id) = record_repo.as_deref() {
         if !repo_id.is_empty() && !active.is_empty() && repo_id != active {
@@ -61,7 +59,7 @@ fn note_log(model: &mut ShellViewModel, record: SystemLogRecord) {
             return;
         }
     }
-    model.workspace.startup.append_sync_log(&level, message);
+    model.workspace.startup.append_sync_log(&level, message, &context);
 }
 
 /// 只在启动完成后刷新当前仓库。缺失仓库和别的仓库直接返回。

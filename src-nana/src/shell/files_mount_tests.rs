@@ -429,6 +429,34 @@ fn failed_media_preview(path: &str, error: &str) -> ShellViewModel {
     model
 }
 
+/// 打开 `path` 的预览，素材详情到了、音视频还没读回来：预览框是准备卡。
+fn loading_media_preview(path: &str) -> ShellViewModel {
+    let mut model = scene("live-files-plain");
+    model.reduce(ShellMessage::SelectFile { path: path.into(), asset_id: Some(path.replace('/', "-")) });
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(media_detail(path))));
+    model
+}
+
+/// 视频按文件类型画，不按有没有画面：没有画面（离屏没有宿主纹理、只解出音轨）时画缩略图或视频图标，不画
+/// 唱片舞台、不写「通用音频」「暂无歌词」；有画面时画画面。准备卡视频写「准备媒体」（Vue `media-preview`），
+/// 音频写「准备音频」（`audioPreview.js`）。
+#[test]
+fn video_previews_never_fall_into_the_audio_stage() {
+    let mut model = scene("preview-no-player");
+    let window = laid_out(&model);
+    assert!(!has_key(&window, "inspect-audio-stage"), "视频没有画面时不该画唱片舞台");
+    assert!(!has_label(&window, "通用音频") && !has_label(&window, "暂无歌词"));
+    assert!(has_key(&window, "inspect-fallback-icon"), "视频没有画面时画视频图标");
+    assert!(has_label(&window, "没有可用于播放此媒体的插件"), "播放条照 Vue 写没有播放插件");
+
+    model.preview_token = Some("video:clip.avi:0:2".into());
+    model.preview_pixels = Some(crate::shell::PreviewPixels { width: 2, height: 2, rgba: vec![255; 16] });
+    assert!(has_key(&laid_out(&model), "inspect-video"), "有画面时画画面");
+
+    assert!(has_label(&laid_out(&loading_media_preview("movies/clip.mp4")), "准备媒体"));
+    assert!(has_label(&laid_out(&loading_media_preview("music/track-01.mp3")), "准备音频"));
+}
+
 /// 音视频预览失败就近写在预览框里：照 Vue 预览插件的失败浮层替换唱片舞台，红色标题下一行原因。
 /// Nana 自己的「没有原生解码器」和某格式「解码失败」都这样；视频的标题是「无法预览该媒体」。
 /// 这类失败不进侧栏的全局状态区。

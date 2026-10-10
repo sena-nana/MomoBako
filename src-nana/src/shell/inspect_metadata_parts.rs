@@ -16,7 +16,7 @@ use nana_ui::{ButtonKind, ControlSize};
 use nana_ui_core::Icon;
 
 use super::super::files::FilesMessage;
-use super::super::files_view::bind::GlyphIconField;
+use super::super::field_bind::GlyphIcon;
 use super::super::files_view::style::{self, ButtonLook};
 use super::super::inspect::InspectMessage;
 use super::super::inspect_asmr::{self, AsmrMessage, CandidateCard};
@@ -49,7 +49,7 @@ pub(super) fn tags_row(signals: MetadataSignals) -> AnyView {
                     .prop::<String, fields::text::value>(meta)
                     .key("inspect-tag-group-count"),
                 widget(IconGlyph::new(untrack(chevron)).size(14.0).role(SemanticColorRole::Muted))
-                    .prop::<Icon, GlyphIconField>(chevron)
+                    .prop::<Icon, GlyphIcon>(chevron)
                     .key("inspect-tag-group-icon"),
             )),
         )))

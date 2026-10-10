@@ -1,8 +1,11 @@
 //! 文件右键里的来源插件动作。
 //!
+//! 清单 `contributes.source.entryActions[]` 的 operation 只有插件 SDK 约定的五种（`SourceEntryActionOperation`，
+//! `docs/api-design.md`）：宿主负责每一种的目录选择、进度、导入和刷新，声明不能让宿主执行别的命令。
 //! 能直接调用的方法接到现有 `call_plugin`。下载先要系统目录对话框，选好目录才带上目录调用。
 //! 「创建播放列表」（`playlist-from-directory`）照 Vue `runPlaylistAction` 不调用插件：在本地建一个以来源
-//! 歌单命名的播放集（已经有就不建），把这个目录加进去，再刷新资源库（`admin_reduce.rs`）。
+//! 歌单命名的播放集（已经有就不建），把这个目录加进去，再刷新资源库（`admin_reduce.rs`）。约定以外的 operation
+//! 和没写 scope 的声明不出菜单，只记日志（Vue 把约定以外的 operation 一律当成「创建播放列表」，是缺陷）。
 
 use serde_json::{Map, Value};
 
@@ -91,22 +94,26 @@ pub fn actions_for(plugins: &[PluginManifest], row: &FileRow) -> Vec<FilePluginA
             if !matches_row(action, row) {
                 continue;
             }
-            let Some(prepared) = prepare(plugin, action, row) else {
-                eprintln!("Nana 文件插件动作没有可执行入口：{}", plugin.plugin_id);
-                continue;
-            };
-            actions.push(prepared);
+            if let Some(prepared) = prepare(plugin, action, row) {
+                actions.push(prepared);
+            }
         }
     }
     actions
 }
 
+/// 按 operation 把声明换成能执行的动作。要调用插件的 operation 找不到方法、或者 operation 不在约定里时返回
+/// `None` 并记下原因。
 fn prepare(plugin: &PluginManifest, action: &Value, row: &FileRow) -> Option<FilePluginAction> {
     let action_id = text(action, "actionId").unwrap_or_else(|| "action".into());
     let label = text(action, "label").unwrap_or_else(|| action_id.clone());
     let operation = text(action, "operation").unwrap_or_default();
     let value = format!("plugin/{}/{}", plugin.plugin_id, action_id);
     let method = action_method(plugin, action, &operation);
+    if method.is_none() && matches!(operation.as_str(), "clear-cache" | "refresh-playback" | "download-entry" | "download-directory") {
+        eprintln!("Nana 文件插件动作没有可调用的方法：{}/{action_id}（{operation}）", plugin.plugin_id);
+        return None;
+    }
     let dispatch = match operation.as_str() {
         "clear-cache" | "refresh-playback" => {
             let method = method?;
@@ -122,12 +129,10 @@ fn prepare(plugin: &PluginManifest, action: &Value, row: &FileRow) -> Option<Fil
             }
         }
         "playlist-from-directory" => FilePluginDispatch::CreatePlaylist(SourcePlaylist::of(action, row)),
-        _ if method.is_some() => FilePluginDispatch::Call {
-            plugin_id: plugin.plugin_id.clone(),
-            method: method.unwrap_or_default(),
-            payload: call_payload(action, row, &operation),
-        },
-        _ => return None,
+        other => {
+            eprintln!("Nana 文件插件动作的 operation 不在插件约定里，不出菜单：{}/{action_id}（{other}）", plugin.plugin_id);
+            return None;
+        }
     };
     Some(FilePluginAction { value, label, dispatch })
 }
@@ -154,9 +159,11 @@ fn action_method(plugin: &PluginManifest, action: &Value, operation: &str) -> Op
         .map(str::to_string)
 }
 
+/// 声明和这一行对得上：`scope` 和条目类型相同（Vue `action.scope !== entry.kind` 就跳过，没写 scope 的声明不出），
+/// 声明了来源时来源相同，声明了 `entryKind` 时来源载荷的条目种类相同（老载荷按歌曲、歌单标识认）。
 fn matches_row(action: &Value, row: &FileRow) -> bool {
     let scope = action.get("scope").and_then(|value| value.as_str()).unwrap_or("");
-    if !scope.is_empty() && scope != row.kind {
+    if scope != row.kind {
         return false;
     }
     if let Some(provider) = text(action, "providerId") {
@@ -363,5 +370,26 @@ mod tests {
         let actions = actions_for(&[manifest()], &directory);
         let FilePluginDispatch::CreatePlaylist(playlist) = &actions[0].dispatch else { panic!("不是本地建播放集") };
         assert_eq!(playlist.playlist_id, None, "两样标识都没有：点了只报错");
+    }
+
+    /// 插件 SDK 只约定了五种 operation。约定以外的值不出菜单，声明了 method 也不调用（Vue 一律当成「创建播放列表」，
+    /// 拿单曲也会建播放集，是缺陷）；没写 scope 的声明也不出（Vue 要求 scope 和条目类型相同）。
+    #[test]
+    fn declarations_outside_the_sdk_contract_are_not_offered() {
+        let mut plugin = manifest();
+        plugin.contributes = serde_json::json!({
+            "source": {
+                "media": { "clearCacheMethod": "media.clearTrackCache" },
+                "entryActions": [
+                    { "actionId": "rename-remote", "label": "改远端名", "scope": "file", "entryKind": "track", "operation": "rename-remote", "method": "media.renameTrack" },
+                    { "actionId": "mystery", "label": "神秘动作", "scope": "file", "entryKind": "track", "operation": "mystery" },
+                    { "actionId": "no-scope", "label": "清理播放缓存", "entryKind": "track", "operation": "clear-cache" },
+                    { "actionId": "clear", "label": "清理播放缓存", "scope": "file", "entryKind": "track", "operation": "clear-cache" }
+                ]
+            }
+        });
+        let actions = actions_for(&[plugin], &row());
+        let labels: Vec<&str> = actions.iter().map(|action| action.value.as_str()).collect();
+        assert_eq!(labels, ["plugin/momobako.netease.source/clear"], "只剩约定里、写了 scope 的那一条");
     }
 }

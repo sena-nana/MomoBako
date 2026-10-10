@@ -233,7 +233,7 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 
 搜索、设置和管理页改常驻时遇到的：
 
-- 控件表里没有的可绑定字段要自己写 `FieldWrite`：`ScrollView.follow_end`、`TextInput.read_only`、`Button.icon`、整份 `NodeStyle`（`admin::bind`；文件页另有一份 `StyleField` 和 `Button.icon` 在 `files_bind.rs`），以及按地址重新编码的 `QrCode`（`source_auth_page::QrPayload`）。
+- 控件表里没有的可绑定字段要自己写 `FieldWrite`：`ScrollView.follow_end`、`TextInput.read_only`（`admin::bind`），以及按地址重新编码的 `QrCode`（`source_auth_page::QrPayload`）。不止一处页面要绑的 `Button.icon`（`ButtonIcon`）、整份 `NodeStyle`（`StyleField`）和 `IconGlyph.icon`（`GlyphIcon`）各只有一份，在 `field_bind.rs`，各页的 `bind` 模块转出去用。
 - （已修）滚动范围（`scroll_content_extent`）原来是全部后代布局盒的并集，不在里层的滚动区或裁剪盒处停下：滚动区里再套一个滚动区时，里层溢出的内容会撑出外层的滚动范围，外层能滚进一片空白。日志页只好改用不滚的 `home_fixed`，窗口矮时内容被裁掉。NanaUI `941df646d` 起范围只算到最近的裁剪盒，日志页改回 `home_scroll`，`home_fixed` 已删。
 - `css!` 的 `min-width: 0` 除了 `min_width` 还写 `allow_shrink`，和构建器的 `min_width(Px(0))` 字段不完全相同；现在布局不读它，画面一样。
 - `StorePath` 没有 `with_untracked`，同步里比较 Store 的现值用 `untrack(|| store.with(..))`。

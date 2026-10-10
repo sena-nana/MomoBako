@@ -7,7 +7,8 @@
 //!
 //! 有 `&mut ShellViewModel` 的归约直接调槽位；文件、工作台和侧栏这些只拿得到自己状态的子状态机把请求
 //! 排进 [`OperationRequests`]，归约结束时由壳层按顺序交给槽位（[`RepositoryOperation::apply`]）。
-//! 爬升和收起的时钟由宿主在准备帧里拨（[`RepositoryOperation::tick`]），和别的计时器一样一帧 16 ms。
+//! 爬升和收起的时钟由宿主在准备帧里拨（[`RepositoryOperation::tick`]），和别的计时器一样按两帧之间
+//! 真实流逝的时间走（`frame_clock.rs`）。
 
 use super::tree_sync::now_ms;
 

@@ -27,7 +27,8 @@ use super::super::view_part_sidebar::project::{
 };
 use super::super::view_part_overlay::session::Projected;
 use super::super::{ShellMessage, ShellViewModel, SidebarMessage};
-use super::parts::{self, bound_hint, group_header, group_title, tree_action, ActiveTone, GlyphIcon};
+use super::super::field_bind::GlyphIcon;
+use super::parts::{self, bound_hint, group_header, group_title, tree_action, ActiveTone};
 use super::super::player_view::key_part;
 use super::{group, refresh_icon, sidebar_message};
 

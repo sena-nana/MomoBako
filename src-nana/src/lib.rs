@@ -7,7 +7,7 @@
 use nana_ui::runtime::{DocumentId, FrameworkError, Task};
 use nana_ui::{
     ApplicationIdentity, ApplicationState, ApplicationWindow, DiagnosticsConfig, NanaApplication,
-    GpuTexture, RuntimeApplication, RuntimeProgramContext, RuntimeProgramUpdate,
+    HostTexture, RuntimeApplication, RuntimeProgramContext, RuntimeProgramUpdate,
 };
 
 pub mod shell;
@@ -20,6 +20,7 @@ mod sidebar_dispatch;
 mod sync_dispatch;
 mod task_watch;
 mod window_host;
+pub(crate) mod frame_clock;
 mod host_bridge;
 mod window_state;
 mod drag_out;
@@ -44,10 +45,11 @@ use backend::services::repository::{
     SyncRequest,
 };
 pub mod settings;
+mod thumbnail_cache;
 mod thumbnail_host;
 pub mod appearance;
 
-use thumbnail_host::{PendingThumb, ThumbnailGpu};
+use thumbnail_host::ThumbnailHost;
 
 /// Nana 宿主应用状态，持有共享领域 Runtime 和原生壳层 ViewModel。
 pub struct MomoBakoApplication {
@@ -55,8 +57,8 @@ pub struct MomoBakoApplication {
     shell: ShellViewModel,
     repositories_load_scheduled: bool,
     preview_gpu: Option<NativePreviewGpu>,
-    pub(crate) thumbnail_gpu: Vec<ThumbnailGpu>,
-    pub(crate) pending_thumbs: Vec<PendingThumb>,
+    /// 缩略图纹理：等上传的像素和已经登记的纹理，见 `thumbnail_host.rs`。
+    pub(crate) thumbnails: ThumbnailHost<HostTexture>,
     host: window_host::HostSession,
     /// 宿主报告的系统深浅色，「跟随系统」时用。
     system_appearance: Option<nana_ui_platform::SystemAppearance>,
@@ -68,9 +70,9 @@ pub struct MomoBakoApplication {
     view: Option<ShellView>,
 }
 
+/// 已经登记在 `file-preview` 槽上的预览画面：纹理由宿主纹理表持有，这里记下是哪一张，同一张画面不再登记。
 pub(crate) struct NativePreviewGpu {
     pub(crate) token: String,
-    pub(crate) texture: GpuTexture,
     pub(crate) width: u32,
     pub(crate) height: u32,
 }
@@ -82,8 +84,7 @@ impl Default for MomoBakoApplication {
             shell: ShellViewModel::default(),
             repositories_load_scheduled: false,
             preview_gpu: None,
-            thumbnail_gpu: Vec::new(),
-            pending_thumbs: Vec::new(),
+            thumbnails: ThumbnailHost::default(),
             host: window_host::HostSession::default(),
             system_appearance: None,
             applied_appearance: None,
@@ -145,8 +146,7 @@ impl ApplicationState for MomoBakoApplication {
             shell,
             repositories_load_scheduled: false,
             preview_gpu: None,
-            thumbnail_gpu: Vec::new(),
-            pending_thumbs: Vec::new(),
+            thumbnails: ThumbnailHost::default(),
             host: window_host::HostSession::default(),
             system_appearance,
             applied_appearance: None,
@@ -199,10 +199,12 @@ impl ApplicationState for MomoBakoApplication {
         window: &mut ApplicationWindow,
         context: &RuntimeProgramContext<Self::Message>,
     ) {
-        if crate::shell::poll_timers(&mut self.shell) {
+        let step = self.host.frames.step(std::time::Instant::now());
+        if crate::shell::poll_timers(&mut self.shell, step) {
             inspect_dispatch::dispatch_inspect_effects(self, context);
         }
-        window_host::prepare_motion(&mut self.shell, self.view.as_mut(), window);
+        window_host::prepare_motion(&mut self.shell, self.view.as_mut(), window, step);
+        self.host.frames.note_demand(window.demand);
         for request in sidebar_dispatch::dispatch_prepared_browses(&mut self.shell) {
             sidebar_dispatch::dispatch_browse_request(self, context, request);
         }
@@ -349,7 +351,7 @@ fn dispatch_workspace_effects(
                 if let Err(error) = context.run_task(Task::new(async move {
                     let result = executor
                         .block_on(tasks.execute(PROTOCOL_REPOSITORY_SYNC, SyncRequest { repo_id }))
-                        .map(|_| ());
+                        .map(|(output, _)| shell::SyncCounts::from_output(&output));
                     ShellMessage::RepositorySynced { generation, result }
                 })) {
                     eprintln!("Nana 资源库同步任务提交失败：{error}");

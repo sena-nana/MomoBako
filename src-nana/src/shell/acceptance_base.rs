@@ -19,7 +19,7 @@ use crate::backend::services::repository::{
 use super::super::admin::{AdminEffect, AdminMessage};
 use super::super::files::DisplayMode;
 use super::super::sidebar::SidebarTree;
-use super::super::{ShellMessage, ShellPage, ShellViewModel, SidebarMessage};
+use super::super::{ShellMessage, ShellPage, ShellViewModel, SidebarMessage, SyncCounts};
 use super::plugin_fixtures::{bundle_failed, bundle_loaded, bundled_plugins};
 
 pub(super) const REPO_ID: &str = "acceptance-repo";
@@ -89,7 +89,8 @@ impl Base {
         let mut repositories = vec![summary(self.name, "ready")];
         repositories.extend(self.others.iter().cloned());
         model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(repositories) });
-        model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(()) });
+        let scanned_files = self.assets().len() as i64;
+        model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(SyncCounts { scanned_files, ..SyncCounts::default() }) });
         model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(self.snapshot()) });
         model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser(self.entries.clone()))));
         answer_admin_reads(model, &self.players, self.plugins_error);

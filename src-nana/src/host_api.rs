@@ -2,29 +2,22 @@
 //!
 //! ViewModel 把外部打开、文件拖出和最小化到托盘排成 `HostRequest`，由窗口宿主（`host_bridge.rs`）
 //! 执行；标题栏的窗口动作经 `WindowCommand` 映射成平台窗口命令。文件对话框直接排 NanaUI 平台命令
-//! （`shell/input.rs`），不经这里。页面因此不需要取得窗口对象。播放器插件的媒体能力和播放会话控制器
+//! （`shell/input.rs`），不经这里。页面因此不需要取得窗口对象。播放器的媒体控制和播放会话控制器
 //! 也在这里。
 
 use crate::backend::services::repository::PlaybackSessionState;
 
-/// 播放器插件只提供媒体能力，播放会话状态和生命周期由宿主控制器拥有。
+/// 播放器只提供媒体控制，播放会话状态由宿主控制器拥有。装载（经仓库服务读字节、在任务里解码）和卸下
+/// （停播放、清会话）由播放器状态机自己做（`shell/player_clip.rs`、`shell/player.rs`），不经这里。
 pub trait PlaybackMediaPlugin {
-    fn load(&mut self, source: &str) -> Result<PlaybackMediaCapabilities, String>;
     fn play(&mut self) -> Result<(), String>;
     fn pause(&mut self) -> Result<(), String>;
     fn seek(&mut self, position_ms: u64) -> Result<(), String>;
     fn set_volume(&mut self, volume: f32) -> Result<(), String>;
-    fn dispose(&mut self);
 }
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct PlaybackMediaCapabilities {
-    pub duration_ms: Option<u64>,
-    pub can_seek: bool,
-    pub can_volume: bool,
-}
-
-/// 单一 Runtime 播放会话控制器，所有失败都会进入可解释的 failed 状态。
+/// 单一 Runtime 播放会话控制器：播放条和系统媒体键的播放、暂停、跳转和音量都经它落到播放器上
+/// （`shell/wav_player.rs` 的 `drive`），所有失败都会进入可解释的 failed 状态。
 pub struct PlaybackSessionController<P> {
     plugin: P,
     state: PlaybackSessionState,
@@ -37,20 +30,6 @@ impl<P: PlaybackMediaPlugin> PlaybackSessionController<P> {
 
     pub fn state(&self) -> &PlaybackSessionState {
         &self.state
-    }
-
-    pub fn load(&mut self, source: &str) -> Result<(), String> {
-        match self.plugin.load(source) {
-            Ok(capabilities) => {
-                self.state.duration_ms = capabilities.duration_ms;
-                self.state.can_seek = capabilities.can_seek;
-                self.state.can_volume = capabilities.can_volume;
-                self.state.status = "paused".into();
-                self.state.error = None;
-                Ok(())
-            }
-            Err(error) => self.fail(error),
-        }
     }
 
     pub fn play(&mut self) -> Result<(), String> {
@@ -82,11 +61,6 @@ impl<P: PlaybackMediaPlugin> PlaybackSessionController<P> {
         self.plugin.set_volume(volume).map_err(|error| self.fail_message(error))?;
         self.state.volume = volume;
         Ok(())
-    }
-
-    pub fn dispose(&mut self) {
-        self.plugin.dispose();
-        self.state.status = "ended".into();
     }
 
     fn fail<T>(&mut self, error: String) -> Result<T, String> {
@@ -175,14 +149,6 @@ mod tests {
     }
 
     impl PlaybackMediaPlugin for MockPlayer {
-        fn load(&mut self, _: &str) -> Result<PlaybackMediaCapabilities, String> {
-            Ok(PlaybackMediaCapabilities {
-                duration_ms: Some(120_000),
-                can_seek: true,
-                can_volume: true,
-            })
-        }
-
         fn play(&mut self) -> Result<(), String> {
             if self.fail_play { Err("播放器插件不可用".into()) } else { Ok(()) }
         }
@@ -195,35 +161,40 @@ mod tests {
             self.volume = volume;
             Ok(())
         }
-
-        fn dispose(&mut self) {}
     }
 
-    #[test]
-    fn playback_controller_owns_state_and_records_plugin_failure() {
-        let state = PlaybackSessionState {
+    fn paused(can_seek: bool) -> PlaybackSessionState {
+        PlaybackSessionState {
             session_id: "session-1".into(),
             repo_id: "repo-1".into(),
             playlist_id: "playlist-1".into(),
             playlist_item_id: Some("item-1".into()),
-            status: "idle".into(),
+            status: "paused".into(),
             current_time_ms: 0,
-            duration_ms: None,
+            duration_ms: Some(120_000),
             volume: 1.0,
-            can_seek: false,
-            can_volume: false,
+            can_seek,
+            can_volume: true,
             error: None,
             updated_at: "now".into(),
-        };
-        let mut controller = PlaybackSessionController::new(
-            MockPlayer { fail_play: true, volume: 1.0 },
-            state,
-        );
-        controller.load("track.mp3").expect("load should expose plugin capabilities");
-        assert_eq!(controller.state().status, "paused");
-        assert!(controller.play().is_err());
-        assert_eq!(controller.state().status, "failed");
-        assert_eq!(controller.state().error.as_deref(), Some("播放器插件不可用"));
+        }
+    }
+
+    /// 装好的条目：控制成功时控制器改会话，播放器报错或不支持的控制都进 failed 并留下原因。
+    #[test]
+    fn playback_controller_owns_state_and_records_plugin_failure() {
+        let mut controller = PlaybackSessionController::new(MockPlayer { fail_play: false, volume: 1.0 }, paused(true));
+        controller.seek(30_000).expect("能跳转");
+        controller.set_volume(1.5).expect("能调音量");
+        controller.play().expect("能播放");
+        assert_eq!((controller.state().status.as_str(), controller.state().current_time_ms, controller.state().volume), ("playing", 30_000, 1.0));
+
+        let mut failing = PlaybackSessionController::new(MockPlayer { fail_play: true, volume: 1.0 }, paused(false));
+        assert!(failing.play().is_err());
+        assert_eq!(failing.state().status, "failed");
+        assert_eq!(failing.state().error.as_deref(), Some("播放器插件不可用"));
+        assert!(failing.seek(1_000).is_err());
+        assert_eq!(failing.state().error.as_deref(), Some("当前播放器不支持进度控制"));
     }
 
     /// 只开 http、https、mailto、tel；盘符路径、`file:`、自定义协议和脚本协议都不开。

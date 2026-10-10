@@ -10,7 +10,7 @@ use nana_ui::runtime::view::{computed, each, fields, signal, widget, AnyView, Fi
 use nana_ui::runtime::{Activate, AlignSpec, IconButton, JustifySpec, LengthSpec, ListItem, ScrollAxes, ScrollView, Stack};
 use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
 
-use super::super::hot::FillPercentField;
+use super::super::hot::{self, FillPercentField, OpacityField};
 use super::super::view_part_overlay::session::Projected;
 use super::super::{ShellMessage, ShellViewModel};
 use super::icons;
@@ -72,6 +72,7 @@ impl TaskPopoverView {
 pub(crate) fn task_popover(model: &ShellViewModel) -> Option<AnyView> {
     let view = signal(TaskPopoverView::project(model)?);
     Projected::register(view, TaskPopoverView::project);
+    let pulse = Pulse { signal: hot::current(|signals| signals.pulse), rest: model.motion.pulse_opacity() };
     let header = widget(style::spread(8.0, AlignSpec::Center).with_layout(|layout| layout.min_height = Some(LengthSpec::Px(24.0))))
         .children((
             widget(label("任务", 13.0, 700, Role::Text)).key("admin-task-title"),
@@ -93,7 +94,7 @@ pub(crate) fn task_popover(model: &ShellViewModel) -> Option<AnyView> {
     let keys = computed(move || view.with(|view| view.rows.iter().map(|row| row.key.clone()).collect::<Vec<_>>()));
     let list = widget(scroll)
         .visible(move || view.with(|view| !view.rows.is_empty()))
-        .children((each(keys, Clone::clone, move |key: String| task_item(view, key)).gap(10.0).key("admin-task-list"),))
+        .children((each(keys, Clone::clone, move |key: String| task_item(view, key, pulse)).gap(10.0).key("admin-task-list"),))
         .key("admin-task-list-scroll")
         .into_any();
     let popover = pad(column(10.0), 10.0, 10.0, 10.0, 10.0)
@@ -168,8 +169,21 @@ fn close_button() -> IconButton {
     button
 }
 
+/// 不确定进度条填充的呼吸：挂载时取到的热信号，取不到（不经 `ShellView` 建树）时用这一刻的值。
+#[derive(Clone, Copy)]
+struct Pulse {
+    signal: Option<Signal<f32>>,
+    rest: f32,
+}
+
+impl Pulse {
+    fn opacity(&self) -> f32 {
+        self.signal.map_or(self.rest, |signal| signal.get())
+    }
+}
+
 /// 一个任务：`bg` 底、`border-soft` 边线、sm 圆角、内边距 9；来源加进度条。字段按键从投影里取。
-fn task_item(view: Signal<TaskPopoverView>, key: String) -> AnyView {
+fn task_item(view: Signal<TaskPopoverView>, key: String, pulse: Pulse) -> AnyView {
     let pick = {
         let key = key.clone();
         move |read: fn(&TaskRowView) -> String| {
@@ -182,16 +196,18 @@ fn task_item(view: Signal<TaskPopoverView>, key: String) -> AnyView {
             widget(label(String::new(), 12.0, 600, Role::Faint))
                 .key(format!("admin-task-source-{key}"))
                 .prop::<String, fields::text::value>(pick(|row| row.source.clone())),
-            progress_bar(view, &key, pick(|row| row.label.clone()), pick(|row| row.detail.clone())),
+            progress_bar(view, &key, pulse, pick(|row| row.label.clone()), pick(|row| row.detail.clone())),
         ))
         .key(format!("admin-task-{key}"))
         .into_any()
 }
 
-/// `ProgressBar.vue`：6 高的药丸轨道，填充至少 18 宽；下面是标签、细节和百分比，间距 7。
+/// `ProgressBar.vue`：6 高的药丸轨道，填充至少 18 宽；下面是标签、细节和百分比，间距 7。不确定进度
+/// （`.progress-bar--indeterminate`）不写百分比，填充按 `progress-pulse` 呼吸（减少动态效果时不呼吸）。
 fn progress_bar(
     view: Signal<TaskPopoverView>,
     key: &str,
+    pulse: Pulse,
     task_label: impl Fn() -> String + Send + 'static,
     detail: impl Fn() -> String + Send + 'static,
 ) -> AnyView {
@@ -199,6 +215,10 @@ fn progress_bar(
     let fill_id = id.clone();
     let fill = move || view.with(|view| view.rows.iter().find(|row| row.key == fill_id).map_or(0.0, |row| row.fill));
     let percent = move || view.with(|view| view.rows.iter().find(|row| row.key == id).and_then(|row| row.percent));
+    let breathing = {
+        let percent = percent.clone();
+        move || if percent().is_none() { pulse.opacity() } else { 1.0 }
+    };
     let track = widget(
         style::rounded(Stack::row(0.0), None)
             .surface(Role::Subtle)
@@ -214,7 +234,9 @@ fn progress_bar(
         layout.min_width = Some(LengthSpec::Px(18.0));
         layout.height = Some(LengthSpec::Fill);
     }))
-    .prop::<f32, FillPercentField>(fill),))
+    .prop::<f32, FillPercentField>(fill)
+    .prop::<f32, OpacityField>(breathing)
+    .key(format!("admin-task-fill-{key}")),))
     .into_any();
     let meta = vec![
         widget(style::label_lh(String::new(), 12.0, 600, Role::Text, 1.3))

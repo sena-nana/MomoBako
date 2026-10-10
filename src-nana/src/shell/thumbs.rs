@@ -21,9 +21,17 @@ pub fn content_aspect(width: u32, height: u32) -> f32 {
     }
 }
 
+/// 宿主纹理槽的前缀。
+const SLOT_PREFIX: &str = "thumb:";
+
 /// 宿主纹理槽。同一路径始终对应同一槽，方便重复挂载。
 pub fn thumbnail_slot(path: &str) -> String {
-    format!("thumb:{path}")
+    format!("{SLOT_PREFIX}{path}")
+}
+
+/// 槽对应的缩略图文件；不是缩略图槽或文件为空时为 `None`。
+pub fn slot_file(slot: &str) -> Option<&str> {
+    slot.strip_prefix(SLOT_PREFIX).filter(|path| !path.is_empty())
 }
 
 /// 解码后的缩略图。布局用原始宽高，纹理用缩小后的像素。

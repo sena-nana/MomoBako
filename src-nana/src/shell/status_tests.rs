@@ -156,7 +156,7 @@ fn repository_reads_are_busy_until_their_result_arrives() {
     model.reduce(ShellMessage::SelectWorkspaceRepository(repo_id));
     assert!(model.workspace.snapshot_loading && super::busy(&model));
     let generation = model.workspace.list_generation;
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(()) });
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) });
     assert!(model.workspace.snapshot_loading, "同步完了还在读摘要");
     model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Err("索引损坏".into()) });
     assert!(!model.workspace.snapshot_loading);

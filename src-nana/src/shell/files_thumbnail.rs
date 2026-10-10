@@ -1,8 +1,12 @@
-//! 文件表面的缩略图状态：目录读回来以后等空闲再解码，解码出的原始宽高写回列表行，
-//! 刷新单条缩略图，以及自定义缩略图保存以后的写回。
+//! 文件表面的缩略图状态：挂着的缩略图等空闲再解码，解码出的原始宽高写回列表行，宿主卸掉的纹理
+//! 写回成没有纹理，刷新单条缩略图，以及自定义缩略图保存以后的写回。
 //!
-//! 解码在调度里做（`files_dispatch.rs`、`thumbs.rs`），纹理由宿主按 `thumb:{path}` 注册；
-//! 这里只排 `DecodeThumbnails` 请求，记下哪些行的纹理已经能画。
+//! 解码在调度里做（`files_dispatch.rs`、`thumbs.rs`），纹理由宿主按 `thumb:{path}` 登记和回收
+//! （`thumbnail_host.rs`、`thumbnail_cache.rs`）；这里只排 `DecodeThumbnails` 请求，记下哪些行的纹理
+//! 已经能画。宿主报告了挂着的缩略图以后，只解码挂着的：滚出视口的行纹理可能被回收，再滚回来时按挂着的
+//! 重新解码，不在视口外整目录解码。
+
+use std::collections::{HashMap, HashSet};
 
 use super::super::motion::PREFETCH_IDLE_MS;
 use super::super::thumbs::ThumbnailFrame;
@@ -18,7 +22,7 @@ impl FilesState {
         if self.prefetch_due_ms.is_some_and(|due| now_ms >= due) {
             self.prefetch_due_ms = None;
             if !paths.is_empty() {
-                self.effects.push(FilesEffect::DecodeThumbnails { paths: paths.to_vec() });
+                self.request_decode(paths.to_vec());
             }
             return true;
         }
@@ -31,13 +35,67 @@ impl FilesState {
         self.schedule_thumbnail_prefetch(needs, self.prefetch_clock);
     }
 
+    /// 还要解码的缩略图文件：列表行和智能文件夹行里没有纹理、没请求过的，宿主报告过挂着的缩略图时
+    /// 只取挂着的。同一个文件只出现一次。
     pub fn undecoded_thumbnail_paths(&self) -> Vec<String> {
+        let mut seen = HashSet::new();
         self.rows
             .iter()
+            .chain(&self.virtual_rows)
             .filter(|row| !row.texture_ready)
-            .filter_map(|row| row.thumbnail_path.clone())
-            .filter(|path| !path.trim().is_empty())
+            .filter_map(thumbnail_file)
+            .filter(|path| !self.decode_requested.contains(*path))
+            .filter(|path| self.mounted_thumbnails.as_ref().is_none_or(|mounted| mounted.contains(*path)))
+            .filter(|path| seen.insert(*path))
+            .map(str::to_string)
             .collect()
+    }
+
+    /// 宿主报告文档里挂着的缩略图文件。和上次不同时记下；挂着的里面有还没解码的，就重新等一个空闲间隔
+    /// 再解码（滚动中一直推迟，停下 `PREFETCH_IDLE_MS` 以后才解码）。
+    pub(crate) fn note_mounted_thumbnails(&mut self, mounted: HashSet<String>) {
+        if self.mounted_thumbnails.as_ref() == Some(&mounted) {
+            return;
+        }
+        self.mounted_thumbnails = Some(mounted);
+        self.mounted_version = self.mounted_version.wrapping_add(1);
+        if !self.undecoded_thumbnail_paths().is_empty() {
+            self.schedule_thumbnail_prefetch(true, self.prefetch_clock);
+        }
+    }
+
+    /// 挂着的缩略图文件。宿主还没报告过时为 `None`。
+    pub(crate) fn mounted_thumbnails(&self) -> Option<&HashSet<String>> {
+        self.mounted_thumbnails.as_ref()
+    }
+
+    /// 挂着的缩略图变过几次。
+    pub(crate) fn mounted_version(&self) -> u64 {
+        self.mounted_version
+    }
+
+    /// 当前列表行和智能文件夹行引用的缩略图文件。不在这里面、也不挂着的纹理可以立刻卸掉。
+    pub(crate) fn listed_thumbnails(&self) -> HashSet<String> {
+        self.rows.iter().chain(&self.virtual_rows).filter_map(thumbnail_file).map(str::to_string).collect()
+    }
+
+    /// 宿主卸掉了这些缩略图的纹理：对应的行回到类型图标，再挂出来时重新解码。返回有没有行变了。
+    pub(crate) fn note_thumbnails_released(&mut self, paths: &[String]) -> bool {
+        let released: HashSet<&str> = paths.iter().map(String::as_str).collect();
+        let mut changed = false;
+        for row in self.rows.iter_mut().chain(self.virtual_rows.iter_mut()) {
+            if row.texture_ready && thumbnail_file(row).is_some_and(|path| released.contains(path)) {
+                row.texture_ready = false;
+                changed = true;
+            }
+        }
+        changed
+    }
+
+    /// 宿主没能把这些缩略图上传成纹理：行回到类型图标，记成已经试过，不在每次空闲时重试。
+    pub(crate) fn note_thumbnails_failed(&mut self, paths: &[String]) -> bool {
+        self.decode_requested.extend(paths.iter().cloned());
+        self.note_thumbnails_released(paths)
     }
 
     pub fn prefetch_pending(&self) -> bool {
@@ -55,6 +113,7 @@ impl FilesState {
     /// 用解码出的原始宽高替换布局。同一路径的行一起更新。
     pub(in crate::shell) fn note_thumbnail_sizes(&mut self, frames: &[ThumbnailFrame]) {
         for frame in frames {
+            self.decode_requested.remove(&frame.path);
             if frame.natural_width == 0 || frame.natural_height == 0 {
                 continue;
             }
@@ -93,7 +152,7 @@ impl FilesState {
             return;
         }
         if let Some(thumb) = thumbnail_path.filter(|item| !item.trim().is_empty()) {
-            self.effects.push(FilesEffect::DecodeThumbnails { paths: vec![thumb] });
+            self.request_decode(vec![thumb.trim().to_string()]);
         }
     }
 
@@ -103,8 +162,46 @@ impl FilesState {
             eprintln!("Nana 刷新缩略图缺少路径");
             return;
         }
-        self.effects.push(FilesEffect::DecodeThumbnails { paths: vec![path.to_string()] });
+        self.request_decode(vec![path.trim().to_string()]);
     }
+
+    /// 换上新列表时，同一个缩略图文件已经有纹理的行接着用它：重读目录不让卡片闪回类型图标，也不重新解码
+    /// （Vue 的 `<img>` 地址不变时同样不重新加载）。新条目的元数据没给宽高时沿用解码出的原始宽高。
+    pub(super) fn carry_thumbnails(&self, incoming: &mut [FileRow]) {
+        let ready: HashMap<&str, (u32, u32)> = self
+            .rows
+            .iter()
+            .chain(&self.virtual_rows)
+            .filter(|row| row.texture_ready)
+            .filter_map(|row| thumbnail_file(row).map(|path| (path, (row.pixel_width, row.pixel_height))))
+            .collect();
+        for row in incoming.iter_mut() {
+            let Some(&(width, height)) = thumbnail_file(row).and_then(|path| ready.get(path)) else {
+                continue;
+            };
+            row.texture_ready = true;
+            if row.pixel_width == 0 || row.pixel_height == 0 {
+                row.pixel_width = width;
+                row.pixel_height = height;
+            }
+        }
+    }
+
+    /// 列表换了以后，解码请求只留还在列表里的：换回来的目录里解码失败过的缩略图可以再试。
+    pub(super) fn prune_decode_requests(&mut self) {
+        let listed = self.listed_thumbnails();
+        self.decode_requested.retain(|path| listed.contains(path));
+    }
+
+    fn request_decode(&mut self, paths: Vec<String>) {
+        self.decode_requested.extend(paths.iter().cloned());
+        self.effects.push(FilesEffect::DecodeThumbnails { paths });
+    }
+}
+
+/// 行引用的缩略图文件（去掉首尾空白），没有时为 `None`。
+fn thumbnail_file(row: &FileRow) -> Option<&str> {
+    row.thumbnail_path.as_deref().map(str::trim).filter(|path| !path.is_empty())
 }
 
 fn apply_thumbnail(row: &mut FileRow, thumbnail_path: Option<String>, custom: bool) {

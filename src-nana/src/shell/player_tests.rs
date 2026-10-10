@@ -776,7 +776,7 @@ fn acceptance_pages_use_the_player_surface() {
         authentication: None,
     };
     model.reduce(ShellMessage::WorkspaceListLoaded { generation: 0, result: Ok(vec![repository.clone()]) });
-    model.reduce(ShellMessage::RepositorySynced { generation: 0, result: Ok(()) });
+    model.reduce(ShellMessage::RepositorySynced { generation: 0, result: Ok(crate::shell::SyncCounts::default()) });
     model.reduce(ShellMessage::RepositorySnapshotLoaded { generation: 0, result: Ok(RepositorySnapshot {
         repository,
         folder_label: String::new(),

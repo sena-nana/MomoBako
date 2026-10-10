@@ -118,6 +118,7 @@ impl FilesState {
     pub(in crate::shell) fn reset_for_repository(&mut self) {
         self.rows.clear();
         self.virtual_rows.clear();
+        self.prune_decode_requests();
         self.current_path.clear();
         self.total_entries = 0;
         self.has_more = false;
