@@ -92,6 +92,8 @@ pub(super) fn set_test_backend_stat_entry_hook(hook: Option<TestBackendStatEntry
         .expect("test backend stat entry hook lock should succeed") = hook;
 }
 
+/// 串行化改进程级测试状态的用例：上面三个 hook 和 `MOMOBKO_TEST_EXPECTED_REPO_ID` 环境变量。
+/// 全 crate 共用这一把锁，测试模块各起一把就拦不住并行测试互相覆盖 hook。
 #[cfg(test)]
 pub(crate) fn playback_test_lock() -> MutexGuard<'static, ()> {
     PLAYBACK_TEST_LOCK
