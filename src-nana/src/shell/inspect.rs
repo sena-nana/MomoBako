@@ -5,7 +5,6 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 use crate::backend::services::repository::{AssetDetail, PlaybackSessionState};
-use crate::plugin_api::{NativeContributionKind, NativePluginContribution};
 
 use super::files::repository_is_writable;
 use super::ShellViewModel;
@@ -34,7 +33,7 @@ pub(super) fn is_reserved_metadata(key: &str) -> bool {
     EDITOR_METADATA.contains(&key) || SEEDED_METADATA.contains(&key)
 }
 
-/// 预览分派结果。原生贡献只保留 view_id，不携带 Vue 组件。
+/// 预览分派结果。`Native` 是内置的压缩包、PDF、文档和模型视图（`native_preview::builtin_view`）。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PreviewKind {
     Image,
@@ -76,12 +75,6 @@ struct MetadataDraft {
     custom: BTreeMap<String, String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PreviewBinding {
-    pub extensions: Vec<String>,
-    pub contribution: NativePluginContribution,
-}
-
 #[derive(Clone, Debug)]
 pub enum InspectEffect {
     LoadImage { repo_id: String, path: String },
@@ -97,7 +90,6 @@ pub enum InspectEffect {
 
 #[derive(Clone, Debug)]
 pub enum InspectMessage {
-    RegisterPreview(PreviewBinding),
     SetComment(String),
     SetLink(String),
     SetRating(i64),
@@ -167,7 +159,6 @@ pub struct InspectState {
     pub(super) conflict: String,
     pub(super) target_path: Option<String>,
     pub(super) generation: u64,
-    contributions: Vec<PreviewBinding>,
     asset_id: Option<String>,
     repo_id: Option<String>,
     expected_version: i64,
@@ -207,7 +198,6 @@ impl Default for InspectState {
             conflict: String::new(),
             target_path: None,
             generation: 0,
-            contributions: native_preview::builtin_bindings(),
             asset_id: None,
             repo_id: None,
             expected_version: 0,
@@ -319,7 +309,7 @@ impl InspectState {
     /// 按扩展名打开预览，并用水合后的元数据草稿替换上一份。
     pub(super) fn note_detail(&mut self, detail: &AssetDetail) {
         let extension = support::extension_of(&detail.summary.extension, &detail.summary.filename);
-        let kind = support::classify(&extension, &self.contributions);
+        let kind = support::classify(&extension);
         self.generation += 1;
         self.target_path = Some(detail.summary.path.clone());
         self.repo_id = Some(detail.summary.repo_id.clone());
@@ -407,13 +397,6 @@ impl InspectState {
     pub(super) fn reduce(&mut self, writable: bool, active_repo: Option<&str>, message: InspectMessage) {
         let hint = tags::clock_hint(&message);
         match message {
-            InspectMessage::RegisterPreview(binding) => {
-                if binding.contribution.kind != NativeContributionKind::Preview {
-                    eprintln!("Nana 忽略非预览贡献：{}", binding.contribution.plugin_id);
-                    return;
-                }
-                self.contributions.push(binding);
-            }
             InspectMessage::SetComment(value) => self.draft.comment = value,
             InspectMessage::SetLink(value) => self.draft.link = value,
             InspectMessage::SetRating(rating) => {

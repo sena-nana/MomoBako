@@ -43,7 +43,6 @@ use backend::services::repository::{
     RepositoryDeleteMode, RepositoryDeleteRequest, RepositoryRelocateRequest,
     SyncRequest,
 };
-pub mod plugin_api;
 pub mod settings;
 mod thumbnail_host;
 pub mod appearance;

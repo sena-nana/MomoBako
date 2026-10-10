@@ -1,6 +1,8 @@
 //! 预览扩展名分派、文本字节上限和可解码音频的预览会话。搜索条件解析在 `search_request.rs`。
 //!
-//! Markdown 先于普通文本。压缩包、PDF、文档和模型走内置绘制，不因 Vue 贡献改回升级提示。
+//! Markdown 先于普通文本。压缩包、PDF、文档和模型走内置绘制（`native_preview.rs`）。插件清单声明的预览
+//! 贡献在 Vue 里要运行插件前端的 Vue 组件，Nana 不运行；随附插件声明的扩展名都已经在这几张表里。
+//! 认不出的扩展名照 Vue 没有预览插件时的样子：缩略图或类型图标，不写字。
 //! 能解出的 WAV、mp3、flac、ogg 同时带上 PCM，供预览和播放条共用同一出声游标。
 
 #[path = "video_preview.rs"]
@@ -14,9 +16,8 @@ pub(super) fn sample_uncompressed() -> Vec<u8> {
 use serde_json::Value;
 
 use crate::backend::services::repository::{MetadataEntry, PlaybackSessionState};
-use crate::plugin_api::NativeContributionKind;
 
-use super::{PreviewBinding, PreviewKind};
+use super::PreviewKind;
 
 const TEXT_BYTE_LIMIT: usize = 768 * 1024;
 
@@ -29,8 +30,9 @@ const TEXT_EXTENSIONS: &[&str] = &[
 ];
 const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mov", "mkv", "webm", "avi", "m4v"];
 const AUDIO_EXTENSIONS: &[&str] = &["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"];
-/// 扩展名分派。Markdown 先于普通文本。能画的文档、压缩包和模型不再要求升级。
-pub fn classify(extension: &str, contributions: &[PreviewBinding]) -> PreviewKind {
+/// 扩展名分派：图片、Markdown（先于普通文本）、文本、音视频，再是内置的压缩包、PDF、文档和模型；
+/// 都不是时认不出。
+pub fn classify(extension: &str) -> PreviewKind {
     let extension = normalize_extension(extension);
     if IMAGE_EXTENSIONS.contains(&extension.as_str()) {
         return PreviewKind::Image;
@@ -44,22 +46,8 @@ pub fn classify(extension: &str, contributions: &[PreviewBinding]) -> PreviewKin
     if VIDEO_EXTENSIONS.contains(&extension.as_str()) || AUDIO_EXTENSIONS.contains(&extension.as_str()) {
         return PreviewKind::Media;
     }
-    if let Some(binding) = find_contribution(&extension, contributions) {
-        if super::native_preview::renders_view(&binding.contribution.view_id) {
-            return PreviewKind::Native {
-                view_id: binding.contribution.view_id.clone(),
-                label: binding.contribution.label.clone(),
-            };
-        }
-    }
-    if let Some((view_id, label)) = super::native_preview::fallback_view(&extension) {
+    if let Some((view_id, label)) = super::native_preview::builtin_view(&extension) {
         return PreviewKind::Native { view_id: view_id.to_string(), label: label.to_string() };
-    }
-    if let Some(binding) = find_contribution(&extension, contributions) {
-        return PreviewKind::Native {
-            view_id: binding.contribution.view_id.clone(),
-            label: binding.contribution.label.clone(),
-        };
     }
     PreviewKind::Unsupported
 }
@@ -231,13 +219,6 @@ fn fresh_session(repo_id: &str) -> PlaybackSessionState {
         error: None,
         updated_at: String::new(),
     }
-}
-
-fn find_contribution<'a>(extension: &str, contributions: &'a [PreviewBinding]) -> Option<&'a PreviewBinding> {
-    contributions.iter().rev().find(|binding| {
-        binding.contribution.kind == NativeContributionKind::Preview
-            && binding.extensions.iter().any(|item| item.eq_ignore_ascii_case(extension))
-    })
 }
 
 pub(super) fn extension_of(extension: &str, filename: &str) -> String {
