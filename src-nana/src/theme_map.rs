@@ -252,25 +252,8 @@ mod tests {
         assert_eq!(corner_metrics(f32::NAN).radius_md, DEFAULT_CORNER_RADIUS_PX);
         assert_eq!(corner_metrics(8.0).control_height, UI_METRICS.control_height);
     }
-
-    #[test]
-    fn shell_buttons_do_not_hardcode_paint_colors() {
-        let source = include_str!("shell/render.rs");
-        for (index, line) in source.lines().enumerate() {
-            let code = line.split("//").next().unwrap_or("");
-            let lower = code.to_ascii_lowercase();
-            assert!(
-                !lower.contains("rgb(")
-                    && !lower.contains("rgba(")
-                    && !lower.contains("buttonpaintoverride"),
-                "shell/render.rs:{} 写死了按钮颜色：{line}",
-                index + 1
-            );
-            assert!(
-                !code.contains('#'),
-                "shell/render.rs:{} 含有颜色字面量：{line}",
-                index + 1
-            );
-        }
-    }
 }
+
+#[cfg(test)]
+#[path = "theme_map_button_tests.rs"]
+mod button_tests;
