@@ -196,9 +196,15 @@ impl MotionState {
         self.spinner = on.then(|| track(self.now_ms, 0.0, 1.0, SPINNER_MS, EasingKind::Linear, !self.reduced));
     }
 
+    /// 不确定进度的呼吸开关。一直开着时不重新起步（每次归约都会调到这里，重起会让呼吸跳回开头）；减少动态效果
+    /// 时不走轨道，关掉减少动态效果以后下一次调用接着呼吸。
     pub fn set_pulse(&mut self, on: bool) {
+        let running = self.pulse.is_some();
+        if on == self.pulse_on && (on == running || (on && self.reduced)) {
+            return;
+        }
         self.pulse_on = on;
-        self.pulse = on.then(|| track(self.now_ms, 0.0, 1.0, PULSE_MS, EasingKind::EaseInOut, !self.reduced));
+        self.pulse = (on && !self.reduced).then(|| track(self.now_ms, 0.0, 1.0, PULSE_MS, EasingKind::EaseInOut, true));
     }
 
     pub fn set_tools_hover(&mut self, hover: bool) {
@@ -395,8 +401,9 @@ impl Track {
         (now_ms.saturating_sub(self.started_ms) % self.duration_ms) as f32 / self.duration_ms as f32
     }
 
+    /// 走完了。循环的轨道（转圈、呼吸）开着就一直在走，要一直要帧，关掉时由调用方拿掉轨道。
     fn finished(&self, now_ms: u64) -> bool {
-        self.looping || now_ms.saturating_sub(self.started_ms) >= self.duration_ms
+        !self.looping && now_ms.saturating_sub(self.started_ms) >= self.duration_ms
     }
 }
 
@@ -566,6 +573,30 @@ mod tests {
         let looped = motion.now_ms();
         motion.advance(looped + PULSE_MS);
         assert_eq!(motion.pulse_opacity(), PULSE_LOW);
+    }
+
+    /// `progress-pulse 1.15s ease-in-out infinite`：0.42 → 1 → 0.42。一直开着时归约再调到也不从头呼吸；
+    /// 减少动态效果时停在不透明，关掉以后接着呼吸；关掉呼吸以后没有轨道，不再要帧。
+    #[test]
+    fn pulse_breathes_without_restarting_and_respects_reduced_motion() {
+        let mut motion = MotionState::default();
+        motion.set_pulse(true);
+        motion.advance(PULSE_MS / 2);
+        assert_eq!(motion.pulse_opacity(), 1.0, "半程最亮");
+        motion.set_pulse(true);
+        assert_eq!(motion.pulse_opacity(), 1.0, "再开一次不该回到开头");
+        assert!(motion.active());
+        motion.set_reduced(true);
+        assert_eq!(motion.pulse_opacity(), 1.0);
+        assert!(!motion.active(), "减少动态效果时不要帧");
+        motion.set_pulse(true);
+        motion.set_reduced(false);
+        motion.set_pulse(true);
+        assert!(motion.active(), "关掉减少动态效果以后接着呼吸");
+        assert_eq!(motion.pulse_opacity(), PULSE_LOW);
+        motion.set_pulse(false);
+        assert_eq!(motion.pulse_opacity(), 1.0);
+        assert!(!motion.active());
     }
 
     #[test]

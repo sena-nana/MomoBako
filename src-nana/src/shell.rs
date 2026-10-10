@@ -408,7 +408,9 @@ impl ShellViewModel {
         self.motion.set_startup_percent(startup);
         self.motion.set_operation_percent(operation.map(|progress| progress.value as f32));
         self.motion.set_spinner(spinner);
-        self.motion.set_pulse(operation.is_some_and(|progress| progress.indeterminate));
+        // 任务弹层开着、里面有不确定进度的行时，进度条按 `progress-pulse` 呼吸；弹层关着不画，也不要帧。
+        let pulse = self.admin.popover_open && self.task_rows().iter().any(|row| row.indeterminate);
+        self.motion.set_pulse(pulse);
         self.motion.set_sidebar_collapsed(self.workspace.sidebar_collapsed, self.workspace.sidebar_width);
     }
 
