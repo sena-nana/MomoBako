@@ -397,7 +397,6 @@ impl ShellViewModel {
     fn follow_motion(&mut self) {
         let panel_open = self.sidebar.popover != sidebar::PopoverMode::Closed || self.admin.popover_open;
         let startup = f32::from(self.workspace.startup.percent);
-        let operation = self.operation.shown();
         let spinner = self.sidebar.tree_loading
             || self.sidebar.submitting
             || self.sidebar.smart_draft.busy
@@ -408,12 +407,19 @@ impl ShellViewModel {
             self.surface_dirty = true;
         }
         self.motion.set_startup_percent(startup);
-        self.motion.set_operation_percent(operation.map(|progress| progress.value as f32));
+        self.follow_task_fills();
         self.motion.set_spinner(spinner);
         // 任务弹层开着、里面有不确定进度的行时，进度条按 `progress-pulse` 呼吸；弹层关着不画，也不要帧。
         let pulse = self.admin.popover_open && self.task_rows().iter().any(|row| row.indeterminate);
         self.motion.set_pulse(pulse);
         self.motion.set_sidebar_collapsed(self.workspace.sidebar_collapsed, self.workspace.sidebar_width);
+    }
+
+    /// 任务弹层各行进度条的目标宽度交给动效时钟（`.progress-bar__fill` 的宽度过渡）。归约以后、准备帧里仓库操作行
+    /// 往上爬或收起以后都要调。
+    pub(crate) fn follow_task_fills(&mut self) {
+        let targets = admin::task_fill_targets(self);
+        self.motion.set_task_fills(&targets);
     }
 
     fn reduce_inner(&mut self, message: ShellMessage) {

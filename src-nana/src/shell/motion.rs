@@ -12,7 +12,7 @@ use super::hot::{LayerPaint, LayerPaintField};
 pub const PANEL_OPACITY_MS: u64 = 140;
 /// 面板上移。同一条规则里的 `transform 0.16s ease`，距离 4px。
 pub const PANEL_RISE_MS: u64 = 160;
-/// 启动条和操作条宽度。`transition: width 0.18s ease`。
+/// 启动条和任务弹层进度条的宽度。`.progress-bar__fill` 的 `transition: width 0.18s ease`。
 pub const PROGRESS_WIDTH_MS: u64 = 180;
 /// 不确定进度呼吸。`progress-pulse 1.15s ease-in-out`。
 pub const PULSE_MS: u64 = 1150;
@@ -62,7 +62,8 @@ pub struct MotionState {
     reduced: bool,
     panel: Option<Track>,
     startup: Option<Track>,
-    operation: Option<Track>,
+    /// 任务弹层每一行进度条的填充宽度，按行键，见 [`MotionState::set_task_fills`]。
+    task_fills: Vec<(String, Track)>,
     pulse: Option<Track>,
     spinner: Option<Track>,
     tools: Option<Track>,
@@ -84,7 +85,7 @@ impl Default for MotionState {
             reduced: false,
             panel: None,
             startup: None,
-            operation: None,
+            task_fills: Vec::new(),
             pulse: None,
             spinner: None,
             tools: None,
@@ -136,9 +137,10 @@ impl MotionState {
         if self.reduced {
             return false;
         }
-        [&self.panel, &self.startup, &self.operation, &self.pulse, &self.spinner, &self.tools, &self.footer, &self.sidebar]
+        [&self.panel, &self.startup, &self.pulse, &self.spinner, &self.tools, &self.footer, &self.sidebar]
             .into_iter()
             .any(|track| track.as_ref().is_some_and(|track| !track.finished(self.now_ms)))
+            || self.task_fills.iter().any(|(_, track)| !track.finished(self.now_ms))
     }
 
     /// 开关有变化时返回 true，调用方据此把界面标成待重建。
@@ -171,21 +173,26 @@ impl MotionState {
         });
     }
 
-    pub fn set_operation_percent(&mut self, percent: Option<f32>) {
-        let Some(percent) = percent else {
-            self.operation = None;
-            return;
-        };
-        let percent = percent.clamp(0.0, 100.0);
-        let from = self.operation.as_ref().map(|track| track.value(self.now_ms)).unwrap_or(0.0);
-        if self.operation.as_ref().is_some_and(|track| (track.to - percent).abs() < 0.01) {
-            return;
-        }
-        self.operation = Some(if self.reduced {
-            track(self.now_ms, percent, percent, 0, EasingKind::Linear, false)
-        } else {
-            track(self.now_ms, from, percent, PROGRESS_WIDTH_MS, EasingKind::Ease, false)
-        });
+    /// 任务弹层各行进度条的目标宽度（行键、百分比），弹层关着时传空。照 `.progress-bar__fill` 的
+    /// `transition: width 0.18s ease`：新出现的行直接停在目标宽度（CSS 过渡不在挂载时播），目标变了从这一刻的宽度
+    /// 走到新目标，没有了的行一起拿掉。减少动态效果时直接停在目标。
+    pub fn set_task_fills(&mut self, targets: &[(String, f32)]) {
+        let now = self.now_ms;
+        let reduced = self.reduced;
+        let next = targets
+            .iter()
+            .map(|(key, target)| {
+                let target = target.clamp(0.0, 100.0);
+                let existing = self.task_fills.iter().find(|(existing, _)| existing == key).map(|(_, fill)| fill);
+                let fill = match existing {
+                    Some(fill) if (fill.to - target).abs() < 0.01 => fill.clone(),
+                    Some(fill) if !reduced => track(now, fill.value(now), target, PROGRESS_WIDTH_MS, EasingKind::Ease, false),
+                    _ => track_done(target),
+                };
+                (key.clone(), fill)
+            })
+            .collect();
+        self.task_fills = next;
     }
 
     pub fn set_spinner(&mut self, on: bool) {
@@ -272,8 +279,9 @@ impl MotionState {
         self.startup.as_ref().map(|track| track.value(self.now_ms)).unwrap_or(0.0)
     }
 
-    pub fn operation_percent(&self) -> Option<f32> {
-        self.operation.as_ref().map(|track| track.value(self.now_ms))
+    /// 任务弹层各行进度条这一刻的填充宽度，按行键。
+    pub fn task_fills(&self) -> Vec<(String, f32)> {
+        self.task_fills.iter().map(|(key, fill)| (key.clone(), fill.value(self.now_ms))).collect()
     }
 
     pub fn spinner_on(&self) -> bool {
@@ -334,8 +342,8 @@ impl MotionState {
         if let Some(track) = &mut self.startup {
             *track = track_done(track.to);
         }
-        if let Some(track) = &mut self.operation {
-            *track = track_done(track.to);
+        for (_, fill) in &mut self.task_fills {
+            *fill = track_done(fill.to);
         }
         self.spinner = None;
         self.pulse = None;
@@ -513,7 +521,8 @@ mod tests {
         let mut motion = MotionState::default();
         motion.set_panel_open(true);
         motion.set_startup_percent(40.0);
-        motion.set_operation_percent(Some(32.0));
+        motion.set_task_fills(&[("task".into(), 10.0)]);
+        motion.set_task_fills(&[("task".into(), 32.0)]);
         motion.set_spinner(true);
         motion.set_pulse(true);
         motion.set_tools_hover(true);
@@ -524,7 +533,7 @@ mod tests {
         assert_eq!(motion.panel_frame().opacity, 1.0);
         assert_eq!(motion.panel_frame().shift, 0.0);
         assert_eq!(motion.startup_percent(), 40.0);
-        assert_eq!(motion.operation_percent(), Some(32.0));
+        assert_eq!(motion.task_fills(), vec![("task".to_string(), 32.0)]);
         assert_eq!(motion.spinner_degrees(), 0.0);
         assert_eq!(motion.pulse_opacity(), 1.0);
         assert_eq!(motion.tools_opacity(), 1.0);
@@ -547,10 +556,15 @@ mod tests {
         assert_eq!(motion.startup_percent(), 0.0);
         motion.advance(motion.now_ms() + PROGRESS_WIDTH_MS);
         assert_eq!(motion.startup_percent(), 50.0);
-        motion.set_operation_percent(Some(32.0));
-        assert_eq!(motion.operation_percent(), Some(0.0));
+        motion.set_task_fills(&[("task".into(), 12.0)]);
+        assert_eq!(motion.task_fills(), vec![("task".to_string(), 12.0)], "新出现的行直接停在目标宽度");
+        motion.set_task_fills(&[("task".into(), 32.0)]);
+        assert_eq!(motion.task_fills(), vec![("task".to_string(), 12.0)], "目标变了从这一刻的宽度起步");
+        assert!(motion.active());
         motion.advance(motion.now_ms() + PROGRESS_WIDTH_MS);
-        assert_eq!(motion.operation_percent(), Some(32.0));
+        assert_eq!(motion.task_fills(), vec![("task".to_string(), 32.0)]);
+        motion.set_task_fills(&[]);
+        assert!(motion.task_fills().is_empty(), "弹层关上，轨道一起拿掉");
         motion.set_spinner(true);
         let started = motion.now_ms();
         assert_eq!(motion.spinner_degrees(), 0.0);

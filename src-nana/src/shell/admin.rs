@@ -69,7 +69,7 @@ pub(crate) use settings_view::settings_page;
 pub(crate) use source_provision::SourceAuthState;
 pub use source_provision::SourceStep;
 pub(crate) use tools::{extensions_page, ToolsSignals};
-pub(crate) use view::task_popover;
+pub(crate) use view::{task_fill_targets, task_popover};
 
 #[cfg(test)]
 #[path = "admin_tests.rs"]

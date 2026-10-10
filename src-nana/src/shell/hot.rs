@@ -66,6 +66,23 @@ impl MotionFrame {
     }
 }
 
+/// 任务弹层各行进度条这一刻的填充百分比，按行键（`.progress-bar__fill` 的宽度过渡，见
+/// `MotionState::set_task_fills`）。弹层关着时为空。
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct TaskFills(Vec<(String, f32)>);
+
+impl TaskFills {
+    /// 按 ViewModel 的动效时钟取这一帧。
+    pub(crate) fn project(model: &ShellViewModel) -> Self {
+        Self(model.motion.task_fills())
+    }
+
+    /// 某一行这一刻的填充百分比；这一行没有轨道时为 `None`。
+    pub(crate) fn get(&self, key: &str) -> Option<f32> {
+        self.0.iter().find(|(row, _)| row == key).map(|(_, fill)| *fill)
+    }
+}
+
 /// 播放条随播放时钟变的部分。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct PlaybackView {
@@ -114,6 +131,7 @@ pub(crate) struct HotSignals {
     pub spinner: Signal<f32>,
     pub footer: Signal<f32>,
     pub pulse: Signal<f32>,
+    pub task_fills: Signal<TaskFills>,
     pub progress: Signal<f32>,
     pub time: Signal<String>,
     pub position: Signal<f64>,
@@ -121,13 +139,14 @@ pub(crate) struct HotSignals {
 
 impl HotSignals {
     /// 在当前作用域里建信号，初值是这一刻的投影。只在骨架的挂载闭包里调用，否则信号会留到线程结束。
-    pub(crate) fn new(motion: MotionFrame, playback: &PlaybackView) -> Self {
+    pub(crate) fn new(motion: MotionFrame, fills: TaskFills, playback: &PlaybackView) -> Self {
         Self {
             panel: signal(motion.panel),
             startup: signal(motion.startup_percent),
             spinner: signal(motion.spinner_degrees),
             footer: signal(motion.footer_opacity),
             pulse: signal(motion.pulse_opacity),
+            task_fills: signal(fills),
             progress: signal(playback.ratio),
             time: signal(playback.time.clone()),
             position: signal(playback.position),
@@ -140,12 +159,13 @@ impl HotSignals {
     }
 
     /// 写入这一帧的投影，只写变了的。信号可能已经随文档回收，回收了就不写。
-    pub(crate) fn write(&self, motion: MotionFrame, playback: &PlaybackView) {
+    pub(crate) fn write(&self, motion: MotionFrame, fills: TaskFills, playback: &PlaybackView) {
         self.panel.try_set_if_changed(motion.panel);
         self.startup.try_set_if_changed(motion.startup_percent);
         self.spinner.try_set_if_changed(motion.spinner_degrees);
         self.footer.try_set_if_changed(motion.footer_opacity);
         self.pulse.try_set_if_changed(motion.pulse_opacity);
+        self.task_fills.try_set_if_changed(fills);
         self.progress.try_set_if_changed(playback.ratio);
         self.time.try_set_if_changed(playback.time.clone());
         self.position.try_set_if_changed(playback.position);
@@ -273,7 +293,7 @@ impl FieldWrite<Stack, LayerPaint> for LayerPaintField {
     }
 }
 
-/// `Stack` 的宽度百分比，启动进度条的填充用。超出 0..100 的值按两端算。
+/// `Stack` 的宽度百分比，启动进度条和任务弹层进度条的填充用。超出 0..100 的值按两端算。
 pub(crate) struct FillPercentField;
 
 impl FieldWrite<Stack, f32> for FillPercentField {

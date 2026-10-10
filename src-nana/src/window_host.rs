@@ -74,9 +74,10 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, mut view: Option<&mut S
     if shell.observe_failures() {
         shell.mark_surface_dirty();
     }
-    // 仓库操作行往上爬、完成后收起，任务弹层和「任务」计数跟着整体同步。
+    // 仓库操作行往上爬、完成后收起，任务弹层和「任务」计数跟着整体同步，进度条的宽度照 Vue 过渡到新值。
     if shell.operation.tick(step.ui_ms) {
         shell.mark_surface_dirty();
+        shell.follow_task_fills();
     }
     if shell.motion.active() {
         shell.motion.advance(shell.motion.now_ms().saturating_add(step.ui_ms));
