@@ -83,6 +83,12 @@ pub struct WorkspaceRepository {
     pub capabilities: Vec<String>,
     pub cache_required: bool,
     pub cache_status: String,
+    /// 来源本地缓存目录（`localCache.path`），来源条目动作的 `managedCacheRoot`。
+    pub cache_path: Option<String>,
+    /// 来源登录过期（`authentication.loginExpired`）。
+    pub login_expired: bool,
+    /// 来源没有登录（`authentication.loggedIn` 为假）。
+    pub logged_out: bool,
 }
 
 impl WorkspaceRepository {
@@ -100,12 +106,26 @@ impl WorkspaceRepository {
                 .as_ref()
                 .map(|cache| cache.status.clone())
                 .unwrap_or_default(),
+            cache_path: summary.local_cache.as_ref().and_then(|cache| cache.path.clone()),
+            login_expired: summary.authentication.as_ref().is_some_and(|auth| auth.login_expired),
+            logged_out: summary.authentication.as_ref().is_some_and(|auth| !auth.logged_in),
         }
     }
 
     /// 来源缓存未就绪时，主操作是打开插件设置，而不是重定向本地文件夹。
     pub fn is_source_cache_issue(&self) -> bool {
         self.cache_required && self.cache_status != "ready"
+    }
+
+    /// 来源认证或本地缓存不可用（Vue `actionDisabled` 的仓库部分）：登录过期、没有登录，或者要本地缓存但缓存
+    /// 没就绪。这时来源条目动作禁用。
+    pub fn source_unavailable(&self) -> bool {
+        self.login_expired || self.logged_out || self.is_source_cache_issue()
+    }
+
+    /// 能当下载目标：就绪，而且可写（Vue 目标资源库对话框的 `requireReady`、`requireWritable`）。
+    pub fn accepts_downloads(&self) -> bool {
+        self.status == "ready" && self.capabilities.iter().any(|capability| capability == "write")
     }
 }
 

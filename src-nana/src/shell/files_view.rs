@@ -36,6 +36,7 @@ mod board;
 mod detail;
 #[path = "files_menu.rs"]
 mod menu;
+pub(crate) use menu::EntryMenuView;
 
 use bind::StyleField;
 

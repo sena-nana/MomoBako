@@ -292,6 +292,9 @@ fn repository_switcher_adds_rows_without_rebuilding_the_rest() {
         capabilities: Vec::new(),
         cache_required: false,
         cache_status: String::new(),
+        cache_path: None,
+        login_expired: false,
+        logged_out: false,
     });
     changed(&mut harness);
     assert_eq!(harness.content_roots().0, Some(root), "列表变了不该重挂弹层");

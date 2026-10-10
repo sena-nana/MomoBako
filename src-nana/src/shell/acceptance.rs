@@ -70,6 +70,8 @@ mod player_scenes;
 mod admin_scenes;
 #[path = "acceptance_search.rs"]
 mod search_scenes;
+#[path = "acceptance_source.rs"]
+mod source_scenes;
 
 /// 补上的表面，给离屏验收出画面。数字和像素都不编造。
 /// 各面板的对照场景放在各自的 `acceptance_*.rs` 里，这里只汇总。
@@ -80,5 +82,6 @@ pub fn gap_models() -> Vec<(&'static str, ShellViewModel)> {
     scenes.extend(player_scenes::models());
     scenes.extend(admin_scenes::models());
     scenes.extend(search_scenes::models());
+    scenes.extend(source_scenes::models());
     scenes
 }

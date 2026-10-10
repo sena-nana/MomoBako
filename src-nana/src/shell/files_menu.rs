@@ -6,6 +6,8 @@
 //! 就展开，都离开就收起，没有延迟；点分组本身不收起（按下时焦点落在分组上）。禁用的分组不展开。
 //! 菜单按指针落点放置，靠右或靠下放不下时夹回窗口内 4px。
 //! 回收站里的「彻底删除」要点两次：第一次只把这一行变成待确认。点菜单外关闭。
+//! 来源插件的条目动作不能用时禁用，紧跟着一行弱色小字写原因（Vue 把原因放在禁用项的 `confirmLabel` 里，
+//! 禁用的按钮点不了，原因从来显示不出来）。
 //!
 //! 菜单常驻：同一个目标、同一个落点的菜单打开期间，条目按内容做键，变了的那一行才重建；
 //! 展开哪个子菜单只切换子菜单的显隐。点条目发的消息是条目数据的一部分（[`MenuAction`]），
@@ -21,8 +23,9 @@ use nana_ui::runtime::{
 };
 use nana_ui_core::{Icon, LengthAtom, SemanticColorMix};
 
+use super::super::admin::source_target::{self, RepositoryDownload};
 use super::super::admin::AdminMessage;
-use super::super::entry_actions::{self, FilePluginAction, FilePluginDispatch};
+use super::super::entry_actions::{self, FilePluginAction, FilePluginDispatch, SourceContext};
 use super::super::files::{BranchSource, FileContext, FileDialog, FileRow, FilesMessage};
 use super::super::input::{repository_absolute, InputMessage};
 use super::super::player::PlayerMessage;
@@ -53,7 +56,8 @@ pub(crate) enum MenuAction {
 }
 
 impl MenuAction {
-    fn message(&self) -> ShellMessage {
+    /// 点这一项时发的消息。
+    pub(crate) fn message(&self) -> ShellMessage {
         match self.clone() {
             Self::Files(message) => ShellMessage::Files(message),
             Self::Input(message) => ShellMessage::Input(message),
@@ -96,6 +100,8 @@ pub(crate) struct MenuEntry {
     pub confirm_label: Option<&'static str>,
     /// 已经点过一次、等第二次确认。
     pub pending: bool,
+    /// 不是菜单项，是写在禁用项后面的一行原因：弱色 12px，不能点、不能聚焦。
+    pub note: bool,
     pub action: Option<MenuAction>,
     pub children: Vec<MenuEntry>,
 }
@@ -111,9 +117,15 @@ impl MenuEntry {
             danger: false,
             confirm_label: None,
             pending: false,
+            note: false,
             action: None,
             children: Vec::new(),
         }
+    }
+
+    /// 写在禁用项后面的一行原因。
+    fn note(id: &str, text: &str) -> Self {
+        Self { note: true, ..Self::new(id, text, None) }
     }
 
     fn disabled(mut self, disabled: bool) -> Self {
@@ -245,6 +257,9 @@ fn close() -> ShellMessage {
 /// 在分组和子菜单之间移动不算离开。展开哪个分组只切换子菜单的显隐。
 fn slot(view: Signal<EntryMenuView>, entry: MenuEntry) -> AnyView {
     let frame = Stack::column(0.0).width(LengthSpec::Fill).with_layout(|layout| layout.position = PositionSpec::Relative);
+    if entry.note {
+        return widget(frame).children((note(&entry),)).into_any();
+    }
     if entry.children.is_empty() || entry.disabled {
         return widget(frame).children((item(&entry),)).into_any();
     }
@@ -357,12 +372,28 @@ fn item(entry: &MenuEntry) -> AnyView {
     node.into_any()
 }
 
-/// 菜单宽：至少 180，长文案按字宽撑开（中文按字号算，其余按半个字号）。
+/// 禁用项后面写原因的一行：和菜单项一样高（菜单高按行数算），左边和菜单项的文字对齐，弱色 12px。
+fn note(entry: &MenuEntry) -> AnyView {
+    let row = Stack::row(0.0).align(AlignSpec::Center).with_layout(|layout| {
+        layout.height = Some(LengthSpec::Px(ITEM_HEIGHT));
+        layout.min_height = Some(LengthSpec::Px(ITEM_HEIGHT));
+        layout.width = Some(LengthSpec::Fill);
+        layout.padding_left = Some(LengthSpec::Px(10.0));
+        layout.padding_right = Some(LengthSpec::Px(10.0));
+    });
+    widget(row)
+        .children((widget(style::text(entry.label.clone(), 12.0, 400, SemanticColorRole::Faint, 18.0).nowrap(true)),))
+        .key(format!("file-menu-{}", entry.id))
+        .into_any()
+}
+
+/// 菜单宽：至少 180，长文案按字宽撑开（中文按字号算，其余按半个字号；写原因的小字按 12px 算）。
 fn menu_width(entries: &[MenuEntry]) -> f32 {
     let widest = entries
         .iter()
         .map(|entry| {
-            let text: f32 = entry.label.chars().map(|ch| if ch.is_ascii() { 7.0 } else { 13.0 }).sum();
+            let (wide, narrow) = if entry.note { (12.0, 6.0) } else { (13.0, 7.0) };
+            let text: f32 = entry.label.chars().map(|ch| if ch.is_ascii() { narrow } else { wide }).sum();
             let icons = 23.0 * (u8::from(entry.icon.is_some()) + u8::from(entry.checked)) as f32;
             let chevron = if entry.children.is_empty() { 0.0 } else { 14.0 };
             20.0 + icons + text + chevron
@@ -424,9 +455,21 @@ fn menu_entries(model: &ShellViewModel, row: &FileRow) -> Vec<MenuEntry> {
         }
     }
     if !trash {
-        for action in entry_actions::actions_for(&model.admin.plugins, row) {
-            entries.push(plugin_entry(&action, repo_id.clone()));
+        let context = SourceContext {
+            managed_cache_root: repository.and_then(|item| item.cache_path.clone()),
+            source_unavailable: repository.is_some_and(|item| item.source_unavailable()),
+            has_target_repository: source_target::has_target_repository(&model.workspace),
+        };
+        let actions = entry_actions::actions_for(&model.admin.plugins, row, &context);
+        entries.extend(actions.iter().map(|action| plugin_entry(action, repo_id.clone())));
+        // 禁用项后面各写一次原因：同一个原因只写一行。
+        let mut reasons: Vec<&'static str> = Vec::new();
+        for reason in actions.iter().filter_map(|action| action.unavailable) {
+            if !reasons.contains(&reason) {
+                reasons.push(reason);
+            }
         }
+        entries.extend(reasons.into_iter().enumerate().map(|(index, reason)| MenuEntry::note(&format!("plugin-note-{index}"), reason)));
     }
     let mut thumbnail = MenuEntry::new("thumbnail", "缩略图", Some(PHOTO)).disabled(trash);
     thumbnail.children = thumbnail_entries(row, repo_id.clone());
@@ -476,7 +519,8 @@ fn playlist_entries(model: &ShellViewModel, row: &FileRow) -> Vec<MenuEntry> {
         .collect()
 }
 
-/// 来源插件的条目动作。下载先弹目录对话框；「创建播放列表」在本地建播放集。
+/// 来源插件的条目动作。下载到本地先弹目录对话框，下载到其他资源库先选目标资源库；「创建播放列表」在本地建播放集。
+/// 不能用的动作禁用，原因写在后面一行。
 fn plugin_entry(action: &FilePluginAction, repository_id: Option<String>) -> MenuEntry {
     let message = match &action.dispatch {
         FilePluginDispatch::Call { plugin_id, method, payload } => admin(AdminMessage::CallFilePlugin {
@@ -492,11 +536,23 @@ fn plugin_entry(action: &FilePluginAction, repository_id: Option<String>) -> Men
             repository_id,
             progress: progress.clone(),
         }),
+        FilePluginDispatch::AskRepository { plugin_id, method, payload, progress, parent_path } => {
+            admin(AdminMessage::BeginRepositoryDownload(RepositoryDownload {
+                plugin_id: plugin_id.clone(),
+                method: method.clone(),
+                payload: payload.clone(),
+                repository_id,
+                progress: progress.clone(),
+                parent_path: parent_path.clone(),
+            }))
+        }
         FilePluginDispatch::CreatePlaylist(playlist) => {
             admin(AdminMessage::CreateSourcePlaylist { playlist: playlist.clone(), repository_id })
         }
     };
-    MenuEntry::new(&action.value.replace('/', "-"), action.label.clone(), None).message(message)
+    MenuEntry::new(&action.value.replace('/', "-"), action.label.clone(), None)
+        .disabled(action.unavailable.is_some())
+        .message(message)
 }
 
 /// 「缩略图」子菜单：选文件、从剪贴板、取消自定义（只有自定义过才可点）、刷新。

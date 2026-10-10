@@ -497,6 +497,10 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
         "preview-no-player" => &["没有可用于播放此媒体的插件", "未选择播放内容"],
         // Shift 选出一段再 Ctrl 加一项：详情写多选摘要。
         "files-multi-select" => &["4 个项目", "4 个文件"],
+        // 来源登录过期：单曲右键菜单里的来源动作禁用，后面一行写原因。
+        "source-menu-unavailable" => &["来源认证或本地缓存不可用", "下载单曲到其他资源库", "清理播放缓存"],
+        // 下载单曲到其他资源库、有两个候选：弹出选择，列出两个资源库。
+        "source-download-target" => &["选择目标资源库", "下载到 第二资源库", "下载到 第三资源库"],
         _ => page_labels(page),
     }
 }
