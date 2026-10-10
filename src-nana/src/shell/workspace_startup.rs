@@ -57,6 +57,47 @@ pub struct StartupStepItem {
     pub state: StartupStepState,
 }
 
+/// 同步写回的计数（Vue `lastSyncResult`），「首屏启动文件变化同步完成。」的明细用。
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SyncCounts {
+    pub scanned_files: i64,
+    pub created_assets: i64,
+    pub updated_assets: i64,
+    pub deleted_assets: i64,
+    pub created_events: i64,
+    pub hardlink_candidates: i64,
+}
+
+impl SyncCounts {
+    /// 从同步协议的输出（后端 `SyncResult` 的 JSON）里取计数。缺的或不是整数的按 0，并记日志。
+    pub fn from_output(output: &serde_json::Value) -> Self {
+        let read = |key: &str| {
+            output.get(key).and_then(serde_json::Value::as_i64).unwrap_or_else(|| {
+                eprintln!("Nana 同步结果里没有 {key}，按 0 记");
+                0
+            })
+        };
+        Self {
+            scanned_files: read("scannedFiles"),
+            created_assets: read("createdAssets"),
+            updated_assets: read("updatedAssets"),
+            deleted_assets: read("deletedAssets"),
+            created_events: read("createdEvents"),
+            hardlink_candidates: read("hardlinkCandidates"),
+        }
+    }
+}
+
+/// 读完仓库摘要时记下的数（Vue `activeSnapshot`、`playlists` 和 `activeAssetId`），摘要、首屏目录和流程完成
+/// 三条日志的明细用。
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct IndexCounts {
+    pub asset_count: usize,
+    pub playlist_count: usize,
+    /// 默认预览对象：之前选中的素材还在就是它，否则是第一个素材。
+    pub default_asset_id: Option<String>,
+}
+
 /// 一条加载日志：级别、本地时间、消息和明细。
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct StartupLog {
@@ -79,6 +120,10 @@ pub struct StartupState {
     pub percent: u8,
     pub error: Option<String>,
     pub logs: Vec<StartupLog>,
+    /// 这一轮读到的仓库摘要计数；没读到摘要（空库、缺失仓库）时为 `None`。
+    pub index: Option<IndexCounts>,
+    /// 启动结束时读的设置包还没回来：回来时记「应用配置与插件设置加载完成」和「流程完成」。
+    pub settings_pending: bool,
 }
 
 impl Default for StartupState {
@@ -93,6 +138,8 @@ impl Default for StartupState {
             percent: 0,
             error: None,
             logs: Vec::new(),
+            index: None,
+            settings_pending: false,
         }
     }
 }
@@ -121,6 +168,7 @@ impl StartupState {
     /// 已有的加载日志留着，这一轮不再写首屏启动日志。
     pub fn begin_switch(&mut self) {
         self.mode = StartupMode::Switch;
+        self.settings_pending = false;
         self.set_progress(1, "切换资源库", "准备目标资源库，清理上一个资源库的首屏状态。");
     }
 
@@ -210,13 +258,38 @@ impl StartupState {
         }
     }
 
+    /// 首屏启动结束、开始读设置包（Vue 在第 4 步 `loadSettingsData` 之前）：记「首屏启动开始加载应用配置与
+    /// 插件设置。」，明细带第 4 步和活动仓库，等设置包回来再记后两条。
+    pub fn note_settings_started(&mut self, repo_id: Option<&str>) {
+        self.settings_pending = true;
+        self.log("info", "首屏启动开始加载应用配置与插件设置。", &[("step", Some("4")), ("repoId", repo_id)]);
+    }
+
+    /// 启动时读的设置包回来了（成功失败都算，和 Vue `loadSettingsData` 吃掉错误一样）：记「首屏启动应用配置与
+    /// 插件设置加载完成。」和「首屏启动流程完成。」，后者明细带活动仓库、素材数和播放集数（没读到摘要时都是 0）。
+    /// 不是启动时读的设置包返回假，什么也不记。
+    pub fn note_settings_finished(&mut self, repo_id: Option<&str>) -> bool {
+        if !std::mem::take(&mut self.settings_pending) {
+            return false;
+        }
+        self.log("info", "首屏启动应用配置与插件设置加载完成。", &[("step", Some("4")), ("repoId", repo_id)]);
+        let index = self.index.clone().unwrap_or_default();
+        let (assets, playlists) = (index.asset_count.to_string(), index.playlist_count.to_string());
+        self.log(
+            "info",
+            "首屏启动流程完成。",
+            &[("activeRepoId", repo_id), ("assetCount", Some(assets.as_str())), ("playlistCount", Some(playlists.as_str()))],
+        );
+        true
+    }
+
     /// 最近 8 条日志，新的在前。
     pub fn visible_logs(&self) -> Vec<&StartupLog> {
         self.logs.iter().rev().take(STARTUP_VISIBLE_LOGS).collect()
     }
 
-    /// 启动仍在加载时追加一条同步日志。其它状态忽略。
-    pub(crate) fn append_sync_log(&mut self, level: &str, message: impl Into<String>) {
+    /// 启动仍在加载时追加一条同步日志，明细照 Vue `appendStartupSyncLog` 取记录的 `context`。其它状态忽略。
+    pub(crate) fn append_sync_log(&mut self, level: &str, message: impl Into<String>, context: &serde_json::Value) {
         if self.status != StartupStatus::Loading {
             return;
         }
@@ -226,7 +299,7 @@ impl StartupState {
             "error" => "error",
             _ => "info",
         };
-        self.push(level, message.into(), None);
+        self.push(level, message.into(), context_detail(context));
     }
 
     /// 记一条日志。明细按 Vue `appendStartupLog` 去掉空值，用「 · 」连接。换仓库不写首屏启动日志
@@ -250,6 +323,27 @@ impl StartupState {
             self.logs.drain(0..extra);
         }
     }
+}
+
+/// 同步记录 `context` 的明细，照 Vue `appendStartupLog`：去掉 null 和空串，对象和数组写成紧凑 JSON，其余写成
+/// 字面值，`键: 值` 用「 · 」连接。不是对象或没有可写的键时为 `None`。
+fn context_detail(context: &serde_json::Value) -> Option<String> {
+    let entries = context.as_object()?;
+    let detail = entries
+        .iter()
+        .filter_map(|(key, value)| {
+            let text = match value {
+                serde_json::Value::Null => return None,
+                serde_json::Value::String(text) if text.is_empty() => return None,
+                serde_json::Value::String(text) => text.clone(),
+                serde_json::Value::Array(_) | serde_json::Value::Object(_) => value.to_string(),
+                serde_json::Value::Bool(_) | serde_json::Value::Number(_) => value.to_string(),
+            };
+            Some(format!("{key}: {text}"))
+        })
+        .collect::<Vec<_>>()
+        .join(" · ");
+    (!detail.is_empty()).then_some(detail)
 }
 
 /// 本地时间「时:分:秒」，和 Vue `toLocaleTimeString("zh-CN", { hour12: false })` 的写法一致。
