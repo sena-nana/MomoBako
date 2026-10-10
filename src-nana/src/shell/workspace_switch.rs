@@ -73,7 +73,7 @@ impl WorkspaceState {
         self.operation.update(OperationPatch::step("加载资源库摘要", 38.0));
         if self.repositories.is_empty() {
             self.assign_active(None);
-            self.last_active_repo_id = None;
+            self.remember_repository(None);
             self.reset_library_category();
             self.presence = RepositoryPresence::Empty;
             self.finish_refresh();
@@ -114,7 +114,7 @@ impl WorkspaceState {
         if repository.status == "missing" {
             self.presence = RepositoryPresence::Missing;
             self.reset_library_category();
-            self.last_active_repo_id = Some(repository.repo_id);
+            self.remember_repository(Some(repository.repo_id));
             self.finish_loading_run();
             return;
         }
@@ -139,7 +139,7 @@ impl WorkspaceState {
         self.operation.start(OperationStart::new("加载资源库", "读取资源库快照", 10.0).indeterminate());
         if repository.status == "missing" {
             self.presence = RepositoryPresence::Missing;
-            self.last_active_repo_id = Some(repository.repo_id);
+            self.remember_repository(Some(repository.repo_id));
             self.finish_loading_run();
             return;
         }
@@ -155,7 +155,7 @@ impl WorkspaceState {
         if repository.status == "missing" {
             self.presence = RepositoryPresence::Missing;
             self.reset_library_category();
-            self.last_active_repo_id = Some(repository.repo_id);
+            self.remember_repository(Some(repository.repo_id));
             self.finish_refresh();
             return;
         }
@@ -280,7 +280,7 @@ impl WorkspaceState {
         let Some(next) = self.repositories.first().cloned() else {
             self.assign_active(None);
             self.presence = RepositoryPresence::Empty;
-            self.last_active_repo_id = None;
+            self.remember_repository(None);
             self.reset_library_category();
             return;
         };

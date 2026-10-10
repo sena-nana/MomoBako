@@ -24,6 +24,9 @@ pub use startup::{IndexCounts, StartupLog, StartupMode, StartupState, StartupSta
 #[path = "workspace_switch.rs"]
 mod switch;
 pub use switch::{RefreshRun, RefreshStage};
+#[path = "workspace_remember.rs"]
+mod remember;
+pub use remember::last_repository_path;
 /// 工作台主面板，对应 `WorkspacePanelKey`。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum WorkspacePanel {
@@ -147,6 +150,8 @@ pub enum WorkspaceEffect {
     RelocateRepository { repo_id: String, path: String },
     DeleteRepository { repo_id: String, mode: DeleteMode },
     PersistSidebar,
+    /// 记住的资源库变了，写进 `last-repository.json`。
+    PersistLastRepository,
     StopPlayback { previous_repo_id: String },
 }
 
@@ -392,7 +397,7 @@ impl WorkspaceState {
                     ],
                 );
                 self.startup.index = Some(counts);
-                self.last_active_repo_id = Some(repo_id.clone());
+                self.remember_repository(Some(repo_id.clone()));
                 if self.startup.mode == StartupMode::Switch {
                     self.operation.update(super::repo_operation::OperationPatch::step("加载资源索引", 46.0));
                 }
@@ -674,7 +679,8 @@ impl WorkspaceState {
         self.startup.finish();
     }
 
-    /// 启动时读回的列表。选择顺序：当前 id、上次记住的 id、列表第一项。空列表清空记住的仓库。
+    /// 启动时读回的列表。选择顺序：当前 id、上次记住的 id（还在列表里时）、列表第一项。空列表清空记住的仓库，
+    /// 选中的仓库缺失时立即记住它。
     fn apply_repository_items(&mut self, items: Vec<WorkspaceRepository>) {
         self.repositories = items;
         let total = self.repositories.len().to_string();
@@ -688,7 +694,7 @@ impl WorkspaceState {
         if self.repositories.is_empty() {
             self.startup.log("warn", "首屏启动未找到可加载的资源库。", &[("repositoryCount", Some("0"))]);
             self.assign_active(None);
-            self.last_active_repo_id = None;
+            self.remember_repository(None);
             self.reset_library_category();
             self.presence = RepositoryPresence::Empty;
             self.finish_loading_run();
@@ -728,7 +734,7 @@ impl WorkspaceState {
                     ("repositoryPath", next.as_ref().map(|item| item.path.as_str())),
                 ],
             );
-            self.last_active_repo_id = Some(next_id);
+            self.remember_repository(Some(next_id));
             self.reset_library_category();
             self.presence = RepositoryPresence::Missing;
             self.finish_loading_run();
