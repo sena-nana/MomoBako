@@ -365,5 +365,4 @@ fn clear_control_metrics(style: &mut NodeStyle) {
     style.control_height = None;
     style.control_padding_x = None;
     style.control_padding_y = None;
-    style.square = None;
 }

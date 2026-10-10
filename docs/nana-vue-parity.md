@@ -133,7 +133,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 | Select、滑杆等没有可见标签的控件，没有声明式的无障碍名称 | 已补：控件写 `.labelled_by(标题节点)`；没有可见标题时写控件自己的 `label`，见 [壳层绑定式视图](./nana-shell-view.md) 的「不再扫描文档补登」 |
 | 固定定位盒自动高度时，百分比 `max-height` 被当成 0 | 上游已修；用到它的文件页自建对话框卡片改成 NanaUI `Dialog`，这处 `vh` 绕行随卡片删掉 |
 | 网格自动行高按最窄内容测量，可折行的芯片把行撑高 | 上游 `1f37b9c79` 已修（`c6dc1086b` 起就带着）：网格先定列宽，再按列宽量行高。插件卡片的依赖、权限、Hook 和执行记录段已改回 Vue 的 `56px minmax(0, 1fr)` 网格（`admin_plugin_card.rs`），测试 `plugin_grid_sections_are_as_tall_as_their_wrapped_chips` 看折行芯片的那一段不多出高度 |
-| IconButton 的默认方形尺寸盖掉显式布局 | 上游已修；任务弹层关闭钮删掉了 `square = None`，别的区域各自清理 |
+| IconButton 的默认方形尺寸盖掉显式布局 | 上游已修（写了宽高的轴不再被方盒改写）：壳层里的 `square = None` 都删了（任务弹层关闭钮、播放条图标按钮和点击区、筛选栏按钮），去掉前后播放条、播放集页和筛选栏 171 个按钮和输入框的布局盒逐一相同 |
 | 框架自己关掉 Dialog 时不通知应用 | 上游已修：`DialogCloseRequested` 加 `DialogClosePolicy::requests_only()`，对话框框架只听请求、发关闭消息 |
 | `DialogSize` 只有 420 / 520 / 600 / 680 / 1080 几档，不能给像素宽，也不能按窗口比例收 | 已补：`DialogSize::Width(长度)` 和 `capped(px, vw)`。各对话框照 Vue 的宽度类给 CSS 宽度 |
 | 对话框标题没有危险口气（`ConfirmDialog.danger` 只改确认按钮） | 已补：`Dialog::danger` / `ConfirmDialog::danger`，标题取主题的危险色。借节点文字色的写法已删 |
