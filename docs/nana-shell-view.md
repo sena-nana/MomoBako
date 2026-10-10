@@ -49,7 +49,7 @@
 
 ### 首页筛选栏
 
-筛选栏属于首页外框，有仓库的首页路由都可能显示它。信号 `FilterBarSignals` 在 `RouteSignals::filter`，启动、设置、缺失仓库和空库页以外每次同步都写（关着时不算候选和库类型快捷方式）。常驻首页路由（文件、搜索、播放集、日志、拓展和动作页）在外框里嵌 `inspect_search_view::resident_filter_bar(signals.filter)`，显隐跟「有仓库且筛选栏打开」走 `.visible`；文件页的 `FilesRouteSignals` 不另存筛选栏的状态，读的是同一份 `RouteSignals::filter`。首页外框和纵向滚动主体只有一套：`route_home::{home_page, home_scroll}`，缺失仓库和空库页也用它（不嵌筛选栏）；设置和启动页的整页滚动是 `route_home::scroll_route`。日志页的主体是不滚的裁剪盒 `route_home::home_fixed`：面板（`admin::style::fill_panel`）撑满主体，页头、工具条和筛选固定，日志列表占满剩下的高度、自己滚动，追踪时 `follow_end` 绑在列表上。滚动区里不要再套滚动区，原因见文末「NanaUI 缺口」。
+筛选栏属于首页外框，有仓库的首页路由都可能显示它。信号 `FilterBarSignals` 在 `RouteSignals::filter`，启动、设置、缺失仓库和空库页以外每次同步都写（关着时不算候选和库类型快捷方式）。常驻首页路由（文件、搜索、播放集、日志、拓展和动作页）在外框里嵌 `inspect_search_view::resident_filter_bar(signals.filter)`，显隐跟「有仓库且筛选栏打开」走 `.visible`；文件页的 `FilesRouteSignals` 不另存筛选栏的状态，读的是同一份 `RouteSignals::filter`。首页外框和纵向滚动主体只有一套：`route_home::{home_page, home_scroll}`，缺失仓库和空库页也用它（不嵌筛选栏）；设置和启动页的整页滚动是 `route_home::scroll_route`。日志页和拓展、动作页一样用 `home_scroll`：面板（`admin::style::workbench_panel`）至少撑满主体，日志列表的基准高写定 360、伸展分走页头、工具条和筛选以下的高度，自己滚动，追踪时 `follow_end` 绑在列表上；窗口矮到放不下时主体滚动。里层滚动区只把自己的盒子算进外层的滚动范围（NanaUI `941df646d` 起），列表里的日志再多，放得下的主体也不滚。
 
 ## 改成常驻的步骤
 
@@ -76,6 +76,7 @@
 - `dynamic` 和 `when` 的容器不能直接给一个 `Stack`；`each` 可以用 `.container(元素)` 把行直接建进给定的元素（播放集条目这样建进 `ReorderList`）。要替换一行有样式的芯片（筛选芯片行、结果行右侧）时用 `.horizontal(n)`，再用 `css!` 补上原来那个 `Stack` 写过的字段（`flex-wrap`、`justify-content`、`width`、`flex-grow` 等），改完跑 `scene_shots` 逐字节比较。竖排父容器里的 `dynamic` 容器不改排版：内容变了整块换、里面又没有可聚焦控件的小块（插件卡片的芯片、原因和四段）可以这样包，可有可无时再给容器 `.visible(..)`。
 - 一行里固定几个、可有可无的块（日志卡片的来源芯片和元数据芯片）直接建出来，各自 `.visible(..)`，不用嵌套列表。
 - 滚动容器写 key，并让 key 带上内容身份（例如 `workspace-page-scroll-{区域}-{面板}`）：换内容时从顶部开始，同一内容重挂时 `remount_state` 按键路径找回偏移。常驻以后滚动容器不再重建，偏移自然留着。
+- 面板高度按内容量（`workbench_panel` 的 `min-height` 是 `MinContent`）时，没写定高度的滚动区按里面的全部内容量高，和 CSS 的 `min-height: min-content` 一样：日志列表只写 `flex-basis: 0` 和最小高，面板会被量成全部日志那么高。要在面板里伸展的滚动列表写定基准高（日志列表 360）再 `flex-grow`。
 
 ### 输入框的四条纪律
 
@@ -233,7 +234,7 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 搜索、设置和管理页改常驻时遇到的：
 
 - 控件表里没有的可绑定字段要自己写 `FieldWrite`：`ScrollView.follow_end`、`TextInput.read_only`、`Button.icon`、整份 `NodeStyle`（`admin::bind`；文件页另有一份 `StyleField` 和 `Button.icon` 在 `files_bind.rs`），以及按地址重新编码的 `QrCode`（`source_auth_page::QrPayload`）。
-- 滚动范围（`scroll_content_extent`）是全部后代布局盒的并集，不在里层的滚动区或裁剪盒处停下。滚动区里再套一个滚动区时，里层溢出的内容会撑出外层的滚动范围，外层能滚进一片空白。日志页因此不用 `home_scroll`，改用不滚的 `home_fixed`，只有日志列表一层滚动。
+- （已修）滚动范围（`scroll_content_extent`）原来是全部后代布局盒的并集，不在里层的滚动区或裁剪盒处停下：滚动区里再套一个滚动区时，里层溢出的内容会撑出外层的滚动范围，外层能滚进一片空白。日志页只好改用不滚的 `home_fixed`，窗口矮时内容被裁掉。NanaUI `941df646d` 起范围只算到最近的裁剪盒，日志页改回 `home_scroll`，`home_fixed` 已删。
 - `css!` 的 `min-width: 0` 除了 `min_width` 还写 `allow_shrink`，和构建器的 `min_width(Px(0))` 字段不完全相同；现在布局不读它，画面一样。
 - `StorePath` 没有 `with_untracked`，同步里比较 Store 的现值用 `untrack(|| store.with(..))`。
 - `layout.hidden` 的子树要等排版以后才退出无障碍投影，没刷新的文档投影出来还带着藏起的节点。
