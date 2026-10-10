@@ -61,7 +61,7 @@
 | 侧栏宽度 220–480，默认 276 | `theme_map::SIDEBAR_MIN_PX` / `SIDEBAR_DEFAULT_PX` / `SIDEBAR_MAX_PX`；工作区资源区的宽度跟着侧栏呈现宽度（`render.rs`、`hot.rs`），宽度存进 `sidebar.json` |
 | CSS 变量 | `theme_map::COLOR_ROLES` 指向的 `SemanticPalette` 字段 |
 | 对话框（`.modal-overlay`、`.modal-card`） | NanaUI `Dialog` / `ConfirmDialog`，距顶、分区、遮罩和开合动效写在主题配方里（`appearance.rs`） |
-| Vue 插件组件 | 不进原生树。原生贡献用 `NativePluginContribution`（`plugin_api.rs`）描述，现状见 [迁移边界](./nana-migration.md) |
+| Vue 插件组件 | 不进原生树：插件清单声明的预览、工具页和播放器组件要运行插件前端的 Vue 代码。预览由内置视图按扩展名接手，现状见 [迁移边界](./nana-migration.md) |
 | 窗口、对话框、外部打开 | `host_api` 请求和 Nana 平台窗口命令 |
 
 ## 主题

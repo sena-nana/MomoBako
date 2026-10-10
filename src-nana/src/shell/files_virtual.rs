@@ -335,7 +335,7 @@ mod tests {
             row.pixel_width = width;
             row.pixel_height = 100;
         }
-        Arc::new(CardFace::of(&row, &[]))
+        Arc::new(CardFace::of(&row))
     }
 
     fn faces(count: usize) -> Vec<Arc<CardFace>> {

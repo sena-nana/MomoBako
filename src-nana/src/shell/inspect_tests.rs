@@ -8,13 +8,11 @@ use crate::backend::services::repository::{
     AssetDetail, AssetSummary, FileBrowserSnapshot, FilePreviewSourceResponse, MetadataEntry, RepositoryBackendSummary,
     RepositoryOverview, RepositorySnapshot, RepositoryStructureCacheState, RepositorySummary,
 };
-use crate::plugin_api::{NativeContributionKind, NativePluginContribution};
-
 use super::super::workspace::{WorkspacePanel, WorkspaceRepository};
 use super::super::player::PlayerMessage;
 use super::super::view_part_primary::RouteKey;
 use super::super::{PreviewPixels, ShellMessage, ShellPage, ShellViewModel};
-use super::{InspectEffect, InspectMessage, InspectState, PreviewBinding, PreviewBody, PreviewKind};
+use super::{InspectEffect, InspectMessage, InspectState, PreviewBody, PreviewKind};
 
 fn asset(path: &str, extension: &str, version: i64, virtual_asset: bool, metadata: Vec<MetadataEntry>) -> AssetDetail {
     let filename = path.rsplit(['/', '\\']).next().unwrap_or(path).to_string();
@@ -66,13 +64,6 @@ fn writable_shell() -> ShellViewModel {
     model
 }
 
-fn preview_binding(kind: NativeContributionKind, extension: &str) -> PreviewBinding {
-    PreviewBinding {
-        extensions: vec![extension.into()],
-        contribution: NativePluginContribution::new("plugin", kind, "官方预览", "view-pdf"),
-    }
-}
-
 fn source(path: &str) -> FilePreviewSourceResponse {
     FilePreviewSourceResponse {
         repo_id: "repo".into(),
@@ -86,37 +77,30 @@ fn source(path: &str) -> FilePreviewSourceResponse {
     }
 }
 
+/// 分派照 Vue `filePreviewExtensions.ts`：图片、Markdown（先于文本）、文本、音视频，再是内置的 PDF、
+/// 模型和压缩包；随附插件（`office-preview` 的 pdf、`three-model-preview`、`preview-archive`）声明的扩展名
+/// 都落到内置视图上，认不出的扩展名（例如只有第三方插件认得的 psd）照 Vue 没有预览插件时一样不预览。
 #[test]
 fn extension_dispatch_prefers_markdown_and_native_preview() {
-    assert_eq!(super::support::classify("PNG", &[]), PreviewKind::Image);
-    assert_eq!(super::support::classify("md", &[]), PreviewKind::Markdown);
-    assert_eq!(super::support::classify("txt", &[]), PreviewKind::Text);
-    assert_eq!(super::support::classify("vue", &[]), PreviewKind::Text);
-    assert_eq!(super::support::classify("mp3", &[]), PreviewKind::Media);
+    assert_eq!(super::support::classify("PNG"), PreviewKind::Image);
+    assert_eq!(super::support::classify("md"), PreviewKind::Markdown);
+    assert_eq!(super::support::classify("txt"), PreviewKind::Text);
+    assert_eq!(super::support::classify("vue"), PreviewKind::Text);
+    assert_eq!(super::support::classify("mp3"), PreviewKind::Media);
     assert_eq!(
-        super::support::classify("pdf", &[]),
+        super::support::classify("pdf"),
         PreviewKind::Native { view_id: "momobako.preview.pdf".into(), label: "PDF".into() }
     );
     assert_eq!(
-        super::support::classify("glb", &[]),
+        super::support::classify("glb"),
         PreviewKind::Native { view_id: "momobako.preview.model".into(), label: "模型".into() }
     );
     assert_eq!(
-        super::support::classify("zip", &[]),
+        super::support::classify("zip"),
         PreviewKind::Native { view_id: "momobako.preview.archive".into(), label: "压缩包".into() }
     );
-    assert_eq!(super::support::classify("bin", &[]), PreviewKind::Unsupported);
-
-    let native = preview_binding(NativeContributionKind::Preview, "pdf");
-    assert_eq!(
-        super::support::classify("pdf", &[native]),
-        PreviewKind::Native { view_id: "momobako.preview.pdf".into(), label: "PDF".into() }
-    );
-    let playlist = preview_binding(NativeContributionKind::PlaylistPlayer, "pdf");
-    assert_eq!(
-        super::support::classify("pdf", &[playlist]),
-        PreviewKind::Native { view_id: "momobako.preview.pdf".into(), label: "PDF".into() }
-    );
+    assert_eq!(super::support::classify("bin"), PreviewKind::Unsupported);
+    assert_eq!(super::support::classify("psd"), PreviewKind::Unsupported);
 }
 
 #[test]
@@ -144,19 +128,11 @@ fn text_decodes_boms_and_drops_a_character_cut_by_the_limit() {
 #[test]
 fn preview_kind_starts_the_matching_body() {
     let mut state = InspectState::default();
-    state.reduce(true, Some("repo"), InspectMessage::RegisterPreview(preview_binding(NativeContributionKind::PlaylistPlayer, "pdf")));
     state.note_detail(&asset("docs/a.pot", "pot", 1, false, Vec::new()));
     assert!(matches!(
         state.take_effects().pop(),
         Some(InspectEffect::LoadNative { view_id, path, .. }) if view_id == "momobako.preview.office" && path == "docs/a.pot"
     ));
-    state.note_detail(&asset("docs/a.pdf", "pdf", 1, false, Vec::new()));
-    assert!(matches!(
-        state.take_effects().pop(),
-        Some(InspectEffect::LoadNative { view_id, .. }) if view_id == "momobako.preview.pdf"
-    ));
-
-    state.reduce(true, Some("repo"), InspectMessage::RegisterPreview(preview_binding(NativeContributionKind::Preview, "pdf")));
     state.note_detail(&asset("docs/a.pdf", "pdf", 1, false, Vec::new()));
     assert!(matches!(
         state.take_effects().pop(),

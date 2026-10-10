@@ -75,9 +75,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 
 ### 接线缺口
 
-归约和服务派发已经写好、但产品界面触发不到的路径，以及 Vue 有、Nana 还没接上的反馈：
-
-- `InspectMessage::RegisterPreview`（登记插件的预览贡献）没有发送方：预览贡献只有内置的那几项（`native_preview::builtin_bindings`），插件声明的预览贡献不会登记，「原生预览 · 名称 · 视图 id」在产品里出不来。
+归约和服务派发已经写好、但产品界面触发不到的路径，以及 Vue 有、Nana 还没接上的反馈：目前没有。
 
 ### 设备验证和其它
 
@@ -88,7 +86,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 - **UIA/AccessKit**：`hosted` 带 AccessKit 平台适配器；测试只读 NanaUI 自己的无障碍树，读屏器看到的结果没有验收。
 - **发布包**：仓库里没有 `momobako-nana` 的打包脚本；CI 和发布流程（`.github/workflows/`）只跑 `yarn verify` 和 Tauri 打包。
 - **全局快捷键**：没有实现。`host_api::HostInputRequest::RegisterShortcut` 没有调用方。
-- **Vue 插件组件不进原生树**：插件前端注册的 Vue 组件（设置页、工具页、预览、播放器）不在原生树里运行。插件设置只画清单 `contributes.settings.fields` 声明的字段；第三方工具页只画页头和「这个工具页由插件的前端组件绘制，Nana 原生界面不能运行它。」（`admin_gap.rs`）；预览贡献只认内置能画的视图，其余写「原生预览 · 名称 · 视图 id」（`native_preview.rs`）；只有播放器贡献、扩展名又不是音视频或图片的条目写「暂不支持播放 {扩展名} 文件」（`player_clip.rs`）。原生贡献的描述是 `src-nana/src/plugin_api.rs` 的 `NativePluginContribution`。
+- **Vue 插件组件不进原生树**：插件前端注册的 Vue 组件（设置页、工具页、预览、播放器）不在原生树里运行。插件设置只画清单 `contributes.settings.fields` 声明的字段；第三方工具页只画页头和「这个工具页由插件的前端组件绘制，Nana 原生界面不能运行它。」（`admin_gap.rs`）；插件清单声明的预览贡献不登记：Vue 里它们由插件前端的 `registerPreview` 组件绘制，随附插件声明的扩展名都已有内置视图（`native_preview::builtin_view`），认不出的扩展名照 Vue 没有预览插件时一样只画缩略图或类型图标；只有播放器贡献、扩展名又不是音视频或图片的条目写「暂不支持播放 {扩展名} 文件」（`player_clip.rs`）。
 
 逐项的设备验收要求见 [设备矩阵](./nana-device-matrix.md)。
 

@@ -82,7 +82,6 @@ impl BoardSignals {
         let rows = visible_rows(&model.files, &ctx);
         let picked = picked_paths(&model.files);
         let drop_folder = (model.input.internal_active || model.input.dragging_files).then(|| model.input.hover_folder.as_deref()).flatten();
-        let bindings = super::cards::builtin_bindings();
         let mut faces = HashMap::with_capacity(rows.len());
         let cards = rows
             .iter()
@@ -91,7 +90,7 @@ impl BoardSignals {
                 let key = row.key();
                 let face = match cache.faces.get(key.as_str()) {
                     Some((known, face)) if *known == print => face.clone(),
-                    _ => Arc::new(CardFace::of(row, bindings)),
+                    _ => Arc::new(CardFace::of(row)),
                 };
                 faces.insert(face.key.clone(), (print, face.clone()));
                 CardView {
