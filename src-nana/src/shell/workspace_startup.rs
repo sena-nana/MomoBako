@@ -39,6 +39,20 @@ pub enum StartupMode {
     Switch,
 }
 
+/// 首屏启动第 4 步等的设置数据，照 Vue `ensureRepositoryWorkspace` 在离开启动页之前 `await loadSettingsData()`：
+/// 读完首屏目录（空库、缺失仓库是选定以后）先等设置包，插件列表到了再等插件登记的播放器类型（Vue 在
+/// `loadSettingsData` 里同步前端插件注册表），都回来（失败也算）才结束启动。换仓库不读设置包，不等。
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SettingsWait {
+    /// 不等：还没走到这一步，或者是换仓库。
+    #[default]
+    None,
+    /// 等设置包：插件、钩子记录、缓存、API 设计和外部连接。
+    Bundle,
+    /// 设置包到了，等播放器类型。
+    Players,
+}
+
 /// 单个启动步骤在步骤条上的状态。
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum StartupStepState {
@@ -122,8 +136,13 @@ pub struct StartupState {
     pub logs: Vec<StartupLog>,
     /// 这一轮读到的仓库摘要计数；没读到摘要（空库、缺失仓库）时为 `None`。
     pub index: Option<IndexCounts>,
-    /// 启动结束时读的设置包还没回来：回来时记「应用配置与插件设置加载完成」和「流程完成」。
-    pub settings_pending: bool,
+    /// 首屏启动第 4 步还在等的设置数据，见 [`SettingsWait`]。
+    pub settings: SettingsWait,
+    /// 这一轮开始时加载日志里的活动仓库（Vue `ensureRepositoryWorkspace` 开始时的 `activeRepoId`）。
+    pub base_repo_id: Option<String>,
+    /// 这一轮已经换上了活动仓库：首屏启动读完摘要、选中缺失仓库或列表为空时，换仓库一开始就换（Vue 在这些时候
+    /// 写 `activeRepoId`）。换上以前，加载日志里的活动仓库还是 [`Self::base_repo_id`]。
+    pub active_applied: bool,
 }
 
 impl Default for StartupState {
@@ -139,7 +158,9 @@ impl Default for StartupState {
             error: None,
             logs: Vec::new(),
             index: None,
-            settings_pending: false,
+            settings: SettingsWait::None,
+            base_repo_id: None,
+            active_applied: false,
         }
     }
 }
@@ -150,10 +171,12 @@ impl StartupState {
         self.begin_with(None, None);
     }
 
-    /// 重新开始一轮启动，并记下「首屏启动流程开始。」，明细带当前和上次打开的资源库。
+    /// 重新开始一轮启动，并记下「首屏启动流程开始。」，明细带当前和上次打开的资源库。`active_repo_id` 也是这一轮
+    /// 换上活动仓库以前日志里的活动仓库。
     pub fn begin_with(&mut self, active_repo_id: Option<&str>, remembered_repo_id: Option<&str>) {
         *self = Self {
             status: StartupStatus::Loading,
+            base_repo_id: active_repo_id.map(str::to_string),
             ..Self::default()
         };
         let total = STARTUP_TOTAL_STEPS.to_string();
@@ -168,7 +191,8 @@ impl StartupState {
     /// 已有的加载日志留着，这一轮不再写首屏启动日志。
     pub fn begin_switch(&mut self) {
         self.mode = StartupMode::Switch;
-        self.settings_pending = false;
+        self.settings = SettingsWait::None;
+        self.active_applied = true;
         self.set_progress(1, "切换资源库", "准备目标资源库，清理上一个资源库的首屏状态。");
     }
 
@@ -258,21 +282,20 @@ impl StartupState {
         }
     }
 
-    /// 首屏启动结束、开始读设置包（Vue 在第 4 步 `loadSettingsData` 之前）：记「首屏启动开始加载应用配置与
-    /// 插件设置。」，明细带第 4 步和活动仓库，等设置包回来再记后两条。
-    pub fn note_settings_started(&mut self, repo_id: Option<&str>) {
-        self.settings_pending = true;
+    /// 首屏启动开始等设置数据（Vue 第 4 步 `loadSettingsData` 之前）：换上第 4 步的说明，记「首屏启动开始加载应用
+    /// 配置与插件设置。」，明细带第 4 步和活动仓库。设置包和播放器类型都回来再由 [`Self::finish_launch`] 收尾。
+    pub fn await_settings(&mut self, repo_id: Option<&str>) {
+        self.set_progress(4, "读取首屏目录", "加载应用配置、插件设置和首屏辅助数据。");
+        self.settings = SettingsWait::Bundle;
         self.log("info", "首屏启动开始加载应用配置与插件设置。", &[("step", Some("4")), ("repoId", repo_id)]);
     }
 
-    /// 启动时读的设置包回来了（成功失败都算，和 Vue `loadSettingsData` 吃掉错误一样）：记「首屏启动应用配置与
+    /// 设置数据都回来了（失败也算，和 Vue `loadSettingsData` 吃掉错误一样）：首屏启动结束，记「首屏启动应用配置与
     /// 插件设置加载完成。」和「首屏启动流程完成。」，后者明细带活动仓库、素材数和播放集数（没读到摘要时都是 0）。
-    /// 不是启动时读的设置包返回假，什么也不记。
-    pub fn note_settings_finished(&mut self, repo_id: Option<&str>) -> bool {
-        if !std::mem::take(&mut self.settings_pending) {
-            return false;
-        }
+    pub fn finish_launch(&mut self, repo_id: Option<&str>) {
+        self.settings = SettingsWait::None;
         self.log("info", "首屏启动应用配置与插件设置加载完成。", &[("step", Some("4")), ("repoId", repo_id)]);
+        self.finish();
         let index = self.index.clone().unwrap_or_default();
         let (assets, playlists) = (index.asset_count.to_string(), index.playlist_count.to_string());
         self.log(
@@ -280,7 +303,6 @@ impl StartupState {
             "首屏启动流程完成。",
             &[("activeRepoId", repo_id), ("assetCount", Some(assets.as_str())), ("playlistCount", Some(playlists.as_str()))],
         );
-        true
     }
 
     /// 最近 8 条日志，新的在前。

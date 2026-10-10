@@ -263,7 +263,8 @@ fn note_selection(model: &mut ShellViewModel, path: &str) {
     let _ = model.inspect.take_effects();
 }
 
-fn asset_detail(row: &FileRow) -> AssetDetail {
+/// Vue `get_asset_detail` 对这一行的应答。
+pub(super) fn asset_detail(row: &FileRow) -> AssetDetail {
     let size_bytes = row.size_label.trim_end_matches(" B").parse::<i64>().unwrap_or(0);
     AssetDetail {
         summary: AssetSummary {

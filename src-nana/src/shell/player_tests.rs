@@ -31,6 +31,9 @@ fn shell(writable: bool) -> ShellViewModel {
         capabilities: if writable { vec!["write".into()] } else { Vec::new() },
         cache_required: false,
         cache_status: String::new(),
+        cache_path: None,
+        login_expired: false,
+        logged_out: false,
     });
     model.workspace.active_repo_id = Some("repo".into());
     model
@@ -506,6 +509,13 @@ fn listed_playback_distinguishes_missing_plugin_upgrade_and_decoder_failure() {
     assert_eq!(decoded.player.session.current_time_ms, time);
     assert!(decoded.player.session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
     assert_ne!(decoded.player.session.status, "playing");
+    // 没装好的条目没有控制落点：暂停不动，播放重新装载、照样报没有原生解码器，不读文件。
+    decoded.player.take_effects();
+    send(&mut decoded, PlayerMessage::SetPlaying(false));
+    send(&mut decoded, PlayerMessage::SetPlaying(true));
+    assert_eq!(decoded.player.session.status, "failed");
+    assert!(decoded.player.session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
+    assert!(!decoded.player.take_effects().iter().any(|effect| matches!(effect, PlayerEffect::LoadItem { .. })), "不读文件");
 
     let mut image = shell(true);
     image.player.candidates = vec![candidate("native.image", "audio", "image", &["png"])];
@@ -812,6 +822,8 @@ fn acceptance_pages_use_the_player_surface() {
         tree: None,
         entries: Vec::new(),
     })));
+    assert!(!model.player_surface_visible(), "首屏启动还在等设置包");
+    crate::shell::data_load_tests::answer_settings(&mut model);
     assert!(model.player_surface_visible());
     model.workspace.panel = WorkspacePanel::Playlist;
     assert!(model.player_surface_visible());

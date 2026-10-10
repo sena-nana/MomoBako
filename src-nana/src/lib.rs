@@ -27,7 +27,7 @@ mod drag_out;
 mod tray;
 use shell::{
     DeleteMode, ShellMessage, ShellPage, ShellView, ShellViewModel,
-    WorkspaceEffect, display_mode_path, mount_shell, sidebar_prefs_path,
+    WorkspaceEffect, display_mode_path, last_repository_path, mount_shell, sidebar_prefs_path,
 };
 
 pub mod capability;
@@ -136,6 +136,7 @@ impl ApplicationState for MomoBakoApplication {
             }
         }
         shell.workspace.load_prefs_file(&sidebar_prefs_path());
+        shell.workspace.load_last_repository_file(&last_repository_path());
         shell.files.load_display_mode_file(&display_mode_path());
         shell.player.load_default_files();
         shell.admin.load_default_file();
@@ -302,6 +303,9 @@ fn dispatch_workspace_effects(
         match effect {
             WorkspaceEffect::PersistSidebar => {
                 app.shell.workspace.save_prefs_file(&sidebar_prefs_path());
+            }
+            WorkspaceEffect::PersistLastRepository => {
+                app.shell.workspace.save_last_repository_file(&last_repository_path());
             }
             WorkspaceEffect::StopPlayback { previous_repo_id } => {
                 eprintln!("Nana 仓库切换，停止播放会话：{previous_repo_id}");

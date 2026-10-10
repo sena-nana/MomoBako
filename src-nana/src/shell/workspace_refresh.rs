@@ -10,7 +10,7 @@ use crate::backend::services::repository::{RepositorySnapshot, RepositorySummary
 use crate::MomoBakoApplication;
 
 use super::sidebar::{ShortcutAsset, SidebarShortcut};
-use super::{ShellMessage, ShellViewModel, StartupStatus, WorkspaceRepository};
+use super::{ShellMessage, ShellViewModel, WorkspaceRepository};
 
 /// 静默列表或摘要的服务结果。失败只记日志，不把页面改成错误。
 #[derive(Clone, Debug)]
@@ -40,7 +40,7 @@ fn apply_repositories(model: &mut ShellViewModel, result: Result<Vec<RepositoryS
         }
         Ok(items) => items,
     };
-    if model.workspace.startup.status != StartupStatus::Ready {
+    if !model.workspace.content_loaded() {
         eprintln!("Nana 启动未完成，忽略静默仓库列表");
         return;
     }
@@ -72,7 +72,7 @@ pub(super) fn apply_snapshot(model: &mut ShellViewModel, result: Result<Reposito
         }
         Ok(snapshot) => snapshot,
     };
-    if model.workspace.startup.status != StartupStatus::Ready {
+    if !model.workspace.content_loaded() {
         eprintln!("Nana 启动未完成，忽略静默仓库摘要：{}", snapshot.repository.repo_id);
         return;
     }
@@ -166,7 +166,7 @@ mod tests {
     use crate::backend::services::repository::{
         AssetSummary, RepositoryBackendSummary, RepositoryOverview, RepositoryShortcut,
     };
-    use crate::shell::{MainRegion, ShellPage, WorkspaceEffect, WorkspaceRepository};
+    use crate::shell::{MainRegion, ShellPage, StartupStatus, WorkspaceEffect, WorkspaceRepository};
 
     fn summary(repo_id: &str, name: &str, status: &str) -> RepositorySummary {
         RepositorySummary {

@@ -54,6 +54,16 @@ impl ShellViewModel {
         }
     }
 
+    /// 首屏启动等完设置包、结束了：空库和缺失仓库读列表时还在启动页上，这时才落到各自的主区，侧栏跟着绑定
+    /// （可用的仓库读完摘要时已经绑定过，同一个仓库再绑定不重复读）。
+    pub(super) fn settle_launch(&mut self) {
+        self.sync_repository_header();
+        if self.workspace.main_region() == MainRegion::MissingRepository {
+            self.browser_entries.clear();
+        }
+        self.bind_sidebar_repository();
+    }
+
     /// 选一个资源库（切换列表、搜索命中、来源登录、附加成功……），见 `WorkspaceState::select_repository`。
     pub(super) fn select_workspace_repository(&mut self, repo_id: &str) {
         if self.workspace.select_repository(repo_id) {
@@ -90,6 +100,8 @@ impl ShellViewModel {
                 self.repository_id = Some(repo_id.clone());
                 self.apply_snapshot_sidebar(&snapshot);
                 if refreshing {
+                    // Vue `selectRepository` 同一个仓库读完摘要也 `rememberLastActiveRepository`。
+                    self.workspace.remember_repository(Some(repo_id.clone()));
                     self.reload_repository_side_data(&repo_id);
                     self.begin_refresh_directory();
                 } else {

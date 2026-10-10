@@ -15,6 +15,9 @@ fn repo(id: &str, status: &str) -> WorkspaceRepository {
         capabilities: vec!["localRootPath".into()],
         cache_required: false,
         cache_status: String::new(),
+        cache_path: None,
+        login_expired: false,
+        logged_out: false,
     }
 }
 
@@ -67,12 +70,15 @@ fn repository_regions_are_mutually_exclusive() {
     assert_eq!(state.main_region(), MainRegion::Startup);
 
     state.apply_repository_list(Some(state.list_generation), Ok(vec![]));
+    assert_eq!(state.main_region(), MainRegion::Startup, "首屏启动等设置包");
+    state.note_settings_loaded(false);
     assert_eq!(state.main_region(), MainRegion::EmptyRepository);
     assert!(state.last_active_repo_id.is_none());
 
     let mut missing = WorkspaceState::default();
     missing.prepare_initial_list();
     missing.apply_repository_list(Some(missing.list_generation), Ok(vec![repo("gone", "missing")]));
+    missing.note_settings_loaded(false);
     assert_eq!(missing.main_region(), MainRegion::MissingRepository);
 
     let mut ready = WorkspaceState::default();
@@ -85,6 +91,10 @@ fn repository_regions_are_mutually_exclusive() {
     ready.note_index_finished(Ok(IndexCounts::default()));
     assert!(ready.take_effects().contains(&WorkspaceEffect::LoadFirstScreen { repo_id: "live".into() }), "读完摘要接着读首屏目录");
     ready.note_first_screen_finished(Ok(()));
+    assert_eq!(ready.main_region(), MainRegion::Startup, "首屏启动等设置包");
+    ready.note_settings_loaded(true);
+    assert_eq!(ready.main_region(), MainRegion::Startup, "插件列表到了，等播放器类型");
+    ready.note_players_loaded();
     assert_eq!(ready.main_region(), MainRegion::HasRepository);
 
     let mut failed = WorkspaceState::default();
@@ -118,6 +128,7 @@ fn selection_prefers_active_then_remembered_then_first() {
         Ok(vec![repo("first", "ready"), repo("remembered", "missing")]),
     );
     assert_eq!(remembered.active_repo_id.as_deref(), Some("remembered"));
+    remembered.note_settings_loaded(false);
     assert_eq!(remembered.main_region(), MainRegion::MissingRepository);
     assert!(remembered.effects.iter().all(|effect| !matches!(effect, WorkspaceEffect::SyncRepository { .. })));
 }

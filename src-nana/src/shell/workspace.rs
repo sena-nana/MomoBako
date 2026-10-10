@@ -20,10 +20,15 @@ pub const SIDEBAR_WIDTH_KEY: &str = "momobako.sidebarWidth";
 
 #[path = "workspace_startup.rs"]
 mod startup;
-pub use startup::{IndexCounts, StartupLog, StartupMode, StartupState, StartupStatus, StartupStepItem, StartupStepState, SyncCounts};
+pub use startup::{
+    IndexCounts, SettingsWait, StartupLog, StartupMode, StartupState, StartupStatus, StartupStepItem, StartupStepState, SyncCounts,
+};
 #[path = "workspace_switch.rs"]
 mod switch;
 pub use switch::{RefreshRun, RefreshStage};
+#[path = "workspace_remember.rs"]
+mod remember;
+pub use remember::last_repository_path;
 /// 工作台主面板，对应 `WorkspacePanelKey`。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum WorkspacePanel {
@@ -78,6 +83,12 @@ pub struct WorkspaceRepository {
     pub capabilities: Vec<String>,
     pub cache_required: bool,
     pub cache_status: String,
+    /// 来源本地缓存目录（`localCache.path`），来源条目动作的 `managedCacheRoot`。
+    pub cache_path: Option<String>,
+    /// 来源登录过期（`authentication.loginExpired`）。
+    pub login_expired: bool,
+    /// 来源没有登录（`authentication.loggedIn` 为假）。
+    pub logged_out: bool,
 }
 
 impl WorkspaceRepository {
@@ -95,12 +106,26 @@ impl WorkspaceRepository {
                 .as_ref()
                 .map(|cache| cache.status.clone())
                 .unwrap_or_default(),
+            cache_path: summary.local_cache.as_ref().and_then(|cache| cache.path.clone()),
+            login_expired: summary.authentication.as_ref().is_some_and(|auth| auth.login_expired),
+            logged_out: summary.authentication.as_ref().is_some_and(|auth| !auth.logged_in),
         }
     }
 
     /// 来源缓存未就绪时，主操作是打开插件设置，而不是重定向本地文件夹。
     pub fn is_source_cache_issue(&self) -> bool {
         self.cache_required && self.cache_status != "ready"
+    }
+
+    /// 来源认证或本地缓存不可用（Vue `actionDisabled` 的仓库部分）：登录过期、没有登录，或者要本地缓存但缓存
+    /// 没就绪。这时来源条目动作禁用。
+    pub fn source_unavailable(&self) -> bool {
+        self.login_expired || self.logged_out || self.is_source_cache_issue()
+    }
+
+    /// 能当下载目标：就绪，而且可写（Vue 目标资源库对话框的 `requireReady`、`requireWritable`）。
+    pub fn accepts_downloads(&self) -> bool {
+        self.status == "ready" && self.capabilities.iter().any(|capability| capability == "write")
     }
 }
 
@@ -147,6 +172,8 @@ pub enum WorkspaceEffect {
     RelocateRepository { repo_id: String, path: String },
     DeleteRepository { repo_id: String, mode: DeleteMode },
     PersistSidebar,
+    /// 记住的资源库变了，写进 `last-repository.json`。
+    PersistLastRepository,
     StopPlayback { previous_repo_id: String },
 }
 
@@ -254,19 +281,30 @@ impl WorkspaceState {
         true
     }
 
-    /// 开始一轮启动：记下「流程开始」和「开始读取资源库列表」，步骤条进入第 1 步。
+    /// 开始一轮启动：记下「流程开始」和「开始读取资源库列表」，步骤条进入第 1 步。「流程开始」的活动仓库是
+    /// 上一轮留下的（[`Self::logged_active_repo_id`]），重试时和 Vue 一样带着失败那一轮已经换上的仓库。
     fn begin_startup(&mut self) {
-        self.startup.begin_with(self.active_repo_id.as_deref(), self.last_active_repo_id.as_deref());
+        let active = self.logged_active_repo_id();
+        self.startup.begin_with(active.as_deref(), self.last_active_repo_id.as_deref());
         self.startup.set_progress(1, "加载仓库列表", "读取已注册资源库，并匹配上次打开的工作区。");
         self.startup.log("info", "首屏启动开始读取资源库列表。", &[("step", Some("1"))]);
     }
 
-    /// 启动失败：停在当前步骤，日志带上正在加载的目标资源库。
-    /// Vue 在首屏加载完成前不写 `activeRepoId`，所以日志里只有 `targetRepoId`。
+    /// 加载日志里的活动仓库，照 Vue `activeRepoId` 的时机：首屏启动换上目标（读完摘要、选中缺失仓库、列表为空）
+    /// 以前还是这一轮开始时的值，换仓库一开始就是目标。Nana 的 `active_repo_id` 在选中时就换成目标，日志不能直接用它。
+    fn logged_active_repo_id(&self) -> Option<String> {
+        if self.startup.active_applied || self.startup.mode == StartupMode::Switch {
+            self.active_repo_id.clone()
+        } else {
+            self.startup.base_repo_id.clone()
+        }
+    }
+
+    /// 启动失败：停在当前步骤，日志照 Vue 带上活动仓库（读完摘要以后才是这次的仓库）和正在加载的目标资源库。
     /// 换仓库失败照 Vue 不写日志（`StartupState::log` 跳过），任务弹层这一行取消。
     fn fail_startup(&mut self, error: impl Into<String>) {
-        let target = self.active_repo_id.clone();
-        self.startup.fail_with(error, None, target.as_deref());
+        let (active, target) = (self.logged_active_repo_id(), self.active_repo_id.clone());
+        self.startup.fail_with(error, active.as_deref(), target.as_deref());
         self.presence = RepositoryPresence::LoadError;
         self.snapshot_loading = false;
         if self.startup.mode == StartupMode::Switch {
@@ -392,7 +430,8 @@ impl WorkspaceState {
                     ],
                 );
                 self.startup.index = Some(counts);
-                self.last_active_repo_id = Some(repo_id.clone());
+                self.startup.active_applied = true;
+                self.remember_repository(Some(repo_id.clone()));
                 if self.startup.mode == StartupMode::Switch {
                     self.operation.update(super::repo_operation::OperationPatch::step("加载资源索引", 46.0));
                 }
@@ -408,9 +447,13 @@ impl WorkspaceState {
         }
     }
 
-    /// 首屏目录到了：启动（含换仓库）结束，任务弹层的「加载资源库」完成；失败停在第 4 步。
+    /// 首屏目录到了：换仓库到这里结束、任务弹层的「加载资源库」完成；首屏启动接着等设置包（[`Self::finish_loading_run`]）。
+    /// 失败停在第 4 步。已经在等设置包时再来的目录不算。
     pub fn note_first_screen_finished(&mut self, result: Result<(), String>) {
-        if self.startup.status != StartupStatus::Loading || self.startup.current_step < 4 {
+        if self.startup.status != StartupStatus::Loading
+            || self.startup.current_step < 4
+            || self.startup.settings != SettingsWait::None
+        {
             return;
         }
         match result {
@@ -421,18 +464,45 @@ impl WorkspaceState {
                     "首屏启动首屏目录与关联数据加载完成。",
                     &[("step", Some("4")), ("playlistCount", Some(playlists.as_str()))],
                 );
-                self.startup.finish();
                 self.presence = RepositoryPresence::Ready;
-                self.snapshot_loading = false;
-                if self.startup.mode == StartupMode::Switch {
-                    self.operation.finish();
-                }
+                self.finish_loading_run();
             }
             Err(error) => {
                 eprintln!("Nana 读取首屏目录失败：{error}");
                 self.fail_startup(error);
             }
         }
+    }
+
+    /// 首屏启动等的设置包回来了（失败也算）。`players_requested`：插件列表换了新的、排下了播放器类型的读取，接着等它；
+    /// 否则首屏启动到这里结束。不是首屏启动在等的设置包（打开设置页、插件面板「刷新」）什么也不做。
+    pub fn note_settings_loaded(&mut self, players_requested: bool) {
+        if self.startup.settings != SettingsWait::Bundle {
+            return;
+        }
+        if players_requested {
+            self.startup.settings = SettingsWait::Players;
+        } else {
+            self.finish_launch();
+        }
+    }
+
+    /// 首屏启动等的播放器类型回来了（失败也算）：首屏启动结束。别的时候读回的播放器类型什么也不做。
+    pub fn note_players_loaded(&mut self) {
+        if self.startup.settings == SettingsWait::Players {
+            self.finish_launch();
+        }
+    }
+
+    fn finish_launch(&mut self) {
+        let repo_id = self.active_repo_id.clone();
+        self.startup.finish_launch(repo_id.as_deref());
+    }
+
+    /// 工作区的内容已经读好：启动结束了，或者首屏启动读完首屏目录、只在等设置包。Vue 这时已经换上了
+    /// `activeRepoId`，结构更新照常静默刷新，Nana 在等设置包的这段也一样，不丢掉外面的改动。
+    pub fn content_loaded(&self) -> bool {
+        self.startup.status == StartupStatus::Ready || self.startup.settings != SettingsWait::None
     }
 
     pub fn toggle_sidebar(&mut self) {
@@ -674,7 +744,8 @@ impl WorkspaceState {
         self.startup.finish();
     }
 
-    /// 启动时读回的列表。选择顺序：当前 id、上次记住的 id、列表第一项。空列表清空记住的仓库。
+    /// 启动时读回的列表。选择顺序：当前 id、上次记住的 id（还在列表里时）、列表第一项。空列表清空记住的仓库，
+    /// 选中的仓库缺失时立即记住它。
     fn apply_repository_items(&mut self, items: Vec<WorkspaceRepository>) {
         self.repositories = items;
         let total = self.repositories.len().to_string();
@@ -688,7 +759,8 @@ impl WorkspaceState {
         if self.repositories.is_empty() {
             self.startup.log("warn", "首屏启动未找到可加载的资源库。", &[("repositoryCount", Some("0"))]);
             self.assign_active(None);
-            self.last_active_repo_id = None;
+            self.startup.active_applied = true;
+            self.remember_repository(None);
             self.reset_library_category();
             self.presence = RepositoryPresence::Empty;
             self.finish_loading_run();
@@ -728,7 +800,8 @@ impl WorkspaceState {
                     ("repositoryPath", next.as_ref().map(|item| item.path.as_str())),
                 ],
             );
-            self.last_active_repo_id = Some(next_id);
+            self.startup.active_applied = true;
+            self.remember_repository(Some(next_id));
             self.reset_library_category();
             self.presence = RepositoryPresence::Missing;
             self.finish_loading_run();

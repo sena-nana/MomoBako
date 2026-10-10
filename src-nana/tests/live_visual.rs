@@ -574,6 +574,9 @@ fn repository(status: &str) -> WorkspaceRepository {
         capabilities: vec!["write".into()],
         cache_required: false,
         cache_status: String::new(),
+        cache_path: None,
+        login_expired: false,
+        logged_out: false,
     }
 }
 
