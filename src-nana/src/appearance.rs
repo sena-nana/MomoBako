@@ -288,6 +288,62 @@ mod tests {
         }
     }
 
+    /// Vue `--radius-2xl` 的大块表面（文件卡、详情卡、预览页、播放条、播放集面板和搜索、插件、日志的
+    /// 工作台面板）写 2xl 档：圆角是装上的主题给的两倍基数；改了圆角半径重新安装，同一批节点跟着变。
+    #[test]
+    fn large_surfaces_follow_the_installed_2xl_radius() {
+        use crate::shell::view_harness::ShellHarness;
+        use crate::shell::{ShellPage, ShellViewModel};
+        let catalog = crate::shell::acceptance_gap_models();
+        let scene = |name: &str| catalog.iter().find(|(scene, _)| *scene == name).unwrap_or_else(|| panic!("没有场景 {name}")).1.clone();
+        let models = [
+            scene("live-files"),
+            scene("playlist-open"),
+            scene("search-results"),
+            ShellViewModel::for_page(ShellPage::PluginSettings),
+            ShellViewModel::for_page(ShellPage::Logs),
+        ];
+        let mut keys = std::collections::BTreeSet::new();
+        for model in models {
+            let mut shell = model.clone();
+            let mut harness = ShellHarness::mount(model);
+            let mut surfaces = Vec::new();
+            for radius in [8.0, 13.0] {
+                shell.admin.corner_radius = radius;
+                assert!(install(&mut harness.window.document, Appearance::from_shell(&shell, None)).is_some(), "主题装不上");
+                harness.flush();
+                let context = harness.document().context();
+                let world = context.world();
+                if surfaces.is_empty() {
+                    surfaces = world
+                        .document_order(harness.document().document())
+                        .into_iter()
+                        .filter(|id| world.node_style(*id).is_some_and(|style| style.radius == Some(RadiusTier::Xxl)))
+                        .collect();
+                    keys.extend(surfaces.iter().filter_map(|id| context.assembly_path(*id)?.rsplit('/').next().map(str::to_string)));
+                }
+                for id in &surfaces {
+                    let resolved = world.extract_nodes(&[*id]).first().and_then(|node| node.source_style.layout.border_radius);
+                    assert_eq!(resolved, Some(radius as f32 * 2.0), "{:?} 的圆角没有跟着主题的 2xl 档", context.assembly_path(*id));
+                }
+            }
+        }
+        // 播放条是旧视图岛，组装路径停在文件页和播放集页给它留的占位上。
+        for key in [
+            "file-browser-card",
+            "file-detail",
+            "inspect-preview-page",
+            "file-player-slot",
+            "playlist-page",
+            "playlist-player-slot",
+            "search-workbench-panel",
+            "admin-plugin-panel",
+            "admin-log-panel",
+        ] {
+            assert!(keys.contains(key), "{key} 没有写 2xl 档：{keys:?}");
+        }
+    }
+
     #[test]
     fn installing_twice_keeps_the_document_on_the_new_radius() {
         let mut document = RuntimeDocument::new(nana_ui::runtime::DocumentId::new(1).expect("id"));

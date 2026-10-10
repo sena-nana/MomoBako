@@ -6,8 +6,8 @@
 
 use nana_ui::runtime::view::{fields, widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, AlignSpec, IconButton, JustifySpec, LengthSpec, RangeChanged, RangeField, SemanticColorRole, SizeChanged,
-    Stack, Text, Thumbnail,
+    Activate, AlignSpec, IconButton, JustifySpec, LengthSpec, RadiusTier, RangeChanged, RangeField, SemanticColorRole,
+    SizeChanged, Stack, Text, Thumbnail,
 };
 use nana_ui::{ContentFit, Icon};
 
@@ -204,11 +204,10 @@ fn narrow_layout(model: &ShellViewModel) -> bool {
     model.narrow_viewport() || (width > 0.0 && width < WIDE_MIN_WIDTH)
 }
 
-/// 播放条。`narrow` 对应 Vue 的 `max-width: 1120px` 断点。
+/// 播放条。`narrow` 对应 Vue 的 `max-width: 1120px` 断点。卡片是 `--radius-2xl`，跟着主题变。
 pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
     let props = BarProps::from_model(model);
     let narrow = narrow_layout(model);
-    let radius = crate::theme_map::radius_2xl(model.admin.corner_radius as f32);
     let mut rows: Vec<AnyView> = vec![progress(&props), body(&props, narrow)];
     if props.shows_settings() {
         rows.push(parts::settings_row(&props, narrow));
@@ -219,7 +218,7 @@ pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
     let card = Stack::column(10.0)
         .surface(SemanticColorRole::Surface)
         .outline(SemanticColorRole::BorderStrong, 1.0)
-        .radius_px(radius)
+        .radius(RadiusTier::Xxl)
         .min_height(LengthSpec::Px(124.0))
         .with_layout(|layout| {
             layout.padding_top = Some(LengthSpec::Px(12.0));

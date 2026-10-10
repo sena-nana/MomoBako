@@ -300,12 +300,12 @@ pub(crate) fn pill_look(tone: PillTone) -> (Stack, Role) {
     }
 }
 
-/// `.search-workbench__panel`：`bg-elev` 底、1px 透明边加 22 内边距、竖排间距 16，
-/// 撑满主区剩余高度。Vue 用 `--radius-2xl`，按渲染层口径先用 `Xl`。
+/// `.search-workbench__panel`：`bg-elev` 底、`--radius-2xl`、1px 透明边加 22 内边距、竖排间距 16，
+/// 撑满主区剩余高度。
 pub(crate) fn workbench_panel(body: Vec<AnyView>, key: &'static str) -> AnyView {
     let panel = pad(Stack::fill_column(16.0), 23.0, 23.0, 23.0, 23.0)
         .surface(Role::Surface)
-        .radius(RadiusTier::Xl)
+        .radius(RadiusTier::Xxl)
         .with_layout(|layout| {
             layout.height = Some(LengthSpec::Shrink);
             layout.min_height = Some(LengthSpec::MinContent);
@@ -320,7 +320,7 @@ pub(crate) fn workbench_panel(body: Vec<AnyView>, key: &'static str) -> AnyView 
 pub(crate) fn fill_panel(body: Vec<AnyView>, key: &'static str) -> AnyView {
     let panel = pad(Stack::fill_column(16.0), 23.0, 23.0, 23.0, 23.0)
         .surface(Role::Surface)
-        .radius(RadiusTier::Xl)
+        .radius(RadiusTier::Xxl)
         .with_layout(|layout| {
             layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
             layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;

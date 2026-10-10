@@ -70,7 +70,7 @@
 
 字号：页面标题用 Nana `title`（18px）。设计标准的 14px 工作文本对应 Nana `section`，13px 行标签对应 Nana `body`。Nana 默认主题把这两个数字对调了，迁移时按这个角色用，不在控件上再写一个 14。元信息用 `meta`（12px），微型标签用 `hint`（11px）。对应表是 `TYPE_ROLES`。
 
-圆角基数来自设置（0–20，默认 8），`corner_metrics` 换成 xs 到 xl 五档，2xl 用 `radius_2xl`。
+圆角基数来自设置（0–20，默认 8），`corner_metrics` 换成 xs 到 2xl 六档，2xl 是 `RadiusTier::Xxl`。
 
 间距用 Nana `space` 阶梯。产品侧栏宽度是上面的 220 / 276 / 480，不属于间距阶梯。
 

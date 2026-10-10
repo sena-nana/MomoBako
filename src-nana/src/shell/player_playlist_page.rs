@@ -52,8 +52,6 @@ pub(crate) struct PageHead {
     pub subline: String,
     /// 有对应的播放插件：页眉和行上的播放才可点。
     pub has_player: bool,
-    /// 面板圆角，跟外观设置里的圆角。
-    pub radius: f32,
     /// 条目所属的播放集，移除条目时带上。
     pub playlist_id: String,
     /// 正在播放的条目。
@@ -104,7 +102,6 @@ impl PlaylistPageView {
                 name: detail.playlist.name.clone(),
                 subline,
                 has_player,
-                radius: crate::theme_map::radius_2xl(model.admin.corner_radius as f32),
                 playlist_id: model.selected_playlist_id.clone().unwrap_or_else(|| detail.playlist.playlist_id.clone()),
                 current: model.player.current_id.clone(),
             },
@@ -153,12 +150,11 @@ impl PlaylistPageSignals {
     }
 }
 
-/// 播放集页：没点开或详情还没读回时是虚线空框；点开后是 bg-elev 面板，里面是页眉、条目（或空框）和
-/// `player_bar`。两块都留着，按是否点开互换。
+/// 播放集页：没点开或详情还没读回时是虚线空框；点开后是 bg-elev、`--radius-2xl` 的面板，里面是页眉、
+/// 条目（或空框）和 `player_bar`。两块都留着，按是否点开互换。
 pub(crate) fn view(signals: PlaylistPageSignals, player_bar: AnyView) -> AnyView {
     let head = signals.head;
     let order = signals.order;
-    let initial = head.get_untracked();
     let unlisted = dashed_empty("选择一个播放集", "在左侧播放集区选择要查看或播放的列表。", "playlist-page-empty")
         .visible(move || !head.with(|head| head.listed));
     let no_items = dashed_empty(
@@ -167,8 +163,7 @@ pub(crate) fn view(signals: PlaylistPageSignals, player_bar: AnyView) -> AnyView
         "playlist-page-no-items",
     )
     .visible(move || order.with(Vec::is_empty));
-    let panel = widget(Stack::column(16.0).padding(18.0).surface(SemanticColorRole::Surface).radius_px(initial.radius))
-        .prop::<f32, PanelRadius>(move || head.with(|head| head.radius))
+    let panel = widget(Stack::column(16.0).padding(18.0).surface(SemanticColorRole::Surface).radius(RadiusTier::Xxl))
         .visible(move || head.with(|head| head.listed))
         .children((header(head), no_items, item_list(signals), player_bar))
         .key("playlist-page");
@@ -484,21 +479,6 @@ impl FieldWrite<Stack, bool> for RowDim {
 
     fn differs(target: &Stack, dim: &bool) -> bool {
         <Stack as StyledComponent>::node_style(target).layout.opacity != dim.then_some(UNREADY_OPACITY)
-    }
-}
-
-/// 面板圆角，跟外观设置里的圆角。
-struct PanelRadius;
-
-impl FieldWrite<Stack, f32> for PanelRadius {
-    const FIELD: &'static str = "Stack.style.layout.border_radius";
-
-    fn write(target: &mut Stack, radius: f32) {
-        Arc::make_mut(&mut <Stack as StyledComponent>::node_style_mut(target).layout).border_radius = Some(radius.max(0.0));
-    }
-
-    fn differs(target: &Stack, radius: &f32) -> bool {
-        <Stack as StyledComponent>::node_style(target).layout.border_radius != Some(radius.max(0.0))
     }
 }
 
