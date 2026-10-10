@@ -7,6 +7,8 @@ import { spawnYarn } from "./yarn-command.ts";
 
 const DEFAULT_PORT = 1420;
 const MAX_PORT_ATTEMPTS = 100;
+// 外置插件包只在打包和开发窗口里作为资源叠加，基础 tauri.conf.json 不声明，cargo check 不依赖插件打包产物；路径相对仓库根。
+const EXTERNAL_PLUGINS_CONFIG = "src-tauri/tauri.external-plugins.conf.json";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** 检查本机回环地址上的端口是否可绑定。 */
@@ -54,6 +56,8 @@ const args = [
   "dev",
   "--config",
   config,
+  "--config",
+  EXTERNAL_PLUGINS_CONFIG,
   ...process.argv.slice(2),
 ];
 
