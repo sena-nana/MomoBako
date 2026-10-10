@@ -16,12 +16,13 @@
 //! [`ShellView::sync_hot`]。这里只写信号，不刷新绑定，刷新由输入路由和帧开头完成。
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use nana_ui::runtime::view::{detached, entity_ref, node_ref, widget, with_refs};
 use nana_ui::runtime::{
-    AppContext, AppShell, Entity, FrameworkError, LengthSpec, RuntimeDocument, StableNodeId, Text, Workspace,
-    WorkspaceRegionSlot,
+    component_descriptors, AppContext, AppShell, Entity, FrameworkError, LengthSpec, RuntimeDocument, StableNodeId, Text,
+    Thumbnail, Workspace, WorkspaceRegionSlot,
 };
 use nana_ui::RegionId;
 
@@ -64,6 +65,8 @@ pub(crate) struct ShellView {
     deferred: Vec<PartId>,
     /// 最近一次整体同步时 ViewModel 的版本。
     revision: u64,
+    /// 上次收集挂着的缩略图时文档的变更代次。
+    thumbnails_scanned: Option<u64>,
     stats: ViewStats,
 }
 
@@ -113,6 +116,7 @@ impl ShellView {
             overlay: OverlayPart::new(overlay),
             deferred: Vec::new(),
             revision: model.revision,
+            thumbnails_scanned: None,
             stats: ViewStats::default(),
         };
         let mut swap = Swap::default();
@@ -198,6 +202,33 @@ impl ShellView {
     /// 还有对话框在放退场：准备帧要一直要帧，放完以后才卸得掉。
     pub(crate) fn overlay_leaving(&self) -> bool {
         self.overlay.leaving()
+    }
+
+    /// 文档变了（变更代次和上次收集时不同）以后，收集还有缩略图节点引用的缩略图文件；没变时返回 `None`，
+    /// 闲着的帧不重复收集。
+    ///
+    /// 缩略图节点的资源是 `thumb:{文件}`：文件卡片有缩略图时一直引用它，还没有纹理时只是藏着。视口和前后
+    /// 预留的行、详情卡片、播放条和预览里的缩略图都算；滚走的行连节点一起卸掉，就不算了。宿主按这份决定
+    /// 解码哪些缩略图、哪些纹理不能卸。
+    pub(crate) fn mounted_thumbnails(&mut self, document: &RuntimeDocument) -> Option<HashSet<String>> {
+        let context = document.context();
+        let generation = context.world().generation();
+        if self.thumbnails_scanned == Some(generation) {
+            return None;
+        }
+        self.thumbnails_scanned = Some(generation);
+        let mut mounted = HashSet::new();
+        for node in context.world().nodes_of_component(document.document(), component_descriptors::THUMBNAIL.type_id) {
+            match context.read(Entity::<Thumbnail>::from_stable_id(node), |thumb| thumb.resource.clone()) {
+                Ok(resource) => {
+                    if let Some(path) = super::thumbs::slot_file(&resource) {
+                        mounted.insert(path.to_string());
+                    }
+                }
+                Err(error) => eprintln!("Nana 读不到缩略图节点 {}：{error}", node.get()),
+            }
+        }
+        Some(mounted)
     }
 
     /// 只同步热信号和侧栏宽度：动效帧和播放推进走这里，不重挂内容。排法要换时由调用方整体同步。
@@ -399,13 +430,13 @@ pub fn mount_shell(document: &mut RuntimeDocument, model: &ShellViewModel) -> Re
     })
 }
 
-/// 测试用：照生产 `prepare` 跑一帧准备，视图用 `mount_shell` 挂在这份文档里的那个。
+/// 测试用：照生产 `prepare` 跑一帧准备，一帧按 16ms 算，视图用 `mount_shell` 挂在这份文档里的那个。
 #[cfg(test)]
 pub(crate) fn prepare_registered(model: &mut ShellViewModel, window: &mut nana_ui::ApplicationWindow) {
     REGISTERED.with(|views| {
         let mut views = views.borrow_mut();
         let view = views.iter_mut().find(|view| view.alive() && view.owns(&window.document));
-        crate::window_host::prepare_motion(model, view, window);
+        crate::window_host::prepare_motion(model, view, window, crate::frame_clock::FrameStep::millis(16));
     })
 }
 

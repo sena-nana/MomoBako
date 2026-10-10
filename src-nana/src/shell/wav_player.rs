@@ -5,12 +5,10 @@
 //! 正式 Windows 构建在播放成功后用 winmm 异步出声。测试构建不打开设备，单元测试不会出声。
 
 use std::cell::RefCell;
-use std::fs;
-use std::path::Path;
 use std::rc::Rc;
 
 use crate::backend::services::repository::PlaybackSessionState;
-use crate::host_api::{PlaybackMediaCapabilities, PlaybackMediaPlugin, PlaybackSessionController};
+use crate::host_api::{PlaybackMediaPlugin, PlaybackSessionController};
 
 use super::PlayerCandidate;
 
@@ -145,7 +143,9 @@ impl Default for WavPlayer {
 impl WavPlayer {
     /// 丢掉已装载的 PCM 和播放头，并停掉正在播放的声音。
     pub(super) fn clear(&mut self) {
-        PlaybackMediaPlugin::dispose(self);
+        let mut cursor = self.inner.borrow_mut();
+        device::stop(&mut cursor);
+        *cursor = Cursor::empty();
     }
 
     /// 预览字节已经在内存里，直接装进和播放列表相同的游标。这里不出声。
@@ -188,30 +188,6 @@ impl std::fmt::Debug for WavPlayer {
 }
 
 impl PlaybackMediaPlugin for WavPlayer {
-    fn load(&mut self, source: &str) -> Result<PlaybackMediaCapabilities, String> {
-        self.clear();
-        let compressed = is_compressed_path(source);
-        match load_source(source) {
-            Ok(parsed) => {
-                let duration_ms = parsed.duration_ms;
-                *self.inner.borrow_mut() = Cursor::from_parsed(parsed);
-                Ok(PlaybackMediaCapabilities {
-                    duration_ms: Some(duration_ms),
-                    can_seek: true,
-                    can_volume: true,
-                })
-            }
-            Err(error) => {
-                if compressed {
-                    eprintln!("Nana 压缩音频装载失败：{error}");
-                } else {
-                    eprintln!("Nana WAV 装载失败：{error}");
-                }
-                Err(error)
-            }
-        }
-    }
-
     fn play(&mut self) -> Result<(), String> {
         self.ensure_loaded("播放")?;
         let mut cursor = self.inner.borrow_mut();
@@ -253,12 +229,6 @@ impl PlaybackMediaPlugin for WavPlayer {
         // 记在游标里，下次 play 或播放中跳转时再缩放。拖动音量不重开，避免把声音拉回播放头。
         self.inner.borrow_mut().volume = volume;
         Ok(())
-    }
-
-    fn dispose(&mut self) {
-        let mut cursor = self.inner.borrow_mut();
-        device::stop(&mut cursor);
-        *cursor = Cursor::empty();
     }
 }
 
@@ -356,10 +326,6 @@ fn control<P: PlaybackMediaPlugin>(
 struct ClockOnly;
 
 impl PlaybackMediaPlugin for ClockOnly {
-    fn load(&mut self, _source: &str) -> Result<PlaybackMediaCapabilities, String> {
-        Err("只有画面的条目不重复装载".into())
-    }
-
     fn play(&mut self) -> Result<(), String> {
         Ok(())
     }
@@ -375,17 +341,11 @@ impl PlaybackMediaPlugin for ClockOnly {
     fn set_volume(&mut self, _volume: f32) -> Result<(), String> {
         Ok(())
     }
-
-    fn dispose(&mut self) {}
 }
 
 struct MissingDecoder;
 
 impl PlaybackMediaPlugin for MissingDecoder {
-    fn load(&mut self, _source: &str) -> Result<PlaybackMediaCapabilities, String> {
-        Err("没有原生解码器".into())
-    }
-
     fn play(&mut self) -> Result<(), String> {
         Err("没有原生解码器".into())
     }
@@ -401,8 +361,6 @@ impl PlaybackMediaPlugin for MissingDecoder {
     fn set_volume(&mut self, _volume: f32) -> Result<(), String> {
         Err("没有原生解码器".into())
     }
-
-    fn dispose(&mut self) {}
 }
 
 /// WAV 优先。失败后再解 mp3、flac、ogg。两种都不是时返回错误，由调用方记日志。
@@ -446,22 +404,6 @@ pub(crate) fn sound_device_compiled_in() -> bool {
     cfg!(all(windows, not(test)))
 }
 
-/// WAV 走原解析。mp3、flac、ogg 读入后解成 16-bit PCM，再装进同一游标。
-fn load_source(path: &str) -> Result<ParsedWav, String> {
-    if is_compressed_path(path) {
-        let bytes = fs::read(path).map_err(|error| format!("无法读取音频：{error}"))?;
-        return parsed_from_decoded(crate::shell::audio_decode::decode_compressed(&bytes)?);
-    }
-    parse_wav_file(path)
-}
-
-fn is_compressed_path(path: &str) -> bool {
-    Path::new(path)
-        .extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| COMPRESSED_EXTENSIONS.iter().any(|item| item.eq_ignore_ascii_case(ext)))
-}
-
 fn parsed_from_decoded(decoded: crate::shell::audio_decode::DecodedPcm) -> Result<ParsedWav, String> {
     let frame_bytes = usize::from(decoded.channels) * 2;
     if frame_bytes == 0 || decoded.pcm.len() % frame_bytes != 0 {
@@ -475,12 +417,6 @@ fn parsed_from_decoded(decoded: crate::shell::audio_decode::DecodedPcm) -> Resul
         duration_ms: decoded.duration_ms,
         pcm: decoded.pcm,
     })
-}
-
-/// 读取并解析一个标准 PCM WAV。坏文件返回错误，由调用方记录日志。
-fn parse_wav_file(path: &str) -> Result<ParsedWav, String> {
-    let bytes = fs::read(path).map_err(|error| format!("无法读取 WAV：{error}"))?;
-    parse_wav(&bytes)
 }
 
 /// 时长按帧计算。一帧是同一时刻全部声道的样本，单声道时帧数就是样本数。

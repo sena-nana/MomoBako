@@ -203,14 +203,15 @@ fn progress_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
     .into_any()
 }
 
-/// 忙碌行：`--bg-subtle` 底、弱色 12px 字，前面一个 16px 的转圈，宽度随内容。转圈的角度读热信号。
+/// 忙碌行：`--bg-subtle` 底、弱色 12px 字，前面一个 16px 的转圈，撑满侧栏宽。Vue 的 `.workspace-state` 写的是
+/// `inline-flex`，但它是侧栏纵向 flex 容器的子项，照样被拉满宽度。转圈的角度读热信号。
 fn busy_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
     let mut glyph = nana_ui::runtime::IconGlyph::new(LOADER_2).size(16.0).role(SemanticColorRole::Muted);
     Arc::make_mut(&mut glyph.style.layout).transform = Some(super::motion::spin_transform(spin.get_untracked()));
     widget(
         Stack::row(8.0)
             .align(AlignSpec::Center)
-            .width(LengthSpec::Shrink)
+            .width(LengthSpec::Fill)
             .min_height(LengthSpec::Px(30.0))
             .padding_xy(8.0, 0.0)
             .radius(RadiusTier::Sm)

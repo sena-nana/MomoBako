@@ -71,10 +71,15 @@ impl ShellHarness {
         self.model.surface_dirty = false;
     }
 
-    /// 照生产 `prepare` 跑一帧准备（计时器和播放时钟、动效时钟、指针、同步），再刷新布局。
+    /// 照生产 `prepare` 跑一帧准备（计时器和播放时钟、动效时钟、指针、同步），再刷新布局。一帧按 16ms 算。
     pub fn frame(&mut self) {
-        super::poll_timers(&mut self.model);
-        crate::window_host::prepare_motion(&mut self.model, Some(&mut self.view), &mut self.window);
+        self.frame_with(crate::frame_clock::FrameStep::millis(16));
+    }
+
+    /// 同 [`Self::frame`]，步长由调用方给，按帧时钟模拟不同帧率时用。
+    pub fn frame_with(&mut self, step: crate::frame_clock::FrameStep) {
+        super::poll_timers(&mut self.model, step);
+        crate::window_host::prepare_motion(&mut self.model, Some(&mut self.view), &mut self.window, step);
         self.flush();
     }
 
@@ -249,6 +254,22 @@ impl ShellHarness {
         let payload = nana_ui::InputPayload::Pointer(nana_ui::PointerInput { modifiers, ..nana_ui::PointerInput::mouse(phase, x, y) });
         self.input.route(self.window.document.context_mut(), payload.clone()).expect("指针");
         crate::window_host::note_modifiers(&mut self.model, &payload);
+    }
+
+    /// 在 `(x, y)` 滚一下滚轮，`delta_y` 按像素，负数往下滚。滚动后要 [`Self::frame`] 或 [`Self::flush`]
+    /// 才会按新的视口建行、卸行。
+    pub fn wheel(&mut self, x: f32, y: f32, delta_y: f32) {
+        let pointer_id = nana_ui::PointerInput::mouse(nana_ui::PointerPhase::Move, x, y).pointer_id;
+        let wheel = nana_ui::WheelInput {
+            pointer_id,
+            x,
+            y,
+            delta_x: 0.0,
+            delta_y,
+            unit: nana_ui::WheelUnit::Pixels,
+            modifiers: nana_ui::InputModifiers::default(),
+        };
+        self.input.route(self.window.document.context_mut(), nana_ui::InputPayload::Wheel(wheel)).expect("滚轮");
     }
 
     /// 在 `from` 按下主键，分几步挪到 `to` 再松开，返回这次拖动发出的消息，不归约。之前排着的消息

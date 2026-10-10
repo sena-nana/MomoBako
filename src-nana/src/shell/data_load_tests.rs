@@ -91,7 +91,7 @@ pub(super) fn start(model: &mut ShellViewModel, repo_id: &str) {
     let generation = model.workspace.prepare_initial_list();
     let steps = [
         ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(repo_id, "ready")]) },
-        ShellMessage::RepositorySynced { generation, result: Ok(()) },
+        ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) },
         ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(repo_id)) },
     ];
     let mut early = Vec::new();
@@ -141,7 +141,7 @@ fn audio_player() -> PlaylistPlayerContribution {
     }
 }
 
-fn bundle(plugins: Vec<PluginManifest>) -> ShellMessage {
+pub(super) fn bundle(plugins: Vec<PluginManifest>) -> ShellMessage {
     ShellMessage::Admin(AdminMessage::SettingsBundleLoaded {
         plugins: Ok(plugins),
         hooks: Ok(Vec::new()),

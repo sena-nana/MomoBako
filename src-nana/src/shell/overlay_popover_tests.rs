@@ -168,6 +168,45 @@ fn task_popover_patches_progress_in_place_and_closes_from_outside() {
     assert!(harness.content_roots().0.is_none());
 }
 
+/// 任务弹层里进度条填充的透明度。
+fn fill_opacity(harness: &ShellHarness, task_id: &str) -> Option<f32> {
+    let id = harness.keyed(&format!("admin-task-fill-{task_id}")).unwrap_or_else(|| panic!("没有 {task_id} 的进度条"));
+    harness.document().context().world().node_style(id).and_then(|style| style.layout.opacity)
+}
+
+/// 不确定进度（Vue `.progress-bar--indeterminate`）的填充照 `progress-pulse 1.15s` 呼吸，确定进度的不呼吸；
+/// 呼吸只改填充的透明度，不重建这一行。减少动态效果时停在不透明；弹层关上以后不再为呼吸要帧。
+#[test]
+fn indeterminate_progress_breathes_in_the_task_popover() {
+    let mut harness = ShellHarness::mount(scene("live-files-plain"));
+    harness.apply(ShellMessage::Admin(AdminMessage::ToggleTaskPopover));
+    let mut scanning = task("task-1", 0.0);
+    scanning.percent = None;
+    harness.apply(ShellMessage::TaskProgressLoaded(vec![scanning, task("task-2", 30.0)]));
+    harness.flush();
+    let row = harness.keyed("admin-task-task-1").expect("任务行");
+    let start = fill_opacity(&harness, "task-1").expect("填充绑了透明度");
+    for _ in 0..30 {
+        harness.frame();
+    }
+    let later = fill_opacity(&harness, "task-1").expect("填充绑了透明度");
+    assert!((start - later).abs() > 0.1, "不确定进度在呼吸：{start} → {later}");
+    assert!(matches!(harness.window.demand, nana_ui::FrameDemand::Continuous(_)), "呼吸要帧");
+    assert_eq!(fill_opacity(&harness, "task-2"), Some(1.0), "确定进度不呼吸");
+    assert_eq!(harness.keyed("admin-task-task-1"), Some(row), "呼吸不重建这一行");
+
+    harness.model.motion.set_reduced(true);
+    changed(&mut harness);
+    harness.frame();
+    assert_eq!(fill_opacity(&harness, "task-1"), Some(1.0), "减少动态效果时不呼吸");
+    harness.model.motion.set_reduced(false);
+    harness.apply(ShellMessage::Admin(AdminMessage::CloseTaskPopover));
+    for _ in 0..20 {
+        harness.frame();
+    }
+    assert!(!harness.model.motion.active(), "弹层关着时不为呼吸要帧");
+}
+
 #[test]
 fn repository_switcher_adds_rows_without_rebuilding_the_rest() {
     let mut harness = ShellHarness::mount(scene("repo-switcher"));

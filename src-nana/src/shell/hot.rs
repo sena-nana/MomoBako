@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nana_ui::runtime::view::{signal, FieldWrite, PropSource, Signal, StyledComponent};
-use nana_ui::runtime::{IconButton, IconGlyph, LengthSpec, Stack, Workspace};
+use nana_ui::runtime::{IconGlyph, LengthSpec, Stack, Workspace};
 use nana_ui::{RegionId, WorkspaceMutation};
 use nana_ui_core::PaintTransform;
 
@@ -45,6 +45,8 @@ pub(crate) struct MotionFrame {
     pub spinner_degrees: f32,
     /// 侧栏底部入口平时的透明度。
     pub footer_opacity: f32,
+    /// 不确定进度条填充的透明度（`progress-pulse` 呼吸）。
+    pub pulse_opacity: f32,
     /// 侧栏呈现宽度，折叠动画中逐帧变化。`ShellView` 直接写进工作区，不经信号，见 [`set_resources_width`]。
     pub sidebar_width: f32,
 }
@@ -58,6 +60,7 @@ impl MotionFrame {
             startup_percent: motion.startup_percent(),
             spinner_degrees: motion.spinner_degrees(),
             footer_opacity: motion.footer_opacity(),
+            pulse_opacity: motion.pulse_opacity(),
             sidebar_width: motion.sidebar_presented_width(),
         }
     }
@@ -110,6 +113,7 @@ pub(crate) struct HotSignals {
     pub startup: Signal<f32>,
     pub spinner: Signal<f32>,
     pub footer: Signal<f32>,
+    pub pulse: Signal<f32>,
     pub progress: Signal<f32>,
     pub time: Signal<String>,
     pub position: Signal<f64>,
@@ -123,6 +127,7 @@ impl HotSignals {
             startup: signal(motion.startup_percent),
             spinner: signal(motion.spinner_degrees),
             footer: signal(motion.footer_opacity),
+            pulse: signal(motion.pulse_opacity),
             progress: signal(playback.ratio),
             time: signal(playback.time.clone()),
             position: signal(playback.position),
@@ -140,6 +145,7 @@ impl HotSignals {
         self.startup.try_set_if_changed(motion.startup_percent);
         self.spinner.try_set_if_changed(motion.spinner_degrees);
         self.footer.try_set_if_changed(motion.footer_opacity);
+        self.pulse.try_set_if_changed(motion.pulse_opacity);
         self.progress.try_set_if_changed(playback.ratio);
         self.time.try_set_if_changed(playback.time.clone());
         self.position.try_set_if_changed(playback.position);
@@ -233,6 +239,12 @@ pub(crate) fn with_signals<R>(signals: HotSignals, build: impl FnOnce() -> R) ->
     build()
 }
 
+/// 挂载期间有热信号时取出其中一个信号的句柄，交给之后才建的行（`each` 的新行）去绑；不经 `ShellView` 建树时
+/// 为 `None`，调用方按投影值写常量。
+pub(crate) fn current<T>(pick: impl FnOnce(&HotSignals) -> Signal<T>) -> Option<Signal<T>> {
+    CURRENT.with(Cell::get).map(|signals| pick(&signals))
+}
+
 /// 热字段的属性：挂载期间有热信号就直接绑定信号，否则写成 `fallback` 常量。
 ///
 /// 只在挂载闭包里同步建的视图拿得到信号；`each_virtual` 的行这类之后才建的视图拿到的是常量。
@@ -295,18 +307,18 @@ impl FieldWrite<IconGlyph, f32> for SpinField {
     }
 }
 
-/// 图标按钮平时的透明度，侧栏底部入口用。
+/// 控件的透明度：侧栏底部入口平时的半透明，不确定进度条填充的呼吸。
 pub(crate) struct OpacityField;
 
-impl FieldWrite<IconButton, f32> for OpacityField {
-    const FIELD: &'static str = "IconButton.style.layout.opacity";
+impl<C: StyledComponent> FieldWrite<C, f32> for OpacityField {
+    const FIELD: &'static str = "style.layout.opacity";
 
-    fn write(target: &mut IconButton, opacity: f32) {
-        Arc::make_mut(&mut target.style.layout).opacity = Some(opacity);
+    fn write(target: &mut C, opacity: f32) {
+        Arc::make_mut(&mut target.node_style_mut().layout).opacity = Some(opacity);
     }
 
-    fn differs(target: &IconButton, opacity: &f32) -> bool {
-        target.style.layout.opacity != Some(*opacity)
+    fn differs(target: &C, opacity: &f32) -> bool {
+        target.node_style().layout.opacity != Some(*opacity)
     }
 }
 

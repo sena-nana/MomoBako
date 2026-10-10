@@ -119,7 +119,7 @@ impl FilesState {
             FilesMessage::HardlinksRefreshed(result) => self.note_hardlinks_silent(result),
             FilesMessage::HardlinksChecked(Ok(prompts)) => self.note_hardlinks_synced(prompts),
             FilesMessage::HardlinksChecked(Err(error)) => eprintln!("Nana 后台读取硬链接候选失败：{error}"),
-            FilesMessage::HardlinkConfirmed(result) => self.note_hardlink_confirmed(result),
+            FilesMessage::HardlinkConfirmed { result, .. } => self.note_hardlink_confirmed(result),
             FilesMessage::NoteError(error) => self.note_error(error),
             FilesMessage::ThumbnailSaved { path, thumbnail_path, custom } => self.note_custom_thumbnail(&path, thumbnail_path, custom),
             // 要读仓库和面板，在 `reduce_message` 里转成宿主拖放消息。
@@ -178,6 +178,10 @@ pub(in crate::shell) fn reduce_message(model: &mut ShellViewModel, message: Shel
     let ShellMessage::Files(message) = message else {
         return Some(message);
     };
+    if let FilesMessage::HardlinkConfirmed { repo_id, result } = message {
+        super::hardlink::finish_confirm(model, &repo_id, result);
+        return None;
+    }
     // 拖放的意图按此刻的仓库条件（有没有仓库、可写、在文件面板）收成宿主拖放消息，交给输入归约。
     if let FilesMessage::HostDrop(event) = &message {
         let flags = input::file_drop_flags(model);

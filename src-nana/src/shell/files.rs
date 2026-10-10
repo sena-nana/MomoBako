@@ -71,7 +71,7 @@ pub struct FileRow {
     /// 元数据或解码后的原始宽高。0 表示还不知道，按正方形排。
     pub pixel_width: u32,
     pub pixel_height: u32,
-    /// 宿主已经能为这条路径注册纹理。
+    /// 宿主已经为这条缩略图登记了纹理（或者这一帧就登记）。宿主卸掉纹理时回到假，卡片画类型图标。
     pub texture_ready: bool,
     /// 元数据色板，最多五枚 `#RRGGBB`。
     pub palette: Vec<String>,
@@ -309,7 +309,8 @@ pub enum FilesMessage {
     HardlinksRefreshed(Result<Vec<HardlinkPrompt>, String>),
     /// 启动和换仓库后查到的候选：换掉列表，没有别的对话框时有候选就弹出确认。
     HardlinksChecked(Result<Vec<HardlinkPrompt>, String>),
-    HardlinkConfirmed(Result<String, String>),
+    /// 确认硬链接的结果：成功时是确认掉的候选。`repo_id` 是确认时的仓库。
+    HardlinkConfirmed { repo_id: String, result: Result<String, String> },
     NoteError(String),
     /// 缩略图已经写入。路径是缓存文件，用来重新解码纹理。
     ThumbnailSaved { path: String, thumbnail_path: Option<String>, custom: bool },
@@ -342,6 +343,13 @@ pub struct FilesState {
     operation_kind: Option<FilesOperation>,
     prefetch_due_ms: Option<u64>,
     prefetch_clock: u64,
+    /// 文档里还有缩略图节点引用的缩略图文件（视口和前后预留的行、详情卡片、播放条）。宿主每次文档变了
+    /// 以后报一次；还没报过（没有视图）时为 `None`，预取不按它筛。
+    mounted_thumbnails: Option<std::collections::HashSet<String>>,
+    /// `mounted_thumbnails` 每变一次加一，宿主据此决定这一帧要不要回收纹理。
+    mounted_version: u64,
+    /// 已经请求解码、还没送回像素的缩略图文件。解码失败的留在这里，不反复重试。
+    decode_requested: std::collections::HashSet<String>,
     pub(super) name_draft: String,
     /// 工具栏里的新建文件名。不占用对话框草稿，建成以后才清空（Vue `handleCreateFile`）。
     pub(super) create_name: String,

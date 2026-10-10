@@ -385,7 +385,7 @@ fn preview_audio_scene() -> ShellViewModel {
 /// 没有视频播放插件（Vue 场景滤掉了 `momobako.preview.media`，只剩音频播放器）时预览 clip.avi：播放条不接管，
 /// 第二行写「没有可用于播放此媒体的插件」。音频不一样：Nana 有内置解码器认领 mp3 这些格式，没有音频插件也照常
 /// 接管播放条，所以这里用视频。预览照样自己解 AVI，不靠插件；离屏会话没有宿主纹理，画面帧画不出来，只交
-/// 会话和音轨，预览框画没有画面时的唱片舞台（真窗口里是 AVI 的画面）。
+/// 会话和音轨，预览框画没有画面时的占位：缩略图或视频图标（真窗口里是 AVI 的画面）。Vue 这里是一块空白。
 fn preview_no_player_scene() -> ShellViewModel {
     let path = "clip.avi";
     let size = CLIP_AVI.len() as i64;

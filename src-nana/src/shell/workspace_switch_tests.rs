@@ -26,7 +26,7 @@ fn ready_on_alpha() -> ShellViewModel {
     let generation = model.workspace.prepare_initial_list();
     for message in [
         ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(ALPHA, "ready"), summary(BETA, "ready")]) },
-        ShellMessage::RepositorySynced { generation, result: Ok(()) },
+        ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) },
         ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(ALPHA)) },
         ShellMessage::FileBrowserLoaded(Ok(browser(ALPHA))),
     ] {
@@ -90,7 +90,7 @@ fn directory(repo_id: &str, path: &str, files: &[&str]) -> FileBrowserSnapshot {
 /// 把换仓库的三步答完：同步、摘要、首屏目录。
 fn finish_switch(model: &mut ShellViewModel, repo_id: &str) {
     let generation = model.workspace.list_generation;
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(()) });
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) });
     model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(repo_id)) });
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(directory(repo_id, "", &["cover.png"]))));
 }
@@ -123,7 +123,7 @@ fn switching_from_the_list_walks_the_startup_page_and_brings_the_sidebar_back() 
     assert!(model.sidebar.bound_repo_id().is_none(), "同步以前不读新仓库的侧栏");
 
     let generation = model.workspace.list_generation;
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(()) });
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) });
     assert_eq!(model.workspace.startup.step_label, "读取仓库摘要");
     assert!(model.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::LoadSnapshot { repo_id, .. } if repo_id == BETA)));
 
@@ -156,7 +156,7 @@ fn a_failed_switch_stays_on_the_startup_page_until_retry_succeeds() {
     let logs = model.workspace.startup.logs.len();
     model.reduce(ShellMessage::Sidebar(SidebarMessage::SelectRepositoryFromSwitcher(BETA.into())));
     let generation = model.workspace.list_generation;
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(()) });
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) });
     model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Err("索引损坏".into()) });
 
     assert_eq!(model.workspace.startup.status, StartupStatus::Error);
@@ -276,7 +276,7 @@ fn refreshing_the_same_repository_syncs_then_rereads_the_current_directory() {
     assert!(sync_requested(&mut model, ALPHA), "先同步资源库");
     assert_eq!(StatusLine::project(&model), StatusLine::Busy);
 
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(()) });
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) });
     assert!(model.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::LoadSnapshot { repo_id, .. } if repo_id == ALPHA)));
     model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(ALPHA)) });
     let browse = model.files.take_effects().into_iter().find_map(|effect| match effect {
@@ -306,7 +306,7 @@ fn a_failed_reread_falls_back_to_the_root_directory() {
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready, "切换列表选当前仓库：原地同步");
     let generation = model.workspace.list_generation;
     assert!(sync_requested(&mut model, ALPHA));
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(()) });
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) });
     model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(ALPHA)) });
     model.files.take_effects();
     model.reduce(ShellMessage::FileBrowserLoaded(Err("目录已删除".into())));
@@ -370,7 +370,7 @@ fn relocating_a_missing_repository_resyncs_it_in_place() {
     assert_eq!(model.workspace.main_region(), MainRegion::HasRepository, "缺失页换成文件页");
     let generation = model.workspace.list_generation;
     assert!(sync_requested(&mut model, ALPHA));
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(()) });
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) });
     model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(ALPHA)) });
     assert!(model.sidebar.take_effects().iter().any(|effect| matches!(effect, SidebarEffect::LoadTree { repo_id } if repo_id == ALPHA)), "侧栏重新绑定");
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(directory(ALPHA, "", &["cover.png"]))));

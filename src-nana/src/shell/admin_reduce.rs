@@ -464,6 +464,9 @@ fn apply_bundle(
     external: Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>,
 ) {
     model.admin.loading_settings = false;
+    // 启动结束时读的设置包：成功失败都照 Vue 记下「应用配置与插件设置加载完成」和「首屏启动流程完成」。
+    let repo_id = model.workspace.active_repo_id.clone();
+    model.workspace.startup.note_settings_finished(repo_id.as_deref());
     match (plugins, hooks, cache, api, external) {
         (Ok(plugins), Ok(hooks), Ok(cache), Ok(api), Ok(external)) => {
             publish_plugins(model, &plugins);
@@ -619,23 +622,6 @@ fn finish_source_playlist(model: &mut ShellViewModel, result: Result<(), String>
     }
 }
 
-/// 仓库动作执行完（Vue `runActiveRepositoryAction` 的 `refreshWorkspaceAfterMutation`）：重读仓库摘要；
-/// 当前不在回收站、也不是智能文件夹时非静默地重读当前目录，任务弹层出「读取目录」。换了仓库就不读。
-fn reload_after_action(model: &mut ShellViewModel, repo_id: String) {
-    if model.workspace.active_repo_id.as_deref() != Some(repo_id.as_str()) {
-        eprintln!("Nana 仓库动作完成时已经换了仓库，不重读：{repo_id}");
-        return;
-    }
-    let context = super::super::files::FileContext::from_model(model);
-    if !context.trash && !context.smart_folder {
-        let path = model.files.current_path.clone();
-        if !model.files.request_refresh_read(&context, &path) {
-            eprintln!("Nana 仓库动作完成后没能重读目录：{path}");
-        }
-    }
-    model.workspace.effects.push(super::super::WorkspaceEffect::LoadSnapshotSilent { repo_id });
-}
-
 fn selected_action<'a>(model: &'a ShellViewModel, action_id: &Option<String>) -> Option<&'a RepositoryAction> {
     let requested = action_id.as_deref().or(model.admin.active_action_id.as_deref());
     model.admin.actions.iter().find(|action| Some(action.action_id.as_str()) == requested).or(model.admin.actions.first())
@@ -694,7 +680,8 @@ fn finish_action(model: &mut ShellViewModel, result: Result<RepositoryAction, St
             if let Some(current) = model.admin.actions.iter_mut().find(|item| item.action_id == action.action_id) {
                 *current = action;
             }
-            reload_after_action(model, repo_id);
+            // Vue `runActiveRepositoryAction` 的 `refreshWorkspaceAfterMutation`。
+            model.reload_after_mutation(&repo_id);
         }
         Err(error) => {
             eprintln!("Nana 仓库动作执行失败：{error}");
