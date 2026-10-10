@@ -5,7 +5,7 @@
 - 插件源码唯一根目录是 `External/Plugins/`
 - 每个插件一个独立工程，独立编译，独立产物
 - `External/Plugins/` 自带插件开发所需工具链与打包脚本
-- `yarn tauri:dev` 每次都会完整构建、打包并暂存插件；主应用默认构建、`tauri build` 和 `verify` 不隐式编译插件
+- `yarn tauri:dev` 每次都会完整构建、打包并暂存插件；主应用默认构建、`tauri build` 和 `verify` 不隐式编译插件，也不要求已有插件包；`.packages/*.momoplug` 只经 `src-tauri/tauri.external-plugins.conf.json` 由 `yarn tauri:build`、`yarn tauri:dev` 和发布流程带进安装包或开发窗口的资源目录
 - 插件运行时目录固定为 `<serviceRoot>/plugins`
 - 默认开发 staging 目录为 `src-tauri/.service-data/plugins`
 - `<serviceRoot>/plugins` 只保存 `.momoplug` 文件，不做持久解压安装

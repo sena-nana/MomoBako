@@ -96,6 +96,8 @@ jobs:
         with:
           projectPath: .
           tauriScript: corepack yarn tauri
+          # 外置插件包经覆盖配置作为安装包资源带上，依赖前面的打包步骤。
+          args: --config src-tauri/tauri.external-plugins.conf.json
           tagName: ${{ steps.release_ref.outputs.tag }}
           releaseName: MomoBako ${{ steps.release_ref.outputs.tag }}
           releaseDraft: true

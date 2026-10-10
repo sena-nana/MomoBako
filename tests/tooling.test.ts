@@ -57,6 +57,7 @@ describe("MomoBako 工具链", () => {
       dev: "vite",
       "tauri:dev": "yarn plugins:build && yarn plugins:package && yarn plugins:stage:dev && node scripts/tauri-dev.ts",
       "tauri:dev:with-plugins": "yarn tauri:dev",
+      "tauri:build": "yarn plugins:build && yarn plugins:package && tauri build --config src-tauri/tauri.external-plugins.conf.json",
       "test:backend": "cargo test -p momobako-backend --locked",
       verify: "yarn typecheck:node-scripts && yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml",
     });
@@ -104,6 +105,22 @@ describe("MomoBako 工具链", () => {
     expect(exampleProject).toContain("\"build\"");
     expect(tsconfig).not.toContain("plugins/**/*.ts");
     expect(tsconfig).not.toContain("plugins/**/*.json");
+  });
+
+  it("Tauri 基础配置不声明插件包资源，打包和开发窗口再叠加插件覆盖配置", () => {
+    const baseConfig = JSON.parse(read("src-tauri/tauri.conf.json"));
+    const pluginsConfig = JSON.parse(read("src-tauri/tauri.external-plugins.conf.json"));
+    const tauriDev = read("scripts/tauri-dev.ts");
+
+    expect(baseConfig.bundle.resources).toBeUndefined();
+    expect(pluginsConfig).toEqual({
+      bundle: {
+        resources: {
+          "../External/Plugins/.packages/*.momoplug": "plugins/",
+        },
+      },
+    });
+    expect(tauriDev).toContain('"src-tauri/tauri.external-plugins.conf.json"');
   });
 
   it("Yarn 启动器优先复用当前项目入口并在独立执行时回退 Corepack", () => {
@@ -175,6 +192,8 @@ describe("MomoBako 工具链", () => {
     expect(release).toContain("Upload external plugin packages");
     expect(release).toContain("projectPath: .");
     expect(release).toContain("tauriScript: corepack yarn tauri");
+    expect(release).toContain("args: --config src-tauri/tauri.external-plugins.conf.json");
+    expect(release).toMatch(/name: Package external plugins[\s\S]+uses: tauri-apps\/tauri-action@/);
     expect(release).toContain("releaseName: MomoBako");
     expect(release).toContain("releaseDraft: true");
   });
