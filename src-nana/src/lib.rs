@@ -16,6 +16,8 @@ mod files_dispatch;
 mod inspect_dispatch;
 mod player_dispatch;
 mod admin_dispatch;
+mod download_dispatch;
+mod download_staging;
 mod sidebar_dispatch;
 mod sync_dispatch;
 mod task_guard;

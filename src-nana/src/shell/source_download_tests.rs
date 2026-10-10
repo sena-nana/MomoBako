@@ -70,6 +70,29 @@ fn download_playlist(model: &mut ShellViewModel) -> DownloadRun {
         .expect("开始下载到第三资源库")
 }
 
+/// 右键歌单目录「夜曲」→「下载歌单到其他资源库」→ 选第三资源库：交回场景和归约交给宿主的那次下载、载荷和导入到
+/// 的文件夹。宿主一侧的测试从这里接着跑（`download_dispatch_tests.rs`）。
+pub(crate) fn chosen_playlist_download() -> (ShellViewModel, DownloadRun, serde_json::Value, Option<String>) {
+    let mut model = netease();
+    click(&mut model, FOLDER, "下载歌单到其他资源库");
+    model.reduce(ShellMessage::Admin(AdminMessage::ChooseDownloadRepository("third-repo".into())));
+    let (run, payload, parent_path) = model
+        .admin
+        .take_effects()
+        .into_iter()
+        .find_map(|effect| match effect {
+            AdminEffect::DownloadToRepository { run, payload, parent_path } => Some((run, payload, parent_path)),
+            _ => None,
+        })
+        .expect("开始下载到第三资源库");
+    (model, run, payload, parent_path)
+}
+
+/// 文件列现在写着的错误（壳层以外的测试读不到 `FilesState` 的字段）。
+pub(crate) fn file_column_error(model: &ShellViewModel) -> &str {
+    &model.files.error
+}
+
 /// 插件交回的歌单结果：完成一首，失败两首（一首带歌曲名，一首只有标识）。
 fn partly_failed() -> serde_json::Value {
     json!({
