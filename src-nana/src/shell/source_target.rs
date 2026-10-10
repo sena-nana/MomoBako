@@ -5,7 +5,7 @@
 //! `requireWritable`）；只有一个候选时直接用它，有几个时弹「选择目标资源库」让用户挑，取消就什么也不做。
 //! 选好以后任务弹层出「{动作名} · 准备下载 …」，载荷的 `destination` 写成 `{ kind: "repository", repoId, path }`
 //! 交给宿主（`admin_dispatch`）：调用插件、把下载回来的文件导入目标资源库（下载目录时放进以歌单命名的文件夹）
-//! 并同步它，最后照 Vue `context.refreshRepo()` 刷新当前资源库。
+//! 并同步它，最后照 Vue `context.refreshRepo()` 刷新当前资源库（收尾在 `source_download.rs`）。
 //!
 //! Vue 在没有候选时点了什么也不发生（`openDialog` 返回 null），这里在菜单上就禁用这一项并写出原因
 //! （`entry_actions::NO_TARGET_REPOSITORY`）；点的那一刻候选没了（列表刚换过）写进文件列的错误。
@@ -13,9 +13,9 @@
 use serde_json::Value;
 
 use super::super::entry_actions::DownloadProgress;
-use super::super::repo_operation::{OperationPatch, OperationStart};
 use super::super::workspace::WorkspaceState;
 use super::super::ShellViewModel;
+use super::source_download::DownloadRun;
 use super::AdminEffect;
 
 /// 等着选目标资源库的下载：调用插件要的东西，加上导入到目标资源库的哪个文件夹。
@@ -94,8 +94,8 @@ pub(crate) fn cancel(model: &mut ShellViewModel) {
     }
 }
 
-/// 带着目标资源库开始下载：任务弹层照 Vue「{动作名} · 准备下载 …」10%，单曲调用插件时「正在下载 …」36% 不确定进度；
-/// 载荷的 `destination` 写成目标资源库，交给宿主调用、导入和同步。
+/// 带着目标资源库开始下载（任务弹层的进度行见 [`DownloadRun::begin`]）：载荷的 `destination` 写成目标资源库，
+/// 交给宿主调用、导入和同步。
 fn start(model: &mut ShellViewModel, download: RepositoryDownload, target: &TargetCandidate) {
     let RepositoryDownload { plugin_id, method, mut payload, repository_id, progress, parent_path } = download;
     let Some(object) = payload.as_object_mut() else {
@@ -104,20 +104,8 @@ fn start(model: &mut ShellViewModel, download: RepositoryDownload, target: &Targ
         return;
     };
     object.insert("destination".into(), serde_json::json!({ "kind": "repository", "repoId": target.repo_id, "path": target.path }));
-    let operation = model.operation.start(OperationStart::new(progress.label.clone(), progress.preparing.clone(), 10.0));
-    if let Some(running) = &progress.running {
-        model.operation.update(operation, OperationPatch::step(running.clone(), 36.0).with_indeterminate(true));
-    }
-    model.admin.note_download_operation(method.clone(), operation);
-    model.admin.push_effect(AdminEffect::DownloadToRepository {
-        plugin_id,
-        method,
-        payload,
-        repository_id,
-        target_repo_id: target.repo_id.clone(),
-        target_path: target.path.clone(),
-        parent_path,
-    });
+    let run = DownloadRun::begin(model, progress, plugin_id, method, repository_id, Some(target.clone()));
+    model.admin.push_effect(AdminEffect::DownloadToRepository { run, payload, parent_path });
 }
 
 /// 插件下载结果里要导入的文件（Vue `resultPaths`）：`paths` 和 `completed[].paths`，去掉空白和重复，顺序不变。
@@ -142,11 +130,6 @@ pub(crate) fn result_paths(payload: &Value) -> Vec<String> {
         }
     }
     paths
-}
-
-/// 下载结果里失败的条数（Vue `response.payload.failed`），任务弹层收尾时写「下载完成，N 项失败」。
-pub(crate) fn failed_count(payload: &Value) -> usize {
-    payload.get("failed").and_then(Value::as_array).map_or(0, Vec::len)
 }
 
 /// 有没有能下载到的其他资源库：菜单据此决定「到其他资源库」能不能点。

@@ -118,10 +118,11 @@ impl SourcePlaylist {
 
 /// 来源下载在任务弹层里的进度行（Vue `runDownloadAction`）：种类是动作名；选好去处先是「准备下载 …」，
 /// 调用插件时单曲是「正在下载 …」。下载目录时 Vue 先列出目录里的文件再写「正在处理 N 个文件」，
-/// Nana 不列目录，停在「准备下载目录」。
+/// Nana 不列目录，停在「准备下载目录」。`subject` 是下载的条目名，收尾的提示和日志用。
 #[derive(Clone, Debug, PartialEq)]
 pub struct DownloadProgress {
     pub label: String,
+    pub subject: String,
     pub preparing: String,
     pub running: Option<String>,
 }
@@ -129,10 +130,11 @@ pub struct DownloadProgress {
 impl DownloadProgress {
     fn of(label: &str, row: &FileRow, operation: &str) -> Self {
         if operation == "download-directory" {
-            Self { label: label.to_string(), preparing: "准备下载目录".into(), running: None }
+            Self { label: label.to_string(), subject: row.name.clone(), preparing: "准备下载目录".into(), running: None }
         } else {
             Self {
                 label: label.to_string(),
+                subject: row.name.clone(),
                 preparing: format!("准备下载 {}", row.name),
                 running: Some(format!("正在下载 {}", row.name)),
             }

@@ -43,6 +43,9 @@ pub struct RefreshRun {
     pub directory: Option<String>,
     /// 读当前目录失败，已经退回根目录读过一次。
     pub fell_back: bool,
+    /// 这一轮是来源下载的收尾（Vue `context.refreshRepo()`），不是用户开始的新操作：状态区里下载刚记下的失败
+    /// 不因为这一轮读列表、同步和重读目录被清掉（`status.rs` 的 `Activity`）。
+    pub keeps_status: bool,
 }
 
 impl WorkspaceState {
@@ -59,11 +62,21 @@ impl WorkspaceState {
                 target,
                 directory: None,
                 fell_back: false,
+                keeps_status: false,
             });
         } else if let Some(target) = target {
             eprintln!("Nana 启动还没完成，刷新资源库列表以后不另选仓库：{target}");
         }
         self.effects.push(WorkspaceEffect::RefreshRepositories { generation: self.list_generation });
+    }
+
+    /// 来源下载收尾的刷新：和 [`Self::request_repository_refresh`] 一样重读列表、同步、读摘要和当前目录，只是这一轮
+    /// 属于刚结束的下载（[`RefreshRun::keeps_status`]），下载记在状态区里的失败留到用户开始下一个操作。
+    pub fn refresh_after_download(&mut self) {
+        self.refresh_repositories(None);
+        if let Some(run) = self.refresh.as_mut() {
+            run.keeps_status = true;
+        }
     }
 
     /// 启动以后读回的资源库列表（Vue `loadRepositories` 拿到列表）：换上列表，空列表回到空库；否则选目标
@@ -172,6 +185,7 @@ impl WorkspaceState {
             target: None,
             directory: None,
             fell_back: false,
+            keeps_status: false,
         });
         run.generation = self.list_generation;
         run.stage = RefreshStage::Syncing;

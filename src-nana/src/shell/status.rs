@@ -4,7 +4,7 @@
 //! **记什么。** 只有一个槽位，后记的失败顶替先记的。记的是没有就近显示的失败：
 //! - 各领域在失败处直接 [`StatusState::fail`]：宿主打开、定位、拖出，最小化到托盘，资源库列表和摘要，
 //!   文件区以外发起的目录读取，素材详情，元数据保存，播放集读写，设置和系统日志，
-//!   智能文件夹删除，添加资源库时的文件夹选择；
+//!   智能文件夹删除，添加资源库时的文件夹选择，来源下载里失败的条目；
 //! - 播放控制和播放集成员这类写在播放器内部的失败，由播放器排进待取的失败，归约结束时取走；
 //! - 文件操作（`files.error`）、文件夹树（`sidebar.tree_error`）、智能文件夹（`sidebar.smart_error`）
 //!   和设置数据（`admin.load_error`：插件、钩子、缓存、API 契约和外部连接的读取）四个领域字段：新写了一次
@@ -19,13 +19,16 @@
 //! 成功不专门清。开始的迹象有两种（[`starts_operation`]、[`Activity`]）：打开、定位、拖出，选仓库、
 //! 重试启动、打开智能文件夹这几条消息；以及读目录、文件变更、刷新文件夹树、选中别的文件、
 //! 保存元数据、搜索、导出、智能文件夹增改删、插件操作、执行仓库动作、刷新资源库和选仓库这些操作的忙碌
-//! 标志由假变真。后台的静默刷新不算。同一次归约里新记的失败不会被这次清掉。
+//! 标志由假变真。后台的静默刷新不算。同一次归约里新记的失败不会被这次清掉。来源下载记下失败条目以后
+//! 接着刷新资源库（Vue `context.refreshRepo()`），这一轮刷新是下载的收尾、不是用户开始的新操作
+//! （[`RefreshRun::keeps_status`](super::workspace::RefreshRun)），它读列表、同步和重读目录也不清。
 //!
 //! 没有失败时依次是忙碌行和同步进度（文件夹树刷新时的扫描、写入、刷新三档）。
 
 use super::input::InputMessage;
 use super::sidebar::SidebarMessage;
 use super::view_part_primary::RouteKey;
+use super::workspace::RefreshStage;
 use super::{ShellMessage, ShellViewModel};
 
 /// 失败来源：哪一类操作失败。状态区只显示文案，来源决定就近显示时让不让位，日志和测试据此认出是谁。
@@ -61,6 +64,8 @@ pub enum FailureSource {
     SettingsData,
     /// 系统日志。
     Logs,
+    /// 来源下载收尾：插件报告失败的条目，每一条的原因写进系统日志。
+    Download,
 }
 
 /// 记下的一次失败。
@@ -141,10 +146,13 @@ pub(super) struct Activity {
 
 impl Activity {
     pub(super) fn of(model: &ShellViewModel) -> Self {
+        // 来源下载收尾的那一轮刷新属于下载本身：它读列表、选仓库和重读目录时的忙碌不算用户开始了新操作。
+        let follow_up = model.workspace.refresh.as_ref().is_some_and(|run| run.keeps_status);
+        let follow_up_directory = follow_up && model.workspace.refresh_stage() == Some(RefreshStage::Directory);
         Self {
             busy: [
                 // 读目录（非静默）、文件变更、刷新文件夹树（同步仓库）。
-                model.files.loading,
+                model.files.loading && !follow_up_directory,
                 model.files.mutating,
                 model.tree_sync.running(),
                 // 保存元数据、搜索、导出。
@@ -159,8 +167,8 @@ impl Activity {
                 model.admin.actions_running,
                 // 刷新资源库（Vue `loadRepositories`）和选仓库（`selectRepository`）开始时都清错误：附加、
                 // 新建、删除以后切过去，来源动作完成以后的刷新都从这里开始。
-                model.workspace.list_loading,
-                model.workspace.snapshot_loading,
+                model.workspace.list_loading && !follow_up,
+                model.workspace.snapshot_loading && !follow_up,
             ],
             selection: model.inspect.target_path.clone(),
         }

@@ -63,6 +63,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 - 来源目录的「创建播放列表」失败时（缺歌单标识、建播放集或加入条目出错），`selectContextMenuItem` 只 `await item.onSelect()`，异常没人接，界面上什么都不显示。Nana 照 `runPlaylistAction` 在本地建播放集，失败写进文件列表的错误。
 - 来源条目动作在来源认证或本地缓存不可用时（Vue `actionDisabled`）禁用，原因「来源认证或本地缓存不可用」放在 `confirmLabel` 里；`confirmLabel` 要点一次没禁用的项才显示，禁用的按钮点不了，原因从来显示不出来。Nana 禁用这些项，紧跟着一行弱色小字写出原因（同一个原因只写一行）。
 - 「下载到其他资源库」没有候选（没有别的就绪、可写资源库）时，Vue 照样能点，点了什么也不发生（`openDialog` 返回 null）。Nana 在菜单上禁用这一项，写「没有可下载到的其他资源库」；点的那一刻候选没了（列表刚换过）写进文件列的错误。
+- 来源下载有部分失败时（网易云下载歌单逐首下载，失败的放进结果的 `failed`，整个调用照样成功），Vue 只在任务行写「下载完成，N 项失败」，可紧接着的 `context.refreshRepo()` 开始「加载资源库」、占住任务行，这句话从来看不到，失败的条目只打在控制台；插件自己写的失败日志宿主也不收（`mutsuki_host::call_session` 只取调用的输出）。Nana 把失败的条数写进侧栏状态区（「下载歌单「夜曲」有 2 项失败，原因见「日志」。」），每一条的名称和原因写进系统日志（宿主来源，分类 `source`、动作 `downloadItemFailed`，记在来源资源库和插件名下）。收尾的刷新不清这条提示，用户开始下一个操作时照常清掉；全部成功时不提示。
 - 歌单下载到其他资源库时，Vue 把文件导入到以歌单命名的文件夹（`parentPath = playlistName`），可目标资源库里没有这个文件夹，导入报「directory not found」，异常没人接。Nana 导入前在目标资源库建这个文件夹（名字里的路径分隔符换成「_」），再导入、同步。
 - 「选择目标资源库」的候选是 `<button>`，被全局 `input, button, select { height: 32px }` 压扁，`overflow: hidden` 的名称和路径被挤到约 1px 高，候选只剩两块空白；悬停描边用了没有定义的 `--accent-weak`。Nana 按内容高画卡片，悬停描强调色。
 - 元数据里来源链接的「打开链接」：Vue（`isOpenableSourceLink`）对除 `javascript:`、`data:`、`vbscript:` 以外的任何协议都可以点，可 Tauri opener 的默认范围只放行 `http`、`https`、`mailto`、`tel`，其余协议点了会失败，而且界面上没有任何反馈；`C:\…` 这样的盘符路径也会被当成协议。Nana 只对这四种协议启用按钮，归约里也会再拦一次（`host_api::openable_url`）。

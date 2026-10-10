@@ -16,10 +16,11 @@ use crate::backend::services::repository::{
     PluginConfigSetRequest, PluginConfigSnapshot, PluginEnabledRequest, PluginHookExecutionListRequest, PluginInstallRequest,
     PlaylistItemsByPathsAddRequest, PlaylistMutationRequest, PlaylistPlayerContribution, PluginManifest, RepositoryAction,
     RepositoryActionRunRequest,
-    RepositoryBackendConfigUpdateRequest, RepositoryMutationRequest, SyncRequest, SystemLogQuery,
+    RepositoryBackendConfigUpdateRequest, RepositoryMutationRequest, SyncRequest, SystemLogQuery, SystemLogWriteRequest,
 };
 use crate::backend::viewmodels::PluginViewModel;
 use crate::shell::admin::api::{self, ApiMessage, HttpRequest};
+use crate::shell::admin::source_download::DownloadRun;
 use crate::shell::admin::{AdminEffect, AdminMessage, PluginCallOrigin, SourceStep};
 use crate::shell::ShellMessage;
 use crate::MomoBakoApplication;
@@ -92,10 +93,8 @@ fn dispatch_one(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<S
         AdminEffect::CreateSourcePlaylist { repo_id, playlist_id, name, player_type_id, path } => {
             create_source_playlist(app, context, repo_id, playlist_id, name, player_type_id, path);
         }
-        AdminEffect::DownloadToRepository { plugin_id, method, payload, repository_id, target_repo_id, target_path, parent_path } => {
-            let request = RepositoryDownloadRequest { plugin_id, method, payload, repository_id, target_repo_id, target_path, parent_path };
-            download_to_repository(app, context, request);
-        }
+        AdminEffect::DownloadToRepository { run, payload, parent_path } => download_to_repository(app, context, run, payload, parent_path),
+        AdminEffect::WriteLogs(requests) => write_logs(app, context, requests),
         AdminEffect::UpdateBackendConfig { repo_id, backend_config, step } => {
             let Some(services) = app.services.as_ref() else {
                 eprintln!("Nana 更新仓库后端配置需要领域服务");
@@ -268,35 +267,36 @@ fn create_source_playlist(
     }
 }
 
-/// 来源下载到其他资源库要的东西，见 [`download_to_repository`]。
-struct RepositoryDownloadRequest {
-    plugin_id: String,
-    method: String,
-    payload: serde_json::Value,
-    repository_id: Option<String>,
-    target_repo_id: String,
-    target_path: String,
-    parent_path: Option<String>,
-}
-
 /// 来源下载到其他资源库（Vue `runDownloadAction` 的 `writable-repository`）：调用插件（载荷里写好了目标），把下载
 /// 回来的文件（`paths` 和 `completed[].paths`）导入目标资源库，再同步目标资源库。下载歌单时导入到以歌单命名的
 /// 文件夹，目标资源库里还没有这个文件夹就先建（导入要求文件夹已经在；Vue 不建，导入报「directory not found」）。
-/// 哪一步失败都把原因交回，不留在进行中；成功交回插件的结果，失败条数在里面。
-fn download_to_repository(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, request: RepositoryDownloadRequest) {
-    let RepositoryDownloadRequest { plugin_id, method, payload, repository_id, target_repo_id, target_path, parent_path } = request;
+/// 哪一步失败都把原因交回，不留在进行中；成功交回插件的结果，失败的条目在里面。
+fn download_to_repository(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    run: DownloadRun,
+    payload: serde_json::Value,
+    parent_path: Option<String>,
+) {
+    let Some(target) = run.target.clone() else {
+        eprintln!("Nana 下载到其他资源库没有目标资源库：{}", run.method);
+        app.shell.reduce(admin(AdminMessage::DownloadFinished { run, result: Err("没有选定目标资源库。".into()) }));
+        return;
+    };
     let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 来源下载需要领域服务，当前服务未启动：{method}");
-        app.shell.reduce(admin(AdminMessage::FilePluginFinished { method, result: Err(NO_SERVICES.into()) }));
+        eprintln!("Nana 来源下载需要领域服务，当前服务未启动：{}", run.method);
+        app.shell.reduce(admin(AdminMessage::DownloadFinished { run, result: Err(NO_SERVICES.into()) }));
         return;
     };
     let plugin = services.plugin.clone();
     let browser = services.file_browser.clone();
     let tasks = services.tasks.clone();
     let executor = services.executor.clone();
-    let failed_method = method.clone();
+    let failed_run = run.clone();
+    let (target_repo_id, target_path) = (target.repo_id, target.path);
     if let Err(error) = context.run_task(Task::new(async move {
-        let call = PluginCallRequest { plugin_id, method: method.clone(), repository_id, payload };
+        let method = run.method.clone();
+        let call = PluginCallRequest { plugin_id: run.plugin_id.clone(), method: method.clone(), repository_id: run.repository_id.clone(), payload };
         let result = (|| {
             let response = executor.block_on(plugin.call_plugin(call))?;
             let paths = crate::shell::admin::source_target::result_paths(&response.payload);
@@ -324,10 +324,32 @@ fn download_to_repository(app: &mut MomoBakoApplication, context: &RuntimeProgra
             })?;
             Ok(response.payload)
         })();
-        admin(AdminMessage::FilePluginFinished { method, result })
+        admin(AdminMessage::DownloadFinished { run, result })
     })) {
         eprintln!("Nana 来源下载任务提交失败：{error}");
-        app.shell.reduce(admin(AdminMessage::FilePluginFinished { method: failed_method, result: Err(format!("来源下载任务提交失败：{error}")) }));
+        app.shell.reduce(admin(AdminMessage::DownloadFinished { run: failed_run, result: Err(format!("来源下载任务提交失败：{error}")) }));
+    }
+}
+
+/// 写系统日志：在任务里逐条写，写不进去的记下原因一起交回。
+fn write_logs(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, requests: Vec<SystemLogWriteRequest>) {
+    let Some(services) = app.services.as_ref() else {
+        eprintln!("Nana 写系统日志需要领域服务，当前服务未启动：{} 条", requests.len());
+        return;
+    };
+    let system = services.system.clone();
+    let executor = services.executor.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        let failures: Vec<String> = requests
+            .into_iter()
+            .filter_map(|request| {
+                let action = request.action.clone();
+                executor.block_on(system.write_system_log(request)).err().map(|error| format!("{action}：{error}"))
+            })
+            .collect();
+        admin(AdminMessage::LogsWritten(if failures.is_empty() { Ok(()) } else { Err(failures.join("；")) }))
+    })) {
+        eprintln!("Nana 写系统日志的任务提交失败：{error}");
     }
 }
 
@@ -335,6 +357,7 @@ fn download_to_repository(app: &mut MomoBakoApplication, context: &RuntimeProgra
 fn plugin_result(origin: PluginCallOrigin, method: String, result: Result<serde_json::Value, String>) -> ShellMessage {
     match origin {
         PluginCallOrigin::FileMenu => admin(AdminMessage::FilePluginFinished { method, result }),
+        PluginCallOrigin::Download(run) => admin(AdminMessage::DownloadFinished { run, result }),
         PluginCallOrigin::SourceAuth(step) => source_step(step, result),
         PluginCallOrigin::Playground => admin(AdminMessage::Api(ApiMessage::PluginFinished(result))),
     }
