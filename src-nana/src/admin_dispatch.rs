@@ -279,7 +279,7 @@ fn download_to_repository(
     payload: serde_json::Value,
     parent_path: Option<String>,
 ) {
-    let Some(target) = run.target.clone() else {
+    let Some(target) = run.target().cloned() else {
         eprintln!("Nana 下载到其他资源库没有目标资源库：{}", run.method);
         app.shell.reduce(admin(AdminMessage::DownloadFinished { run, result: Err("没有选定目标资源库。".into()) }));
         return;

@@ -15,7 +15,7 @@ use serde_json::Value;
 use super::super::entry_actions::DownloadProgress;
 use super::super::workspace::WorkspaceState;
 use super::super::ShellViewModel;
-use super::source_download::DownloadRun;
+use super::source_download::{DownloadDestination, DownloadRun};
 use super::AdminEffect;
 
 /// 等着选目标资源库的下载：调用插件要的东西，加上导入到目标资源库的哪个文件夹。
@@ -104,19 +104,24 @@ fn start(model: &mut ShellViewModel, download: RepositoryDownload, target: &Targ
         return;
     };
     object.insert("destination".into(), serde_json::json!({ "kind": "repository", "repoId": target.repo_id, "path": target.path }));
-    let run = DownloadRun::begin(model, progress, plugin_id, method, repository_id, Some(target.clone()));
+    let run = DownloadRun::begin(model, progress, plugin_id, method, repository_id, DownloadDestination::Repository(target.clone()));
     model.admin.push_effect(AdminEffect::DownloadToRepository { run, payload, parent_path });
 }
 
 /// 插件下载结果里要导入的文件（Vue `resultPaths`）：`paths` 和 `completed[].paths`，去掉空白和重复，顺序不变。
 pub(crate) fn result_paths(payload: &Value) -> Vec<String> {
-    let direct = payload.get("paths").and_then(Value::as_array).into_iter().flatten();
+    listed_paths(payload, "paths")
+}
+
+/// 插件下载结果里的一种路径列表：顶层的 `key` 和每一项 `completed[].key`，去掉空白和重复，顺序不变。
+pub(crate) fn listed_paths(payload: &Value, key: &str) -> Vec<String> {
+    let direct = payload.get(key).and_then(Value::as_array).into_iter().flatten();
     let completed = payload
         .get("completed")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(|item| item.get("paths").and_then(Value::as_array))
+        .filter_map(|item| item.get(key).and_then(Value::as_array))
         .flatten();
     let mut paths: Vec<String> = Vec::new();
     for path in direct.chain(completed) {

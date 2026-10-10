@@ -782,7 +782,8 @@ fn download_folder_calls_plugin_only_after_a_directory_is_chosen() {
         }
         other => panic!("unexpected {other:?}"),
     };
-    assert_eq!((run.progress.subject.as_str(), run.target.as_ref()), ("夜曲", None));
+    assert_eq!(run.progress.subject, "夜曲");
+    assert_eq!(run.destination, crate::shell::admin::source_download::DownloadDestination::LocalFolder("D:/downloads".into()));
     // Vue `runDownloadAction`：选好目录以后任务弹层出「下载单曲 · 正在下载 夜曲」36%，不确定进度。
     let row = model.operation.shown().cloned().expect("下载的进度行");
     assert_eq!((row.label.as_str(), row.detail.as_str(), row.value, row.indeterminate), ("下载单曲", "正在下载 夜曲", 36.0, true));

@@ -217,6 +217,84 @@ fn files_already_in_the_target_are_kept_and_reported() {
     assert_eq!(notice(&clean), None, "导入结果里没有跳过的，不提醒");
 }
 
+/// 右键 `path` →「{label}」→ 在「选择下载目录」里选 `folder`，返回宿主拿去调用插件的那一次下载（载荷的去处是这个
+/// 本地目录）。
+fn download_to_folder(model: &mut ShellViewModel, path: &str, label: &str, folder: &str) -> DownloadRun {
+    click(model, path, label);
+    let request_id = model
+        .input
+        .take_platform_commands(nana_ui_platform::WindowId(1), false)
+        .into_iter()
+        .find_map(|command| match command {
+            nana_ui_platform::host::WindowCommand::OpenFileDialog { request, .. } if request.title.as_deref() == Some("选择下载目录") => {
+                Some(request.id)
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("「{label}」没有打开「选择下载目录」"));
+    model.reduce(ShellMessage::Input(InputMessage::FileDialogCompleted { request_id, paths: vec![folder.into()], failed: None }));
+    model
+        .admin
+        .take_effects()
+        .into_iter()
+        .find_map(|effect| match effect {
+            AdminEffect::CallPlugin { payload, origin: crate::shell::admin::PluginCallOrigin::Download(run), .. } => {
+                assert_eq!(payload["destination"], json!({ "kind": "localFolder", "path": folder }));
+                Some(run)
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("「{label}」选好目录以后没有调用插件"))
+}
+
+/// 下载到本地目录：目录里已有的同名文件插件不覆盖（结果的 `skippedEntries`）。状态区照下载到其他资源库的样子用
+/// 警告色写出已有几个同名文件、保留了原文件，保留的路径写一条警告日志，记在来源资源库名下；收尾的刷新不清它。
+#[test]
+fn files_already_in_the_local_folder_are_kept_and_reported() {
+    let mut model = netease();
+    let run = download_to_folder(&mut model, FOLDER, "下载歌单到本地", "D:/Music");
+    let kept = ["D:/Music/夜曲/周杰伦 - 晴天.mp3", "D:/Music/夜曲/周杰伦 - 晴天.lrc"];
+    let payload = json!({
+        "completed": [
+            { "songId": 186016, "paths": [], "skippedEntries": kept },
+            { "songId": 185811, "paths": ["D:/Music/夜曲/周杰伦 - 七里香.mp3"] }
+        ],
+        "failed": []
+    });
+    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: plugin(payload) }));
+
+    let message = "下载歌单「夜曲」：下载目录里已有 2 个同名文件，保留原文件、没有写入。";
+    assert_eq!(StatusLine::project(&model), StatusLine::Warning(message.into()), "只有保留时是提醒");
+    let logs = written_logs(&mut model);
+    assert_eq!(logs.len(), 1);
+    assert_eq!((logs[0].level.as_str(), logs[0].action.as_str(), logs[0].message.as_str()), ("warn", "downloadLocalSkipped", message));
+    assert_eq!(logs[0].repo_id.as_deref(), Some("acceptance-repo"), "下载到本地记在来源资源库名下");
+    let context = logs[0].context.clone().unwrap_or_default();
+    assert_eq!((context["skippedPaths"].clone(), context["folder"].clone()), (json!(kept), json!("D:/Music")));
+    assert!(model.workspace.refresh.as_ref().is_some_and(|run| run.keeps_status), "收尾的刷新不清提醒");
+}
+
+/// 单曲下载到本地、文件全都已经在：照样是保留的提醒，不说成「没有下载到任何条目」；有失败的条目时并进失败那一句。
+#[test]
+fn a_track_kept_in_full_is_not_reported_as_an_empty_download() {
+    let mut track = netease();
+    let run = download_to_folder(&mut track, TRACK, "下载单曲到本地", "D:/Music");
+    let payload = json!({ "songId": 186016, "paths": [], "skippedEntries": ["D:/Music/周杰伦 - 晴天.mp3"], "destination": "localFolder" });
+    track.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: plugin(payload) }));
+    let message = "下载单曲「晴天.mp3」：下载目录里已有 1 个同名文件，保留原文件、没有写入。";
+    assert_eq!(StatusLine::project(&track), StatusLine::Warning(message.into()));
+
+    let mut playlist = netease();
+    let run = download_to_folder(&mut playlist, FOLDER, "下载歌单到本地", "D:/Music");
+    let mut payload = partly_failed();
+    payload["completed"][0]["skippedEntries"] = json!(["D:/Music/夜曲/周杰伦 - 晴天.lrc"]);
+    playlist.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: plugin(payload) }));
+    let message = "下载歌单「夜曲」有 2 项失败，原因见「日志」；下载目录里已有 1 个同名文件，保留原文件、没有写入。";
+    assert_eq!(StatusLine::project(&playlist), StatusLine::Failure(message.into()));
+    let actions: Vec<String> = written_logs(&mut playlist).into_iter().map(|log| log.action).collect();
+    assert_eq!(actions, ["downloadItemFailed", "downloadItemFailed", "downloadLocalSkipped"]);
+}
+
 /// 有失败的条目，又跳过了同名文件：一句话里两样都写，按失败显示，日志里各自一条。
 #[test]
 fn failures_and_skipped_files_share_one_notice() {
