@@ -605,6 +605,7 @@ mod startup_view;
 mod workbench;
 mod title_bar;
 mod hot;
+mod field_bind;
 mod view_host;
 mod view_part;
 mod view_part_sidebar;
