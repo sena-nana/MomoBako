@@ -487,6 +487,16 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
         "filter-bar-active" => &["3 个条件", "默认资源库 / cover.png"],
         // 查询跑完没有命中：空状态写明全部资源库里没有匹配的文件。
         "search-empty" => &["当前查询: 不存在的文件", "0 条结果", "没有匹配的文件"],
+        // 移动还没回来：文件列写「正在处理文件」，任务弹层的仓库操作行爬到上限。
+        "file-operation-progress" => &["正在处理文件", "移动文件", "移动到目标文件夹", "88%"],
+        // 换仓库停在启动页第 2 步，侧栏收起。
+        "repo-switch-startup" => &["扫描资源库文件", "同步文件变化"],
+        // 刷新时同步还没回来：状态区忙碌行和任务弹层的「加载资源库」。
+        "repo-refresh-sync" => &["正在同步仓库状态", "加载资源库", "加载资源库摘要"],
+        // 没有视频播放插件：播放条第二行写原因。
+        "preview-no-player" => &["没有可用于播放此媒体的插件", "未选择播放内容"],
+        // Shift 选出一段再 Ctrl 加一项：详情写多选摘要。
+        "files-multi-select" => &["4 个项目", "4 个文件"],
         _ => page_labels(page),
     }
 }
