@@ -391,7 +391,7 @@ fn opening_a_hit_in_another_repository_switches_first_and_resets_search() {
     );
 
     let generation = model.workspace.list_generation;
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(()) });
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) });
     model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot("other", &[("pics/cover.png", "png", &[])])) });
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser("other", "", &[]))));
     assert_eq!(model.workspace.startup.status, super::super::super::StartupStatus::Ready);
@@ -425,7 +425,7 @@ fn a_failed_switch_drops_the_pending_hit() {
     model.reduce(ShellMessage::StartupRetry);
     let generation = model.workspace.list_generation;
     model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![snapshot("repo", &[]).repository, snapshot("other", &[]).repository]) });
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(()) });
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) });
     model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot("other", &[])) });
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser("other", "", &[]))));
     assert_eq!(model.workspace.startup.status, super::super::super::StartupStatus::Ready);

@@ -65,7 +65,7 @@ pub use sidebar::{
 };
 pub(crate) use sidebar::escape_layer;
 pub use workspace::{
-    sidebar_prefs_path, DeleteMode, LibraryCategory, MainRegion, StartupStatus, WorkspaceEffect,
+    sidebar_prefs_path, DeleteMode, LibraryCategory, MainRegion, StartupStatus, SyncCounts, WorkspaceEffect,
     WorkspacePanel, WorkspaceRepository, WorkspaceState,
 };
 
@@ -111,8 +111,8 @@ pub enum ShellMessage {
         generation: u64,
         result: Result<Vec<RepositorySummary>, String>,
     },
-    /// 带代次的同步结果：启动、换仓库和同一个仓库的刷新都先同步资源库。
-    RepositorySynced { generation: u64, result: Result<(), String> },
+    /// 带代次的同步结果：启动、换仓库和同一个仓库的刷新都先同步资源库。成功时带同步写回的计数，首屏启动日志用。
+    RepositorySynced { generation: u64, result: Result<workspace::SyncCounts, String> },
     ToggleSidebar,
     StartupRetry,
     MissingRefresh,
@@ -353,6 +353,9 @@ impl ShellViewModel {
         if startup_before != StartupStatus::Ready && self.workspace.startup.status == StartupStatus::Ready && launch {
             // Vue 启动流程在结束前 `loadSettingsData`：插件、钩子记录、缓存、API 设计和外部连接。
             // 没有仓库、仓库丢失的启动也读，添加资源库的来源列表要用插件清单。换仓库不读（Vue `selectRepository`）。
+            // 加载日志照 Vue 记「开始加载应用配置与插件设置」，设置包回来再记后两条（`admin_reduce::apply_bundle`）。
+            let repo_id = self.workspace.active_repo_id.clone();
+            self.workspace.startup.note_settings_started(repo_id.as_deref());
             self.admin.begin_settings_load();
         }
         self.settle_workspace(&active_before, startup_before);
@@ -637,6 +640,8 @@ mod operation_row_tests;
 mod frame_timing_tests;
 #[cfg(test)]
 mod thumbnail_host_tests;
+#[cfg(test)]
+mod startup_log_tests;
 #[cfg(test)]
 mod workspace_switch_tests;
 #[cfg(test)]

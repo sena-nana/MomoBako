@@ -5,7 +5,7 @@ use crate::backend::services::repository::{FileBrowserSnapshot, RepositorySnapsh
 
 use super::files::FileContext;
 use super::status::FailureSource;
-use super::workspace::{RefreshStage, StartupMode};
+use super::workspace::{IndexCounts, RefreshStage, StartupMode, SyncCounts};
 use super::{MainRegion, ShellPage, ShellViewModel, StartupStatus, WorkspaceEffect, WorkspaceRepository};
 
 impl ShellViewModel {
@@ -62,7 +62,7 @@ impl ShellViewModel {
     }
 
     /// 同步的结果。同仓库刷新失败写进状态区；启动和换仓库失败停在启动页。
-    pub(super) fn note_repository_synced(&mut self, generation: u64, result: Result<(), String>) {
+    pub(super) fn note_repository_synced(&mut self, generation: u64, result: Result<SyncCounts, String>) {
         if let Some(failure) = self.workspace.note_sync_finished(generation, result) {
             self.status.fail(FailureSource::Repository, failure);
         }
@@ -93,7 +93,8 @@ impl ShellViewModel {
                     self.reload_repository_side_data(&repo_id);
                     self.begin_refresh_directory();
                 } else {
-                    self.workspace.note_index_finished(Ok(()));
+                    let counts = self.index_counts(&snapshot);
+                    self.workspace.note_index_finished(Ok(counts));
                 }
             }
             Err(error) => {
@@ -106,6 +107,21 @@ impl ShellViewModel {
                     self.page = ShellPage::Error;
                 }
             }
+        }
+    }
+
+    /// 启动日志里摘要的计数（Vue `applyRepositorySnapshotState` 以后的 `activeSnapshot`、`playlists` 和
+    /// `activeAssetId`）：素材数、播放集数，默认预览对象是之前选中的素材（还在这份摘要里时），否则是第一个素材。
+    fn index_counts(&self, snapshot: &RepositorySnapshot) -> IndexCounts {
+        let selected = self
+            .inspect
+            .current_asset_id()
+            .filter(|id| snapshot.assets.iter().any(|asset| asset.asset_id == *id))
+            .map(str::to_string);
+        IndexCounts {
+            asset_count: snapshot.assets.len(),
+            playlist_count: snapshot.playlists.len(),
+            default_asset_id: selected.or_else(|| snapshot.assets.first().map(|asset| asset.asset_id.clone())),
         }
     }
 

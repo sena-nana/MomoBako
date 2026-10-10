@@ -254,6 +254,11 @@ impl InspectState {
         self.asset_id.is_some() && !self.virtual_asset && !self.saving
     }
 
+    /// 正在看的素材。
+    pub(super) fn current_asset_id(&self) -> Option<&str> {
+        self.asset_id.as_deref()
+    }
+
     pub(super) fn draft_rating(&self) -> i64 {
         self.draft.rating
     }

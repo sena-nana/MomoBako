@@ -28,7 +28,8 @@
 | `lifecycle.ts` 重试 | 启动已失败 | 新代次的 `RefreshRepositories` | 已就绪时直接返回；否则整段回到第 1 步，旧步骤不再保持完成 | 进行中的步骤条替换失败态 | 已测试（未离屏） |
 | `lifecycle.ts` `loadInitialRepository` | 列表为空 | 不同步 | 清空活动仓库和记住的 id，结束启动 | “还没有可用资源库” / “拖入一个本地文件夹创建资源库。” | 已离屏（`empty-repository`） |
 | `lifecycle.ts` `loadInitialRepository` | 选中仓库 `status == missing` | 不同步，立即记住 id | 结束启动，主区为缺失 | 缺失面板；不进入文件列表 | 已离屏（`missing`） |
-| `lifecycle.ts` `loadInitialRepository` | 选中仓库可同步 | `SyncRepository` | 选择顺序是当前 id、记住的 id、第一项；同步成功后才记住 | 第 2 步“扫描资源库文件” | 已离屏（`loading`，走记住的 id） |
+| `lifecycle.ts` `loadInitialRepository` | 选中仓库可同步 | `SyncRepository` | 选择顺序是当前 id、记住的 id、第一项；读完摘要后才记住（Vue `rememberLastActiveRepository`） | 第 2 步“扫描资源库文件” | 已离屏（`loading`，走记住的 id） |
+| `lifecycle.ts` `emitStartupLog` | 首屏启动的每一步 | 无新请求；同步结果带回同步计数（后端 `SyncResult`） | 照 Vue 依次记：流程开始（totalSteps、activeRepoId、rememberedRepoId）、开始读列表、列表完成（三个计数）、已选定（仓库状态、名称、路径）、开始同步、同步完成（scannedFiles、createdAssets、updatedAssets、deletedAssets、createdEvents、hardlinkCandidates）、开始读摘要、摘要完成（assetCount、playlistCount、defaultAssetId）、开始首屏、首屏完成（playlistCount）；进工作区时记开始加载应用配置与插件设置（step、repoId），设置包回来（失败也算）记设置完成和流程完成（activeRepoId、assetCount、playlistCount）；空库和缺失仓库同样以这三条收尾，计数是 0；换仓库不记 | 启动页「加载日志」最近 8 条，明细 `键: 值 · 键: 值` | 已测试（`startup_log_tests.rs`，未离屏） |
 | `lifecycle.ts` 同步结果 | 代次不匹配，或启动已不是加载中 | 丢弃 | 不改已完成步骤和活动仓库 | 保持当前步骤 | 已测试（未离屏） |
 | `lifecycle.ts` 同步成功 | 代次匹配 | `LoadSnapshot` → `get_repository_snapshot` | 进入第 3 步；没有活动仓库则失败 | 第 3 步“读取仓库摘要” | 已测试（未离屏） |
 | `lifecycle.ts` 摘要与首屏 | 活动仓库匹配且步骤已到 3 / 4 | 摘要成功后根目录浏览 | 成功则结束启动并进入有仓库；失败则加载错误 | 第 4 步“读取首屏目录”，或错误面板 | 已测试（未离屏） |
@@ -249,7 +250,7 @@
 | 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | `logs.ts` `mergeSystemLogs` | `system://log-recorded` | 日志器 `write` 后的事件，没有替身 | 相同 id 替换；降序后保留前 500 条；暂停不滚动 | 日志列表 | 已测试（未离屏） |
-| `lifecycle.ts` `appendStartupSyncLog` | 启动加载中的 `repository.sync` | 无新请求 | 其它分类不进入启动日志；仓库不一致则忽略；启动结束后不再追加 | 启动日志 | 已测试（未离屏） |
+| `lifecycle.ts` `appendStartupSyncLog` | 启动加载中的 `repository.sync` | 无新请求 | 其它分类不进入启动日志；仓库不一致则忽略；启动结束后不再追加；明细是记录的 `context`（去掉空值，对象和数组写成 JSON） | 启动日志 | 已测试（`startup_log_tests.rs`，未离屏） |
 | `lifecycle.ts` `handleRepositoryStructureUpdated` | `repository://structure-updated` | 目录树、智能文件夹、播放集、仓库动作、当前目录浏览，没有替身 | 别的仓库、启动未完成或缺失仓库不刷新；目录树正在读取时不重复请求树；文件和回收站静默重读并保留选择 | 当前列表 | 已测试（未离屏） |
 | 静默目录失败 | 重读返回错误 | 无 | 保留原列表和当前页 | 页面不变 | 已测试（未离屏） |
 | `refresh.ts` `refreshRepositorySummaries` | 就绪后的结构更新 | `list_repositories`，没有替身 | 替换列表；失败或启动中不写；不改活动 id、页面和启动步骤；当前仓库缺失或不在列表中时保留内容和主区 | 仓库名称；页面不变 | 已测试（未离屏） |

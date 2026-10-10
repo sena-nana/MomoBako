@@ -351,7 +351,7 @@ fn dispatch_workspace_effects(
                 if let Err(error) = context.run_task(Task::new(async move {
                     let result = executor
                         .block_on(tasks.execute(PROTOCOL_REPOSITORY_SYNC, SyncRequest { repo_id }))
-                        .map(|_| ());
+                        .map(|(output, _)| shell::SyncCounts::from_output(&output));
                     ShellMessage::RepositorySynced { generation, result }
                 })) {
                     eprintln!("Nana 资源库同步任务提交失败：{error}");

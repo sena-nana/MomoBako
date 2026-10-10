@@ -20,7 +20,7 @@ pub const SIDEBAR_WIDTH_KEY: &str = "momobako.sidebarWidth";
 
 #[path = "workspace_startup.rs"]
 mod startup;
-pub use startup::{StartupLog, StartupMode, StartupState, StartupStatus, StartupStepItem, StartupStepState};
+pub use startup::{IndexCounts, StartupLog, StartupMode, StartupState, StartupStatus, StartupStepItem, StartupStepState, SyncCounts};
 #[path = "workspace_switch.rs"]
 mod switch;
 pub use switch::{RefreshRun, RefreshStage};
@@ -315,19 +315,39 @@ impl WorkspaceState {
 
     /// 同步的结果：启动和换仓库接着读摘要；同一个仓库的刷新见 [`Self::note_refresh_synced`]。
     /// 返回要写进状态区的失败（只有同仓库刷新会有，启动的失败停在启动页上）。
-    pub fn note_sync_finished(&mut self, generation: u64, result: Result<(), String>) -> Option<String> {
+    pub fn note_sync_finished(&mut self, generation: u64, result: Result<SyncCounts, String>) -> Option<String> {
         if self.startup.status != StartupStatus::Loading {
-            return self.note_refresh_synced(generation, result);
+            return self.note_refresh_synced(generation, result.map(|_| ()));
         }
         if generation != self.list_generation {
             eprintln!("Nana 忽略过期的资源库同步结果：代次 {generation}");
             return None;
         }
         match result {
-            Ok(()) => {
+            Ok(counts) => {
                 if let Some(repo_id) = self.active_repo_id.clone() {
-                    self.startup.log("info", "首屏启动文件变化同步完成。", &[("step", Some("2"))]);
-                    self.last_active_repo_id = Some(repo_id.clone());
+                    let numbers = [
+                        counts.scanned_files,
+                        counts.created_assets,
+                        counts.updated_assets,
+                        counts.deleted_assets,
+                        counts.created_events,
+                        counts.hardlink_candidates,
+                    ]
+                    .map(|count| count.to_string());
+                    self.startup.log(
+                        "info",
+                        "首屏启动文件变化同步完成。",
+                        &[
+                            ("step", Some("2")),
+                            ("scannedFiles", Some(numbers[0].as_str())),
+                            ("createdAssets", Some(numbers[1].as_str())),
+                            ("updatedAssets", Some(numbers[2].as_str())),
+                            ("deletedAssets", Some(numbers[3].as_str())),
+                            ("createdEvents", Some(numbers[4].as_str())),
+                            ("hardlinkCandidates", Some(numbers[5].as_str())),
+                        ],
+                    );
                     self.startup.set_progress(
                         3,
                         "读取仓库摘要",
@@ -347,9 +367,10 @@ impl WorkspaceState {
         None
     }
 
-    /// 启动（含换仓库）第 3 步的摘要到了：成功进入第 4 步、排下首屏目录的读取，记住这个仓库；失败停在
-    /// 第 3 步。调用方先用 [`Self::awaits_snapshot`] 认过代次和仓库。
-    pub fn note_index_finished(&mut self, result: Result<(), String>) {
+    /// 启动（含换仓库）第 3 步的摘要到了：成功记下摘要计数、进入第 4 步、排下首屏目录的读取，记住这个仓库
+    /// （Vue 读完摘要才 `rememberLastActiveRepository`）；失败停在第 3 步。调用方先用 [`Self::awaits_snapshot`]
+    /// 认过代次和仓库。
+    pub fn note_index_finished(&mut self, result: Result<IndexCounts, String>) {
         if self.startup.status != StartupStatus::Loading || self.startup.current_step != 3 {
             return;
         }
@@ -358,8 +379,19 @@ impl WorkspaceState {
             return;
         };
         match result {
-            Ok(()) => {
-                self.startup.log("info", "首屏启动资源库摘要读取完成。", &[("step", Some("3"))]);
+            Ok(counts) => {
+                let (assets, playlists) = (counts.asset_count.to_string(), counts.playlist_count.to_string());
+                self.startup.log(
+                    "info",
+                    "首屏启动资源库摘要读取完成。",
+                    &[
+                        ("step", Some("3")),
+                        ("assetCount", Some(assets.as_str())),
+                        ("playlistCount", Some(playlists.as_str())),
+                        ("defaultAssetId", counts.default_asset_id.as_deref()),
+                    ],
+                );
+                self.startup.index = Some(counts);
                 self.last_active_repo_id = Some(repo_id.clone());
                 if self.startup.mode == StartupMode::Switch {
                     self.operation.update(super::repo_operation::OperationPatch::step("加载资源索引", 46.0));
@@ -383,7 +415,12 @@ impl WorkspaceState {
         }
         match result {
             Ok(()) => {
-                self.startup.log("info", "首屏启动首屏目录与关联数据加载完成。", &[("step", Some("4"))]);
+                let playlists = self.startup.index.as_ref().map_or(0, |counts| counts.playlist_count).to_string();
+                self.startup.log(
+                    "info",
+                    "首屏启动首屏目录与关联数据加载完成。",
+                    &[("step", Some("4")), ("playlistCount", Some(playlists.as_str()))],
+                );
                 self.startup.finish();
                 self.presence = RepositoryPresence::Ready;
                 self.snapshot_loading = false;
