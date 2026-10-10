@@ -23,6 +23,7 @@ mod page;
 #[path = "preview_paint.rs"]
 mod preview_paint;
 
+pub(crate) use body::wants_preview_texture;
 pub(crate) use frame::PreviewSignals;
 
 /// 文件预览页：预览框架铺满文件列，播放条由框架贴在页底（Vue `files-preview-page` 里的

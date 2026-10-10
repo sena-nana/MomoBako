@@ -58,6 +58,7 @@ pub(crate) use inspect::support::{preview_media_parts, MediaParts};
 pub(crate) use inspect::support::preview_media_session;
 pub use player::PreviewPcm;
 pub(crate) use inspect::NativeLoad;
+pub(crate) use inspect_view::wants_preview_texture;
 pub use sidebar::{
     FolderMutation, GapMessage, SidebarEffect, SidebarFolder, SidebarMessage, SidebarPlaylist, SidebarSmartFolder,
     SidebarTree, ShortcutId,

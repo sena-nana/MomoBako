@@ -210,6 +210,13 @@ fn resolve(model: &ShellViewModel) -> (ContentRef<'_>, bool) {
     }
 }
 
+/// 预览框这一帧是不是从宿主纹理槽 `file-preview` 取画面：预览页开着，画的是图片纹理或视频画面。
+/// 宿主只在这时上传 `preview_pixels`（`thumbnail_host::publish_preview`）。单击只选中时预览页藏着；
+/// 预览的正是幻灯片当前项时画幻灯片的帧；PDF 和模型页图编成内容图。这几种都不从纹理槽取。
+pub(crate) fn wants_preview_texture(model: &ShellViewModel) -> bool {
+    super::super::files_view::previewing(model) && matches!(resolve(model).0, ContentRef::ImageTexture | ContentRef::Video { .. })
+}
+
 /// 预览的正是播放列表当前的图片：和 Vue 的播放器挂载一样画幻灯片这一帧，按「适应 / 填充」铺。
 /// 没有帧（读不到或解不开）时交回普通图片预览，由它写失败原因。
 fn current_still(model: &ShellViewModel) -> Option<ContentRef<'_>> {

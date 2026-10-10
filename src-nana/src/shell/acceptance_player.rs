@@ -227,7 +227,7 @@ fn item(index: usize, path: &str) -> PlaylistItem {
 }
 
 /// 文件列让开后的 PDF 页和元数据。页面文字来自实况 PDF 解析，不编造页数。
-/// 页位图走宿主纹理槽，离屏会话没有 `Application::prepare` 上传，这里不挂空纹理。
+/// 页位图从解码结果编成内容图画进预览框，不经宿主纹理槽，离屏会话也画得出来。
 fn live_preview_scene() -> ShellViewModel {
     let mut model = ShellViewModel::for_page(ShellPage::SelectedFile);
     model.files.display_mode = super::super::files::DisplayMode::List;
@@ -247,9 +247,6 @@ fn live_preview_scene() -> ShellViewModel {
         ..super::super::inspect::FileFacts::default()
     };
     model.reduce(ShellMessage::Inspect(super::super::inspect::InspectMessage::SetComment("PDF 页".into())));
-    // 页位图留在解码结果里。离屏会话不走 prepare，挂 file-preview 会引用未注册的宿主纹理。
-    model.preview_pixels = None;
-    model.preview_token = None;
     model
 }
 
