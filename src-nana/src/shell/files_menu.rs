@@ -319,7 +319,7 @@ fn item(entry: &MenuEntry) -> AnyView {
     layout.padding_left = Some(LengthSpec::Px(10.0));
     layout.padding_right = Some(LengthSpec::Px(10.0));
     layout.align_items = AlignSpec::Center;
-    layout.opacity = entry.disabled.then_some(0.45);
+    layout.opacity = entry.disabled.then_some(crate::theme_map::DISABLED_OPACITY);
     let weight = if pending { 600 } else { 500 };
     let label = if pending { entry.confirm_label.unwrap_or_default().to_string() } else { entry.label.clone() };
     let mut parts = Vec::new();

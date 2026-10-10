@@ -447,7 +447,7 @@ struct ToolbarLook {
 impl ToolbarLook {
     fn new(kind: ButtonKind, base: SemanticColorRole, disabled: bool) -> Self {
         let role = if kind == ButtonKind::Danger { SemanticColorRole::Danger } else { SemanticColorRole::Text };
-        Self { disabled, mix: disabled.then(|| nana_ui_core::SemanticColorMix::new(role, base, bar::DISABLED_OPACITY)) }
+        Self { disabled, mix: disabled.then(|| nana_ui_core::SemanticColorMix::new(role, base, crate::theme_map::DISABLED_OPACITY)) }
     }
 }
 

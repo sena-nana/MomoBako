@@ -443,7 +443,7 @@ impl FieldWrite<IconButton, bool> for IconDimmed {
 
     fn write(target: &mut IconButton, disabled: bool) {
         target.disabled = disabled;
-        Arc::make_mut(&mut target.style.layout).opacity = disabled.then_some(parts::DISABLED_OPACITY);
+        Arc::make_mut(&mut target.style.layout).opacity = disabled.then_some(crate::theme_map::DISABLED_OPACITY);
     }
 
     fn differs(target: &IconButton, disabled: &bool) -> bool {
