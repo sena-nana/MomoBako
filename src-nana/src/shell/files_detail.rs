@@ -165,7 +165,7 @@ impl Projection {
         if let Some(row) = current {
             let metadata = row.kind != "directory" && !ctx.trash;
             projected.entry = entry_view(model, &ctx, row);
-            projected.preview = PreviewLook::of(row, super::cards::builtin_bindings());
+            projected.preview = PreviewLook::of(row);
             projected.key = DetailKey {
                 kind: DetailKind::Entry { key: row.key(), metadata, trash: ctx.trash },
                 scroll: format!("entry-{}", row.key()),

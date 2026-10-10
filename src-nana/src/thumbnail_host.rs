@@ -1,6 +1,7 @@
-//! 把解码后的缩略图像素登记成宿主纹理。
+//! 把解码后的缩略图像素和文件预览的画面登记成宿主纹理。
 //!
-//! 像素不放进会整份克隆的壳层状态。布局只用原始宽高，绘制用缩小后的纹理。
+//! 缩略图像素不放进会整份克隆的壳层状态，布局只用原始宽高，绘制用缩小后的纹理。文件预览只在预览框
+//! 这一帧从 `file-preview` 槽取画面时上传；播放列表幻灯片、PDF 和模型页图都编成内容图直接画，不经宿主纹理。
 
 use nana_ui::{
     ApplicationWindow, GpuTexture, GpuTextureDescriptor, GpuTextureFormat, GpuTextureRegion, GpuTextureUsages,
@@ -92,60 +93,15 @@ impl MomoBakoApplication {
     }
 }
 
-/// 图片幻灯片的 RGBA 帧。没有帧就卸掉纹理，不留上一张图。
-pub(crate) fn publish_still(
-        app: &mut MomoBakoApplication,
-        window: &mut ApplicationWindow,
-        context: &RuntimeProgramContext<crate::shell::ShellMessage>,
-    ) {
-        let Some((token, frame)) = app.slideshow_frame() else {
-            app.still_gpu = None;
-            window.textures.remove("player-still");
-            return;
-        };
-        let needs_upload = app.still_gpu.as_ref().is_none_or(|preview| {
-            preview.token != token || preview.width != frame.width || preview.height != frame.height
-        });
-        if needs_upload {
-            let Ok(texture) = context.gpu().create_texture(&GpuTextureDescriptor {
-                label: Some("momobako slideshow"),
-                width: frame.width,
-                height: frame.height,
-                format: GpuTextureFormat::RGBA8_UNORM_SRGB,
-                usage: GpuTextureUsages::SAMPLED | GpuTextureUsages::COPY_DST,
-            }) else {
-                eprintln!("Nana 图片幻灯片纹理创建失败：{}x{}", frame.width, frame.height);
-                return;
-            };
-            if let Err(error) = context.gpu().write_texture(
-                &texture,
-                GpuTextureRegion::full(frame.width, frame.height),
-                &frame.rgba,
-                frame.width.saturating_mul(4),
-            ) {
-                eprintln!("Nana 图片幻灯片纹理上传失败：{error}");
-                return;
-            }
-            app.still_gpu = Some(NativePreviewGpu { token, texture, width: frame.width, height: frame.height });
-        }
-        if let Some(preview) = app.still_gpu.as_ref() {
-            window.textures.register(
-                "player-still",
-                HostTexture::new(1, 1, &preview.texture),
-                preview.width,
-                preview.height,
-                HostTextureAlphaMode::Premultiplied,
-            );
-        }
-    }
-
-/// 文件预览的 RGBA 页图。没有预览令牌或像素就卸掉纹理。
+/// 文件预览的图片或视频画面。预览框这一帧不从 `file-preview` 槽取画面（预览页藏着、预览的是幻灯片
+/// 当前项、PDF 和模型页图），或者没有令牌和像素时不上传，已经上传的卸掉。
 pub(crate) fn publish_preview(
     app: &mut MomoBakoApplication,
     window: &mut ApplicationWindow,
     context: &RuntimeProgramContext<crate::shell::ShellMessage>,
 ) {
-    let (Some(token), Some(pixels)) = (app.shell.preview_token.clone(), app.shell.preview_pixels.as_ref()) else {
+    let wanted = crate::shell::wants_preview_texture(&app.shell);
+    let (true, Some(token), Some(pixels)) = (wanted, app.shell.preview_token.clone(), app.shell.preview_pixels.as_ref()) else {
         app.preview_gpu = None;
         window.textures.remove("file-preview");
         return;

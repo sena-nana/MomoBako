@@ -5,6 +5,7 @@
 
 use crate::backend::services::repository::{PluginConfigSnapshot, PluginManifest, RepositoryAction};
 
+use super::super::repo_operation::OperationPatch;
 use super::super::status::FailureSource;
 use super::super::workspace_refresh::SilentMessage;
 use super::super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
@@ -39,10 +40,6 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
                 model.admin.queue_actions(Some(repo_id.clone()));
             }
             Some(ShellMessage::SelectWorkspaceRepository(repo_id))
-        }
-        ShellMessage::RepositoriesLoaded(Ok(items)) => {
-            model.admin.note_backends(&items);
-            Some(ShellMessage::RepositoriesLoaded(Ok(items)))
         }
         ShellMessage::WorkspaceListLoaded { generation, result: Ok(items) } => {
             model.admin.note_backends(&items);
@@ -243,7 +240,6 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
         AdminMessage::LogsCleared(result) => note_logs_cleared(model, result),
         AdminMessage::ToggleTaskPopover => model.admin.popover_open = !model.admin.popover_open,
         AdminMessage::CloseTaskPopover => model.admin.popover_open = false,
-        AdminMessage::SetOperation(operation) => model.admin.operation = operation,
         AdminMessage::SelectAction(action_id) => {
             model.admin.active_action_id = Some(action_id);
             model.workspace.panel = WorkspacePanel::Actions;
@@ -269,6 +265,8 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
             model.admin.push_effect(AdminEffect::CallPlugin { plugin_id, method, payload, repository_id, origin: PluginCallOrigin::FileMenu });
         }
         AdminMessage::FilePluginFinished { method, result } => finish_file_plugin(model, &method, result),
+        AdminMessage::CreateSourcePlaylist { playlist, repository_id } => create_source_playlist(model, playlist, repository_id),
+        AdminMessage::SourcePlaylistFinished(result) => finish_source_playlist(model, result),
         AdminMessage::BeginSourceAuth { plugin_id, repo_id } => flow::begin(model, &plugin_id, repo_id),
         AdminMessage::CheckSourceAuth { plugin_id, repo_id } => flow::refresh_status(model, &plugin_id, &repo_id),
         AdminMessage::ClearSourceAuth { plugin_id, repo_id } => flow::clear(model, &plugin_id, &repo_id),
@@ -563,17 +561,79 @@ fn note_logs_cleared(model: &mut ShellViewModel, result: Result<(), String>) {
 }
 
 fn finish_file_plugin(model: &mut ShellViewModel, method: &str, result: Result<serde_json::Value, String>) {
+    let download = model.admin.take_download_operation(method);
     match result {
-        // 和 Vue 来源动作完成后的 `context.refreshRepo()` 一样重读资源库列表，再按当前仓库重读摘要和目录。
+        // 和 Vue 来源动作完成后的 `context.refreshRepo()` 一样重读资源库列表，再按当前仓库同步、重读摘要和目录。
+        // 下载的进度行照 Vue 写「下载完成」再完成；刷新开始的「加载资源库」会接着顶掉它。
         Ok(_) => {
             model.files.error.clear();
+            if let Some(operation) = download {
+                model.operation.update(operation, OperationPatch::step("下载完成", 100.0).with_indeterminate(false));
+                model.operation.finish(operation);
+            }
             model.workspace.request_repository_refresh();
         }
         Err(error) => {
             eprintln!("Nana 文件插件动作失败：{method}：{error}");
+            if let Some(operation) = download {
+                model.operation.cancel(operation);
+            }
             model.files.error = if error.is_empty() { format!("{method} 调用失败。") } else { error };
         }
     }
+}
+
+/// 「创建播放列表」照 Vue `runPlaylistAction` 交给服务：没有当前仓库或来源歌单标识时只报错，不建。
+fn create_source_playlist(model: &mut ShellViewModel, playlist: super::super::entry_actions::SourcePlaylist, repository_id: Option<String>) {
+    let Some(repo_id) = repository_id.filter(|id| !id.trim().is_empty()) else {
+        eprintln!("Nana 创建来源播放集没有当前仓库：{}", playlist.path);
+        model.files.error = "没有当前资源库，不能创建播放列表。".into();
+        return;
+    };
+    let Some(playlist_id) = playlist.playlist_id else {
+        eprintln!("Nana 来源目录缺少播放列表标识：{}", playlist.path);
+        model.files.error = "来源目录缺少播放列表标识".into();
+        return;
+    };
+    model.admin.push_effect(AdminEffect::CreateSourcePlaylist {
+        repo_id,
+        playlist_id,
+        name: playlist.name,
+        player_type_id: playlist.player_type_id,
+        path: playlist.path,
+    });
+}
+
+/// 建好以后和别的来源动作一样刷新资源库（Vue `context.refreshRepo()`），新播放集随摘要出现在侧栏。
+/// 失败写进文件列表的错误；Vue 在这里没有任何提示，失败只留在控制台。
+fn finish_source_playlist(model: &mut ShellViewModel, result: Result<(), String>) {
+    match result {
+        Ok(()) => {
+            model.files.error.clear();
+            model.workspace.request_repository_refresh();
+        }
+        Err(error) => {
+            eprintln!("Nana 创建来源播放集失败：{error}");
+            model.files.error = if error.is_empty() { "创建播放列表失败。".into() } else { error };
+        }
+    }
+}
+
+/// 仓库动作执行完（Vue `runActiveRepositoryAction` 的 `refreshWorkspaceAfterMutation`）：重读仓库摘要；
+/// 当前不在回收站、也不是智能文件夹时非静默地重读当前目录，任务弹层出「读取目录」。换了仓库就不读。
+fn reload_after_action(model: &mut ShellViewModel, repo_id: String) {
+    if model.workspace.active_repo_id.as_deref() != Some(repo_id.as_str()) {
+        eprintln!("Nana 仓库动作完成时已经换了仓库，不重读：{repo_id}");
+        return;
+    }
+    let context = super::super::files::FileContext::from_model(model);
+    if !context.trash && !context.smart_folder {
+        let path = model.files.current_path.clone();
+        if !model.files.request_refresh_read(&context, &path) {
+            eprintln!("Nana 仓库动作完成后没能重读目录：{path}");
+        }
+    }
+    model.workspace.effects.push(super::super::WorkspaceEffect::LoadSnapshotSilent { repo_id });
 }
 
 fn selected_action<'a>(model: &'a ShellViewModel, action_id: &Option<String>) -> Option<&'a RepositoryAction> {
@@ -634,7 +694,7 @@ fn finish_action(model: &mut ShellViewModel, result: Result<RepositoryAction, St
             if let Some(current) = model.admin.actions.iter_mut().find(|item| item.action_id == action.action_id) {
                 *current = action;
             }
-            model.admin.push_effect(AdminEffect::ReloadBrowser { repo_id });
+            reload_after_action(model, repo_id);
         }
         Err(error) => {
             eprintln!("Nana 仓库动作执行失败：{error}");

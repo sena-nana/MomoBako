@@ -244,12 +244,11 @@ mod tests {
         }
     }
 
-    /// 用正式列表路径把存在状态设为已就绪，再清掉它附带的摘要请求。
+    /// 已经进到「库」的工作区，不排队同步和摘要。
     fn ready_shell() -> ShellViewModel {
         let mut model = ShellViewModel::default();
         model.page = ShellPage::FileList;
-        model.workspace.startup.finish();
-        model.workspace.apply_repository_list(None, Ok(vec![repository("repo", "库", "ready")]));
+        model.workspace.present_repository(repository("repo", "库", "ready"));
         model.workspace.take_effects();
         model.repository_name = "库".into();
         model.repository_id = Some("repo".into());

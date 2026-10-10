@@ -8,7 +8,7 @@ use super::super::player::{ClockStep, PreviewEntry};
 use super::super::{PreviewPixels, ShellViewModel};
 use super::{InspectEffect, InspectMessage, InspectState, PreviewBody};
 
-/// 一页画出来的画面。`error` 有值时不上传空白纹理。
+/// 一页画出来的画面。`error` 有值时预览框写错误，不画这页。
 #[derive(Clone, Debug)]
 pub struct PageFrame {
     pub width: u32,
@@ -55,20 +55,20 @@ pub(super) enum Follow {
     None,
     Media { path: String, pcm: Option<super::super::player::PreviewPcm> },
     Autoplay { path: String, generation: u64 },
-    Sync,
+    Native,
 }
 
-/// 在归约消费消息之前抄出随后要做的接管、自动播放或换页。
+/// 在归约消费消息之前抄出随后要做的接管、自动播放，或者原生预览读好以后放掉旧画面。
 pub(super) fn follow(message: &InspectMessage) -> Follow {
     match message {
         InspectMessage::MediaLoaded { path, result: Ok(_), pcm, .. } => Follow::Media { path: path.clone(), pcm: pcm.clone() },
         InspectMessage::Autoplay { path, generation } => Follow::Autoplay { path: path.clone(), generation: *generation },
-        InspectMessage::NativeLoaded { .. } | InspectMessage::TurnPage(_) | InspectMessage::Orbit { .. } => Follow::Sync,
+        InspectMessage::NativeLoaded { .. } => Follow::Native,
         _ => Follow::None,
     }
 }
 
-/// 会话已经写好之后再交给播放器、同步画面。过期的媒体结果不会装进游标。
+/// 会话已经写好之后再交给播放器、换画面。过期的媒体结果不会装进游标。
 pub(super) fn apply(model: &mut ShellViewModel, follow: Follow) {
     match follow {
         Follow::None => {}
@@ -77,7 +77,7 @@ pub(super) fn apply(model: &mut ShellViewModel, follow: Follow) {
             show_video_frame(model);
         }
         Follow::Autoplay { path, generation } => autoplay(model, &path, generation),
-        Follow::Sync => sync_frame(model),
+        Follow::Native => release_preview_pixels(model),
     }
 }
 
@@ -314,7 +314,7 @@ pub(super) fn show_video_frame(model: &mut ShellViewModel) {
     if model.preview_token.as_deref() == Some(token.as_str()) {
         return;
     }
-    model.preview_pixels = Some(super::super::PreviewPixels {
+    model.preview_pixels = Some(PreviewPixels {
         width: frame.width,
         height: frame.height,
         rgba: frame.rgba.clone(),
@@ -322,24 +322,13 @@ pub(super) fn show_video_frame(model: &mut ShellViewModel) {
     model.preview_token = Some(token);
 }
 
-fn sync_frame(model: &mut ShellViewModel) {
-    let index = model.inspect.deck.index;
-    let frame = model.inspect.deck.frames.get(index);
-    let Some(frame) = frame else {
-        return;
-    };
-    if frame.error.is_some() || frame.rgba.is_empty() {
-        if model.preview_token.as_deref().is_some_and(|token| token.starts_with("native:")) {
-            model.preview_pixels = None;
-            model.preview_token = None;
-        }
+/// PDF、Office 和模型的页图由预览框直接从 `deck` 取（`raster_frame`），编成内容图画，不复制进
+/// `preview_pixels`，也不上传宿主纹理。当前预览换成原生视图时放掉上一个文件留下的图片或视频画面。
+/// 过期的读取结果没有装进去时预览体不是原生视图，当前文件的画面留着。
+fn release_preview_pixels(model: &mut ShellViewModel) {
+    if !matches!(model.inspect.body, PreviewBody::Native { .. }) {
         return;
     }
-    let path = model.inspect.target_path.clone().unwrap_or_default();
-    model.preview_pixels = Some(PreviewPixels {
-        width: frame.width,
-        height: frame.height,
-        rgba: frame.rgba.clone(),
-    });
-    model.preview_token = Some(format!("native:{path}:{index}"));
+    model.preview_pixels = None;
+    model.preview_token = None;
 }

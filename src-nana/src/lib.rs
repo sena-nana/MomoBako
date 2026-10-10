@@ -43,7 +43,6 @@ use backend::services::repository::{
     RepositoryDeleteMode, RepositoryDeleteRequest, RepositoryRelocateRequest,
     SyncRequest,
 };
-pub mod plugin_api;
 pub mod settings;
 mod thumbnail_host;
 pub mod appearance;
@@ -56,7 +55,6 @@ pub struct MomoBakoApplication {
     shell: ShellViewModel,
     repositories_load_scheduled: bool,
     preview_gpu: Option<NativePreviewGpu>,
-    pub(crate) still_gpu: Option<NativePreviewGpu>,
     pub(crate) thumbnail_gpu: Vec<ThumbnailGpu>,
     pub(crate) pending_thumbs: Vec<PendingThumb>,
     host: window_host::HostSession,
@@ -77,14 +75,6 @@ pub(crate) struct NativePreviewGpu {
     pub(crate) height: u32,
 }
 
-impl MomoBakoApplication {
-    /// 当前图片幻灯片的路径和像素。没有帧时不返回。
-    pub(crate) fn slideshow_frame(&self) -> Option<(String, crate::shell::PreviewPixels)> {
-        let still = self.shell.player.still.as_ref()?;
-        Some((still.path.clone(), still.frame.clone()?))
-    }
-}
-
 impl Default for MomoBakoApplication {
     fn default() -> Self {
         Self {
@@ -92,7 +82,6 @@ impl Default for MomoBakoApplication {
             shell: ShellViewModel::default(),
             repositories_load_scheduled: false,
             preview_gpu: None,
-            still_gpu: None,
             thumbnail_gpu: Vec::new(),
             pending_thumbs: Vec::new(),
             host: window_host::HostSession::default(),
@@ -156,7 +145,6 @@ impl ApplicationState for MomoBakoApplication {
             shell,
             repositories_load_scheduled: false,
             preview_gpu: None,
-            still_gpu: None,
             thumbnail_gpu: Vec::new(),
             pending_thumbs: Vec::new(),
             host: window_host::HostSession::default(),
@@ -218,7 +206,6 @@ impl ApplicationState for MomoBakoApplication {
         for request in sidebar_dispatch::dispatch_prepared_browses(&mut self.shell) {
             sidebar_dispatch::dispatch_browse_request(self, context, request);
         }
-        thumbnail_host::publish_still(self, window, context);
         thumbnail_host::publish_preview(self, window, context);
         self.publish_thumbnails(window, context);
         appearance::sync(self, &mut window.document);
@@ -245,9 +232,7 @@ impl ApplicationState for MomoBakoApplication {
             };
         }
         app_dispatch::dispatch_services(self, &message, context);
-        let snapshot_repo_id = app_dispatch::snapshot_repo(&message);
         self.shell.reduce(message);
-        app_dispatch::after_snapshot(self, snapshot_repo_id, context);
         dispatch_workspace_effects(self, context);
         player_dispatch::dispatch_player_effects(self, context);
         admin_dispatch::dispatch_admin_effects(self, context);
@@ -355,7 +340,7 @@ fn dispatch_workspace_effects(
                     .map(|services| (services.tasks.clone(), services.executor.clone()));
                 let Some((tasks, executor)) = prepared else {
                     eprintln!("Nana 资源库同步需要领域服务，当前服务未启动");
-                    app.shell.reduce(ShellMessage::StartupSyncFinished {
+                    app.shell.reduce(ShellMessage::RepositorySynced {
                         generation,
                         result: Err("领域服务未启动".into()),
                     });
@@ -365,43 +350,40 @@ fn dispatch_workspace_effects(
                     let result = executor
                         .block_on(tasks.execute(PROTOCOL_REPOSITORY_SYNC, SyncRequest { repo_id }))
                         .map(|_| ());
-                    ShellMessage::StartupSyncFinished { generation, result }
+                    ShellMessage::RepositorySynced { generation, result }
                 })) {
                     eprintln!("Nana 资源库同步任务提交失败：{error}");
-                    app.shell.reduce(ShellMessage::StartupSyncFinished {
+                    app.shell.reduce(ShellMessage::RepositorySynced {
                         generation,
                         result: Err(format!("资源库同步任务提交失败：{error}")),
                     });
                 }
             }
-            WorkspaceEffect::LoadSnapshot { repo_id } => {
+            WorkspaceEffect::LoadSnapshot { repo_id, generation } => {
                 let prepared = app.services.as_ref().map(|services| {
                     (services.repository_query.clone(), services.executor.clone())
                 });
                 let Some((query, executor)) = prepared else {
                     eprintln!("Nana 资源库摘要需要领域服务，当前服务未启动");
-                    app.shell.reduce(ShellMessage::RepositorySnapshotLoaded(Err(
-                        "领域服务未启动".into(),
-                    )));
+                    app.shell.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Err("领域服务未启动".into()) });
                     continue;
                 };
                 if let Err(error) = context.run_task(Task::new(async move {
-                    ShellMessage::RepositorySnapshotLoaded(
-                        executor.block_on(query.get_repository_snapshot(repo_id)),
-                    )
+                    ShellMessage::RepositorySnapshotLoaded { generation, result: executor.block_on(query.get_repository_snapshot(repo_id)) }
                 })) {
                     eprintln!("Nana 资源库摘要任务提交失败：{error}");
-                    app.shell.reduce(ShellMessage::RepositorySnapshotLoaded(Err(format!(
-                        "资源库摘要任务提交失败：{error}"
-                    ))));
+                    app.shell.reduce(ShellMessage::RepositorySnapshotLoaded {
+                        generation,
+                        result: Err(format!("资源库摘要任务提交失败：{error}")),
+                    });
                 }
             }
+            WorkspaceEffect::LoadFirstScreen { repo_id } => app_dispatch::dispatch_first_screen(app, context, repo_id),
             WorkspaceEffect::RelocateRepository { repo_id, path } => {
-                let prepared = app
-                    .services
-                    .as_ref()
-                    .map(|services| (services.tasks.clone(), services.executor.clone()));
-                let Some((tasks, executor)) = prepared else {
+                let prepared = app.services.as_ref().map(|services| {
+                    (services.tasks.clone(), services.repository_query.clone(), services.executor.clone())
+                });
+                let Some((tasks, query, executor)) = prepared else {
                     eprintln!("Nana 资源库重定向需要领域服务，当前服务未启动");
                     app.shell
                         .reduce(ShellMessage::MissingRelocateFinished(Err("领域服务未启动".into())));
@@ -413,7 +395,7 @@ fn dispatch_workspace_effects(
                             PROTOCOL_REPOSITORY_RELOCATE,
                             RepositoryRelocateRequest { repo_id, path },
                         ))
-                        .map(|_| ());
+                        .and_then(|(output, _)| app_dispatch::mutated_repository(&executor, &query, &output));
                     ShellMessage::MissingRelocateFinished(result)
                 })) {
                     eprintln!("Nana 资源库重定向任务提交失败：{error}");

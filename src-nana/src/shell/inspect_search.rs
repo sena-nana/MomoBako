@@ -274,6 +274,9 @@ pub struct SearchUi {
     pub facets: Vec<AssetFacet>,
     reveal_panel: bool,
     reveal_hit: Option<HitReveal>,
+    /// 命中在别的仓库：等换仓库走完再读它所在的目录（Vue `openSearchHit` 先 `await selectRepository`）。
+    /// 换仓库清空搜索时留着它。
+    after_switch: Option<SearchRow>,
 }
 
 /// 打开命中时先读所在目录，目录到达后再选中并读取详情。
@@ -509,21 +512,11 @@ pub(super) fn observe(model: &mut ShellViewModel, message: &ShellMessage) {
         eprintln!("Nana 搜索结果所在目录的读取被别的浏览顶掉，放弃等待中的命中");
     }
     match message {
-        ShellMessage::RepositorySnapshotLoaded(Ok(snapshot)) => note_snapshot(&mut model.inspect, snapshot),
+        ShellMessage::RepositorySnapshotLoaded { result: Ok(snapshot), .. } => note_snapshot(&mut model.inspect, snapshot),
         ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Ok(snapshot))) => note_snapshot(&mut model.inspect, snapshot),
-        ShellMessage::SelectWorkspaceRepository(repo_id) => {
-            let switching = model.workspace.active_repo_id.as_deref() != Some(repo_id.as_str())
-                && model.workspace.repositories.iter().any(|item| &item.repo_id == repo_id);
-            if switching {
-                model.inspect.reset_search();
-            }
-        }
         ShellMessage::FileBrowserLoaded(result) => reveal_after_browse(model, result),
         // 用户已经去了别处：等待中的命中不再打开，免得以后读到同一目录时突然跳进预览。
-        ShellMessage::OpenDirectory(_)
-        | ShellMessage::SelectFile { .. }
-        | ShellMessage::SetWorkspacePanel(_)
-        | ShellMessage::SetLibraryCategory(_) => {
+        ShellMessage::OpenDirectory(_) | ShellMessage::SelectFile { .. } | ShellMessage::SetWorkspacePanel(_) => {
             if model.inspect.search_ui.reveal_hit.take().is_some() {
                 eprintln!("Nana 打开搜索结果前已经切到别处，放弃等待中的命中");
             }
@@ -567,15 +560,43 @@ fn open_hit(model: &mut ShellViewModel, row: SearchRow) {
             eprintln!("Nana 搜索结果所在的资源库不在列表里：{}", row.repo_id);
             return;
         }
-        model.reduce(ShellMessage::SelectWorkspaceRepository(row.repo_id.clone()));
-        if model.workspace.active_repo_id.as_deref() != Some(row.repo_id.as_str()) {
-            eprintln!("Nana 没能切换到搜索结果所在的资源库：{}", row.repo_id);
-            return;
+        let repo_id = row.repo_id.clone();
+        model.inspect.search_ui.after_switch = Some(row);
+        model.reduce(ShellMessage::SelectWorkspaceRepository(repo_id.clone()));
+        if model.workspace.active_repo_id.as_deref() != Some(repo_id.as_str()) {
+            eprintln!("Nana 没能切换到搜索结果所在的资源库：{repo_id}");
+            model.inspect.search_ui.after_switch = None;
         }
+        return;
     }
+    reveal_in_current(model, row);
+}
+
+/// 换仓库走完：命中还在这个仓库时接着读它所在的目录。目标缺失时目录读不了，命中不再打开。
+pub(in crate::shell) fn resume_after_switch(model: &mut ShellViewModel) {
+    let Some(row) = model.inspect.search_ui.after_switch.take() else {
+        return;
+    };
+    if model.workspace.active_repo_id.as_deref() != Some(row.repo_id.as_str()) || model.navigation_locked() {
+        eprintln!("Nana 换仓库以后不再打开搜索结果：{}", row.path);
+        return;
+    }
+    reveal_in_current(model, row);
+}
+
+/// 换仓库失败：等着的命中不再打开。
+pub(in crate::shell) fn drop_after_switch(model: &mut ShellViewModel) {
+    if model.inspect.search_ui.after_switch.take().is_some() {
+        eprintln!("Nana 换仓库失败，放弃等待中的搜索结果");
+    }
+}
+
+/// 命中就在当前仓库：读它所在的目录，到了再选中并读详情。
+fn reveal_in_current(model: &mut ShellViewModel, row: SearchRow) {
     let parent = parent_path(&row.path);
     let context = super::super::files::FileContext::from_model(model);
-    if model.files.request_browse(&context, &parent) {
+    // Vue 读命中所在目录时带上目录树（`includeTree: true`），任务弹层是「读取文件树」。
+    if model.files.request_browse_reporting(&context, &parent, super::super::files::ReadProgress::Tree) {
         model.files.set_drag_selection(vec![row.path.clone()], Some(row.path.clone()), Some(row.path.clone()));
         model.inspect.search_ui.reveal_hit = Some(HitReveal { row, parent });
     } else {

@@ -1,12 +1,9 @@
 //! Nana 宿主与应用服务之间的无窗口依赖契约。
 //!
-//! 这些请求由 Runtime/ViewModel 产生，Windows 窗口、文件对话框、托盘和外部打开
-//! 分别由具体宿主实现；因此 Nana 页面不需要取得 Tauri `AppHandle` 或窗口对象。
-
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
+//! ViewModel 把外部打开、文件拖出和最小化到托盘排成 `HostRequest`，由窗口宿主（`host_bridge.rs`）
+//! 执行；标题栏的窗口动作经 `WindowCommand` 映射成平台窗口命令。文件对话框直接排 NanaUI 平台命令
+//! （`shell/input.rs`），不经这里。页面因此不需要取得窗口对象。播放器插件的媒体能力和播放会话控制器
+//! 也在这里。
 
 use crate::backend::services::repository::PlaybackSessionState;
 
@@ -105,65 +102,36 @@ impl<P: PlaybackMediaPlugin> PlaybackSessionController<P> {
     }
 }
 
-/// 窗口生命周期与显示状态命令。
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// 标题栏和关窗策略发出的窗口动作。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum WindowCommand {
-    Restore,
     Minimize,
     ToggleMaximize,
     Close,
-    SetTitle(String),
 }
 
 impl WindowCommand {
     /// 将宿主无关窗口动作映射为 Nana 平台命令；窗口对象仍只停留在适配层。
     pub fn to_platform_command(
-        &self,
+        self,
         id: nana_ui_platform::WindowId,
         maximized: bool,
-    ) -> Option<nana_ui_platform::host::WindowCommand> {
+    ) -> nana_ui_platform::host::WindowCommand {
         match self {
-            Self::Restore => Some(nana_ui_platform::host::WindowCommand::SetMinimized { id, minimized: false }),
-            Self::Minimize => Some(nana_ui_platform::host::WindowCommand::SetMinimized { id, minimized: true }),
-            Self::ToggleMaximize => Some(nana_ui_platform::host::WindowCommand::SetMaximized { id, maximized: !maximized }),
-            Self::Close => Some(nana_ui_platform::host::WindowCommand::Close(id)),
-            Self::SetTitle(_) => None,
+            Self::Minimize => nana_ui_platform::host::WindowCommand::SetMinimized { id, minimized: true },
+            Self::ToggleMaximize => nana_ui_platform::host::WindowCommand::SetMaximized { id, maximized: !maximized },
+            Self::Close => nana_ui_platform::host::WindowCommand::Close(id),
         }
     }
-}
-
-/// 宿主通知，保持安静的默认级别，危险和失败状态才提高可见度。
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Notification {
-    pub title: String,
-    pub body: String,
-    pub is_error: bool,
-}
-
-/// 文件对话框请求。
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum FileDialogRequest {
-    OpenFile { extensions: Vec<String> },
-    OpenDirectory,
-    SaveFile { suggested_name: String },
-}
-
-/// Host-provided file drop payload. Paths are validated by the host before dispatch.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FileDropRequest {
-    pub paths: Vec<String>,
 }
 
 /// 交给宿主执行的输入请求。关闭确认是浮层里的确认框，由 `InputState::pending_close` 驱动，不经宿主。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HostInputRequest {
-    FileDrop(FileDropRequest),
     /// 把库内绝对路径拖出窗口。Windows 上由宿主调用系统拖放。
     DragOut { paths: Vec<String> },
     /// 关闭行为是最小化到托盘。宿主隐藏窗口，进程继续留在托盘里。
     MinimizeToTray,
-    FocusMainWindow,
-    RegisterShortcut { accelerator: String },
 }
 
 /// 请求宿主打开外部资源。
@@ -174,26 +142,9 @@ pub struct ExternalOpenRequest {
     pub reveal: bool,
 }
 
-/// 可取消的长任务探针，服务层和 Nana 宿主共享同一个原子状态。
-#[derive(Clone, Debug, Default)]
-pub struct CancellationProbe(Arc<AtomicBool>);
-
-impl CancellationProbe {
-    pub fn cancel(&self) {
-        self.0.store(true, Ordering::Release);
-    }
-
-    pub fn is_cancelled(&self) -> bool {
-        self.0.load(Ordering::Acquire)
-    }
-}
-
-/// 应用向宿主发出的最小请求集合。
+/// 应用向宿主发出的请求。宿主每次 `update` 后全部执行并清空（`host_bridge::perform`）。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HostRequest {
-    Window(WindowCommand),
-    Notify(Notification),
-    OpenFileDialog(FileDialogRequest),
     OpenExternal(ExternalOpenRequest),
     Input(HostInputRequest),
 }
@@ -230,40 +181,6 @@ mod tests {
         }
 
         fn dispose(&mut self) {}
-    }
-
-    #[test]
-    fn cancellation_probe_is_shared_and_monotonic() {
-        let first = CancellationProbe::default();
-        let second = first.clone();
-        assert!(!first.is_cancelled());
-        second.cancel();
-        assert!(first.is_cancelled());
-    }
-
-    #[test]
-    fn host_request_keeps_window_and_dialog_payloads() {
-        let request = HostRequest::OpenFileDialog(FileDialogRequest::OpenFile {
-            extensions: vec!["png".into(), "jpg".into()],
-        });
-        assert_eq!(
-            request,
-            HostRequest::OpenFileDialog(FileDialogRequest::OpenFile {
-                extensions: vec!["png".into(), "jpg".into()],
-            })
-        );
-    }
-
-    #[test]
-    fn host_input_keeps_drop_paths() {
-        assert_eq!(
-            HostRequest::Input(HostInputRequest::FileDrop(FileDropRequest {
-                paths: vec!["C:/assets/a.png".into()],
-            })),
-            HostRequest::Input(HostInputRequest::FileDrop(FileDropRequest {
-                paths: vec!["C:/assets/a.png".into()],
-            }))
-        );
     }
 
     #[test]

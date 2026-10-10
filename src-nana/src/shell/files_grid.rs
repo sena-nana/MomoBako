@@ -24,7 +24,8 @@ use super::super::files::{FileContext, FilesMessage};
 use super::super::hot::{HotSignals, SpinField};
 use super::super::workspace::{LibraryCategory, WorkspacePanel};
 use super::super::ShellViewModel;
-use super::bind::{fill_container, ButtonIconField};
+use super::super::field_bind::ButtonIcon;
+use super::bind::fill_container;
 use super::board::{BoardSignals, GroupPresence};
 use super::file_message;
 use super::style;
@@ -262,7 +263,7 @@ fn load_more(sections: Signal<Sections>) -> AnyView {
     let button = style::styled_button(more_label(current.loading), more_icon(current.loading), look).disabled(!current.enabled);
     widget(button)
         .prop::<String, fields::button::label>(move || more_label(more().loading).to_string())
-        .prop::<Option<Icon>, ButtonIconField>(move || more_icon(more().loading))
+        .prop::<Option<Icon>, ButtonIcon>(move || more_icon(more().loading))
         .prop::<bool, fields::button::disabled>(move || !more().enabled)
         .key("file-load-more")
         .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(file_message(FilesMessage::LoadMore)))

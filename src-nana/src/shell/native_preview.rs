@@ -1,20 +1,19 @@
 //! 内置原生预览。压缩包列文件，PDF 画页面，Office 抽文本，模型能解析的网格会光栅化。
 //!
+//! 扩展名到预览视图的对应在 [`builtin_view`]：随附插件（`preview-archive`、`office-preview`、
+//! `three-model-preview`）声明的扩展名都在这里。插件声明的别的预览要运行插件前端的 Vue 组件，Nana 不登记。
 //! PDF 按内容流翻页。解不开的滤镜记成该页失败，不假装成空白成功。
 //! Open XML 仍走 zip。二进制 Office 只刮取连续的 UTF-16LE 文本，不还原版式。
-//! OBJ、STL、glTF/GLB、3MF、VRM 能取出三角形就画进预览纹理。Nana GpuView 没有网格管线。
+//! OBJ、STL、glTF/GLB、3MF、VRM 能取出三角形就软件光栅成页图，编码成 PNG 画进预览框。
 //! FBX 与 BLEND 只看文件头。不嵌入 Three.js。
-//! 读不到的格式仍走升级提示。
 
 use std::io::{Cursor, Read};
 
 use unarc_rs::unified::{ArchiveFormat, UnifiedArchive};
 use zip::ZipArchive;
 
-use crate::plugin_api::{NativeContributionKind, NativePluginContribution};
-
 use super::bridge::{MeshData, NativeLoad, PageFrame};
-use super::{InspectEffect, InspectState, PreviewBinding, PreviewBody};
+use super::{InspectEffect, InspectState, PreviewBody};
 
 #[path = "native_preview_pdf.rs"]
 mod pdf;
@@ -30,38 +29,8 @@ const TEXT_LIMIT: usize = 24_000;
 const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 const OLE_MIN_CHARS: usize = 2;
 
-/// 壳层启动时就有的预览贡献。后登记的同扩展名贡献优先。
-pub fn builtin_bindings() -> Vec<PreviewBinding> {
-    vec![
-        binding("momobako.preview.archive", "压缩包", ARCHIVE_VIEW, &["zip", "cbz", "7z", "rar", "cbr"], 10),
-        binding("momobako.preview.pdf", "PDF", PDF_VIEW, &["pdf"], 15),
-        binding(
-            "momobako.preview.office",
-            "文档",
-            OFFICE_VIEW,
-            &[
-                "docx", "docm", "doc", "dotx", "dotm", "dot", "xlsx", "xlsm", "xlsb", "xls", "xltx", "xltm", "xlt",
-                "pptx", "pptm", "ppt", "ppsx", "ppsm", "pps", "potx", "potm", "pot",
-            ],
-            20,
-        ),
-        binding(
-            "momobako.preview.model",
-            "模型",
-            MODEL_VIEW,
-            &["obj", "gltf", "glb", "stl", "3mf", "vrm", "fbx", "blend"],
-            30,
-        ),
-    ]
-}
-
-/// 这个 view 会自己读文件并画出列表、页面或网格。
-pub fn renders_view(view_id: &str) -> bool {
-    renders(view_id)
-}
-
-/// 扩展名已经有内置绘制时返回它的 view。Vue 贡献不能画时用这一份。
-pub fn fallback_view(extension: &str) -> Option<(&'static str, &'static str)> {
+/// 扩展名有内置绘制时返回它的视图和种类名：压缩包、PDF、文档和模型。不分大小写，前导的点去掉。
+pub fn builtin_view(extension: &str) -> Option<(&'static str, &'static str)> {
     let extension = extension.trim().trim_start_matches('.').to_ascii_lowercase();
     if extension == "pdf" {
         return Some((PDF_VIEW, "PDF"));
@@ -82,24 +51,9 @@ pub fn fallback_view(extension: &str) -> Option<(&'static str, &'static str)> {
     None
 }
 
-/// 已知贡献开始读取文件。不能画、但扩展名已有内置表面时改走那一份。
+/// 内置视图开始读取文件：先标读取中，读到的字节交给 [`load`]。
 pub fn begin(state: &mut InspectState, repo_id: &str, path: &str, view_id: String, label: String) {
     state.error.clear();
-    if !renders(&view_id) {
-        let extension = path.rsplit(['/', '\\']).next().unwrap_or(path).rsplit_once('.').map(|(_, suffix)| suffix).unwrap_or("");
-        if let Some((builtin, builtin_label)) = fallback_view(extension) {
-            eprintln!("Nana 预览贡献 {view_id} 不能绘制，改用 {builtin}：{path}");
-            begin(state, repo_id, path, builtin.to_string(), builtin_label.to_string());
-            return;
-        }
-        state.loading = false;
-        state.body = PreviewBody::Native {
-            content: format!("原生预览 · {label} · {view_id}"),
-            view_id,
-            label,
-        };
-        return;
-    }
     state.loading = true;
     state.body = PreviewBody::Native { view_id: view_id.clone(), label, content: String::new() };
     state.effects.push(InspectEffect::LoadNative {
@@ -155,17 +109,6 @@ pub fn note_loaded(state: &mut InspectState, path: String, generation: u64, resu
             state.body = PreviewBody::Failed(error.clone());
             state.error = error;
         }
-    }
-}
-
-fn renders(view_id: &str) -> bool {
-    matches!(view_id, ARCHIVE_VIEW | PDF_VIEW | OFFICE_VIEW | MODEL_VIEW)
-}
-
-fn binding(plugin_id: &str, label: &str, view_id: &str, extensions: &[&str], order: i32) -> PreviewBinding {
-    PreviewBinding {
-        extensions: extensions.iter().map(|item| (*item).to_string()).collect(),
-        contribution: NativePluginContribution::new(plugin_id, NativeContributionKind::Preview, label, view_id).with_order(order),
     }
 }
 
@@ -687,17 +630,16 @@ mod tests {
         assert!(!listed.lines().any(|line| line.starts_with("dir ·")), "{listed}");
     }
 
+    /// 内置视图认得 PDF、3MF 和 zip 以外的压缩包；扩展名不分大小写、前导点去掉；认不出的不给视图。
     #[test]
-    fn bindings_include_pdf_three_mf_and_non_zip_archives() {
-        let bindings = builtin_bindings();
-        let extensions = |view: &str| {
-            bindings.iter().find(|item| item.contribution.view_id == view).expect(view).extensions.clone()
-        };
-        assert_eq!(extensions(PDF_VIEW), vec!["pdf".to_string()]);
-        assert!(extensions(MODEL_VIEW).iter().any(|item| item == "3mf"));
+    fn builtin_views_cover_pdf_three_mf_and_non_zip_archives() {
+        let view = |extension: &str| builtin_view(extension).map(|(view, _)| view);
+        assert_eq!(view("PDF"), Some(PDF_VIEW));
+        assert_eq!(view(".3mf"), Some(MODEL_VIEW));
         for extension in ["zip", "cbz", "7z", "rar", "cbr"] {
-            assert!(extensions(ARCHIVE_VIEW).iter().any(|item| item == extension), "{extension}");
+            assert_eq!(view(extension), Some(ARCHIVE_VIEW), "{extension}");
         }
+        assert_eq!(view("psd"), None);
     }
 
     #[test]
@@ -727,16 +669,13 @@ mod tests {
         assert_eq!(read(OFFICE_VIEW, &ole).expect("ole"), "桃箱");
         assert!(read(OFFICE_VIEW, &[0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1]).is_err());
 
-        let bindings = builtin_bindings();
-        let extensions = |view: &str| {
-            bindings.iter().find(|item| item.contribution.view_id == view).expect(view).extensions.clone()
-        };
+        let view = |extension: &str| builtin_view(extension).map(|(view, _)| view);
         for extension in ["doc", "xls", "ppt", "dot", "xlt", "pps", "dotm", "xlsb", "xltx", "xltm", "ppsx", "ppsm", "potx", "potm", "pot"] {
-            assert!(extensions(OFFICE_VIEW).iter().any(|item| item == extension), "{extension}");
+            assert_eq!(view(extension), Some(OFFICE_VIEW), "{extension}");
         }
         assert!(read(OFFICE_VIEW, &sample_zip(&[("a.txt", b"hi")])).is_err());
         for extension in ["vrm", "fbx", "blend"] {
-            assert!(extensions(MODEL_VIEW).iter().any(|item| item == extension), "{extension}");
+            assert_eq!(view(extension), Some(MODEL_VIEW), "{extension}");
         }
 
         assert!(read(MODEL_VIEW, b"glTF").is_err());

@@ -85,7 +85,6 @@ pub(super) fn type_cover(label: &str, size: f32, key: &'static str, dim: Option<
 pub(crate) fn hit_area(label: &str, disabled: bool, inset: f32, radius: f32) -> IconButton {
     let mut button = IconButton::new(super::icons::PLAY, label).colors_from_style().disabled(disabled);
     button.style.background = None;
-    button.style.square = None;
     button.style.control_padding_x = None;
     button.style.painter = Some(HoverSurface { radius }.into());
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);

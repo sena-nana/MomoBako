@@ -10,18 +10,17 @@
 //! 条目列表放在 `ReorderList` 里：它按自己的直接子节点取行的盒子来拖动排序。条目用 Store 的
 //! `keyed(..).each(..)` 建，`.container(..)` 把行直接建进 `ReorderList`，不多一层容器：增删、重排时
 //! 按编号保留各行的节点，留下的行一个都不重建，焦点、按钮和行里的状态都还是原来的；当前播放、文件名
-//! 这类字段原地改。每行可点的那一段登记成列表条目的 `tools`，按钮的点击不会被拖动手势抓走。
+//! 这类字段原地改。按在行里的按钮上不移动就松开是按钮自己的点击，移动超过 4px 才拖动这一行，和 Vue
+//! 整行都能拖一样。
 
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use nana_ui::runtime::view::{
-    fields, node_ref, on_cleanup, on_mount, signal, store, widget, AnyView, FieldWrite, IntoView, Item, NodeRef, Signal,
-    Store, StoreList, StorePath, StyledComponent,
+    fields, signal, store, widget, AnyView, FieldWrite, IntoView, Item, Signal, Store, StoreList, StorePath, StyledComponent,
 };
 use nana_ui::runtime::{
     Activate, AlignSpec, Button, JustifySpec, LengthSpec, RadiusTier, ReorderItem, ReorderList, ReorderListEvent,
-    SemanticColorRole, SemanticPaint, Stack, StableNodeId, Text, TextHorizontalAlignment,
+    SemanticColorRole, SemanticPaint, Stack, Text, TextHorizontalAlignment,
 };
 use nana_ui::{ButtonKind, Icon};
 
@@ -125,16 +124,13 @@ pub(crate) struct PlaylistPageSignals {
     entries: Store<Vec<PlaylistEntry>>,
     /// 投影里的条目顺序：拖动排序用的条目和「还是空的」空框读它，和 Store 里的顺序一致。
     order: Signal<Vec<String>>,
-    /// 每一行可点的那一段（扩展名方块、标题、播放和移除）的节点，按条目编号。行挂上时登记、回收时
-    /// 去掉。拖动排序的条目带上它：按在这一段上不开始拖动，按钮照常接点击。
-    tools: Signal<BTreeMap<String, StableNodeId>>,
 }
 
 impl PlaylistPageSignals {
     /// 在当前作用域里建信号，初值是 `view`。
     pub(crate) fn new(view: PlaylistPageView) -> Self {
         let order = view.items.iter().map(entry_key).collect::<Vec<_>>();
-        Self { head: signal(view.head), entries: store(view.items), order: signal(order), tools: signal(BTreeMap::new()) }
+        Self { head: signal(view.head), entries: store(view.items), order: signal(order) }
     }
 
     /// 写入投影：页眉值没变不写，条目按编号对照着改，顺序变了写进顺序。作用域已回收时只记日志。
@@ -170,27 +166,19 @@ pub(crate) fn view(signals: PlaylistPageSignals, player_bar: AnyView) -> AnyView
     (unlisted, panel).into_any()
 }
 
-/// 条目列表。从拖动柄（和行的留白）拖动排序，排序结果交回壳层持久化；行按编号建在 `ReorderList` 里，
-/// 增删、重排只动变了的行。列表的条目（拖动命中用的编号和名字、当前播放、不开始拖动的可点区域）
-/// 跟着顺序和字段原地换。
+/// 条目列表。整行都能拖动排序（按在按钮上要移动超过 4px 才拖），排序结果交回壳层持久化；行按编号建在
+/// `ReorderList` 里，增删、重排只动变了的行。列表的条目（拖动命中用的编号和名字、当前播放）跟着顺序和
+/// 字段原地换。
 fn item_list(signals: PlaylistPageSignals) -> AnyView {
-    let PlaylistPageSignals { head, entries, order, tools } = signals;
+    let PlaylistPageSignals { head, entries, order } = signals;
     let keyed = entries.keyed(entry_key);
     let reorder = move || {
         let current = head.with(|head| head.current.clone());
-        tools.with(|tools| {
-            order.with(|ids| {
-                ids.iter()
-                    .filter_map(|id| keyed.at(id).try_with(|entry| entry.filename.clone()).map(|name| (id, name)))
-                    .map(|(id, name)| {
-                        let item = ReorderItem::new(id.clone(), name).selected(current.as_deref() == Some(id.as_str()));
-                        match tools.get(id) {
-                            Some(cluster) => item.tools(*cluster),
-                            None => item,
-                        }
-                    })
-                    .collect::<Vec<_>>()
-            })
+        order.with(|ids| {
+            ids.iter()
+                .filter_map(|id| keyed.at(id).try_with(|entry| entry.filename.clone()).map(|name| (id, name)))
+                .map(|(id, name)| ReorderItem::new(id.clone(), name).selected(current.as_deref() == Some(id.as_str())))
+                .collect::<Vec<_>>()
         })
     };
     let list = widget(ReorderList::new(reorder()).live_rows(true).spacing(10.0).label("播放集条目"))
@@ -205,7 +193,7 @@ fn item_list(signals: PlaylistPageSignals) -> AnyView {
                 }));
             }
         });
-    keyed.each(move |item| entry_row(item, head, tools)).container(list).into_any()
+    keyed.each(move |item| entry_row(item, head)).container(list).into_any()
 }
 
 /// 眉题、22px 标题、13px 状态行；右上角是播放整张列表。
@@ -240,12 +228,9 @@ fn spaced(mut text: Text, margin: f32) -> Text {
     text
 }
 
-/// 一条：拖动柄，后面是可点的一段（扩展名方块、文件名和路径、播放与移除）。不可播放的条目整行变淡，
-/// 次行写原因，两种次行都留着、按能不能播放互换。
-///
-/// 可点的一段包成一个节点，挂上时登记进 `tools`：列表按下行就开始拖动手势、把指针抓走，按钮收不到
-/// 点击；登记过的这一段不开始拖动。所以从拖动柄（和行的留白）拖，按钮照常点。
-fn entry_row(item: EntryItem, head: Signal<PageHead>, tools: Signal<BTreeMap<String, StableNodeId>>) -> AnyView {
+/// 一条：拖动柄，后面是扩展名方块、文件名和路径、播放与移除。不可播放的条目整行变淡，次行写原因，
+/// 两种次行都留着、按能不能播放互换。按钮上单击是按钮的动作，按下拖动则拖动这一行。
+fn entry_row(item: EntryItem, head: Signal<PageHead>) -> AnyView {
     let entry = item.get_untracked();
     let id = entry.item_id.clone();
     let ready = move || item.try_with(|entry| entry.ready).unwrap_or(false);
@@ -276,12 +261,9 @@ fn entry_row(item: EntryItem, head: Signal<PageHead>, tools: Signal<BTreeMap<Str
                 cx.dispatch_program_all(ShellMessage::RemovePlaylistItem { playlist_id, item_id: remove_id.clone() });
             }),
     ));
-    let cluster = node_ref();
-    register_tools(tools, id.clone(), cluster);
     let clickable = widget(Stack::row(12.0).align(AlignSpec::Center).width(LengthSpec::Shrink).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0))
-        .node_ref(cluster)
         .children((extension_mark(item, &id, &entry.mark), meta, actions))
-        .key(format!("playlist-item-tools-{}", key_part(&id)));
+        .key(format!("playlist-item-body-{}", key_part(&id)));
     let row = Stack::row(12.0)
         .align(AlignSpec::Center)
         .width(LengthSpec::Fill)
@@ -300,23 +282,7 @@ fn entry_row(item: EntryItem, head: Signal<PageHead>, tools: Signal<BTreeMap<Str
         .into_any()
 }
 
-/// 行挂上以后把可点那一段的节点登记进 `tools`，行回收时去掉。页面先回收时登记表已经没了，什么也不做。
-fn register_tools(tools: Signal<BTreeMap<String, StableNodeId>>, id: String, cluster: NodeRef) {
-    let mounted = id.clone();
-    on_mount(move |_| match cluster.get_untracked() {
-        Some(node) => tools.update(|tools| {
-            tools.insert(mounted, node);
-        }),
-        None => eprintln!("Nana 播放集条目 {mounted} 可点的一段没有建出来，按钮会被拖动手势盖住"),
-    });
-    on_cleanup(move || {
-        tools.try_update(|tools| {
-            tools.remove(&id);
-        });
-    });
-}
-
-/// 拖动柄：32px 方块里一枚弱色竖握把。从这里（和行的留白）拖动排序。
+/// 拖动柄：32px 方块里一枚弱色竖握把，提示这一行能拖动排序。
 fn drag_handle(id: &str) -> AnyView {
     widget(
         Stack::column(0.0)
@@ -447,7 +413,7 @@ struct ToolbarLook {
 impl ToolbarLook {
     fn new(kind: ButtonKind, base: SemanticColorRole, disabled: bool) -> Self {
         let role = if kind == ButtonKind::Danger { SemanticColorRole::Danger } else { SemanticColorRole::Text };
-        Self { disabled, mix: disabled.then(|| nana_ui_core::SemanticColorMix::new(role, base, bar::DISABLED_OPACITY)) }
+        Self { disabled, mix: disabled.then(|| nana_ui_core::SemanticColorMix::new(role, base, crate::theme_map::DISABLED_OPACITY)) }
     }
 }
 

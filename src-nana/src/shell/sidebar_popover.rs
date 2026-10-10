@@ -6,6 +6,7 @@
 
 use crate::backend::services::repository::PluginManifest;
 
+use super::super::repo_operation::{OperationPatch, OperationStart};
 use super::{PopoverMode, SidebarEffect, SidebarState};
 
 /// Eagle Library 来源插件。
@@ -203,6 +204,7 @@ impl SidebarState {
         self.submitting = true;
         self.popover_error.clear();
         if std::mem::take(&mut self.attach_eagle) {
+            self.begin_create();
             self.effects.push(SidebarEffect::CreateBackendRepository {
                 name: eagle_repository_name(&path),
                 path,
@@ -210,6 +212,7 @@ impl SidebarState {
                 config: None,
             });
         } else {
+            self.begin_attach();
             self.effects.push(SidebarEffect::AttachRepository { path });
         }
         true
@@ -221,10 +224,24 @@ impl SidebarState {
         if path.is_empty() {
             return;
         }
+        self.begin_attach();
         self.effects.push(SidebarEffect::AttachRepository { path });
     }
 
-    /// 附加或创建结束。成功关弹层；失败回到添加菜单并显示错误（表单失败留在表单）。
+    /// Vue `attachRepository`：任务弹层「挂载资源库 · 检查文件夹并读取索引」8%。
+    fn begin_attach(&mut self) {
+        self.creating = false;
+        self.operation.start(OperationStart::new("挂载资源库", "检查文件夹并读取索引", 8.0));
+    }
+
+    /// Vue `createNewRepository`（会做首次扫描）：任务弹层「创建资源库 · 初始化资源库并扫描文件」8%。
+    fn begin_create(&mut self) {
+        self.creating = true;
+        self.operation.start(OperationStart::new("创建资源库", "初始化资源库并扫描文件", 8.0));
+    }
+
+    /// 附加或创建结束。成功关弹层，新建的进度行走到「切换到新资源库」88%（随后换仓库接手这一行）；
+    /// 失败回到添加菜单并显示错误（表单失败留在表单），进度行取消。
     pub fn note_attach_finished(&mut self, result: Result<(), String>) {
         self.submitting = false;
         match result {
@@ -232,9 +249,14 @@ impl SidebarState {
                 self.popover = PopoverMode::Closed;
                 self.attach_path.clear();
                 self.popover_error.clear();
+                if std::mem::take(&mut self.creating) {
+                    self.operation.update(OperationPatch::step("切换到新资源库", 88.0));
+                }
             }
             Err(error) => {
                 eprintln!("Nana 附加资源库失败：{error}");
+                self.creating = false;
+                self.operation.cancel();
                 self.popover_error = error;
                 if self.popover != PopoverMode::BackendForm {
                     self.popover = PopoverMode::AddMenu;
@@ -270,6 +292,7 @@ impl SidebarState {
         config.insert("rootPath".into(), serde_json::Value::String(self.backend_root.trim().to_string()));
         self.submitting = true;
         self.popover_error.clear();
+        self.begin_create();
         self.effects.push(SidebarEffect::CreateBackendRepository {
             name,
             path,

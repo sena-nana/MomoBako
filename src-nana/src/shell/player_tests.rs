@@ -775,9 +775,9 @@ fn acceptance_pages_use_the_player_surface() {
         local_cache: None,
         authentication: None,
     };
-    model.reduce(ShellMessage::RepositoriesLoaded(Ok(vec![repository.clone()])));
-    model.reduce(ShellMessage::StartupSyncFinished { generation: 0, result: Ok(()) });
-    model.reduce(ShellMessage::RepositorySnapshotLoaded(Ok(RepositorySnapshot {
+    model.reduce(ShellMessage::WorkspaceListLoaded { generation: 0, result: Ok(vec![repository.clone()]) });
+    model.reduce(ShellMessage::RepositorySynced { generation: 0, result: Ok(()) });
+    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation: 0, result: Ok(RepositorySnapshot {
         repository,
         folder_label: String::new(),
         folders: Vec::new(),
@@ -795,7 +795,7 @@ fn acceptance_pages_use_the_player_surface() {
             trash_count: 0,
             readme_content: None,
         },
-    })));
+    }) });
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(FileBrowserSnapshot {
         repo_id: "repo".into(),
         root_path: "C:/repo".into(),

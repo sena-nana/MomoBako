@@ -1,6 +1,7 @@
 //! 剪贴板、外部打开、目录揭示、文件拖出和最小化到托盘。
 //!
-//! 打开和定位启动系统程序。拖出和托盘沿用已有的 `HostInputRequest`，
+//! 打开启动系统默认程序；定位交给 NanaUI 的 `reveal_in_file_manager`：文件在所在文件夹里选中，文件夹
+//! 直接打开，路径不存在时报错，不再自己拼 `explorer /select,`。拖出和托盘沿用已有的 `HostInputRequest`，
 //! 由窗口宿主在 Windows 上调用系统接口。失败时保留系统返回的错误。
 
 use std::process::Command;
@@ -50,8 +51,7 @@ pub fn read_clipboard_text() -> Option<String> {
     }
 }
 
-/// 执行已经记下的打开、拖出和托盘请求。队列每次都清空：宿主是它唯一的消费方，
-/// 执行不了的请求记日志后丢掉，不留下来越积越多。
+/// 执行已经记下的打开、拖出和托盘请求。队列每次都清空：宿主是它唯一的消费方。
 pub fn perform(
     shell: &mut ShellViewModel,
     mut open: impl FnMut(&str, bool) -> Result<(), String>,
@@ -85,7 +85,6 @@ pub fn perform(
                     }
                 }
             }
-            other => eprintln!("Nana 宿主不执行这个请求，已丢弃：{other:?}"),
         }
     }
 }
@@ -108,9 +107,21 @@ pub fn perform_live(shell: &mut ShellViewModel, window: &nana_ui::WindowHandle, 
     );
 }
 
+/// 用系统程序打开，或者在文件管理器里定位。定位的路径照原样交给 NanaUI，由它转成绝对路径、
+/// 换成反斜杠并给整段路径加引号（路径里有空格、中文都照常）。
 fn system_open(target: &str, reveal: bool) -> Result<(), String> {
-    let mut command = if reveal { reveal_command(target) } else { open_command(target) };
-    command.spawn().map(|_| ()).map_err(|error| error.to_string())
+    if reveal {
+        return nana_ui::reveal_in_file_manager(std::path::Path::new(target)).map_err(|error| reveal_failure(&error));
+    }
+    open_command(target).spawn().map(|_| ()).map_err(|error| error.to_string())
+}
+
+/// 定位失败的原因写成中文：路径不存在，或者文件管理器起不来（带系统原文）。
+fn reveal_failure(error: &nana_ui::RevealError) -> String {
+    match error {
+        nana_ui::RevealError::NotFound => "路径不存在".into(),
+        nana_ui::RevealError::Unavailable(reason) => format!("文件管理器不可用：{reason}"),
+    }
 }
 
 fn open_command(target: &str) -> Command {
@@ -130,28 +141,6 @@ fn open_command(target: &str) -> Command {
     {
         let mut command = Command::new("xdg-open");
         command.arg(target);
-        command
-    }
-}
-
-fn reveal_command(target: &str) -> Command {
-    #[cfg(target_os = "windows")]
-    {
-        let mut command = Command::new("explorer");
-        command.arg(format!("/select,{target}"));
-        command
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let mut command = Command::new("open");
-        command.args(["-R", target]);
-        command
-    }
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    {
-        let mut command = Command::new("xdg-open");
-        let parent = std::path::Path::new(target).parent().unwrap_or(std::path::Path::new(target));
-        command.arg(parent);
         command
     }
 }
@@ -246,6 +235,13 @@ mod tests {
         assert!(model.input.take_platform_commands(nana_ui_platform::WindowId(1), false).is_empty());
     }
 
+    /// 定位失败照 NanaUI 给的原因写中文：路径不存在、文件管理器起不来。
+    #[test]
+    fn reveal_failures_read_in_chinese() {
+        assert_eq!(reveal_failure(&nana_ui::RevealError::NotFound), "路径不存在");
+        assert_eq!(reveal_failure(&nana_ui::RevealError::Unavailable("spawn failed".into())), "文件管理器不可用：spawn failed");
+    }
+
     /// 关闭要确认时，每次 `update` 后宿主都跑一遍 `perform`：问、取消、再问、再取消，队列一直是空的，
     /// 关闭确认只由 `pending_close` 驱动，确认后才排关窗命令。
     #[test]
@@ -268,14 +264,5 @@ mod tests {
         assert!(model.input.host_requests.is_empty());
         let commands = model.input.take_platform_commands(nana_ui_platform::WindowId(1), false);
         assert!(matches!(commands.as_slice(), [nana_ui_platform::host::WindowCommand::Close(_)]));
-    }
-
-    /// 宿主执行不了的请求也从队列里拿掉，只记日志。
-    #[test]
-    fn perform_drains_requests_it_cannot_execute() {
-        let mut model = ShellViewModel::default();
-        model.input.host_requests.push(HostRequest::Input(HostInputRequest::FocusMainWindow));
-        perform(&mut model, |_, _| Ok(()), |_| Ok(()), || Ok(()));
-        assert!(model.input.host_requests.is_empty());
     }
 }

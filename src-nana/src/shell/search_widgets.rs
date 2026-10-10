@@ -16,6 +16,7 @@ use nana_ui_core::{LineHeightSpec, RadiusTier, SemanticColorMix};
 
 use super::paint::SwatchChipPainter;
 use super::presenter::SwatchColor;
+use crate::theme_map::DISABLED_OPACITY;
 
 /// Vue 根字号的行高倍数 1.55。
 pub(crate) const LINE_RATIO: f32 = 1.55;
@@ -152,9 +153,6 @@ impl FieldWrite<Button, bool> for ChipActive {
     }
 }
 
-/// Vue `button:disabled` 的 45% 不透明度。
-const DISABLED_ALPHA: f32 = 0.45;
-
 /// Vue `.workspace-filter-bar__btn`：28px 高、左右 9px 的透明按钮，14px 中等字重正文色。
 /// 悬停是 `--bg-hover`。禁用时文字按 45% 混进筛选栏底色：Vue 的 `opacity` 在 sRGB 里合成，
 /// 直接给半透明文字会被渲染器按线性空间合成得更亮，所以先混成不透明色。
@@ -174,7 +172,7 @@ pub(crate) fn bar_button(content: &str, disabled: bool) -> Button {
     style.radius = Some(RadiusTier::Sm);
     ghost_paint(&mut style);
     style.interaction.disabled = SemanticPaint {
-        foreground_mix: Some(SemanticColorMix::new(SemanticColorRole::Text, SemanticColorRole::Surface, DISABLED_ALPHA)),
+        foreground_mix: Some(SemanticColorMix::new(SemanticColorRole::Text, SemanticColorRole::Surface, DISABLED_OPACITY)),
         ..SemanticPaint::default()
     };
     button.style(style)
@@ -326,8 +324,8 @@ pub(crate) fn pill_button(content: &str, disabled: bool) -> Button {
     style.interaction.hovered = accent;
     style.interaction.pressed = accent;
     style.interaction.disabled = SemanticPaint {
-        foreground_mix: Some(SemanticColorMix::new(SemanticColorRole::Muted, SemanticColorRole::Background, DISABLED_ALPHA)),
-        background_mix: Some(SemanticColorMix::new(SemanticColorRole::Subtle, SemanticColorRole::Background, DISABLED_ALPHA)),
+        foreground_mix: Some(SemanticColorMix::new(SemanticColorRole::Muted, SemanticColorRole::Background, DISABLED_OPACITY)),
+        background_mix: Some(SemanticColorMix::new(SemanticColorRole::Subtle, SemanticColorRole::Background, DISABLED_OPACITY)),
         ..SemanticPaint::default()
     };
     button.style(style)
@@ -367,5 +365,4 @@ fn clear_control_metrics(style: &mut NodeStyle) {
     style.control_height = None;
     style.control_padding_x = None;
     style.control_padding_y = None;
-    style.square = None;
 }

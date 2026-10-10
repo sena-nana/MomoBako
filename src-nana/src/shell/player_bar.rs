@@ -1,8 +1,8 @@
 //! 底部播放条，对齐 Vue `WorkspacePlayerBar`。
 //!
 //! 卡片里自上而下是 8px 进度轨、「媒体 / 传输 / 时间与音量」三栏，以及图片、视频才有的
-//! 停留时长和适应 / 填充设置。窗口不宽于 1120px 时三栏拆成三行。当前队列浮在卡片右上方。
-//! 文件页、预览页和播放集页共用这一块。
+//! 停留时长和适应 / 填充设置。窗口不宽于 1120px（Vue 断点）、或者卡片比宽排版的下限还窄时，三栏拆成
+//! 三行。当前队列浮在卡片右上方（`player_bar_parts.rs`）。文件页、预览页和播放集页共用这一块。
 
 use nana_ui::runtime::view::{fields, widget, AnyView, IntoView};
 use nana_ui::runtime::{
@@ -188,9 +188,6 @@ pub(crate) fn clock_parts(current_ms: u64, duration_ms: u64) -> (f32, String, f6
     (ratio, time, current_ms.min(duration_ms.max(1)) as f64)
 }
 
-/// Vue 禁用按钮的整体不透明度。
-pub(crate) const DISABLED_OPACITY: f32 = 0.45;
-
 /// 宽排版放得下的最窄卡片：内边距 32、传输 188、两道栏距 36、时间音量至少 170、
 /// 媒体至少 134（58 封面 + 12 间距 + 约四个字），再加两侧 1px 边。
 const WIDE_MIN_WIDTH: f32 = 562.0;
@@ -204,7 +201,7 @@ fn narrow_layout(model: &ShellViewModel) -> bool {
     model.narrow_viewport() || (width > 0.0 && width < WIDE_MIN_WIDTH)
 }
 
-/// 播放条。`narrow` 对应 Vue 的 `max-width: 1120px` 断点。卡片是 `--radius-2xl`，跟着主题变。
+/// 播放条。窄排版按 [`narrow_layout`] 拆成三行。卡片是 `--radius-2xl`，跟着主题变。
 pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
     let props = BarProps::from_model(model);
     let narrow = narrow_layout(model);
@@ -331,7 +328,7 @@ fn body(props: &BarProps, narrow: bool) -> AnyView {
 fn media(props: &BarProps) -> AnyView {
     let title = props.title();
     // 没有条目时整块按 Vue 的 0.45 淡化，在卡片底色上混出来。
-    let dim = (!props.has_item()).then_some((SemanticColorRole::Surface, DISABLED_OPACITY));
+    let dim = (!props.has_item()).then_some((SemanticColorRole::Surface, crate::theme_map::DISABLED_OPACITY));
     let hit = widget(parts::hit_area(&title, !props.has_item(), 0.0, 6.0))
         .key("player-media")
         .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(player_message(PlayerMessage::OpenPreview { item_id: None })));
@@ -409,7 +406,6 @@ pub(crate) fn glyph_button(icon: Icon, label: &str, icon_size: f32, box_size: f3
     let mut button = IconButton::new(icon, label).colors_from_style().disabled(disabled);
     button.style.foreground = Some(SemanticColorRole::Text);
     button.style.background = None;
-    button.style.square = None;
     button.style.control_padding_x = None;
     button.style.painter = Some(GlyphButton { icon, size: icon_size, color: SemanticColorRole::Text, dim: disabled }.into());
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);

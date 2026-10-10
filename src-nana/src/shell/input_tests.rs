@@ -698,6 +698,15 @@ fn attach_folder_dialog_submits_a_chosen_path_and_ignores_cancel() {
     ));
 }
 
+/// 下载单曲在任务弹层里的进度行：动作名，「准备下载 夜曲」→「正在下载 夜曲」。
+fn download_progress() -> crate::shell::entry_actions::DownloadProgress {
+    crate::shell::entry_actions::DownloadProgress {
+        label: "下载单曲".into(),
+        preparing: "准备下载 夜曲".into(),
+        running: Some("正在下载 夜曲".into()),
+    }
+}
+
 #[test]
 fn download_folder_calls_plugin_only_after_a_directory_is_chosen() {
     let mut model = ShellViewModel::default();
@@ -706,6 +715,7 @@ fn download_folder_calls_plugin_only_after_a_directory_is_chosen() {
         method: "media.downloadTrackPackage".into(),
         payload: serde_json::json!({"songId": 9}),
         repository_id: Some("repo".into()),
+        progress: download_progress(),
     };
     send(&mut model, begin.clone());
     assert!(model.admin.take_effects().is_empty());
@@ -730,11 +740,13 @@ fn download_folder_calls_plugin_only_after_a_directory_is_chosen() {
     assert!(model.admin.take_effects().is_empty());
     assert!(model.input.pending_download.is_none());
 
+    assert!(model.operation.shown().is_none(), "没选目录不出进度行");
     send(&mut model, InputMessage::BeginDownloadFolder {
         plugin_id: "momobako.netease.source".into(),
         method: "media.downloadTrackPackage".into(),
         payload: serde_json::json!({"songId": 9}),
         repository_id: Some("repo".into()),
+        progress: download_progress(),
     });
     send(
         &mut model,
@@ -751,6 +763,18 @@ fn download_folder_calls_plugin_only_after_a_directory_is_chosen() {
         }
         other => panic!("unexpected {other:?}"),
     }
+    // Vue `runDownloadAction`：选好目录以后任务弹层出「下载单曲 · 正在下载 夜曲」36%，不确定进度。
+    let row = model.operation.shown().cloned().expect("下载的进度行");
+    assert_eq!((row.label.as_str(), row.detail.as_str(), row.value, row.indeterminate), ("下载单曲", "正在下载 夜曲", 36.0, true));
+    send_admin(&mut model, crate::shell::admin::AdminMessage::FilePluginFinished {
+        method: "media.downloadTrackPackage".into(),
+        result: Err("网络断开".into()),
+    });
+    assert!(model.operation.shown().is_none(), "下载失败时这一行取消");
+}
+
+fn send_admin(model: &mut ShellViewModel, message: crate::shell::admin::AdminMessage) {
+    model.reduce(crate::shell::ShellMessage::Admin(message));
 }
 
 #[test]
@@ -812,46 +836,4 @@ fn custom_thumbnail_dialog_is_id_six_and_writes_or_clears() {
         [FilesEffect::MutateThumbnail { action, source_path, image_bytes, .. }]
             if action == "clear" && source_path.is_none() && image_bytes.is_none()
     ));
-}
-
-#[test]
-fn source_playlist_name_is_required_before_the_plugin_call() {
-    let mut model = ShellViewModel::default();
-    send(&mut model, InputMessage::OpenSourcePlaylist {
-        plugin_id: "momobako.netease.source".into(),
-        method: "source.playlistFromDirectory".into(),
-        payload: serde_json::json!({"playlistId": 3}),
-        repository_id: Some("repo".into()),
-    });
-    assert!(model.input.source_playlist.is_some());
-    assert!(model.admin.take_effects().is_empty());
-    send(&mut model, InputMessage::SourcePlaylistDraft("   ".into()));
-    send(&mut model, InputMessage::SubmitSourcePlaylist);
-    assert!(model.admin.take_effects().is_empty());
-    assert!(model.input.source_playlist.is_some());
-    send(&mut model, InputMessage::CloseSourcePlaylist);
-    assert!(model.input.source_playlist.is_none());
-    assert!(model.admin.take_effects().is_empty());
-
-    send(&mut model, InputMessage::OpenSourcePlaylist {
-        plugin_id: "momobako.netease.source".into(),
-        method: "source.playlistFromDirectory".into(),
-        payload: serde_json::json!({"playlistId": 3}),
-        repository_id: Some("repo".into()),
-    });
-    send(&mut model, InputMessage::SourcePlaylistDraft("  夜曲  ".into()));
-    send(&mut model, InputMessage::SubmitSourcePlaylist);
-    assert!(model.input.source_playlist.is_none());
-    match model.admin.take_effects().as_slice() {
-        [crate::shell::admin::AdminEffect::CallPlugin { method, payload, repository_id, origin, .. }] => {
-            assert_eq!(method, "source.playlistFromDirectory");
-            assert_eq!(payload["name"], "夜曲");
-            assert_eq!(payload["playlistName"], "夜曲");
-            assert_eq!(payload["repositoryId"], "repo");
-            assert_eq!(payload["playlistId"], 3);
-            assert_eq!(repository_id.as_deref(), Some("repo"));
-            assert_eq!(*origin, crate::shell::admin::PluginCallOrigin::FileMenu);
-        }
-        other => panic!("unexpected {other:?}"),
-    }
 }

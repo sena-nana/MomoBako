@@ -356,15 +356,12 @@ pub(crate) fn wrapping_text(size: f32, line_height: f32, color: SemanticColorRol
 /// 禁用的行框架不派发点击。对话框的选项卡片和弹层的菜单行共用。
 pub(crate) struct DimmedDisabled;
 
-/// Vue `button:disabled` 的整体透明度。
-const DISABLED_OPACITY: f32 = 0.45;
-
 impl FieldWrite<ListItem, bool> for DimmedDisabled {
     const FIELD: &'static str = "ListItem.disabled+opacity";
 
     fn write(target: &mut ListItem, disabled: bool) {
         target.disabled = disabled;
-        Arc::make_mut(&mut target.style.layout).opacity = disabled.then_some(DISABLED_OPACITY);
+        Arc::make_mut(&mut target.style.layout).opacity = disabled.then_some(crate::theme_map::DISABLED_OPACITY);
     }
 
     fn differs(target: &ListItem, disabled: &bool) -> bool {

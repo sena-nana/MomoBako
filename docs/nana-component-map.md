@@ -2,7 +2,7 @@
 
 本文锁定 `momobako-nana` 当前构建能用的 Nana 组件、和旧 Tauri/Vue 工作台的对应关系，以及还没有现成组件的宿主缺口。稳定 id 以 `src-nana/src/capability.rs` 的 `COMPILED_COMPONENT_IDS` 为准；目录变了，`compiled_catalog_matches_the_locked_product_set` 会失败。
 
-`src-nana/Cargo.toml` 给 `nana-ui` 开 `hosted`、`bundled-fonts`、`components`、`icons-tabler`、`view-macro`，给 `nana-ui-platform` 开 `clipboard`。`components` 打开 calendar、charts、controls、graph-canvas、image-viewer、rich-text；`hosted` 带上 GPU 和 AccessKit 平台适配；`view-macro` 提供结构块容器的 `css!` 和 `#[derive(Store)]`。没开 `syntax-highlighting` 和 `packaged-resources`。Nana 修订是 `941df646d3d9b25b529674299c787594f63f0149`，不保留本地副本。
+`src-nana/Cargo.toml` 给 `nana-ui` 开 `hosted`、`bundled-fonts`、`components`、`icons-tabler`、`view-macro`，给 `nana-ui-platform` 开 `clipboard`。`components` 打开 calendar、charts、controls、graph-canvas、image-viewer、rich-text；`hosted` 带上 GPU 和 AccessKit 平台适配；`view-macro` 提供结构块容器的 `css!` 和 `#[derive(Store)]`。没开 `syntax-highlighting` 和 `packaged-resources`。Nana 修订是 `b02eaa231aa00049662fbf35cfb70163be6f7dfe`，不保留本地副本。
 
 ## 已编译组件
 
@@ -61,7 +61,7 @@
 | 侧栏宽度 220–480，默认 276 | `theme_map::SIDEBAR_MIN_PX` / `SIDEBAR_DEFAULT_PX` / `SIDEBAR_MAX_PX`；工作区资源区的宽度跟着侧栏呈现宽度（`render.rs`、`hot.rs`），宽度存进 `sidebar.json` |
 | CSS 变量 | `theme_map::COLOR_ROLES` 指向的 `SemanticPalette` 字段 |
 | 对话框（`.modal-overlay`、`.modal-card`） | NanaUI `Dialog` / `ConfirmDialog`，距顶、分区、遮罩和开合动效写在主题配方里（`appearance.rs`） |
-| Vue 插件组件 | 不进原生树。原生贡献用 `NativePluginContribution`（`plugin_api.rs`）描述，现状见 [迁移边界](./nana-migration.md) |
+| Vue 插件组件 | 不进原生树：插件清单声明的预览、工具页和播放器组件要运行插件前端的 Vue 代码。预览由内置视图按扩展名接手，现状见 [迁移边界](./nana-migration.md) |
 | 窗口、对话框、外部打开 | `host_api` 请求和 Nana 平台窗口命令 |
 
 ## 主题

@@ -480,7 +480,7 @@ fn protocol_success_reloads_without_rewriting_rows() {
         [
             FilesEffect::Browse { path, append: false, limit, .. },
             FilesEffect::LoadHardlinks { repo_id },
-        ] if path == "photos" && *limit == super::INITIAL_PAGE_SIZE && repo_id == "repo"
+        ] if path == "photos" && *limit == super::browse::INITIAL_PAGE_SIZE && repo_id == "repo"
     ));
 }
 
@@ -544,8 +544,10 @@ fn copy_submits_the_stored_sources() {
     assert!(reduce_open(&mut state, &ctx, FileDialog::Copy));
     state.reduce(&ctx, FilesMessage::DraftChanged("album\\nested".into()));
     assert!(submit_for(&mut state, &ctx));
-    assert_eq!(state.operation.as_ref().map(|item| item.value), Some(32.0));
-    assert_eq!(state.operation.as_ref().map(|item| item.detail.as_str()), Some("创建硬链接或复制文件"));
+    let mut slot = super::super::repo_operation::RepositoryOperation::default();
+    slot.apply(&mut state.operation);
+    let shown = slot.shown().map(|progress| (progress.label.as_str(), progress.detail.as_str(), progress.value));
+    assert_eq!(shown, Some(("复制文件", "创建硬链接或复制文件", 32.0)));
     assert!(matches!(
         state.take_effects().as_slice(),
         [FilesEffect::Copy { sources, parent: Some(parent), .. }]
@@ -567,7 +569,7 @@ fn directory_replace_opens_and_file_activation_loads_the_asset() {
     assert!(state.selected.is_empty());
     assert!(matches!(
         state.take_effects().as_slice(),
-        [FilesEffect::Browse { path, limit, .. }] if path == "photos" && *limit == super::INITIAL_PAGE_SIZE
+        [FilesEffect::Browse { path, limit, .. }] if path == "photos" && *limit == super::browse::INITIAL_PAGE_SIZE
     ));
     state.loading = false;
     state.pending = None;
@@ -642,7 +644,7 @@ fn append_uses_the_larger_page_and_display_mode_persists() {
     assert!(state.load_more(&ctx));
     assert!(matches!(
         state.take_effects().as_slice(),
-        [FilesEffect::Browse { offset: 1, limit, append: true, .. }] if *limit == super::APPEND_PAGE_SIZE
+        [FilesEffect::Browse { offset: 1, limit, append: true, .. }] if *limit == super::browse::APPEND_PAGE_SIZE
     ));
     state.loading_more = false;
     state.reduce(&ctx, FilesMessage::SetDisplayMode(DisplayMode::List));

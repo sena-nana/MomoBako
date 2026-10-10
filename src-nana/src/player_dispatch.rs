@@ -54,7 +54,7 @@ fn dispatch_memberships(app: &mut MomoBakoApplication, context: &RuntimeProgramC
         eprintln!("Nana 播放列表成员任务提交失败：{error}");
         app.shell.reduce(player(PlayerMessage::MembershipsLoaded {
             repo_id,
-            result: Err(format!("播放列表成员任务提交失败：{error}")),
+            result: Err(format!("播放集成员任务提交失败：{error}")),
         }));
     }
 }
@@ -75,7 +75,7 @@ fn dispatch_set_membership(
         player(PlayerMessage::MembershipSaved(executor.block_on(interaction.set_playlist_membership(request))))
     })) {
         eprintln!("Nana 更新播放列表成员任务提交失败：{error}");
-        app.shell.reduce(player(PlayerMessage::MembershipSaved(Err(format!("播放列表成员任务提交失败：{error}")))));
+        app.shell.reduce(player(PlayerMessage::MembershipSaved(Err(format!("播放集成员任务提交失败：{error}")))));
     }
 }
 
@@ -95,7 +95,7 @@ fn dispatch_add_paths(
         ShellMessage::PlaylistDetailLoaded(executor.block_on(interaction.add_playlist_items_by_paths(request)))
     })) {
         eprintln!("Nana 按路径加入播放列表任务提交失败：{error}");
-        app.shell.reduce(ShellMessage::PlaylistDetailLoaded(Err(format!("播放列表添加任务提交失败：{error}"))));
+        app.shell.reduce(ShellMessage::PlaylistDetailLoaded(Err(format!("播放集添加条目任务提交失败：{error}"))));
     }
 }
 
@@ -115,7 +115,7 @@ fn dispatch_reorder(
         ShellMessage::PlaylistDetailLoaded(executor.block_on(interaction.reorder_playlist_items(request)))
     })) {
         eprintln!("Nana 播放列表排序任务提交失败：{error}");
-        app.shell.reduce(ShellMessage::PlaylistDetailLoaded(Err(format!("播放列表排序任务提交失败：{error}"))));
+        app.shell.reduce(ShellMessage::PlaylistDetailLoaded(Err(format!("播放集排序任务提交失败：{error}"))));
     }
 }
 
@@ -136,7 +136,7 @@ fn dispatch_restore(
         player(PlayerMessage::RestoreDetail(executor.block_on(interaction.get_playlist_detail(repo_id, playlist_id))))
     })) {
         eprintln!("Nana 恢复播放会话任务提交失败：{error}");
-        app.shell.reduce(player(PlayerMessage::RestoreDetail(Err(format!("播放列表详情任务提交失败：{error}")))));
+        app.shell.reduce(player(PlayerMessage::RestoreDetail(Err(format!("播放集详情任务提交失败：{error}")))));
     }
 }
 

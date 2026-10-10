@@ -45,6 +45,7 @@ mod sidebar_view;
 mod workspace;
 pub(crate) mod workspace_refresh;
 pub(crate) mod tree_sync;
+pub(crate) mod repo_operation;
 pub use files::{display_mode_path, FileRow, FilesEffect, FilesMessage, HardlinkPrompt, VirtualQuery};
 pub(crate) use thumbs::{decode_preview_pixels, decode_thumbnail_file, thumbnail_slot, ThumbnailFrame};
 pub(crate) use inspect::poll_timers;
@@ -57,6 +58,7 @@ pub(crate) use inspect::support::{preview_media_parts, MediaParts};
 pub(crate) use inspect::support::preview_media_session;
 pub use player::PreviewPcm;
 pub(crate) use inspect::NativeLoad;
+pub(crate) use inspect_view::wants_preview_texture;
 pub use sidebar::{
     FolderMutation, GapMessage, SidebarEffect, SidebarFolder, SidebarMessage, SidebarPlaylist, SidebarSmartFolder,
     SidebarTree, ShortcutId,
@@ -71,9 +73,8 @@ pub use workspace::{
 pub enum ShellMessage {
     /// 打开设置页：读设置包和应用设置，和 Vue `Settings.vue` 挂载时的 `loadSettingsData` 一致。
     OpenSettings,
-    Refresh,
-    RepositoriesLoaded(Result<Vec<RepositorySummary>, String>),
-    RepositorySnapshotLoaded(Result<RepositorySnapshot, String>),
+    /// 带代次的仓库摘要结果：启动和换仓库的第 3 步，或者同一个仓库刷新时的读摘要。代次不对的丢掉。
+    RepositorySnapshotLoaded { generation: u64, result: Result<RepositorySnapshot, String> },
     FileBrowserLoaded(Result<FileBrowserSnapshot, String>),
     /// 缩略图解码结果。像素由宿主上传，归约只留下原始宽高。
     ThumbnailPixels(Vec<ThumbnailFrame>),
@@ -110,16 +111,16 @@ pub enum ShellMessage {
         generation: u64,
         result: Result<Vec<RepositorySummary>, String>,
     },
-    StartupSyncFinished { generation: u64, result: Result<(), String> },
+    /// 带代次的同步结果：启动、换仓库和同一个仓库的刷新都先同步资源库。
+    RepositorySynced { generation: u64, result: Result<(), String> },
     ToggleSidebar,
-    SetSidebarWidth(f32),
-    CommitSidebarWidth,
     StartupRetry,
     MissingRefresh,
     MissingChoosePath,
     MissingPathChanged(String),
     MissingSubmitPath,
-    MissingRelocateFinished(Result<(), String>),
+    /// 重定向的结果：成功时是更新以后的仓库摘要。
+    MissingRelocateFinished(Result<RepositorySummary, String>),
     MissingOpenDelete,
     MissingCloseDelete,
     MissingConfirmDelete(DeleteMode),
@@ -127,7 +128,6 @@ pub enum ShellMessage {
     MissingOpenSourceSettings,
     SelectWorkspaceRepository(String),
     SetWorkspacePanel(WorkspacePanel),
-    SetLibraryCategory(LibraryCategory),
     /// 侧栏导航。具体分支在 `sidebar::reduce_message` 里归约。
     Sidebar(sidebar::SidebarMessage),
     /// 文件浏览和变更。具体分支在 `files::reduce_message` 里归约。
@@ -243,6 +243,8 @@ pub struct ShellViewModel {
     pub status: status::StatusState,
     /// 文件夹树的「刷新」：同步仓库再刷新工作区，见 `tree_sync.rs`。
     pub tree_sync: tree_sync::TreeSyncState,
+    /// 任务弹层的「仓库操作」行（Vue `operationProgress`），见 `repo_operation.rs`。
+    pub operation: repo_operation::RepositoryOperation,
     /// 窗口逻辑宽。Vue 唯一按窗口宽度切换的断点在播放条，见 [`NARROW_VIEWPORT_PX`]。
     pub viewport_width: f32,
     /// 对话框、弹层或打开文件夹之后，手势松开时要重建树。
@@ -289,6 +291,7 @@ impl Default for ShellViewModel {
             motion: motion::MotionState::default(),
             status: status::StatusState::default(),
             tree_sync: tree_sync::TreeSyncState::default(),
+            operation: repo_operation::RepositoryOperation::default(),
             viewport_width: DEFAULT_VIEWPORT_PX,
             surface_dirty: false,
             revision: 0,
@@ -343,16 +346,23 @@ impl ShellViewModel {
     pub fn reduce(&mut self, message: ShellMessage) {
         self.revision = self.revision.wrapping_add(1);
         let (before, seq, started) = (status::Activity::of(self), self.status.seq(), status::starts_operation(&message));
-        let startup_open = self.workspace.startup.status != StartupStatus::Ready;
+        let startup_before = self.workspace.startup.status;
+        let active_before = self.workspace.active_repo_id.clone();
         self.reduce_inner(message);
-        if startup_open && self.workspace.startup.status == StartupStatus::Ready {
+        let launch = self.workspace.startup.mode == workspace::StartupMode::Launch;
+        if startup_before != StartupStatus::Ready && self.workspace.startup.status == StartupStatus::Ready && launch {
             // Vue 启动流程在结束前 `loadSettingsData`：插件、钩子记录、缓存、API 设计和外部连接。
-            // 没有仓库、仓库丢失的启动也读，添加资源库的来源列表要用插件清单。
+            // 没有仓库、仓库丢失的启动也读，添加资源库的来源列表要用插件清单。换仓库不读（Vue `selectRepository`）。
             self.admin.begin_settings_load();
         }
+        self.settle_workspace(&active_before, startup_before);
         self.flush_folder_mutations();
         self.settle_sidebar_dialogs();
         tree_sync::settle(self);
+        // 同一次归约里先后开始的操作，照开始的先后交给槽位：文件和侧栏的在前，换仓库的在后。
+        self.operation.apply(&mut self.files.operation);
+        self.operation.apply(&mut self.sidebar.operation);
+        self.operation.apply(&mut self.workspace.operation);
         self.settle_status(&before, seq, started);
         self.follow_motion();
     }
@@ -382,7 +392,7 @@ impl ShellViewModel {
     fn follow_motion(&mut self) {
         let panel_open = self.sidebar.popover != sidebar::PopoverMode::Closed || self.admin.popover_open;
         let startup = f32::from(self.workspace.startup.percent);
-        let operation = self.files.operation_percent();
+        let operation = self.operation.shown();
         let spinner = self.sidebar.tree_loading
             || self.sidebar.submitting
             || self.sidebar.smart_draft.busy
@@ -393,9 +403,9 @@ impl ShellViewModel {
             self.surface_dirty = true;
         }
         self.motion.set_startup_percent(startup);
-        self.motion.set_operation_percent(operation);
+        self.motion.set_operation_percent(operation.map(|progress| progress.value as f32));
         self.motion.set_spinner(spinner);
-        self.motion.set_pulse(self.files.operation_indeterminate());
+        self.motion.set_pulse(operation.is_some_and(|progress| progress.indeterminate));
         self.motion.set_sidebar_collapsed(self.workspace.sidebar_collapsed, self.workspace.sidebar_width);
     }
 
@@ -431,61 +441,15 @@ impl ShellViewModel {
             return;
         };
         match message {
-            ShellMessage::RepositoriesLoaded(result) => self.apply_loaded_repositories(None, result),
             ShellMessage::WorkspaceListLoaded { generation, result } => {
                 self.apply_loaded_repositories(Some(generation), result);
             }
-            ShellMessage::RepositorySnapshotLoaded(Ok(snapshot)) => {
-                if self.workspace.startup.status == StartupStatus::Loading
-                    && self.workspace.active_repo_id.as_deref() != Some(snapshot.repository.repo_id.as_str())
-                {
-                    eprintln!("Nana 忽略过期的资源库摘要：{}", snapshot.repository.repo_id);
-                    return;
-                }
-                self.workspace.note_index_finished(&snapshot.repository.repo_id, Ok(()));
-                self.page = ShellPage::FileList;
-                self.repository_name = snapshot.repository.name.clone();
-                self.repository_id = Some(snapshot.repository.repo_id.clone());
-                self.apply_snapshot_sidebar(&snapshot);
-            }
-            ShellMessage::RepositorySnapshotLoaded(Err(error)) => {
-                eprintln!("Nana 读取资源库摘要失败：{error}");
-                if self.workspace.startup.status == StartupStatus::Ready {
-                    self.status.fail(status::FailureSource::Repository, format!("无法读取资源库摘要：{error}"));
-                }
-                if let Some(repo_id) = self.workspace.active_repo_id.clone() {
-                    self.workspace.note_index_finished(&repo_id, Err(error));
-                }
-                self.page = ShellPage::Error;
-            }
-            ShellMessage::FileBrowserLoaded(Ok(browser)) => {
-                let virtual_view = files::FileContext::from_model(self).is_virtual();
-                if !self.files.apply_browser(&browser, virtual_view) {
-                    return;
-                }
-                self.workspace.note_first_screen_finished(Ok(()));
-                self.page = ShellPage::FileList;
-                self.browser_entries = browser.entries;
-                self.current_directory = browser.current_path.clone();
-                self.sidebar.note_directory(
-                    &browser.current_path,
-                    browser.special_location.as_deref() == Some("trash"),
-                );
-            }
+            ShellMessage::RepositorySnapshotLoaded { generation, result } => self.apply_repository_snapshot(generation, result),
+            ShellMessage::FileBrowserLoaded(Ok(browser)) => self.apply_file_browser(browser),
             ShellMessage::ThumbnailPixels(frames) => {
                 self.files.note_thumbnail_sizes(&frames);
             }
-            ShellMessage::FileBrowserLoaded(Err(error)) => {
-                if self.files.note_load_failed(&error) {
-                    return;
-                }
-                eprintln!("Nana 读取首屏目录失败：{error}");
-                if self.workspace.startup.status == StartupStatus::Ready {
-                    self.status.fail(status::FailureSource::Directory, format!("无法读取文件列表：{error}"));
-                }
-                self.workspace.note_first_screen_finished(Err(error));
-                self.page = ShellPage::Error;
-            }
+            ShellMessage::FileBrowserLoaded(Err(error)) => self.note_file_browser_failed(error),
             ShellMessage::SelectFile { path, .. } => {
                 self.page = ShellPage::SelectedFile;
                 self.player.disarm_preview_audio();
@@ -592,16 +556,8 @@ impl ShellViewModel {
             | ShellMessage::TaskProgressLoaded(_)
             | ShellMessage::Admin(_) => {}
             ShellMessage::WindowAction(_) => {}
-            ShellMessage::Refresh => self.workspace.request_repository_refresh(),
-            ShellMessage::StartupSyncFinished { generation, result } => {
-                self.workspace.note_sync_finished(generation, result);
-                if self.workspace.main_region() == MainRegion::LoadError {
-                    self.page = ShellPage::Error;
-                }
-            }
+            ShellMessage::RepositorySynced { generation, result } => self.note_repository_synced(generation, result),
             ShellMessage::ToggleSidebar => self.workspace.toggle_sidebar(),
-            ShellMessage::SetSidebarWidth(width) => self.workspace.set_sidebar_width(width),
-            ShellMessage::CommitSidebarWidth => self.workspace.commit_sidebar_width(),
             ShellMessage::StartupRetry => {
                 self.workspace.retry_startup();
             }
@@ -615,31 +571,15 @@ impl ShellViewModel {
             ShellMessage::MissingConfirmDelete(mode) => {
                 self.workspace.confirm_delete(mode);
             }
-            ShellMessage::MissingDeleteFinished(result) => {
-                self.workspace.note_delete_finished(result);
-                self.repository_id = self.workspace.active_repo_id.clone();
-                if let Some(repository) = self.workspace.active_repository() {
-                    self.repository_name = repository.name.clone();
-                } else if self.workspace.main_region() == MainRegion::EmptyRepository {
-                    self.page = ShellPage::EmptyRepository;
-                    self.repository_name = "默认资源库".into();
-                }
-            }
+            // 删掉当前仓库以后换到下一个（或回到空库），壳层上的内容在归约结束时随活动仓库一起清掉。
+            ShellMessage::MissingDeleteFinished(result) => self.workspace.note_delete_finished(result),
             ShellMessage::MissingOpenSourceSettings => {
                 if let Some(plugin_id) = self.workspace.open_source_settings() {
                     admin::open_settings_page(self, Some(&plugin_id));
                 }
             }
-            ShellMessage::SelectWorkspaceRepository(repo_id) => {
-                self.workspace.select_repository(&repo_id);
-                self.repository_id = self.workspace.active_repo_id.clone();
-                if let Some(repository) = self.workspace.active_repository() {
-                    self.repository_name = repository.name.clone();
-                }
-                self.bind_sidebar_repository();
-            }
+            ShellMessage::SelectWorkspaceRepository(repo_id) => self.select_workspace_repository(&repo_id),
             ShellMessage::SetWorkspacePanel(panel) => self.workspace.panel = panel,
-            ShellMessage::SetLibraryCategory(category) => self.workspace.library_category = category,
             ShellMessage::Sidebar(_) => {}
             ShellMessage::Files(_) => {}
             ShellMessage::Inspect(_) => {}
@@ -652,38 +592,9 @@ impl ShellViewModel {
         }
     }
 
-    /// 把仓库列表结果写进工作台，并同步壳层上仍被旧页面读取的仓库名称。
-    fn apply_loaded_repositories(&mut self, generation: Option<u64>, result: Result<Vec<RepositorySummary>, String>) {
-        let mapped = match result {
-            Ok(items) => Ok(items.iter().map(WorkspaceRepository::from_summary).collect()),
-            Err(error) => Err(error),
-        };
-        // 启动以后重读列表失败：缺失仓库页会就近显示，别的区域进状态区。
-        let failed = mapped.as_ref().err().filter(|_| self.workspace.startup.status == StartupStatus::Ready).cloned();
-        let applied = self.workspace.apply_repository_list(generation, mapped);
-        if let Some(error) = failed.filter(|_| applied && self.workspace.main_region() != MainRegion::MissingRepository) {
-            self.status.fail(status::FailureSource::Repository, format!("无法读取资源库列表：{error}"));
-        }
-        self.repository_id = self.workspace.active_repo_id.clone();
-        if let Some(repository) = self.workspace.active_repository() {
-            self.repository_name = repository.name.clone();
-        }
-        match self.workspace.main_region() {
-            MainRegion::LoadError => self.page = ShellPage::Error,
-            MainRegion::EmptyRepository => {
-                self.page = ShellPage::EmptyRepository;
-                self.repository_id = None;
-                self.repository_name = "默认资源库".into();
-                self.browser_entries.clear();
-            }
-            MainRegion::MissingRepository => self.browser_entries.clear(),
-            MainRegion::HasRepository => self.page = ShellPage::FileList,
-            MainRegion::Startup => {}
-        }
-        self.bind_sidebar_repository();
-    }
 }
 
+mod workspace_flow;
 mod interaction;
 mod render;
 mod remount_state;
@@ -694,6 +605,7 @@ mod startup_view;
 mod workbench;
 mod title_bar;
 mod hot;
+mod field_bind;
 mod view_host;
 mod view_part;
 mod view_part_sidebar;
@@ -721,5 +633,7 @@ mod escape_tests;
 mod data_load_tests;
 #[cfg(test)]
 mod operation_row_tests;
+#[cfg(test)]
+mod workspace_switch_tests;
 #[cfg(test)]
 pub(crate) mod view_harness;

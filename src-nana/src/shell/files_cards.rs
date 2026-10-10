@@ -9,7 +9,7 @@
 //! 标题、元信息和缩略图到达都只改这一张卡片的字段，别的卡片不动。外框尺寸跟着所在的行走，
 //! 尺寸变了的卡片所在的行整行重建（见 `files_virtual.rs`）。
 
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use nana_ui::icons_tabler::{FILE, FILE_MUSIC, FOLDER, PHOTO, VIDEO};
 use nana_ui::runtime::view::fields::{self, HiddenWhenEmpty};
@@ -21,7 +21,6 @@ use nana_ui::runtime::{
 use nana_ui_core::{Icon, LengthAtom, SemanticColorMix};
 
 use super::super::files::{hardlink_label, DisplayMode, FileRow, FilesMessage};
-use super::super::inspect::PreviewBinding;
 use super::bind::StyleField;
 use super::file_message;
 use super::style::{self, PreviewPainter, Tone};
@@ -42,15 +41,13 @@ impl CardBox {
     }
 }
 
-/// 缩略图盒的样子：底色、已有纹理、已有像素或类型图标。三者按「纹理、像素、图标」的先后只取一样。
+/// 缩略图盒的样子：底色，加上已有纹理或类型图标（有纹理就不画图标）。
 #[derive(Clone, Debug)]
 pub(super) struct PreviewLook {
     pub tone: Tone,
     /// 宿主已经能注册纹理的缩略图路径。
     pub texture: Option<String>,
-    /// 已有像素缩小后的缩略图，PNG data URL。
-    pub image: Option<Arc<str>>,
-    /// 纹理和像素都没有时画的类型图标。
+    /// 没有纹理时画的类型图标。
     pub icon: Option<Icon>,
     /// 缩略图宽高比，按 Vue 的范围夹过。
     pub aspect: f32,
@@ -58,7 +55,7 @@ pub(super) struct PreviewLook {
 
 impl Default for PreviewLook {
     fn default() -> Self {
-        Self { tone: Tone::Placeholder, texture: None, image: None, icon: None, aspect: 1.0 }
+        Self { tone: Tone::Placeholder, texture: None, icon: None, aspect: 1.0 }
     }
 }
 
@@ -67,30 +64,21 @@ impl PartialEq for PreviewLook {
     fn eq(&self, other: &Self) -> bool {
         self.tone == other.tone
             && self.texture == other.texture
-            && self.image == other.image
             && self.icon.map(Icon::as_ptr) == other.icon.map(Icon::as_ptr)
             && self.aspect.to_bits() == other.aspect.to_bits()
     }
 }
 
 impl PreviewLook {
-    /// 文件行的缩略图盒。`bindings` 是内置预览分派，判断类型图标用。
-    pub(super) fn of(row: &FileRow, bindings: &[PreviewBinding]) -> Self {
+    /// 文件行的缩略图盒。没有缩略图时画类型图标。
+    pub(super) fn of(row: &FileRow) -> Self {
         let tone = if row.kind == "directory" { Tone::Folder } else { Tone::Placeholder };
         let texture = row
             .texture_ready
             .then(|| row.thumbnail_path.as_deref().map(str::trim).filter(|path| !path.is_empty()).map(str::to_string))
             .flatten();
-        let image = if texture.is_none() {
-            row.thumbnail_rgba
-                .as_ref()
-                .and_then(|(w, h, rgba)| super::super::inspect::rgba_png_data_url(*w, *h, rgba))
-                .map(Arc::<str>::from)
-        } else {
-            None
-        };
-        let icon = (texture.is_none() && image.is_none()).then(|| entry_icon(row, bindings));
-        Self { tone, texture, image, icon, aspect: aspect(row.pixel_width, row.pixel_height) }
+        let icon = texture.is_none().then(|| entry_icon(row));
+        Self { tone, texture, icon, aspect: aspect(row.pixel_width, row.pixel_height) }
     }
 
     /// 缩略图槽；没有纹理时为空串（缩略图节点藏着）。
@@ -123,7 +111,7 @@ pub(super) struct CardFace {
 
 impl CardFace {
     /// 从文件行算出卡片的文字、元信息和缩略图。
-    pub(super) fn of(row: &FileRow, bindings: &[PreviewBinding]) -> Self {
+    pub(super) fn of(row: &FileRow) -> Self {
         let directory = row.kind == "directory";
         let kind_label = if directory {
             "文件夹".to_string()
@@ -145,7 +133,7 @@ impl CardFace {
             kind_label,
             size,
             modified: super::super::files::local_time::format_or(&row.modified_at, "未记录"),
-            preview: PreviewLook::of(row, bindings),
+            preview: PreviewLook::of(row),
         }
     }
 
@@ -501,7 +489,7 @@ where
 
 /// 缩略图盒的样式：固定宽高（或撑满列宽）、底色和图标的自绘、裁掉溢出。
 fn preview_frame_style(look: &PreviewLook, width: Option<f32>, height: f32, icon_size: f32, radius: RadiusTier) -> NodeStyle {
-    let painter = PreviewPainter { tone: look.tone, icon: look.icon, icon_size, radius, image: look.image.clone() };
+    let painter = PreviewPainter { tone: look.tone, icon: look.icon, icon_size, radius };
     let frame = match width {
         Some(width) => style::fixed(Stack::column(0.0), width, height),
         None => Stack::column(0.0)
@@ -519,14 +507,8 @@ fn preview_frame_style(look: &PreviewLook, width: Option<f32>, height: f32, icon
         .node_style()
 }
 
-/// 内置预览分派，判断卡片类型图标用。只建一次。
-pub(super) fn builtin_bindings() -> &'static [PreviewBinding] {
-    static BINDINGS: OnceLock<Vec<PreviewBinding>> = OnceLock::new();
-    BINDINGS.get_or_init(super::super::inspect::native_preview::builtin_bindings)
-}
-
-/// Vue 的类型图标：文件夹、视频、音频、有预览插件的文件，其余是图片图标。
-pub(super) fn entry_icon(row: &FileRow, bindings: &[PreviewBinding]) -> Icon {
+/// Vue 的类型图标：文件夹、视频、音频、有预览插件的文件（Nana 是认得出预览的扩展名），其余是图片图标。
+pub(super) fn entry_icon(row: &FileRow) -> Icon {
     if row.kind == "directory" {
         return FOLDER;
     }
@@ -538,7 +520,7 @@ pub(super) fn entry_icon(row: &FileRow, bindings: &[PreviewBinding]) -> Icon {
         return FILE_MUSIC;
     }
     let previewable = !extension.is_empty()
-        && !matches!(super::super::inspect::support::classify(&extension, bindings), super::super::inspect::PreviewKind::Unsupported);
+        && !matches!(super::super::inspect::support::classify(&extension), super::super::inspect::PreviewKind::Unsupported);
     if previewable { FILE } else { PHOTO }
 }
 
