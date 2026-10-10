@@ -50,8 +50,7 @@ pub fn read_clipboard_text() -> Option<String> {
     }
 }
 
-/// 执行已经记下的打开、拖出和托盘请求。队列每次都清空：宿主是它唯一的消费方，
-/// 执行不了的请求记日志后丢掉，不留下来越积越多。
+/// 执行已经记下的打开、拖出和托盘请求。队列每次都清空：宿主是它唯一的消费方。
 pub fn perform(
     shell: &mut ShellViewModel,
     mut open: impl FnMut(&str, bool) -> Result<(), String>,
@@ -85,7 +84,6 @@ pub fn perform(
                     }
                 }
             }
-            other => eprintln!("Nana 宿主不执行这个请求，已丢弃：{other:?}"),
         }
     }
 }
@@ -268,14 +266,5 @@ mod tests {
         assert!(model.input.host_requests.is_empty());
         let commands = model.input.take_platform_commands(nana_ui_platform::WindowId(1), false);
         assert!(matches!(commands.as_slice(), [nana_ui_platform::host::WindowCommand::Close(_)]));
-    }
-
-    /// 宿主执行不了的请求也从队列里拿掉，只记日志。
-    #[test]
-    fn perform_drains_requests_it_cannot_execute() {
-        let mut model = ShellViewModel::default();
-        model.input.host_requests.push(HostRequest::Input(HostInputRequest::FocusMainWindow));
-        perform(&mut model, |_, _| Ok(()), |_| Ok(()), || Ok(()));
-        assert!(model.input.host_requests.is_empty());
     }
 }

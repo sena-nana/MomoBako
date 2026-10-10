@@ -22,7 +22,7 @@ pub(crate) fn window_action_commands(
         WindowAction::ToggleMaximize => crate::host_api::WindowCommand::ToggleMaximize,
         WindowAction::Close => return None,
     };
-    Some(request.to_platform_command(id, maximized).into_iter().collect())
+    Some(vec![request.to_platform_command(id, maximized)])
 }
 
 /// 应用一次运行时点击排队的消息。
