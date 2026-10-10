@@ -71,17 +71,12 @@ impl RepositoryWatcher {
         let repository_state_for_thread = repository_state.clone();
 
         thread::spawn(move || {
-            while let Ok(event) = rx.recv() {
-                match event {
-                    Ok(event) => handle_fs_event(&repository_state_for_thread, event),
-                    Err(error) => {
-                        log_watcher_error(
-                            "eventReadFailed",
-                            "文件监听事件读取失败。",
-                            serde_json::json!({ "error": error.to_string() }),
-                        );
-                    }
-                }
+            while let Ok(first) = rx.recv() {
+                // 拷贝、解压会连着来一串事件：把已到的一次取完，整批只读一遍资源库列表。
+                let events = std::iter::once(first)
+                    .chain(rx.try_iter())
+                    .collect::<Vec<_>>();
+                handle_fs_events(&repository_state_for_thread, events);
             }
         });
 
@@ -106,7 +101,7 @@ pub(crate) fn sync_watched_paths(
     repository_state: &Arc<RepositoryState>,
     watcher_handle: &Arc<Mutex<RepositoryWatcher>>,
 ) -> Result<(), String> {
-    let repositories = repository_state.list_repositories()?;
+    let repositories = repository_state.list_repositories_without_asset_counts()?;
     let desired_paths = repositories
         .into_iter()
         .filter_map(|repository| repository_watch_path(&repository))
@@ -146,8 +141,24 @@ pub(crate) fn watched_paths_for_test(
         .map_err(|_| "watcher state lock poisoned".to_string())
 }
 
-fn handle_fs_event(repository_state: &Arc<RepositoryState>, event: Event) {
-    let repositories = match repository_state.list_repositories() {
+/// 把一批文件事件换算成各资源库里的相对路径，排进结构刷新队列。
+fn handle_fs_events(repository_state: &RepositoryState, events: Vec<notify::Result<Event>>) {
+    let mut paths = Vec::new();
+    for event in events {
+        match event {
+            Ok(event) => paths.extend(event.paths),
+            Err(error) => log_watcher_error(
+                "eventReadFailed",
+                "文件监听事件读取失败。",
+                serde_json::json!({ "error": error.to_string() }),
+            ),
+        }
+    }
+    if paths.is_empty() {
+        return;
+    }
+    // 只要路径和状态，不打开各资源库的数据库：开关连接本身就会在 `.momo` 里引出新的文件事件。
+    let repositories = match repository_state.list_repositories_without_asset_counts() {
         Ok(repositories) => repositories,
         Err(error) => {
             log_watcher_error(
@@ -158,31 +169,38 @@ fn handle_fs_event(repository_state: &Arc<RepositoryState>, event: Event) {
             return;
         }
     };
+    for (repo_id, changed_paths) in changed_paths_by_repository(&repositories, paths) {
+        repository_state.queue_repository_structure_refresh_with_paths(
+            repo_id,
+            "watcher",
+            changed_paths,
+        );
+    }
+}
 
-    if event.paths.is_empty() {
-        return;
-    };
-
+/// 按资源库归并变更路径。`.momo` 里的变化（同步写库、数据库的 WAL 文件）和资源库根目录本身不算结构变化：
+/// 给它们排刷新会再去读写 `.momo`、再引出事件，监听就会自己转起来停不下，真正的文件变化反而一直排不上。
+fn changed_paths_by_repository(
+    repositories: &[RepositorySummary],
+    paths: Vec<PathBuf>,
+) -> BTreeMap<String, BTreeSet<String>> {
     let mut changed_paths_by_repo = BTreeMap::<String, BTreeSet<String>>::new();
-    for path in event.paths {
+    for path in paths {
         for repository in repositories
             .iter()
             .filter(|repo| repository_event_path_is_inside(Path::new(&repo.path), &path))
         {
-            let changed_paths = changed_paths_by_repo
-                .entry(repository.repo_id.clone())
-                .or_default();
             if let Some(relative_path) =
                 repository_relative_event_path(Path::new(&repository.path), &path)
             {
-                changed_paths.insert(relative_path);
+                changed_paths_by_repo
+                    .entry(repository.repo_id.clone())
+                    .or_default()
+                    .insert(relative_path);
             }
         }
     }
-
-    for (repo_id, paths) in changed_paths_by_repo {
-        repository_state.queue_repository_structure_refresh_with_paths(repo_id, "watcher", paths);
-    }
+    changed_paths_by_repo
 }
 
 fn repository_relative_event_path(repo_root: &Path, path: &Path) -> Option<String> {
@@ -430,5 +448,55 @@ mod tests {
 
         assert!(repository_event_path_is_inside(&repo_root, &inside_path));
         assert!(!repository_event_path_is_inside(&repo_root, &sibling_path));
+    }
+
+    #[test]
+    fn changed_paths_by_repository_groups_file_changes_per_repository() {
+        let repo_root = unique_test_path("changed-paths");
+        let other_root = unique_test_path("changed-paths-other");
+        let mut other = build_repository_summary(&other_root, "ready");
+        other.repo_id = "repo-other".to_string();
+        let repositories = vec![build_repository_summary(&repo_root, "ready"), other];
+
+        let changed = changed_paths_by_repository(
+            &repositories,
+            vec![
+                repo_root.join("Artist").join("track.mp3"),
+                repo_root.join("Artist").join("cover.png"),
+                other_root.join("clip.mp4"),
+            ],
+        );
+
+        assert_eq!(changed.len(), 2);
+        assert_eq!(
+            changed["repo-test"],
+            BTreeSet::from([
+                "Artist/cover.png".to_string(),
+                "Artist/track.mp3".to_string()
+            ])
+        );
+        assert_eq!(
+            changed["repo-other"],
+            BTreeSet::from(["clip.mp4".to_string()])
+        );
+    }
+
+    #[test]
+    fn changed_paths_by_repository_skips_metadata_and_repository_root_events() {
+        let repo_root = unique_test_path("metadata-only");
+        let repositories = vec![build_repository_summary(&repo_root, "ready")];
+
+        // 开关数据库连接会在 `.momo` 里生成、删除 WAL 文件；这些事件不能再排一次结构刷新。
+        let changed = changed_paths_by_repository(
+            &repositories,
+            vec![
+                repo_root.join(".momo").join("metadata.db-wal"),
+                repo_root.join(".momo").join("metadata.db-shm"),
+                repo_root.join(".momo"),
+                repo_root.clone(),
+            ],
+        );
+
+        assert!(changed.is_empty());
     }
 }

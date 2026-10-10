@@ -238,6 +238,18 @@ impl RepositoryState {
             .collect()
     }
 
+    /// 只读登记表，不打开各资源库的存储，`asset_count` 一律为 0。
+    /// 文件监听这类只关心路径和状态的调用方用它，免得每个文件事件都把所有资源库的数据库开一遍。
+    pub(crate) fn list_repositories_without_asset_counts(
+        &self,
+    ) -> Result<Vec<RepositorySummary>, String> {
+        Ok(self
+            .load_repository_records()?
+            .into_iter()
+            .map(|repo| repo.summary)
+            .collect())
+    }
+
     /// 列表里的资源数。后端插件未注册、或者存储要重建却没建成时只列出不打开，资源数记 0，
     /// 免得一个资源库拖垮整张列表。
     fn listed_asset_count(&self, repo: &RepositoryRecord) -> Result<i64, String> {
