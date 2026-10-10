@@ -130,8 +130,9 @@ fn pill(label: &str, strong: bool, key: &'static str) -> AnyView {
 }
 
 /// 准备卡：读取或解码时居中显示文件名、「准备音频」和一条进度。
-pub(super) fn loading_card(name: &str) -> AnyView {
+pub(super) fn loading_card(name: &str, video: bool) -> AnyView {
     let name = if name.is_empty() { "准备播放".to_string() } else { name.to_string() };
+    let detail = if video { "准备媒体" } else { "准备音频" };
     let card = widget(
         Stack::column(10.0)
             .padding(14.0)
@@ -145,7 +146,7 @@ pub(super) fn loading_card(name: &str) -> AnyView {
     )
     .children((
         widget(text(&name, 13.0, 700, SemanticColorRole::Text, 20.15).truncating()).key("inspect-media-loading-name"),
-        widget(text("准备音频", 12.0, 400, SemanticColorRole::Muted, 18.6).truncating()).key("inspect-media-loading-detail"),
+        widget(text(detail, 12.0, 400, SemanticColorRole::Muted, 18.6).truncating()).key("inspect-media-loading-detail"),
         progress_track(0.0, "inspect-media-loading-progress"),
     ))
     .key("inspect-media-loading")
