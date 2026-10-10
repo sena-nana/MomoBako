@@ -7,9 +7,10 @@
 use nana_ui::runtime::Task;
 use nana_ui::RuntimeProgramContext;
 
-use crate::backend::services::repository::FileBrowserRequest;
-use crate::shell::{ShellMessage, StartupStatus};
-use crate::{services, MomoBakoApplication};
+use crate::backend::services::repository::{FileBrowserRequest, RepositorySummary};
+use crate::backend::viewmodels::RepositoryQueryViewModel;
+use crate::shell::ShellMessage;
+use crate::MomoBakoApplication;
 
 /// 归约前提交这条消息需要的服务任务。服务没启动时不提交，任务提交失败只记日志。
 pub(crate) fn dispatch_services(
@@ -21,30 +22,23 @@ pub(crate) fn dispatch_services(
     dispatch_browse_and_preview(app, message, context);
 }
 
-/// 资源库摘要成功时它所属的仓库。归约后据此决定是否读取根目录。
-pub(crate) fn snapshot_repo(message: &ShellMessage) -> Option<String> {
-    if let ShellMessage::RepositorySnapshotLoaded(Ok(snapshot)) = message {
-        Some(snapshot.repository.repo_id.clone())
-    } else {
-        None
-    }
-}
-
-/// 归约之后：摘要确认属于当前仓库、启动没有失败且已走到第 4 步时读取根目录。
-pub(crate) fn after_snapshot(
-    app: &MomoBakoApplication,
-    snapshot_repo_id: Option<String>,
-    context: &RuntimeProgramContext<ShellMessage>,
-) {
-    if let Some(repo_id) = snapshot_repo_id
-        && app.shell.repository_id.as_deref() == Some(repo_id.as_str())
-        && app.shell.workspace.startup.status != StartupStatus::Error
-        && (app.shell.workspace.startup.status != StartupStatus::Loading
-            || app.shell.workspace.startup.current_step >= 4)
-        && let Some(services) = app.services.as_ref()
-    {
-        schedule_root_browser(services, context, repo_id);
-    }
+/// 附加、新建或重定向资源库的协议只回 JSON：按 `repository.repoId` 认出这个仓库，再从资源库列表里取出
+/// 它的摘要（领域的仓库摘要不能从 JSON 读回）。在服务任务里调用。
+pub(crate) fn mutated_repository(
+    executor: &tokio::runtime::Runtime,
+    query: &RepositoryQueryViewModel,
+    output: &serde_json::Value,
+) -> Result<RepositorySummary, String> {
+    let Some(repo_id) = output.get("repository").and_then(|repository| repository.get("repoId")).and_then(serde_json::Value::as_str)
+    else {
+        eprintln!("Nana 资源库操作的结果里没有仓库标识：{output}");
+        return Err("资源库操作没有返回仓库标识".into());
+    };
+    let items = executor.block_on(query.list_repositories())?;
+    items.into_iter().find(|item| item.repo_id == repo_id).ok_or_else(|| {
+        eprintln!("Nana 资源库列表里没有刚处理的仓库：{repo_id}");
+        format!("资源库列表里没有刚处理的仓库：{repo_id}")
+    })
 }
 
 /// 提交一个服务任务，提交失败按 `what` 记日志。
@@ -117,14 +111,18 @@ fn dispatch_browse_and_preview(
     }
 }
 
-/// 摘要确认属于当前仓库后，读取根目录作为启动第 4 步。
-fn schedule_root_browser(
-    services: &services::NativeServices,
+/// 启动和换仓库的第 4 步：读根目录首屏。服务没起来或提交失败时按失败写回，启动不会停在第 4 步。
+pub(crate) fn dispatch_first_screen(
+    app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
     repo_id: String,
 ) {
-    let browser = services.file_browser.clone();
-    let executor = services.executor.clone();
+    let prepared = app.services.as_ref().map(|services| (services.file_browser.clone(), services.executor.clone()));
+    let Some((browser, executor)) = prepared else {
+        eprintln!("Nana 首屏目录需要领域服务，当前服务未启动");
+        app.shell.reduce(ShellMessage::FileBrowserLoaded(Err("领域服务未启动".into())));
+        return;
+    };
     let request = FileBrowserRequest {
         repo_id,
         directory_path: None,
@@ -133,7 +131,10 @@ fn schedule_root_browser(
         offset: Some(0),
         limit: Some(200),
     };
-    run(context, "文件浏览", Task::new(async move {
+    if let Err(error) = context.run_task(Task::new(async move {
         ShellMessage::FileBrowserLoaded(executor.block_on(browser.get_file_browser(request)))
-    }));
+    })) {
+        eprintln!("Nana 首屏目录任务提交失败：{error}");
+        app.shell.reduce(ShellMessage::FileBrowserLoaded(Err(format!("首屏目录任务提交失败：{error}"))));
+    }
 }

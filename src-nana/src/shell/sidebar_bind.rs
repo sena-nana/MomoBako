@@ -47,10 +47,15 @@ impl ShellViewModel {
         }
     }
 
-    /// 快照返回前，文件列表先停在正在打开的目录上。
-    pub(crate) fn note_sidebar_browse(&mut self, path: &str) {
+    /// 快照返回前，文件列表先停在正在打开的目录上。非静默的读取在任务弹层出「读取目录」这一行，
+    /// 这时已经在归约之外，当场交给槽位。
+    pub(crate) fn note_sidebar_browse(&mut self, path: &str, trash: bool, progress: bool) {
         self.files.current_path = path.to_string();
         self.files.loading = true;
+        if progress {
+            self.files.report_read(path, trash, super::super::files::ReadProgress::Directory);
+            self.operation.apply(&mut self.files.operation);
+        }
     }
 
     /// 悬停打开发生在 `prepare`。松手会先写下移动文案，拆树前要把目录加载盖回去。
@@ -58,8 +63,8 @@ impl ShellViewModel {
         let mut browses = std::mem::take(&mut self.staged_browses);
         browses.extend(self.sidebar.take_browses());
         for effect in &browses {
-            if let super::SidebarEffect::Browse { path, .. } = effect {
-                self.note_sidebar_browse(path);
+            if let super::SidebarEffect::Browse { path, trash, progress, .. } = effect {
+                self.note_sidebar_browse(path, *trash, *progress);
             }
         }
         self.staged_browses = browses;

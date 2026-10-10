@@ -147,14 +147,17 @@ fn busy_shows_while_loading_and_failures_win() {
     assert!(!super::busy(&model), "详情失败以后不再忙碌");
 }
 
-/// 换仓库读摘要、刷新读列表时忙碌，结果到达就放下；启动以后读摘要失败进状态区。
+/// 选同一个仓库时先同步再读摘要，整轮忙碌，结果到达才放下；读摘要失败进状态区。刷新读列表时也忙碌。
 #[test]
 fn repository_reads_are_busy_until_their_result_arrives() {
     let mut model = files_page();
     let repo_id = model.workspace.active_repo_id.clone().expect("活动仓库");
     model.reduce(ShellMessage::SelectWorkspaceRepository(repo_id));
     assert!(model.workspace.snapshot_loading && super::busy(&model));
-    model.reduce(ShellMessage::RepositorySnapshotLoaded(Err("索引损坏".into())));
+    let generation = model.workspace.list_generation;
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(()) });
+    assert!(model.workspace.snapshot_loading, "同步完了还在读摘要");
+    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Err("索引损坏".into()) });
     assert!(!model.workspace.snapshot_loading);
     assert_eq!(failure(&model), Some((FailureSource::Repository, "无法读取资源库摘要：索引损坏".into())));
 

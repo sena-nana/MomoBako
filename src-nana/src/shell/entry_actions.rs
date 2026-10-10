@@ -21,10 +21,34 @@ pub struct FilePluginAction {
 #[derive(Clone, Debug, PartialEq)]
 pub enum FilePluginDispatch {
     Call { plugin_id: String, method: String, payload: Value },
-    /// 选中文件夹后把 `destination` 写进载荷再调用。
-    AskFolder { plugin_id: String, method: String, payload: Value },
+    /// 选中文件夹后把 `destination` 写进载荷再调用。`progress` 是这次下载在任务弹层里的进度行。
+    AskFolder { plugin_id: String, method: String, payload: Value, progress: DownloadProgress },
     /// 名称非空后把名称和当前仓库写进载荷再调用。
     AskName { plugin_id: String, method: String, payload: Value },
+}
+
+/// 来源下载在任务弹层里的进度行（Vue `runDownloadAction`）：种类是动作名；选好目录先是「准备下载 …」，
+/// 调用插件时单曲是「正在下载 …」。下载目录时 Vue 先列出目录里的文件再写「正在处理 N 个文件」，
+/// Nana 不列目录，停在「准备下载目录」。
+#[derive(Clone, Debug, PartialEq)]
+pub struct DownloadProgress {
+    pub label: String,
+    pub preparing: String,
+    pub running: Option<String>,
+}
+
+impl DownloadProgress {
+    fn of(label: &str, row: &FileRow, operation: &str) -> Self {
+        if operation == "download-directory" {
+            Self { label: label.to_string(), preparing: "准备下载目录".into(), running: None }
+        } else {
+            Self {
+                label: label.to_string(),
+                preparing: format!("准备下载 {}", row.name),
+                running: Some(format!("正在下载 {}", row.name)),
+            }
+        }
+    }
 }
 
 /// 按清单 `entryActions` 和当前行的类型、来源载荷匹配菜单项。
@@ -68,6 +92,7 @@ fn prepare(plugin: &PluginManifest, action: &Value, row: &FileRow) -> Option<Fil
                 plugin_id: plugin.plugin_id.clone(),
                 method,
                 payload: call_payload(action, row, &operation),
+                progress: DownloadProgress::of(&label, row, &operation),
             }
         }
         "playlist-from-directory" => {

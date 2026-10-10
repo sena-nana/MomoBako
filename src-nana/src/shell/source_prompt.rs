@@ -10,6 +10,7 @@ use nana_ui::ButtonKind;
 use serde_json::Value;
 
 use super::super::admin::AdminMessage;
+use super::super::repo_operation::{OperationPatch, OperationStart};
 use super::super::view_part_overlay::dialog::{action, footer, text_field, DialogFrame, MODAL_CARD};
 use super::super::view_part_overlay::session::{Draft, Projected};
 use super::super::{ShellMessage, ShellViewModel};
@@ -22,6 +23,8 @@ pub struct PendingDownload {
     pub method: String,
     pub payload: Value,
     pub repository_id: Option<String>,
+    /// 选好目录以后在任务弹层里出的进度行。
+    pub progress: super::super::entry_actions::DownloadProgress,
 }
 
 /// 正在问名称的来源播放列表。
@@ -51,6 +54,13 @@ pub(super) fn submit_download(model: &mut ShellViewModel, path: String) {
             serde_json::json!({ "kind": "localFolder", "path": trimmed }),
         );
     }
+    // Vue `runDownloadAction`：「{动作名} · 准备下载 …」10%，调用插件时「正在下载 …」36% 不确定进度。
+    let progress = &pending.progress;
+    let operation = model.operation.start(OperationStart::new(progress.label.clone(), progress.preparing.clone(), 10.0));
+    if let Some(running) = &progress.running {
+        model.operation.update(operation, OperationPatch::step(running.clone(), 36.0).with_indeterminate(true));
+    }
+    model.admin.note_download_operation(pending.method.clone(), operation);
     model.reduce(ShellMessage::Admin(AdminMessage::CallFilePlugin {
         plugin_id: pending.plugin_id,
         method: pending.method,

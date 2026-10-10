@@ -485,11 +485,12 @@ fn plugin_entry(action: &FilePluginAction, repository_id: Option<String>) -> Men
             payload: payload.clone(),
             repository_id,
         }),
-        FilePluginDispatch::AskFolder { plugin_id, method, payload } => input(InputMessage::BeginDownloadFolder {
+        FilePluginDispatch::AskFolder { plugin_id, method, payload, progress } => input(InputMessage::BeginDownloadFolder {
             plugin_id: plugin_id.clone(),
             method: method.clone(),
             payload: payload.clone(),
             repository_id,
+            progress: progress.clone(),
         }),
         FilePluginDispatch::AskName { plugin_id, method, payload } => input(InputMessage::OpenSourcePlaylist {
             plugin_id: plugin_id.clone(),

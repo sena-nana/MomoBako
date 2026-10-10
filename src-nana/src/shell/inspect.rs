@@ -58,7 +58,7 @@ pub enum PreviewBody {
 }
 
 #[path = "inspect_search.rs"]
-mod search;
+pub(super) mod search;
 pub use search::{
     AdvancedField, DateBound, FilterList, MetadataInput, NumberBound, SearchFilters, SearchRequestDraft, SearchRow,
     SortDirection,

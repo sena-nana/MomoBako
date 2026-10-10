@@ -46,13 +46,13 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
     }
 }
 
-fn note_attach(model: &mut ShellViewModel, result: &Result<(), String>) {
+fn note_attach(model: &mut ShellViewModel, result: &Result<crate::backend::services::repository::RepositorySummary, String>) {
     if !model.input.pending_attach {
         return;
     }
     model.input.pending_attach = false;
     match result {
-        Ok(()) => model.input.empty_repository_error.clear(),
+        Ok(_) => model.input.empty_repository_error.clear(),
         Err(error) => {
             eprintln!("Nana 拖放附加资源库失败：{error}");
             model.input.empty_repository_error = error.clone();
@@ -140,8 +140,8 @@ fn reduce_input(model: &mut ShellViewModel, message: InputMessage) {
         }
         InputMessage::ConfirmCloseAnswer(accept) => model.input.answer_close(accept),
         InputMessage::FileDialogCompleted { request_id, paths, failed } => complete_dialog(model, request_id, &paths, failed),
-        InputMessage::BeginDownloadFolder { plugin_id, method, payload, repository_id } => {
-            model.input.pending_download = Some(super::source_prompt::PendingDownload { plugin_id, method, payload, repository_id });
+        InputMessage::BeginDownloadFolder { plugin_id, method, payload, repository_id, progress } => {
+            model.input.pending_download = Some(super::source_prompt::PendingDownload { plugin_id, method, payload, repository_id, progress });
             model.input.queue_download_dialog();
         }
         InputMessage::OpenSourcePlaylist { plugin_id, method, payload, repository_id } => {

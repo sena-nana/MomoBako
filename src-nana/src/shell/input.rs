@@ -130,6 +130,7 @@ pub enum InputMessage {
         method: String,
         payload: serde_json::Value,
         repository_id: Option<String>,
+        progress: super::entry_actions::DownloadProgress,
     },
     OpenSourcePlaylist {
         plugin_id: String,

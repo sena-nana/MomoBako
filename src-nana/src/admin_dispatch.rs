@@ -9,7 +9,7 @@ use nana_ui::RuntimeProgramContext;
 
 use crate::backend::services::mutsuki_runner::{PROTOCOL_REPOSITORY_ACTION_RUN, PROTOCOL_REPOSITORY_CREATE, PROTOCOL_REPOSITORY_SYNC};
 use crate::backend::services::repository::{
-    BinaryFileWriteRequest, FileBrowserRequest, NeteaseRepositoryCacheConfigureRequest, PluginCallRequest, PluginConfigDeleteRequest,
+    BinaryFileWriteRequest, NeteaseRepositoryCacheConfigureRequest, PluginCallRequest, PluginConfigDeleteRequest,
     PluginConfigSetRequest, PluginConfigSnapshot, PluginEnabledRequest, PluginHookExecutionListRequest, PluginInstallRequest,
     PluginManifest, RepositoryAction, RepositoryActionRunRequest, RepositoryBackendConfigUpdateRequest, RepositoryMutationRequest,
     SyncRequest, SystemLogQuery,
@@ -81,7 +81,6 @@ fn dispatch_one(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<S
         AdminEffect::OpenDataDirectory { plugin_id, name } => open_directory(app, context, plugin_id, name),
         AdminEffect::LoadActions { repo_id } => load_actions(app, context, repo_id),
         AdminEffect::RunAction { repo_id, action_id, paths } => run_action(app, context, repo_id, action_id, paths),
-        AdminEffect::ReloadBrowser { repo_id } => reload_browser(app, context, repo_id),
         AdminEffect::WriteFile { path, bytes } => write_file(app, context, path, bytes),
         AdminEffect::CallPlugin { plugin_id, method, payload, repository_id, origin } => {
             call_plugin(app, context, plugin_id, method, payload, repository_id, origin);
@@ -448,29 +447,6 @@ fn run_action(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<She
 fn action_from_value(value: serde_json::Value) -> Result<RepositoryAction, String> {
     let action = value.get("action").cloned().ok_or_else(|| "动作结果缺少 action".to_string())?;
     serde_json::from_value(action).map_err(|error| format!("动作结果无法解析：{error}"))
-}
-
-fn reload_browser(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String) {
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 动作完成后的文件刷新需要领域服务，当前服务未启动");
-        return;
-    };
-    let directory = app.shell.current_directory.clone();
-    let browser = services.file_browser.clone();
-    let executor = services.executor.clone();
-    let request = FileBrowserRequest {
-        repo_id,
-        directory_path: (!directory.is_empty()).then_some(directory),
-        include_tree: Some(false),
-        special_location: None,
-        offset: Some(0),
-        limit: Some(200),
-    };
-    if let Err(error) = context.run_task(Task::new(async move {
-        ShellMessage::FileBrowserLoaded(executor.block_on(browser.get_file_browser(request)))
-    })) {
-        eprintln!("Nana 动作完成后的文件刷新任务提交失败：{error}");
-    }
 }
 
 fn write_file(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, path: String, bytes: Vec<u8>) {
