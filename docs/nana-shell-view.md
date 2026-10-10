@@ -49,7 +49,7 @@
 
 ### 首页筛选栏
 
-筛选栏属于首页外框，有仓库的首页路由都可能显示它。信号 `FilterBarSignals` 在 `RouteSignals::filter`，启动、设置、缺失仓库和空库页以外每次同步都写（关着时不算候选和库类型快捷方式）。常驻首页路由（文件、搜索、播放集、日志、拓展和动作页）在外框里嵌 `inspect_search_view::resident_filter_bar(signals.filter)`，显隐跟「有仓库且筛选栏打开」走 `.visible`；文件页的 `FilesRouteSignals` 不另存筛选栏的状态，读的是同一份 `RouteSignals::filter`。首页外框和纵向滚动主体只有一套：`route_home::{home_page, home_scroll}`，缺失仓库和空库页也用它（不嵌筛选栏）；设置和启动页的整页滚动是 `route_home::scroll_route`。日志页和拓展、动作页一样用 `home_scroll`：面板（`admin::style::workbench_panel`）至少撑满主体，日志列表的基准高写定 360、伸展分走页头、工具条和筛选以下的高度，自己滚动，追踪时 `follow_end` 绑在列表上；窗口矮到放不下时主体滚动。里层滚动区只把自己的盒子算进外层的滚动范围（NanaUI `941df646d` 起），列表里的日志再多，放得下的主体也不滚。
+筛选栏属于首页外框，有仓库的首页路由都可能显示它。信号 `FilterBarSignals` 在 `RouteSignals::filter`，启动、设置、缺失仓库和空库页以外每次同步都写（关着时不算候选和库类型快捷方式）。常驻首页路由（文件、搜索、播放集、日志、拓展和动作页）在外框里嵌 `inspect_search_view::resident_filter_bar(signals.filter)`，显隐跟「有仓库且筛选栏打开」走 `.visible`；文件页的 `FilesRouteSignals` 不另存筛选栏的状态，读的是同一份 `RouteSignals::filter`。首页外框和纵向滚动主体只有一套：`route_home::{home_page, home_scroll}`，缺失仓库和空库页也用它（不嵌筛选栏）；设置和启动页的整页滚动是 `route_home::scroll_route`。日志页和拓展、动作页一样用 `home_scroll`：面板（`admin::style::workbench_panel`）至少撑满主体，日志列表的基准高写定为最矮高度 72（`admin_logs_view::LIST_FLOOR`）、伸展分走页头、工具条和筛选以下的高度，自己滚动，追踪时 `follow_end` 绑在列表上；窗口矮到连 72 都放不下时主体滚动。里层滚动区只把自己的盒子算进外层的滚动范围（NanaUI `941df646d` 起），列表里的日志再多，放得下的主体也不滚。
 
 ## 改成常驻的步骤
 
@@ -76,7 +76,7 @@
 - `dynamic` 和 `when` 的容器不能直接给一个 `Stack`；`each` 可以用 `.container(元素)` 把行直接建进给定的元素（播放集条目这样建进 `ReorderList`）。要替换一行有样式的芯片（筛选芯片行、结果行右侧）时用 `.horizontal(n)`，再用 `css!` 补上原来那个 `Stack` 写过的字段（`flex-wrap`、`justify-content`、`width`、`flex-grow` 等），改完跑 `scene_shots` 逐字节比较。竖排父容器里的 `dynamic` 容器不改排版：内容变了整块换、里面又没有可聚焦控件的小块（插件卡片的芯片、原因和四段）可以这样包，可有可无时再给容器 `.visible(..)`。
 - 一行里固定几个、可有可无的块（日志卡片的来源芯片和元数据芯片）直接建出来，各自 `.visible(..)`，不用嵌套列表。
 - 滚动容器写 key，并让 key 带上内容身份（例如 `workspace-page-scroll-{区域}-{面板}`）：换内容时从顶部开始，同一内容重挂时 `remount_state` 按键路径找回偏移。常驻以后滚动容器不再重建，偏移自然留着。
-- 面板高度按内容量（`workbench_panel` 的 `min-height` 是 `MinContent`）时，没写定高度的滚动区按里面的全部内容量高，和 CSS 的 `min-height: min-content` 一样：日志列表只写 `flex-basis: 0` 和最小高，面板会被量成全部日志那么高。要在面板里伸展的滚动列表写定基准高（日志列表 360）再 `flex-grow`。
+- 面板高度按内容量（`workbench_panel` 的 `min-height` 是 `MinContent`）时，没写定高度的滚动区按里面的全部内容量高，和 CSS 的 `min-height: min-content` 一样：日志列表只写 `flex-basis: 0` 和最小高，面板会被量成全部日志那么高。要在面板里伸展的滚动列表写定基准高（日志列表 72）再 `flex-grow`。
 
 ### 输入框的四条纪律
 
