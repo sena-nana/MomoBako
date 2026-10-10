@@ -13,7 +13,8 @@
 //!   位置，状态区显示，和 Vue 一样。
 //!
 //! 对话框里的错误行、搜索面板、缺失仓库页、空库页、启动页、插件操作、导出对话框、预览和播放条这些已经
-//! 就近显示的失败不进这里。
+//! 就近显示的失败不进这里。要提醒、但不算失败的结果（来源下载一项也没有下载到）用 [`StatusState::warn`] 记进
+//! 同一个槽位，清除的时机一样，状态区用警告色。
 //!
 //! **什么时候清。** 照 Vue `error.value = null` 的时机：用户开始一个会写全局错误的操作时清掉上一次失败，
 //! 成功不专门清。开始的迹象有两种（[`starts_operation`]、[`Activity`]）：打开、定位、拖出，选仓库、
@@ -64,16 +65,18 @@ pub enum FailureSource {
     SettingsData,
     /// 系统日志。
     Logs,
-    /// 来源下载收尾：插件报告失败的条目，每一条的原因写进系统日志。
+    /// 来源下载收尾：插件报告失败的条目（每一条的原因写进系统日志），或者一项也没有下载到（提醒）。
     Download,
 }
 
-/// 记下的一次失败。
+/// 记下的一次失败，或者一条要提醒的结果。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Failure {
     pub source: FailureSource,
     /// 状态区显示的文案：说明失败的对象，后面接系统返回的原因。
     pub message: String,
+    /// 提醒而不是失败（例如来源下载一项也没有下载到）：状态区用警告色，DESIGN.md 8.1 的 Warning。
+    pub warning: bool,
     /// 第几次记的失败，判断是不是这次归约里新记的。
     seq: u64,
 }
@@ -105,14 +108,23 @@ impl StatusState {
 
     /// 记下一次失败，顶替上一次。空文案不记。
     pub(crate) fn fail(&mut self, source: FailureSource, message: impl Into<String>) {
-        let message = message.into();
+        self.record(source, message.into(), false);
+    }
+
+    /// 记下一条要提醒的结果（不是失败），和失败共用一个槽位、同样的清除时机，状态区用警告色。空文案不记。
+    pub(crate) fn warn(&mut self, source: FailureSource, message: impl Into<String>) {
+        self.record(source, message.into(), true);
+    }
+
+    fn record(&mut self, source: FailureSource, message: String, warning: bool) {
         if message.trim().is_empty() {
             eprintln!("Nana 状态区收到空的失败文案，来源 {source:?}");
             return;
         }
-        eprintln!("Nana 状态区记下失败（{source:?}）：{message}");
+        let kind = if warning { "提醒" } else { "失败" };
+        eprintln!("Nana 状态区记下{kind}（{source:?}）：{message}");
         self.seq += 1;
-        self.failure = Some(Failure { source, message, seq: self.seq });
+        self.failure = Some(Failure { source, message, warning, seq: self.seq });
     }
 
     /// 清掉第 `seq` 次及以前记的失败；之后新记的留着。
@@ -236,13 +248,15 @@ impl ShellViewModel {
     }
 }
 
-/// 状态区显示什么。顺序照 Vue：失败 > 忙碌 > 同步进度。同步进度来自文件夹树的「刷新」（`tree_sync.rs`），
+/// 状态区显示什么。顺序照 Vue：失败（或提醒）> 忙碌 > 同步进度。同步进度来自文件夹树的「刷新」（`tree_sync.rs`），
 /// 启动时的同步进度在启动页上。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum StatusLine {
     Hidden,
     /// 红色错误条：最近一次失败的文案。
     Failure(String),
+    /// 警告色的提醒条：最近一次要提醒的结果，例如来源下载一项也没有下载到。
+    Warning(String),
     /// 「正在同步仓库状态」：读资源库列表、读仓库摘要或读素材详情时。
     Busy,
     /// 同步进度：这一步的文案和百分比（扫描、写入、刷新三档）。
@@ -255,7 +269,8 @@ impl StatusLine {
         if let Some(failure) = model.status.failure()
             && !shown_in_place(model, failure.source)
         {
-            return Self::Failure(failure.message.clone());
+            let message = failure.message.clone();
+            return if failure.warning { Self::Warning(message) } else { Self::Failure(message) };
         }
         if busy(model) {
             return Self::Busy;

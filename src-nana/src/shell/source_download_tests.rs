@@ -164,6 +164,88 @@ fn a_fully_successful_download_says_nothing() {
     assert!(model.workspace.refresh.as_ref().is_some_and(|run| !run.keeps_status), "照常刷新");
 }
 
+/// 下载歌单不列目录：选好目标以后任务弹层和单曲一样写「准备下载 夜曲」→「正在下载 夜曲」，载荷里是歌单标识和
+/// 歌单名、没有 `tracks`，由插件按歌单标识取来源里完整的歌单。Vue 先分页列出目录、写「正在处理 N 个文件」。
+#[test]
+fn downloading_a_playlist_asks_the_source_for_the_whole_playlist() {
+    let mut model = netease();
+    click(&mut model, FOLDER, "下载歌单到其他资源库");
+    model.reduce(ShellMessage::Admin(AdminMessage::ChooseDownloadRepository("third-repo".into())));
+    let row = model.operation.shown().expect("进度行");
+    assert_eq!((row.label.as_str(), row.detail.as_str(), row.value, row.indeterminate), ("下载歌单", "正在下载 夜曲", 36.0, true));
+    let effects = model.admin.take_effects();
+    let payload = effects
+        .iter()
+        .find_map(|effect| match effect {
+            AdminEffect::DownloadToRepository { payload, parent_path, .. } => {
+                assert_eq!(parent_path.as_deref(), Some(FOLDER), "导入到以歌单命名的文件夹");
+                Some(payload.clone())
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("没有下载到其他资源库：{effects:?}"));
+    assert_eq!((payload["playlistId"].clone(), payload["playlistName"].clone()), (json!(9001), json!(FOLDER)));
+    assert!(payload.get("tracks").is_none(), "不列目录、不带曲目");
+}
+
+/// 插件交回的是一批、却一项也没有（网易云取不到歌单详情时什么也不下）：状态区用警告色提醒没有下载到任何条目，写一条
+/// 警告日志，收尾的刷新不清它。单曲交回文件、批量结果有完成的条目时都不提醒。
+#[test]
+fn an_empty_batch_is_called_out_as_a_warning() {
+    let mut model = netease();
+    let run = download_playlist(&mut model);
+    let empty = json!({ "completed": [], "failed": [], "summary": { "total": 0, "succeeded": 0, "failed": 0 } });
+    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Ok(empty) }));
+    let warning = "下载歌单「夜曲」没有下载到任何条目。";
+    assert_eq!(StatusLine::project(&model), StatusLine::Warning(warning.into()));
+    assert_eq!(notice(&model), Some((FailureSource::Download, warning.into())));
+    let logs = model
+        .admin
+        .take_effects()
+        .into_iter()
+        .find_map(|effect| match effect {
+            AdminEffect::WriteLogs(logs) => Some(logs),
+            _ => None,
+        })
+        .expect("写一条日志");
+    assert_eq!(logs.len(), 1);
+    assert_eq!((logs[0].level.as_str(), logs[0].action.as_str(), logs[0].message.as_str()), ("warn", "downloadEmpty", warning));
+    assert!(model.workspace.refresh.as_ref().is_some_and(|run| run.keeps_status));
+
+    let mut track = netease();
+    click(&mut track, TRACK, "下载单曲到其他资源库");
+    track.reduce(ShellMessage::Admin(AdminMessage::ChooseDownloadRepository("third-repo".into())));
+    let run = track
+        .admin
+        .take_effects()
+        .into_iter()
+        .find_map(|effect| match effect {
+            AdminEffect::DownloadToRepository { run, .. } => Some(run),
+            _ => None,
+        })
+        .expect("开始下载单曲");
+    let single = json!({ "songId": 186016, "paths": ["D:/stage/周杰伦 - 晴天.mp3"], "destination": "repository" });
+    track.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Ok(single) }));
+    assert_eq!(notice(&track), None, "单曲交回了文件，不提醒");
+}
+
+/// 提醒画成警告色的提醒条，失败条藏着；侧栏不重挂，和新挂的一样。
+#[test]
+fn the_sidebar_shows_the_warning_in_its_own_tone() {
+    let mut harness = ShellHarness::mount(netease());
+    let run = download_playlist(&mut harness.model);
+    harness.apply(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Ok(json!({ "completed": [], "failed": [] })) }));
+    harness.flush();
+    assert!(harness.find("下载歌单「夜曲」没有下载到任何条目。").is_some(), "提醒画在侧栏顶部");
+    let hidden = |key: &str| {
+        let id = harness.keyed(key).unwrap_or_else(|| panic!("侧栏缺少 {key}"));
+        harness.document().context().world().node_style(id).is_some_and(|style| style.layout.hidden)
+    };
+    assert!(!hidden("sidebar-status-warning"), "提醒条显示着");
+    assert!(hidden("sidebar-status"), "失败条藏着");
+    harness.assert_same_as_fresh_mount();
+}
+
 /// 侧栏顶部的状态条画出提示，侧栏不重挂；和新挂的一样。
 #[test]
 fn the_sidebar_shows_the_notice() {

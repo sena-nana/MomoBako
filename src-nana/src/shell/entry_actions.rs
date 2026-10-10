@@ -116,29 +116,31 @@ impl SourcePlaylist {
     }
 }
 
-/// 来源下载在任务弹层里的进度行（Vue `runDownloadAction`）：种类是动作名；选好去处先是「准备下载 …」，
-/// 调用插件时单曲是「正在下载 …」。下载目录时 Vue 先列出目录里的文件再写「正在处理 N 个文件」，
-/// Nana 不列目录，停在「准备下载目录」。`subject` 是下载的条目名，收尾的提示和日志用。
+/// 来源下载在任务弹层里的进度行（Vue `runDownloadAction`）：种类是动作名；选好去处先是「准备下载 …」，调用插件时
+/// 「正在下载 …」。下载目录（歌单）也一样：Vue 先分页列出目录里的文件、写「正在处理 N 个文件」，把曲目作为 `tracks`
+/// 交给插件；Nana 不列目录、不带 `tracks`，由插件按歌单标识取来源里完整的歌单（理由见 `docs/nana-vue-parity.md`），
+/// 调用插件这一段就是在下载。
 #[derive(Clone, Debug, PartialEq)]
 pub struct DownloadProgress {
+    /// 动作名，例如「下载歌单」。
     pub label: String,
+    /// 下载的条目名：右键的那个文件或目录，收尾的提示和日志也用它。
     pub subject: String,
-    pub preparing: String,
-    pub running: Option<String>,
 }
 
 impl DownloadProgress {
-    fn of(label: &str, row: &FileRow, operation: &str) -> Self {
-        if operation == "download-directory" {
-            Self { label: label.to_string(), subject: row.name.clone(), preparing: "准备下载目录".into(), running: None }
-        } else {
-            Self {
-                label: label.to_string(),
-                subject: row.name.clone(),
-                preparing: format!("准备下载 {}", row.name),
-                running: Some(format!("正在下载 {}", row.name)),
-            }
-        }
+    fn of(label: &str, row: &FileRow) -> Self {
+        Self { label: label.to_string(), subject: row.name.clone() }
+    }
+
+    /// 选好去处时的进度行文案。
+    pub fn preparing(&self) -> String {
+        format!("准备下载 {}", self.subject)
+    }
+
+    /// 调用插件时的进度行文案。
+    pub fn running(&self) -> String {
+        format!("正在下载 {}", self.subject)
     }
 }
 
@@ -189,7 +191,7 @@ fn prepare(plugin: &PluginManifest, action: &Value, row: &FileRow, context: &Sou
                 .into_iter()
                 .map(|target| {
                     let payload = call_payload(row, &operation, context);
-                    let progress = DownloadProgress::of(&label, row, &operation);
+                    let progress = DownloadProgress::of(&label, row);
                     let plugin_id = plugin.plugin_id.clone();
                     let method = method.clone();
                     let (dispatch, unavailable) = match target {
@@ -291,7 +293,7 @@ fn entry_login_expired(row: &FileRow) -> bool {
 
 /// 调用插件的载荷，照 Vue 各动作的载荷：歌曲、歌单标识，音质，公开的来源载荷，以及当前资源库的本地缓存目录
 /// （`managedCacheRoot`，没有时写 null）；重新获取播放资源多一个 `forceRefresh`，下载多一个歌单名。下载的
-/// `destination` 选好去处以后再写。
+/// `destination` 选好去处以后再写。下载目录不带 `tracks`（Vue 带目录里列出的曲目），插件按歌单标识自己取。
 fn call_payload(row: &FileRow, operation: &str, context: &SourceContext) -> Value {
     let mut payload = Map::new();
     if let Some(song_id) = source_number(row, "songId") {
