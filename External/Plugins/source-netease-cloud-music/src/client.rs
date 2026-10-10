@@ -240,6 +240,23 @@ pub(crate) fn fetch_lyrics(
     ))
 }
 
+/// 下载音频地址指向的文件内容（播放缓存和下载共用）。
+pub(crate) fn fetch_binary(url: &str) -> Result<Vec<u8>, String> {
+    let response = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(300))
+        .build()
+        .map_err(http_error)?
+        .get(url)
+        .send()
+        .map_err(http_error)?
+        .error_for_status()
+        .map_err(http_error)?;
+    response
+        .bytes()
+        .map(|bytes| bytes.to_vec())
+        .map_err(http_error)
+}
+
 fn lyric_text(field: Option<LyricField>) -> Option<String> {
     field
         .and_then(|value| value.lyric)

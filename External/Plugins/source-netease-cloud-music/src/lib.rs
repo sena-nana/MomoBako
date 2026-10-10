@@ -5,6 +5,8 @@
 mod auth;
 mod catalog;
 mod client;
+mod download;
+mod files;
 mod media;
 mod models;
 mod util;
@@ -71,10 +73,10 @@ fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String>
         "media.prepareTrackPlayback" => decode::<PrepareTrackPlaybackPayload>(request.payload)
             .and_then(|p| media::prepare_track_playback(&runtime, p)),
         "media.downloadTrackPackage" => decode::<DownloadTrackPackagePayload>(request.payload)
-            .and_then(|p| media::download_track_package(&runtime, p)),
+            .and_then(|p| download::download_track_package(&runtime, p)),
         "media.downloadPlaylistPackage" => {
             decode::<DownloadPlaylistPackagePayload>(request.payload)
-                .and_then(|p| media::download_playlist_package(&runtime, p))
+                .and_then(|p| download::download_playlist_package(&runtime, p))
         }
         "media.resolveLyrics" => decode::<ResolveLyricsPayload>(request.payload)
             .and_then(|p| media::resolve_lyrics(&runtime, p)),
