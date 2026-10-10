@@ -2,7 +2,8 @@
 //!
 //! 下载到用户选的本地目录（`localFolder`）时只新建文件：目录里已有的同名文件保留原样、不写入（音频已经在就不再
 //! 下载），结果的 `skippedEntries` 列出这些文件，`paths` 只列这次写下的。下载到其他资源库（`repository`）时先
-//! 放进插件管理的暂存目录，由宿主导入目标资源库。
+//! 放进宿主给这次下载新建的暂存目录（`destination.stagingPath`），由宿主导入目标资源库、导入完再清掉；宿主没给时
+//! 放进插件自己的旧暂存目录。
 //!
 //! 下载以前先查一次登录状态：登录失效时网易云只给试听片段或者不给地址，不先查就会每首都说取不到地址。歌单的曲目
 //! 取不到（网络、登录失效、歌单不存在）时整个调用报错、写明原因，不再什么也不下却交回成功。
@@ -310,14 +311,24 @@ fn path_strings(paths: &[PathBuf]) -> Vec<String> {
         .collect()
 }
 
-/// 下载落在哪里：本地目录保留已有文件；下载到其他资源库时放进插件管理的暂存目录，暂存过的同名文件可以替换。
+/// 下载落在哪里：本地目录保留已有文件。下载到其他资源库时放进宿主给这次下载新建的暂存目录（`stagingPath`，空的，
+/// 同样不覆盖）；宿主没给时放进插件自己的旧暂存目录，暂存过的同名文件可以替换。
 pub(crate) fn resolve_download_target(
     runtime: &RuntimeContext,
     destination: &DownloadDestination,
     managed_cache_root: Option<&str>,
 ) -> Result<DownloadTarget, String> {
-    match destination.kind.as_str() {
-        "localFolder" => destination
+    let staging = destination
+        .staging_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    match (destination.kind.as_str(), staging) {
+        ("repository", Some(staging)) => Ok(DownloadTarget {
+            root: join_parent(PathBuf::from(staging), destination),
+            policy: WritePolicy::KeepExisting,
+        }),
+        ("localFolder", _) => destination
             .path
             .as_deref()
             .map(str::trim)
@@ -327,7 +338,7 @@ pub(crate) fn resolve_download_target(
                 policy: WritePolicy::KeepExisting,
             })
             .ok_or_else(|| "localFolder 缺少 path".to_string()),
-        "repository" => {
+        ("repository", None) => {
             let repo_key = destination
                 .repo_id
                 .as_deref()
@@ -348,23 +359,27 @@ pub(crate) fn resolve_download_target(
                         .join("exports/repository-staging")
                         .join(&repo_key)
                 });
-            let parent = destination
-                .parent_path
-                .as_deref()
-                .unwrap_or_default()
-                .replace('\\', "/");
-            let parent = parent.trim_matches('/');
-            let root = if parent.is_empty() {
-                root
-            } else {
-                root.join(parent)
-            };
             Ok(DownloadTarget {
-                root,
+                root: join_parent(root, destination),
                 policy: WritePolicy::Replace,
             })
         }
-        other => Err(format!("unsupported destination kind: {other}")),
+        (other, _) => Err(format!("unsupported destination kind: {other}")),
+    }
+}
+
+/// 暂存根目录下再按载荷的 `parentPath` 分一层（没有时就是根目录）。
+fn join_parent(root: PathBuf, destination: &DownloadDestination) -> PathBuf {
+    let parent = destination
+        .parent_path
+        .as_deref()
+        .unwrap_or_default()
+        .replace('\\', "/");
+    let parent = parent.trim_matches('/');
+    if parent.is_empty() {
+        root
+    } else {
+        root.join(parent)
     }
 }
 

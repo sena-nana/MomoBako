@@ -382,4 +382,7 @@ pub(crate) struct DownloadDestination {
     pub path: Option<String>,
     pub repo_id: Option<String>,
     pub parent_path: Option<String>,
+    /// 下载到其他资源库时宿主给这次下载新建的空暂存目录；没有时用插件自己的旧暂存目录。
+    #[serde(default)]
+    pub staging_path: Option<String>,
 }
