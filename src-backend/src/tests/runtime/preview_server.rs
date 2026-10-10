@@ -262,12 +262,10 @@ fn repository_query_prepare_preview_file_source_returns_preview_url() {
     fs::remove_dir_all(root).expect("test temp root should be removed");
 }
 
+// helper 清理测试显式传服务目录，不能靠 `start()` 加改当前目录：cwd 是进程级的，并行测试会互相串目录。
 #[test]
 fn repository_runtime_start_cleans_stale_office_helper_state() {
     let root = unique_temp_dir("runtime-start-office-helper");
-    let previous = std::env::current_dir().expect("cwd should resolve");
-    std::env::set_current_dir(&root).expect("cwd should switch to temp root");
-
     let service_root = root.join(".service-data");
     install_local_filesystem_test_plugin_archive(&service_root);
     let plugin_dir = plugin_data_dir(&service_root, "momobako.service.office-convert");
@@ -283,7 +281,7 @@ fn repository_runtime_start_cleans_stale_office_helper_state() {
     )
     .expect("helper script should be written");
 
-    let runtime = crate::services::runtime::RepositoryRuntime::start()
+    let runtime = crate::services::runtime::RepositoryRuntime::start_at(service_root.clone())
         .expect("repository runtime should start");
 
     assert!(!helper_dir.join("pid.txt").exists());
@@ -293,16 +291,12 @@ fn repository_runtime_start_cleans_stale_office_helper_state() {
     assert!(!helper_dir.join("office-convert-helper.ps1").exists());
 
     runtime.shutdown_helpers();
-    std::env::set_current_dir(previous).expect("cwd should restore");
     fs::remove_dir_all(root).expect("test temp root should be removed");
 }
 
 #[test]
 fn repository_runtime_start_cleans_stale_aria2_helper_state() {
     let root = unique_temp_dir("runtime-start-aria2-helper");
-    let previous = std::env::current_dir().expect("cwd should resolve");
-    std::env::set_current_dir(&root).expect("cwd should switch to temp root");
-
     let service_root = root.join(".service-data");
     install_local_filesystem_test_plugin_archive(&service_root);
     let plugin_dir = plugin_data_dir(&service_root, "momobako.service.downloader");
@@ -313,7 +307,7 @@ fn repository_runtime_start_cleans_stale_aria2_helper_state() {
     fs::write(helper_dir.join("session.txt"), "aria2-session")
         .expect("session state should be written");
 
-    let runtime = crate::services::runtime::RepositoryRuntime::start()
+    let runtime = crate::services::runtime::RepositoryRuntime::start_at(service_root.clone())
         .expect("repository runtime should start");
 
     assert!(!helper_dir.join("pid.txt").exists());
@@ -321,6 +315,5 @@ fn repository_runtime_start_cleans_stale_aria2_helper_state() {
     assert!(!helper_dir.join("session.txt").exists());
 
     runtime.shutdown_helpers();
-    std::env::set_current_dir(previous).expect("cwd should restore");
     fs::remove_dir_all(root).expect("test temp root should be removed");
 }
