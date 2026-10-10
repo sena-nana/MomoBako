@@ -166,6 +166,7 @@ pub(crate) struct HardlinkView {
     pub message: String,
     pub existing_path: String,
     pub new_path: String,
+    /// 确认请求在途，或者确认以后的候选重读还没回来（Vue `isMutatingFiles` 包着整轮刷新）。
     pub busy: bool,
     pub confirm: String,
 }
@@ -181,8 +182,8 @@ impl HardlinkView {
             message: prompt.message(),
             existing_path: prompt.existing_path.clone(),
             new_path: prompt.new_path.clone(),
-            busy: files.mutating,
-            confirm: if files.mutating { "处理中..." } else { "加入关联" }.to_string(),
+            busy: files.hardlink_busy(),
+            confirm: if files.hardlink_busy() { "处理中..." } else { "加入关联" }.to_string(),
         })
     }
 }

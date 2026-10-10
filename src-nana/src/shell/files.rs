@@ -231,11 +231,12 @@ pub enum FilesEffect {
     ImportEagle { repo_id: String, parent: Option<String>, library_path: String, mode: String },
     Delete { repo_id: String, paths: Vec<String>, mode: Option<String> },
     MutateTrash { repo_id: String, action: String, paths: Vec<String> },
-    LoadHardlinks { repo_id: String },
+    /// 复制以后读候选。`epoch` 是请求时候选列表的版本，结果按它认过期（见 `files_hardlink.rs`）。
+    LoadHardlinks { repo_id: String, epoch: u64 },
     /// 结构更新静默重读候选。不打开对话框，失败不写入页面错误。
-    RefreshHardlinks { repo_id: String },
-    /// 启动和换仓库后在后台查一次候选（Vue `queueRepositoryBackgroundLoads`）。失败只记日志。
-    CheckHardlinks { repo_id: String },
+    RefreshHardlinks { repo_id: String, epoch: u64 },
+    /// 启动和换仓库后在后台查一次候选（Vue `queueRepositoryBackgroundLoads`），确认以后也用它重读。失败只记日志。
+    CheckHardlinks { repo_id: String, epoch: u64 },
     ConfirmHardlink { repo_id: String, candidate_id: String },
     LoadAsset { repo_id: String, asset_id: String },
     PersistDisplayMode,
@@ -304,11 +305,12 @@ pub enum FilesMessage {
     ConfirmHardlink,
     MutationSnapshot { result: Result<FileBrowserSnapshot, String>, created_name: Option<String> },
     ProtocolFinished { result: Result<(), String>, reload: bool, hardlinks: bool },
-    HardlinksLoaded(Result<Vec<HardlinkPrompt>, String>),
+    /// 复制以后读到的候选。`epoch` 是请求时候选列表的版本，比现在旧的结果丢掉。
+    HardlinksLoaded { epoch: u64, result: Result<Vec<HardlinkPrompt>, String> },
     /// 静默刷新结果。只替换候选，不改对话框和页面错误。
-    HardlinksRefreshed(Result<Vec<HardlinkPrompt>, String>),
+    HardlinksRefreshed { epoch: u64, result: Result<Vec<HardlinkPrompt>, String> },
     /// 启动和换仓库后查到的候选：换掉列表，没有别的对话框时有候选就弹出确认。
-    HardlinksChecked(Result<Vec<HardlinkPrompt>, String>),
+    HardlinksChecked { epoch: u64, result: Result<Vec<HardlinkPrompt>, String> },
     /// 确认硬链接的结果：成功时是确认掉的候选。`repo_id` 是确认时的仓库。
     HardlinkConfirmed { repo_id: String, result: Result<String, String> },
     NoteError(String),
@@ -364,6 +366,10 @@ pub struct FilesState {
     copy_sources: Vec<String>,
     hardlinks: Vec<HardlinkPrompt>,
     skipped_hardlinks: Vec<String>,
+    /// 候选列表的版本：确认结果回来、换仓库时加一，之前发出的读取回来时已经过期，见 `files_hardlink.rs`。
+    hardlink_epoch: u64,
+    /// 确认结果回来以后在重读候选：确认框的按钮禁用，读回来（或读失败）才放开。
+    pub(super) hardlink_rereading: bool,
     pending: Option<BrowsePending>,
     effects: Vec<FilesEffect>,
     pub(super) entry_menu: Option<EntryMenu>,
