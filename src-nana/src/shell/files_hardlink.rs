@@ -1,8 +1,10 @@
 //! 硬链接候选：显式读取、启动和换仓库后的后台检查、结构更新后的静默重读，以及确认框里的确认和跳过。
 //!
 //! 对应 Vue `HardlinkCandidateDialog.vue` 和 `listHardlinkCandidates` / `confirmHardlinkCandidate`：
-//! 确认框显示第一个没跳过的候选，跳过只记在本地，不调用服务。
+//! 确认框显示第一个没跳过的候选，跳过只记在本地，不调用服务。确认成功以后照 Vue 重读候选、仓库摘要和
+//! 当前目录（[`finish_confirm`]）。
 
+use super::super::ShellViewModel;
 use super::{FileContext, FileDialog, FilesEffect, FilesState};
 
 /// 硬链接确认框只保留文案需要的字段。
@@ -135,6 +137,8 @@ impl FilesState {
         }
     }
 
+    /// 确认的结果落到候选上：成功按 id 移除、没有剩余就关掉确认框；失败留着这条，写下错误。重读由
+    /// [`finish_confirm`] 排。
     pub(in crate::shell) fn note_hardlink_confirmed(&mut self, result: Result<String, String>) {
         self.mutating = false;
         match result {
@@ -153,4 +157,24 @@ impl FilesState {
             }
         }
     }
+}
+
+/// 确认硬链接的结果到了（Vue `confirmWorkspaceHardlinkCandidate`）。先落到候选上；确认时的仓库还是活动仓库时：
+/// - 成功照 Vue `refreshWorkspace(repoId, { directory, hardlinkCandidates, repositorySnapshot })`：重读候选（换掉
+///   列表、跳过的留着，还有没跳过的就接着弹确认），静默重读仓库摘要，不在回收站和智能文件夹时非静默地重读当前
+///   目录（任务弹层「读取目录」），新文件的硬链接状态和侧栏计数跟着更新；
+/// - 失败照 Vue 静默重读候选（读失败只记日志），确认框按最新的列表走，错误留在文件列。
+pub(in crate::shell) fn finish_confirm(model: &mut ShellViewModel, repo_id: &str, result: Result<String, String>) {
+    let confirmed = result.is_ok();
+    model.files.note_hardlink_confirmed(result);
+    if model.workspace.active_repo_id.as_deref() != Some(repo_id) {
+        eprintln!("Nana 确认硬链接回来时已经换了仓库，不重读：{repo_id}");
+        return;
+    }
+    if !confirmed {
+        model.files.refresh_hardlinks_silent(repo_id);
+        return;
+    }
+    model.files.check_hardlinks(repo_id);
+    model.reload_after_mutation(repo_id);
 }

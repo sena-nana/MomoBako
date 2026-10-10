@@ -103,7 +103,7 @@
 | `fileOperations.ts` 协议结果 | 复制、移动、导入、压缩包、Eagle 或删除返回 | 成功后重新 `get_file_browser` | 成功不改当前行，保留选择并允许分类视图重读；智能文件夹不按目录重读；复制成功再列硬链接候选；失败保留原列表和对话框 | 对话框在成功后关闭 | 已测试（未离屏） |
 | `fileOperations.ts` 删除 | 有选择且可写 | `PROTOCOL_ENTRY_DELETE` | 回收站 mode 为 `permanentDelete`，普通删除 mode 为空；失败保留原列表和对话框 | 文件列显示“正在处理文件”；回收站里“彻底删除”要点两次 | 已测试（未离屏） |
 | `fileOperations.ts` 回收站 | 还原、还原全部、清空 | `mutate_trash` | 还原只在回收站；清空和还原全部不要求当前选择 | 文件列显示“正在处理文件” | 已测试（未离屏） |
-| `HardlinkCandidateDialog.vue` | 候选到达（复制以后；刷新文件夹树以后；启动和换仓库绑定侧栏时照 Vue 后台读 `list_hardlink_candidates`）、跳过、确认 | 确认用 `confirm_hardlink_candidate`；跳过无请求；后台读取失败只记日志 | 跳过只记本地 id 并显示下一条；确认失败保留该条；确认成功按 id 移除，没有剩余则关闭 | “确认后会将新文件加入硬链接关联。”；跳过 / 加入关联 | 已测试（未离屏） |
+| `HardlinkCandidateDialog.vue` | 候选到达（复制以后；刷新文件夹树以后；启动和换仓库绑定侧栏时照 Vue 后台读 `list_hardlink_candidates`）、跳过、确认 | 确认用 `confirm_hardlink_candidate`；成功以后照 Vue `refreshWorkspace(repoId, { directory, hardlinkCandidates, repositorySnapshot })` 重读候选（`CheckHardlinks`）、静默重读仓库摘要，不在回收站和智能文件夹时非静默重读当前目录；失败静默重读候选；跳过无请求；后台读取失败只记日志 | 跳过只记本地 id 并显示下一条；确认失败保留该条，错误写在文件列；确认成功按 id 移除，没有剩余则关闭，重读的候选里还有没跳过的就接着弹确认；确认回来时已经换了仓库就不重读 | “确认后会将新文件加入硬链接关联。”；跳过 / 加入关联；确认成功后任务弹层「读取目录」 | 已测试（`operation_row_tests.rs`，未离屏） |
 | `files.ts` 展示方式 | 切换或读取 `file-display.json` | `PersistDisplayMode` | 值是 adaptive、masonry、grid、list，也接受中文标签；未知、损坏或文件缺失回到自适应；只在切换时写入。四种都用 `each_virtual` 按视口虚拟化，行高按内容量；瀑布流照 CSS 多列分列 | “自适应 / 瀑布流 / 网格 / 列表” | 已测试（未离屏） |
 | `files.ts` 重命名草稿 | 选择变成多项，或主选变化 | 无 | 清掉重命名路径和草稿，并关闭重命名框 | 重命名框消失 | 已测试（未离屏） |
 | Eagle 导入 | 模式为 copy 或 move，库路径非空 | `PROTOCOL_EAGLE_IMPORT` | 其他模式不打开对话框；空白路径不提交 | 对话框主按钮写“处理中...”并禁用 | 已测试（未离屏） |

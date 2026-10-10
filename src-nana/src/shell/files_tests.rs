@@ -334,11 +334,11 @@ fn hardlink_skip_hides_candidate_and_confirm_failure_keeps_it() {
     state.reduce(&ctx, FilesMessage::SkipHardlink);
     assert_eq!(state.current_hardlink().map(|item| item.id.as_str()), Some("two"));
     state.mutating = true;
-    state.reduce(&ctx, FilesMessage::HardlinkConfirmed(Err("确认失败".into())));
+    state.reduce(&ctx, FilesMessage::HardlinkConfirmed { repo_id: "repo".into(), result: Err("确认失败".into()) });
     assert_eq!(state.current_hardlink().map(|item| item.id.as_str()), Some("two"));
     assert_eq!(state.error, "确认失败");
     assert!(!state.mutating);
-    state.reduce(&ctx, FilesMessage::HardlinkConfirmed(Ok("two".into())));
+    state.reduce(&ctx, FilesMessage::HardlinkConfirmed { repo_id: "repo".into(), result: Ok("two".into()) });
     assert!(state.current_hardlink().is_none());
     assert_eq!(state.dialog, FileDialog::Closed);
     assert!(first.message().contains("确认后会将新文件加入硬链接关联"));

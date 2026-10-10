@@ -5,7 +5,7 @@ use crate::backend::services::repository::{FileBrowserSnapshot, RepositoryStruct
 
 use super::files::{FileDialog, FilesMessage};
 use super::repo_operation::{CLIMB_INTERVAL_MS, FINISH_LINGER_MS};
-use super::{ShellMessage, ShellViewModel};
+use super::{FilesEffect, ShellMessage, ShellViewModel, WorkspaceEffect};
 
 /// 列表模式的文件页：assets 文件夹、cover.png 和 notes/page.pdf，资源库可写。
 fn files_page() -> ShellViewModel {
@@ -150,4 +150,67 @@ fn only_multi_delete_shows_the_operation_and_failures_clear_it() {
     files(&mut model, FilesMessage::ProtocolFinished { result: Err("删除失败".into()), reload: false, hardlinks: false });
     assert!(operation_row(&model).is_none(), "失败时收起");
     assert_eq!(model.files.error, "删除失败");
+}
+
+/// 启动后读到一条硬链接候选的文件页（inbox/cover.png 与 cover.png 哈希一致），之前排下的请求清掉。
+fn hardlink_page() -> (ShellViewModel, String) {
+    let mut model = super::acceptance_gap_models()
+        .into_iter()
+        .find(|(scene, _)| *scene == "hardlink-dialog")
+        .map(|(_, model)| model)
+        .expect("硬链接确认场景");
+    let repo_id = model.workspace.active_repo_id.clone().expect("活动仓库");
+    let _ = model.files.take_effects();
+    let _ = model.workspace.take_effects();
+    (model, repo_id)
+}
+
+/// 确认硬链接照 Vue `refreshWorkspace(repoId, { directory, hardlinkCandidates, repositorySnapshot })`：确认本身不出
+/// 进度行；成功以后重读候选、静默重读仓库摘要、非静默地重读当前目录，任务弹层是「读取目录」，目录读回来收起。
+/// 只有这一条候选时确认框关掉。
+#[test]
+fn confirming_a_hardlink_reloads_candidates_summary_and_directory() {
+    let (mut model, repo_id) = hardlink_page();
+    assert_eq!(model.files.dialog, FileDialog::Hardlink);
+    files(&mut model, FilesMessage::ConfirmHardlink);
+    assert_eq!(model.files.take_effects(), vec![FilesEffect::ConfirmHardlink { repo_id: repo_id.clone(), candidate_id: "link-1".into() }]);
+    assert!(model.files.mutating, "确认在途时按钮禁用");
+    assert!(operation_row(&model).is_none(), "确认本身不出进度行");
+
+    files(&mut model, FilesMessage::HardlinkConfirmed { repo_id: repo_id.clone(), result: Ok("link-1".into()) });
+    assert!(!model.files.mutating);
+    assert_eq!(model.files.dialog, FileDialog::Closed);
+    let effects = model.files.take_effects();
+    assert!(effects.contains(&FilesEffect::CheckHardlinks { repo_id: repo_id.clone() }), "重读候选：{effects:?}");
+    assert!(
+        effects.iter().any(|effect| matches!(effect, FilesEffect::Browse { path, append: false, trash: false, .. } if path.is_empty())),
+        "重读当前目录：{effects:?}"
+    );
+    assert_eq!(model.workspace.take_effects(), vec![WorkspaceEffect::LoadSnapshotSilent { repo_id }]);
+    assert_eq!(operation_row(&model), Some(("读取目录".into(), "正在读取根目录".into(), 14.0)));
+    let message = reloaded(&model);
+    model.reduce(message);
+    assert_eq!(operation_row(&model), Some(("读取目录".into(), "整理目录条目".into(), 100.0)));
+}
+
+/// 确认失败照 Vue 静默重读候选，确认框和这一条留着，错误写在文件列，不重读目录和摘要；确认回来时已经换了
+/// 仓库就什么也不读。
+#[test]
+fn a_failed_or_stale_hardlink_confirmation_does_not_reload_the_workspace() {
+    let (mut model, repo_id) = hardlink_page();
+    files(&mut model, FilesMessage::ConfirmHardlink);
+    let _ = model.files.take_effects();
+    files(&mut model, FilesMessage::HardlinkConfirmed { repo_id: repo_id.clone(), result: Err("哈希不一致".into()) });
+    assert_eq!(model.files.take_effects(), vec![FilesEffect::RefreshHardlinks { repo_id: repo_id.clone() }]);
+    assert!(model.workspace.take_effects().is_empty());
+    assert_eq!(model.files.dialog, FileDialog::Hardlink, "这一条留着");
+    assert_eq!(model.files.error, "哈希不一致");
+    assert!(operation_row(&model).is_none());
+
+    files(&mut model, FilesMessage::ConfirmHardlink);
+    let _ = model.files.take_effects();
+    files(&mut model, FilesMessage::HardlinkConfirmed { repo_id: "other-repo".into(), result: Ok("link-1".into()) });
+    assert!(!model.files.mutating);
+    assert!(model.files.take_effects().is_empty(), "别的仓库的结果不重读");
+    assert!(model.workspace.take_effects().is_empty());
 }
