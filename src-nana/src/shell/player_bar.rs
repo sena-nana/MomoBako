@@ -406,7 +406,6 @@ pub(crate) fn glyph_button(icon: Icon, label: &str, icon_size: f32, box_size: f3
     let mut button = IconButton::new(icon, label).colors_from_style().disabled(disabled);
     button.style.foreground = Some(SemanticColorRole::Text);
     button.style.background = None;
-    button.style.square = None;
     button.style.control_padding_x = None;
     button.style.painter = Some(GlyphButton { icon, size: icon_size, color: SemanticColorRole::Text, dim: disabled }.into());
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
