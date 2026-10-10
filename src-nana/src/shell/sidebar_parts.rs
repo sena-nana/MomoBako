@@ -406,17 +406,3 @@ impl FieldWrite<IconButton, bool> for DimmedTool {
     }
 }
 
-/// 图标字形本身，文件夹开合这类随状态换图标的地方用。
-pub(crate) struct GlyphIcon;
-
-impl FieldWrite<IconGlyph, Icon> for GlyphIcon {
-    const FIELD: &'static str = "IconGlyph.icon";
-
-    fn write(target: &mut IconGlyph, icon: Icon) {
-        target.icon = icon;
-    }
-
-    fn differs(target: &IconGlyph, icon: &Icon) -> bool {
-        target.icon != *icon
-    }
-}

@@ -2,13 +2,13 @@
 //!
 //! - [`row_text`]、[`row_flag`]：列表行里的字段绑定，行已经删掉时读默认值；
 //! - [`row_draft`]：列表行里受控输入框的草稿，行里的 ViewModel 值相对上次投影变了才写回；
-//! - [`StyleField`]、[`ReadOnly`]、[`FollowEnd`]：控件表里没有的可绑定字段；按钮图标用各页共用的
-//!   [`ButtonIcon`]（`field_bind.rs`）。
+//! - [`ActionDisabled`]、[`ReadOnly`]、[`FollowEnd`]：控件表里没有的可绑定字段；按钮图标和整份样式用各页共用的
+//!   [`ButtonIcon`]、[`StyleField`]（`field_bind.rs`）。
 
-use nana_ui::runtime::view::{untrack, watch_effect, FieldWrite, StorePath, StyledComponent};
-use nana_ui::runtime::{Button, NodeStyle, ScrollView, TextInput};
+use nana_ui::runtime::view::{untrack, watch_effect, FieldWrite, StorePath};
+use nana_ui::runtime::{Button, ScrollView, TextInput};
 
-pub(crate) use super::super::field_bind::ButtonIcon;
+pub(crate) use super::super::field_bind::{ButtonIcon, StyleField};
 use super::super::hot::ModelField;
 use crate::theme_map::DISABLED_OPACITY;
 
@@ -32,22 +32,6 @@ pub(crate) fn row_draft(read: impl Fn() -> Option<String> + 'static) -> ModelFie
         }
     });
     draft
-}
-
-/// 整份节点样式：外观随状态整套换（分段按钮的选中态、状态胶囊的语气）。
-/// 不要和 `.visible(..)` 绑在同一个节点上，整份写会把显隐冲掉。
-pub(crate) struct StyleField;
-
-impl<C: StyledComponent> FieldWrite<C, NodeStyle> for StyleField {
-    const FIELD: &'static str = "style";
-
-    fn write(target: &mut C, style: NodeStyle) {
-        *target.node_style_mut() = style;
-    }
-
-    fn differs(target: &C, style: &NodeStyle) -> bool {
-        target.node_style() != style
-    }
 }
 
 /// `style::action` 按钮的禁用：Vue 原生按钮禁用时整体 45% 不透明，不换颜色，所以和禁用标志一起写透明度。
