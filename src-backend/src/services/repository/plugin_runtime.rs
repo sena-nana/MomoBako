@@ -142,6 +142,14 @@ impl PluginCatalog {
             .unwrap_or_else(|| trimmed.to_string())
     }
 
+    /// 插件当前接不了调用时返回原因：未注册、被禁用、依赖不满足或运行时不可用。
+    pub(super) fn call_unavailable_reason(&self, plugin_id: &str) -> Option<String> {
+        match self.resolved_manifest(plugin_id) {
+            Some(manifest) => manifest_call_block_reason(&manifest),
+            None => Some("插件未注册。".to_string()),
+        }
+    }
+
     pub(super) fn call(
         &self,
         plugin_id: &str,
@@ -161,16 +169,7 @@ impl PluginCatalog {
         let resolved_manifest = self
             .resolved_manifest(plugin_id)
             .ok_or_else(|| format!("unsupported plugin: {plugin_id}"))?;
-        if !resolved_manifest.enabled
-            || matches!(
-                resolved_manifest.status.as_str(),
-                "disabled" | "unavailable" | "error"
-            )
-        {
-            let reason = resolved_manifest
-                .disable_reason
-                .as_deref()
-                .unwrap_or("插件不可用。");
+        if let Some(reason) = manifest_call_block_reason(&resolved_manifest) {
             return Err(format!(
                 "plugin call blocked by dependency status: {} {method} ({reason})",
                 resolved_manifest.plugin_id
@@ -280,6 +279,21 @@ impl PluginCatalog {
         providers.sort_by(|left, right| left.0.cmp(&right.0).then_with(|| left.1.cmp(&right.1)));
         providers
     }
+}
+
+/// 已解析依赖的插件被禁用、依赖不满足或运行时不可用时，返回拦下调用的原因。
+fn manifest_call_block_reason(manifest: &PluginManifest) -> Option<String> {
+    let blocked = !manifest.enabled
+        || matches!(
+            manifest.status.as_str(),
+            "disabled" | "unavailable" | "error"
+        );
+    blocked.then(|| {
+        manifest
+            .disable_reason
+            .clone()
+            .unwrap_or_else(|| "插件不可用。".to_string())
+    })
 }
 
 fn test_local_filesystem_adapter_enabled() -> bool {

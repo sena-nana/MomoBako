@@ -278,9 +278,9 @@ pub(crate) fn create_local_repository_record_for_external_tests(
     repo_id
 }
 
-/// 只写一条资源库登记，不准备存储也不注册后端插件，模拟插件被移除后留下的登记。
+/// 只写一条资源库登记，不准备 `.momo` 存储也不检查后端插件，模拟插件被移除或 `.momo` 被删后留下的登记。
 #[cfg(test)]
-pub(crate) fn register_repository_without_backend_plugin(
+pub(crate) fn register_repository_record_only(
     state: &RepositoryState,
     repo_id: &str,
     repo_root: &Path,
@@ -307,6 +307,31 @@ pub(crate) fn register_repository_without_backend_plugin(
             ],
         )
         .expect("repository should be registered");
+}
+
+/// 装一个清单上就绪的本地根目录来源插件。测试里没有 Host 接它的调用，所以对它的后端调用都会失败。
+#[cfg(test)]
+pub(crate) fn install_unreachable_filesystem_source_plugin(
+    state: &RepositoryState,
+    plugin_id: &str,
+) {
+    write_test_plugin_archive_with_manifest(
+        &plugin::runtime_plugins_dir(&state.root).join(format!("{plugin_id}.momoplug")),
+        test_plugin_manifest_json(
+            plugin_id,
+            "Unreachable Filesystem",
+            serde_json::json!({
+                "kind": "filesystem",
+                "category": "source",
+                "type": {
+                    "layer": "source",
+                    "kind": "filesystem"
+                },
+                "capabilities": ["browse", "read", "write", "watch", "sync", "localRootPath"],
+                "runtime": "manifest-only"
+            }),
+        ),
+    );
 }
 
 #[cfg(test)]

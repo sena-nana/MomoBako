@@ -23,8 +23,8 @@ pub struct RepositoryState {
     pub(super) preview_sources: Mutex<BTreeMap<String, PreviewFileSource>>,
     pub(super) structure_refresh_tx: Mutex<Option<Sender<RepositoryStructureRefreshRequest>>>,
     pub(super) refreshing_repo_ids: Mutex<BTreeSet<String>>,
-    /// 已经告警过「后端插件未注册」的资源库，列表每次刷新时不再重复告警。
-    pub(super) unregistered_backend_repo_ids: Mutex<BTreeSet<String>>,
+    /// 在列表里降级显示的资源库和告警过的原因，原因没变就不重复告警。
+    pub(super) degraded_listing_reasons: Mutex<BTreeMap<String, String>>,
     pub(super) event_sink: Mutex<Option<Arc<dyn HostEventSink>>>,
 }
 
@@ -39,7 +39,7 @@ impl RepositoryState {
             preview_sources: Mutex::new(BTreeMap::new()),
             structure_refresh_tx: Mutex::new(None),
             refreshing_repo_ids: Mutex::new(BTreeSet::new()),
-            unregistered_backend_repo_ids: Mutex::new(BTreeSet::new()),
+            degraded_listing_reasons: Mutex::new(BTreeMap::new()),
             event_sink: Mutex::new(None),
         }
     }
@@ -229,20 +229,7 @@ impl RepositoryState {
         self.load_repository_records()?
             .into_iter()
             .map(|repo| {
-                let backend_registered = backend_summary_is_registered(&repo.summary.backend);
-                self.track_unregistered_backend(&repo, backend_registered);
-                // 后端插件未注册时打开存储会选错位置、触发注定失败的重建，只列出、不打开，
-                // 免得一个资源库拖垮整张列表、文件监听和运行时启动。
-                let asset_count = if repo.summary.status == "missing" || !backend_registered {
-                    0
-                } else {
-                    let connection = self.open_repository_connection(
-                        &repo.summary.repo_id,
-                        &repo.summary.path,
-                        &repo.backend_record,
-                    )?;
-                    load_active_asset_count(&connection).map_err(db_error)?
-                };
+                let asset_count = self.listed_asset_count(&repo)?;
                 Ok(RepositorySummary {
                     asset_count,
                     ..repo.summary
@@ -251,29 +238,59 @@ impl RepositoryState {
             .collect()
     }
 
-    /// 资源库后端插件未注册时只在第一次发现时告警；插件恢复注册后清掉记录，下次再丢还会告警。
-    fn track_unregistered_backend(&self, repo: &RepositoryRecord, registered: bool) {
-        let mut repo_ids = self
-            .unregistered_backend_repo_ids
+    /// 列表里的资源数。后端插件未注册、或者存储要重建却没建成时只列出不打开，资源数记 0，
+    /// 免得一个资源库拖垮整张列表。
+    fn listed_asset_count(&self, repo: &RepositoryRecord) -> Result<i64, String> {
+        if repo.summary.status == "missing" {
+            return Ok(0);
+        }
+        // 插件未注册时连存储放在资源库目录还是服务目录都定不了，不能去碰存储。
+        if !backend_summary_is_registered(&repo.summary.backend) {
+            self.track_listing_degraded(repo, Some("后端插件未注册。"));
+            return Ok(0);
+        }
+        match self.open_repository_storage(
+            &repo.summary.repo_id,
+            &repo.summary.path,
+            &repo.backend_record,
+        )? {
+            RepositoryStorage::Ready(connection) => {
+                self.track_listing_degraded(repo, None);
+                load_active_asset_count(&connection).map_err(db_error)
+            }
+            RepositoryStorage::RebuildPending(reason) => {
+                self.track_listing_degraded(repo, Some(&reason));
+                Ok(0)
+            }
+        }
+    }
+
+    /// 资源库在列表里降级时告警；同一个原因只告警一次，恢复正常后清掉记录，下次再出问题还会告警。
+    fn track_listing_degraded(&self, repo: &RepositoryRecord, reason: Option<&str>) {
+        let mut reasons = self
+            .degraded_listing_reasons
             .lock()
             .unwrap_or_else(PoisonError::into_inner);
-        if registered {
-            repo_ids.remove(&repo.summary.repo_id);
+        let Some(reason) = reason else {
+            reasons.remove(&repo.summary.repo_id);
+            return;
+        };
+        if reasons.get(&repo.summary.repo_id).map(String::as_str) == Some(reason) {
             return;
         }
-        if repo_ids.insert(repo.summary.repo_id.clone()) {
-            crate::app_log!(
-                "warn",
-                "repository.query",
-                "backendUnregistered",
-                "资源库的后端插件未注册，列表只显示它、不打开它的存储。",
-                serde_json::json!({
-                    "repoId": repo.summary.repo_id.as_str(),
-                    "pluginId": repo.backend_record.plugin_id.as_str(),
-                    "path": repo.summary.path.as_str(),
-                })
-            );
-        }
+        reasons.insert(repo.summary.repo_id.clone(), reason.to_string());
+        crate::app_log!(
+            "warn",
+            "repository.query",
+            "listingDegraded",
+            "资源库暂时打不开存储，列表只显示它，资源数记 0。",
+            serde_json::json!({
+                "repoId": repo.summary.repo_id.as_str(),
+                "pluginId": repo.backend_record.plugin_id.as_str(),
+                "path": repo.summary.path.as_str(),
+                "reason": reason,
+            })
+        );
     }
 
     /// Returns repository thumbnail roots that should be exposed to the desktop asset scope.
