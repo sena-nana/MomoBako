@@ -9,7 +9,6 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use nana_ui::runtime::Task;
 use nana_ui::RuntimeProgramContext;
 use serde_json::{json, Value};
 
@@ -23,6 +22,7 @@ use crate::shell::admin::source_download::{DownloadOutcome, DownloadRun};
 use crate::shell::admin::source_target::{result_paths, TargetCandidate};
 use crate::shell::admin::AdminMessage;
 use crate::shell::ShellMessage;
+use crate::task_guard::spawn_service;
 use crate::MomoBakoApplication;
 
 /// 下载到其他资源库要用的领域服务。产品里是 `NativeServices` 的 ViewModel（[`LiveServices`]），测试里换成假的。
@@ -40,7 +40,7 @@ pub(crate) trait DownloadServices {
 }
 
 /// 来源下载到其他资源库：交给任务线程做完一整趟（[`run`]），结果回 [`AdminMessage::DownloadFinished`]。没有目标
-/// 资源库、服务没启动或者任务提交失败时当场按失败交回。
+/// 资源库时当场按失败交回；服务没启动、任务排不进去或任务 panic 时也按失败交回（`task_guard.rs`）。
 pub(crate) fn download_to_repository(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
@@ -53,28 +53,23 @@ pub(crate) fn download_to_repository(
         app.shell.reduce(finished(run, Err("没有选定目标资源库。".into())));
         return;
     };
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 来源下载需要领域服务，当前服务未启动：{}", run.method);
-        app.shell.reduce(finished(run, Err("领域服务未启动".into())));
-        return;
-    };
-    let live = LiveServices {
-        plugin: services.plugin.clone(),
-        browser: services.file_browser.clone(),
-        tasks: services.tasks.clone(),
-        system: services.system.clone(),
-        executor: services.executor.clone(),
-    };
-    let managed_cache_root = payload.get("managedCacheRoot").and_then(Value::as_str);
-    let root = staging_root(managed_cache_root, &services.runtime.service_root(), &target.repo_id);
     let failed_run = run.clone();
-    if let Err(error) = context.run_task(Task::new(async move {
-        let result = self::run(&live, &run, &target, payload, parent_path, &root);
-        finished(run, result)
-    })) {
-        eprintln!("Nana 来源下载任务提交失败：{error}");
-        app.shell.reduce(finished(failed_run, Err(format!("来源下载任务提交失败：{error}"))));
-    }
+    let failed = move |error| finished(failed_run.clone(), Err(error));
+    spawn_service(app.services.as_ref(), context, "来源下载", failed, |services| {
+        let live = LiveServices {
+            plugin: services.plugin.clone(),
+            browser: services.file_browser.clone(),
+            tasks: services.tasks.clone(),
+            system: services.system.clone(),
+            executor: services.executor.clone(),
+        };
+        let managed_cache_root = payload.get("managedCacheRoot").and_then(Value::as_str);
+        let root = staging_root(managed_cache_root, &services.runtime.service_root(), &target.repo_id);
+        move || {
+            let result = self::run(&live, &run, &target, payload, parent_path, &root);
+            finished(run, result)
+        }
+    });
 }
 
 fn finished(run: DownloadRun, result: Result<DownloadOutcome, String>) -> ShellMessage {

@@ -3,7 +3,6 @@
 //! 只在启动就绪时写入列表、名称和侧栏计数。
 //! 不改页面、不推进启动步骤，也不清空缺失仓库已经显示的内容。
 
-use nana_ui::runtime::Task;
 use nana_ui::RuntimeProgramContext;
 
 use crate::backend::services::repository::{RepositorySnapshot, RepositorySummary};
@@ -110,54 +109,24 @@ pub(super) fn apply_snapshot(model: &mut ShellViewModel, result: Result<Reposito
     model.sidebar.apply_snapshot(&assets, snapshot.overview.trash_count, quick_access);
 }
 
-/// 后台读取仓库列表。服务未启动时把错误交回静默归约，不增加列表代次。
-pub(crate) fn dispatch_silent_list(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
-    let prepared = app.services.as_ref().map(|services| {
-        (services.repository_query.clone(), services.executor.clone())
+/// 后台读取仓库列表。失败（含服务没起来、任务排不进去和 panic，`task_guard.rs`）交回静默归约，不增加列表代次。
+pub(crate) fn dispatch_silent_list(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
+    let failed = |error| ShellMessage::SilentWorkspace(SilentMessage::Repositories(Err(error)));
+    crate::task_guard::spawn_service(app.services.as_ref(), context, "静默资源库列表", failed, |services| {
+        let query = services.repository_query.clone();
+        let executor = services.executor.clone();
+        move || ShellMessage::SilentWorkspace(SilentMessage::Repositories(executor.block_on(query.list_repositories())))
     });
-    let Some((query, executor)) = prepared else {
-        eprintln!("Nana 静默刷新仓库列表需要领域服务，当前服务未启动");
-        app.shell.reduce(ShellMessage::SilentWorkspace(SilentMessage::Repositories(Err(
-            "领域服务未启动".into(),
-        ))));
-        return;
-    };
-    if let Err(error) = context.run_task(Task::new(async move {
-        ShellMessage::SilentWorkspace(SilentMessage::Repositories(executor.block_on(query.list_repositories())))
-    })) {
-        eprintln!("Nana 静默刷新仓库列表任务提交失败：{error}");
-        app.shell.reduce(ShellMessage::SilentWorkspace(SilentMessage::Repositories(Err(
-            format!("资源库列表任务提交失败：{error}"),
-        ))));
-    }
 }
 
 /// 后台读取仓库摘要。失败走静默消息，不把页面改成错误。
-pub(crate) fn dispatch_silent_snapshot(
-    app: &mut MomoBakoApplication,
-    context: &RuntimeProgramContext<ShellMessage>,
-    repo_id: String,
-) {
-    let prepared = app.services.as_ref().map(|services| {
-        (services.repository_query.clone(), services.executor.clone())
+pub(crate) fn dispatch_silent_snapshot(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String) {
+    let failed = |error| ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Err(error)));
+    crate::task_guard::spawn_service(app.services.as_ref(), context, "静默资源库摘要", failed, |services| {
+        let query = services.repository_query.clone();
+        let executor = services.executor.clone();
+        move || ShellMessage::SilentWorkspace(SilentMessage::Snapshot(executor.block_on(query.get_repository_snapshot(repo_id))))
     });
-    let Some((query, executor)) = prepared else {
-        eprintln!("Nana 静默刷新仓库摘要需要领域服务，当前服务未启动");
-        app.shell.reduce(ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Err(
-            "领域服务未启动".into(),
-        ))));
-        return;
-    };
-    if let Err(error) = context.run_task(Task::new(async move {
-        ShellMessage::SilentWorkspace(SilentMessage::Snapshot(
-            executor.block_on(query.get_repository_snapshot(repo_id)),
-        ))
-    })) {
-        eprintln!("Nana 静默刷新仓库摘要任务提交失败：{error}");
-        app.shell.reduce(ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Err(format!(
-            "资源库摘要任务提交失败：{error}"
-        )))));
-    }
 }
 
 #[cfg(test)]

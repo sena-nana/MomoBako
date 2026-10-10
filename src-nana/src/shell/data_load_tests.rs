@@ -239,13 +239,15 @@ fn a_failed_settings_bundle_still_finishes_the_startup() {
 }
 
 /// 设置包的任务 panic（插件宿主出错之类）：NanaUI 的任务线程不接 panic，结果消息永远不来，首屏启动会一直停在
-/// 第 4 步。派发层接住 panic，按五份都失败交回：启动照常结束，原因留在插件面板，加载日志照常写完。
+/// 第 4 步。派发层（`task_guard::spawn`，照产品的失败消息）接住 panic，按五份都失败交回：启动照常结束，原因留在插件
+/// 面板，加载日志照常写完。
 #[test]
 fn a_panicking_settings_bundle_task_still_finishes_the_startup() {
     let mut model = ShellViewModel::default();
     launch(&mut model, REPO);
     admin_effects(&mut model);
-    model.reduce(crate::admin_dispatch::bundle_message(|| panic!("插件宿主没有响应")));
+    let failed = crate::admin_dispatch::failed_bundle_message;
+    model.reduce(crate::task_guard::tests::run_guarded("设置页数据", failed, || panic!("插件宿主没有响应")));
     assert!(!admin_effects(&mut model).iter().any(|effect| matches!(effect, AdminEffect::LoadPlaylistPlayers)), "插件列表没换，不读播放器类型");
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
     assert_eq!(RouteKey::of(&model), RouteKey::Files);
@@ -261,7 +263,8 @@ fn a_panicking_player_type_task_still_finishes_the_startup() {
     launch(&mut model, REPO);
     admin_effects(&mut model);
     model.reduce(bundle(Vec::new()));
-    model.reduce(crate::admin_dispatch::players_message(|| panic!("播放器清单解析出错")));
+    let failed = crate::admin_dispatch::players_failed;
+    model.reduce(crate::task_guard::tests::run_guarded("播放器类型", failed, || panic!("播放器清单解析出错")));
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
     assert_eq!(
         model.status.failure().map(|failure| failure.message.as_str()),
