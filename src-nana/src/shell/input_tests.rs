@@ -720,12 +720,7 @@ fn attach_folder_dialog_submits_a_chosen_path_and_ignores_cancel() {
 
 /// 下载单曲在任务弹层里的进度行：动作名，「准备下载 夜曲」→「正在下载 夜曲」。
 fn download_progress() -> crate::shell::entry_actions::DownloadProgress {
-    crate::shell::entry_actions::DownloadProgress {
-        label: "下载单曲".into(),
-        subject: "夜曲".into(),
-        preparing: "准备下载 夜曲".into(),
-        running: Some("正在下载 夜曲".into()),
-    }
+    crate::shell::entry_actions::DownloadProgress { label: "下载单曲".into(), subject: "夜曲".into() }
 }
 
 #[test]

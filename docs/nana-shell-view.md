@@ -120,7 +120,7 @@
 
 ## 全局状态区
 
-侧栏顶部的状态条对应 Vue `WorkspaceSidebarStatus.vue`。状态在 `status.rs`：`ShellViewModel::status` 只有一个槽位，记最近一次失败（来源 `FailureSource` 加文案），后记的顶替先记的。投影 `StatusLine` 放进侧栏投影（`SidebarView::status`），顺序照 Vue：失败 > 忙碌 > 同步进度。视图里错误条、忙碌行和同步进度三块都留着，按投影 `.visible` 互换，侧栏不重挂。
+侧栏顶部的状态条对应 Vue `WorkspaceSidebarStatus.vue`。状态在 `status.rs`：`ShellViewModel::status` 只有一个槽位，记最近一次失败（来源 `FailureSource` 加文案），后记的顶替先记的；要提醒、但不算失败的结果（`StatusState::warn`）记进同一个槽位，投影成警告色的提醒条（`--warn-soft` 底、`--warn` 字，DESIGN.md 8.1 的 Warning）。投影 `StatusLine` 放进侧栏投影（`SidebarView::status`），顺序照 Vue：失败或提醒 > 忙碌 > 同步进度。视图里错误条、提醒条、忙碌行和同步进度四块都留着，按投影 `.visible` 互换，侧栏不重挂。
 
 **记什么。** 只记没有就近显示的失败：
 
@@ -138,7 +138,7 @@
 | `SmartFolder` | 智能文件夹删除失败（编辑对话框没开着）；查询、读列表失败 | `sidebar.rs` 归约；`sidebar.smart_error` |
 | `FolderTree` | 文件夹树读取失败 | `sidebar.tree_error` |
 | `Sync` | 刷新文件夹树：同步仓库，或之后重读摘要、硬链接候选、目录树失败 | `tree_sync.rs` |
-| `Download` | 来源下载里插件报告失败的条目：「{动作名}「{名称}」有 N 项失败，原因见「日志」。」，每一条的原因写进系统日志 | `source_download.rs` |
+| `Download` | 来源下载里插件报告失败的条目：「{动作名}「{名称}」有 N 项失败，原因见「日志」。」，每一条的原因写进系统日志；一项也没有下载到时是提醒（警告色）「{动作名}「{名称}」没有下载到任何条目。」 | `source_download.rs` |
 | `Files` | 文件操作失败 | `files.error` |
 
 文案先写失败的对象（「定位失败：」「无法读取文件元数据：」），后接系统返回的原因。`files.error`、`sidebar.tree_error`、`sidebar.smart_error` 三个字段被盯着（`observe_failures`）：新写一次记一次，字段清掉时它记下的那一条一起清。宿主在归约以外写下的失败（服务派发、拖出结果）在 `update` 同步视图之前、`prepare` 里收进来。

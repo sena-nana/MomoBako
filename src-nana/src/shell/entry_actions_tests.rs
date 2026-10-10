@@ -129,7 +129,7 @@ fn track_actions_carry_the_managed_cache_root_and_split_downloads_by_target() {
             assert_eq!(payload["managedCacheRoot"], "D:/cache");
             assert_eq!(payload["playlistName"], "song", "没有歌单名时用条目名");
             assert!(payload.get("destination").is_none(), "去处选好以后再写");
-            assert_eq!(progress.preparing, "准备下载 song");
+            assert_eq!(progress.preparing(), "准备下载 song");
         }
         other => panic!("到本地不是先问目录：{other:?}"),
     }
@@ -158,7 +158,8 @@ fn a_declared_target_is_the_only_download_entry() {
             assert_eq!(method, "media.downloadPlaylistPackage");
             assert_eq!(payload["playlistId"], 3);
             assert_eq!(payload["playlistName"], "夜曲");
-            assert_eq!(progress.preparing, "准备下载目录");
+            assert!(payload.get("tracks").is_none(), "不列目录、不带曲目，插件按歌单标识取来源里完整的歌单");
+            assert_eq!((progress.preparing(), progress.running()), ("准备下载 夜曲合集".into(), "正在下载 夜曲合集".into()));
             assert_eq!(parent_path.as_deref(), Some("夜曲"), "导入到以歌单命名的文件夹");
         }
         other => panic!("不是先选资源库：{other:?}"),
