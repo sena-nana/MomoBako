@@ -466,7 +466,7 @@
   - Used by frontend preview or codec plugins to invoke ABI or isolated process plugin capabilities without adding file-format-specific commands to the core runtime
   - Native plugin call envelopes include `runtime.pluginId`, `runtime.pluginDataDir`, `runtime.serviceRootDir`, and `runtime.pluginConfig`; `pluginDataDir` points to the plugin's own persistent directory and is created before dispatch, `serviceRootDir` points to the host service storage root, and `pluginConfig` is the current host-managed key-value config from `config.json`.
   - Native backend plugins may register an optional host callback bridge and call other backend plugins through the host. The current first-party use case is `momobako.service.office-convert` calling `momobako.service.downloader` to download bundled LibreOffice runtimes through the shared aria2 task layer.
-  - 内建宿主桥还暴露 `pluginId = "momobako.system"` / `method = "system.log.write"`，供后端插件写入统一日志中心。Rust SDK helper `write_host_log(runtime, level, action, message, context)` 会自动带上 `pluginId` 和 `sourceKind: "backend-plugin"`。
+  - 后端插件经 Rust SDK 的 `write_host_log_silently(runtime, level, action, message, context)` 写统一日志中心：SDK 把日志作为 `momobako.plugin.log` 事件（载荷 `{ level, action, message, pluginId, context }`）放进这次调用的结果，调用失败时也带着。宿主收下结果时先把它们写进系统日志（`src-backend/src/services/plugin_events.rs`）：分类 `plugin.backend`，来源 `backend-plugin`，插件标识取宿主加载的插件、不信载荷自报的，调用载荷里有 `repoId` 时记在这个资源库名下；级别只认 `debug | info | warn | error`（`warning` 当 `warn`，别的当 `info`）。插件调用是一次性请求，别的种类的事件宿主不处理，丢弃，每个插件的每种事件只记一次 `pluginEventDropped`。调用失败时宿主另记一条 `callFailed`（方法和原因），插件不必再自己记。
   - Source backends may expose:
     - `filesystem.describeRepositoryState`
       - Request: `{ repoRoot, config }`
