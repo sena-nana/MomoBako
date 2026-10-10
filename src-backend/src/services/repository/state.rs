@@ -5,6 +5,7 @@ use crate::services::host_events::{HostEvent, HostEventSink};
 use crate::services::repository::plugin::plugin_data_root_dir;
 use std::collections::BTreeSet;
 use std::sync::mpsc::Sender;
+use std::sync::PoisonError;
 
 #[derive(Clone)]
 /// Watcher 到宿主无关 Runtime 的结构刷新请求。
@@ -22,6 +23,8 @@ pub struct RepositoryState {
     pub(super) preview_sources: Mutex<BTreeMap<String, PreviewFileSource>>,
     pub(super) structure_refresh_tx: Mutex<Option<Sender<RepositoryStructureRefreshRequest>>>,
     pub(super) refreshing_repo_ids: Mutex<BTreeSet<String>>,
+    /// 已经告警过「后端插件未注册」的资源库，列表每次刷新时不再重复告警。
+    pub(super) unregistered_backend_repo_ids: Mutex<BTreeSet<String>>,
     pub(super) event_sink: Mutex<Option<Arc<dyn HostEventSink>>>,
 }
 
@@ -36,6 +39,7 @@ impl RepositoryState {
             preview_sources: Mutex::new(BTreeMap::new()),
             structure_refresh_tx: Mutex::new(None),
             refreshing_repo_ids: Mutex::new(BTreeSet::new()),
+            unregistered_backend_repo_ids: Mutex::new(BTreeSet::new()),
             event_sink: Mutex::new(None),
         }
     }
@@ -225,7 +229,11 @@ impl RepositoryState {
         self.load_repository_records()?
             .into_iter()
             .map(|repo| {
-                let asset_count = if repo.summary.status == "missing" {
+                let backend_registered = backend_summary_is_registered(&repo.summary.backend);
+                self.track_unregistered_backend(&repo, backend_registered);
+                // 后端插件未注册时打开存储会选错位置、触发注定失败的重建，只列出、不打开，
+                // 免得一个资源库拖垮整张列表、文件监听和运行时启动。
+                let asset_count = if repo.summary.status == "missing" || !backend_registered {
                     0
                 } else {
                     let connection = self.open_repository_connection(
@@ -241,6 +249,31 @@ impl RepositoryState {
                 })
             })
             .collect()
+    }
+
+    /// 资源库后端插件未注册时只在第一次发现时告警；插件恢复注册后清掉记录，下次再丢还会告警。
+    fn track_unregistered_backend(&self, repo: &RepositoryRecord, registered: bool) {
+        let mut repo_ids = self
+            .unregistered_backend_repo_ids
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        if registered {
+            repo_ids.remove(&repo.summary.repo_id);
+            return;
+        }
+        if repo_ids.insert(repo.summary.repo_id.clone()) {
+            crate::app_log!(
+                "warn",
+                "repository.query",
+                "backendUnregistered",
+                "资源库的后端插件未注册，列表只显示它、不打开它的存储。",
+                serde_json::json!({
+                    "repoId": repo.summary.repo_id.as_str(),
+                    "pluginId": repo.backend_record.plugin_id.as_str(),
+                    "path": repo.summary.path.as_str(),
+                })
+            );
+        }
     }
 
     /// Returns repository thumbnail roots that should be exposed to the desktop asset scope.

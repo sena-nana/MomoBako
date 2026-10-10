@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// 插件目录里找不到后端插件时，资源库摘要使用的占位种类。
+const UNAVAILABLE_BACKEND_KIND: &str = "unavailable";
+
 pub(super) fn backend_summary_from_registry(
     registry: &PluginCatalog,
     plugin_id: &str,
@@ -17,11 +20,16 @@ pub(super) fn backend_summary_from_registry(
     } else {
         RepositoryBackendSummary {
             plugin_id: normalized_plugin_id,
-            kind: "unavailable".to_string(),
+            kind: UNAVAILABLE_BACKEND_KIND.to_string(),
             name: "Unavailable plugin".to_string(),
             capabilities: Vec::new(),
         }
     }
+}
+
+/// 后端插件是否已在插件目录注册。未注册时不知道存储该放在资源库目录还是服务目录，也调不了后端。
+pub(super) fn backend_summary_is_registered(backend: &RepositoryBackendSummary) -> bool {
+    backend.kind != UNAVAILABLE_BACKEND_KIND
 }
 
 pub(super) fn repository_runtime_status(
