@@ -134,6 +134,22 @@ pub enum HostInputRequest {
     MinimizeToTray,
 }
 
+/// 网址能不能交给系统打开：只认 `http`、`https`、`mailto`、`tel` 四种协议。
+///
+/// 和 Vue 实际能打开的范围一致：Vue 走 Tauri opener 插件的 `opener:default`，默认范围
+/// （`allow-default-urls`）只放行这四种。其余协议一律不开，例如 `file:`、`C:\…` 这样的盘符路径、
+/// 自定义协议，以及 `javascript:`、`data:`、`vbscript:`，免得元数据里的链接直接启动本地程序。
+pub fn openable_url(url: &str) -> bool {
+    let Some((scheme, rest)) = url.trim().split_once(':') else {
+        return false;
+    };
+    match scheme.to_ascii_lowercase().as_str() {
+        "http" | "https" => rest.starts_with("//") && rest.len() > 2,
+        "mailto" | "tel" => !rest.trim().is_empty(),
+        _ => false,
+    }
+}
+
 /// 请求宿主打开外部资源。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExternalOpenRequest {
@@ -208,5 +224,28 @@ mod tests {
         assert!(controller.play().is_err());
         assert_eq!(controller.state().status, "failed");
         assert_eq!(controller.state().error.as_deref(), Some("播放器插件不可用"));
+    }
+
+    /// 只开 http、https、mailto、tel；盘符路径、`file:`、自定义协议和脚本协议都不开。
+    #[test]
+    fn only_web_mail_and_phone_links_are_openable() {
+        for url in ["https://example.com/cover", "HTTP://example.com", " https://x/?a=1&calc ", "mailto:a@b.c", "tel:+86123"] {
+            assert!(super::openable_url(url), "{url} 应该能打开");
+        }
+        for url in [
+            "C:\\Windows\\System32\\calc.exe",
+            "file:///C:/Windows/System32/calc.exe",
+            "eagle://item/1",
+            "javascript:alert(1)",
+            "DATA:text/html,x",
+            "vbscript:x",
+            "example.com",
+            "https:",
+            "https:example.com",
+            "mailto:",
+            "",
+        ] {
+            assert!(!super::openable_url(url), "{url} 不该交给系统打开");
+        }
     }
 }

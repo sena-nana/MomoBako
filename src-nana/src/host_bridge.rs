@@ -1,10 +1,9 @@
 //! 剪贴板、外部打开、目录揭示、文件拖出和最小化到托盘。
 //!
-//! 打开启动系统默认程序；定位交给 NanaUI 的 `reveal_in_file_manager`：文件在所在文件夹里选中，文件夹
-//! 直接打开，路径不存在时报错，不再自己拼 `explorer /select,`。拖出和托盘沿用已有的 `HostInputRequest`，
-//! 由窗口宿主在 Windows 上调用系统接口。失败时保留系统返回的错误。
-
-use std::process::Command;
+//! 打开交给系统默认程序：Windows 上直接调 `ShellExecuteW`，不经过 `cmd` 解析命令行。定位交给 NanaUI 的
+//! `reveal_in_file_manager`：文件在所在文件夹里选中，文件夹直接打开，路径不存在时报错，不再自己拼
+//! `explorer /select,`。拖出和托盘沿用已有的 `HostInputRequest`，由窗口宿主在 Windows 上调用系统接口。
+//! 失败时保留系统返回的错误。
 
 use crate::host_api::{ExternalOpenRequest, HostInputRequest, HostRequest};
 use crate::shell::status::FailureSource;
@@ -113,7 +112,51 @@ fn system_open(target: &str, reveal: bool) -> Result<(), String> {
     if reveal {
         return nana_ui::reveal_in_file_manager(std::path::Path::new(target)).map_err(|error| reveal_failure(&error));
     }
-    open_command(target).spawn().map(|_| ()).map_err(|error| error.to_string())
+    open_with_default_program(target)
+}
+
+/// 用系统默认程序打开文件或网址。
+///
+/// Windows 上直接调 `ShellExecuteW`，目标整串交给外壳，不经过 `cmd /C start`：`cmd` 会把网址里的 `&`、`|`
+/// 当成命令分隔符，`https://x/?a=1&calc` 这样的链接会多执行一条命令。
+#[cfg(target_os = "windows")]
+fn open_with_default_program(target: &str) -> Result<(), String> {
+    use windows::core::{w, HSTRING, PCWSTR};
+    use windows::Win32::UI::Shell::ShellExecuteW;
+    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    let file = HSTRING::from(target);
+    // SAFETY: 参数都是有效的以零结尾的宽字符串或空指针，不传窗口句柄。
+    let instance = unsafe { ShellExecuteW(None, w!("open"), &file, PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL) };
+    // 返回值大于 32 表示成功，否则是 `SE_ERR_*` 错误码。
+    let code = instance.0 as isize;
+    if code > 32 {
+        Ok(())
+    } else {
+        Err(shell_execute_failure(code))
+    }
+}
+
+/// 用系统默认程序打开文件或网址。macOS 用 `open`，其余用 `xdg-open`，目标作为单独的参数传，不经过 shell。
+#[cfg(not(target_os = "windows"))]
+fn open_with_default_program(target: &str) -> Result<(), String> {
+    let program = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    std::process::Command::new(program).arg(target).spawn().map(|_| ()).map_err(|error| error.to_string())
+}
+
+/// `ShellExecuteW` 的错误码写成中文，认不出的带上原始错误码。
+#[cfg(any(target_os = "windows", test))]
+fn shell_execute_failure(code: isize) -> String {
+    match code {
+        0 | 8 => "系统资源不足".into(),
+        2 => "文件不存在".into(),
+        3 => "路径不存在".into(),
+        5 => "没有访问权限".into(),
+        11 => "不是有效的程序".into(),
+        26 => "文件正被占用".into(),
+        27 | 31 => "没有关联的打开程序".into(),
+        _ => format!("系统打开失败（错误码 {code}）"),
+    }
 }
 
 /// 定位失败的原因写成中文：路径不存在，或者文件管理器起不来（带系统原文）。
@@ -121,27 +164,6 @@ fn reveal_failure(error: &nana_ui::RevealError) -> String {
     match error {
         nana_ui::RevealError::NotFound => "路径不存在".into(),
         nana_ui::RevealError::Unavailable(reason) => format!("文件管理器不可用：{reason}"),
-    }
-}
-
-fn open_command(target: &str) -> Command {
-    #[cfg(target_os = "windows")]
-    {
-        let mut command = Command::new("cmd");
-        command.args(["/C", "start", "", target]);
-        command
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let mut command = Command::new("open");
-        command.arg(target);
-        command
-    }
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    {
-        let mut command = Command::new("xdg-open");
-        command.arg(target);
-        command
     }
 }
 
@@ -240,6 +262,33 @@ mod tests {
     fn reveal_failures_read_in_chinese() {
         assert_eq!(reveal_failure(&nana_ui::RevealError::NotFound), "路径不存在");
         assert_eq!(reveal_failure(&nana_ui::RevealError::Unavailable("spawn failed".into())), "文件管理器不可用：spawn failed");
+    }
+
+    /// 打开失败照 `ShellExecuteW` 的错误码写中文，认不出的带上原始错误码。
+    #[test]
+    fn open_failures_read_in_chinese() {
+        assert_eq!(shell_execute_failure(2), "文件不存在");
+        assert_eq!(shell_execute_failure(31), "没有关联的打开程序");
+        assert_eq!(shell_execute_failure(29), "系统打开失败（错误码 29）");
+    }
+
+    /// 任何地方都不经过 `cmd` 启动程序：`cmd /C start` 会把参数里的 `&`、`|` 当成命令分隔符，
+    /// 元数据里的链接就能多执行一条命令。
+    #[test]
+    fn nothing_launches_programs_through_cmd() {
+        let needle = ["Command::new(\"", "cmd", "\")"].concat();
+        let mut pending = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+        while let Some(dir) = pending.pop() {
+            for entry in std::fs::read_dir(&dir).expect("读源码目录") {
+                let path = entry.expect("读目录项").path();
+                if path.is_dir() {
+                    pending.push(path);
+                } else if path.extension().is_some_and(|extension| extension == "rs") {
+                    let source = std::fs::read_to_string(&path).expect("读源码");
+                    assert!(!source.contains(&needle), "{} 经过 cmd 启动程序", path.display());
+                }
+            }
+        }
     }
 
     /// 关闭要确认时，每次 `update` 后宿主都跑一遍 `perform`：问、取消、再问、再取消，队列一直是空的，

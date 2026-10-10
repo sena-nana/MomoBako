@@ -220,7 +220,7 @@
 
 实况文件列和空库面板挂上时用 `set_drop_target_node` 登记拖放目标（`input::accept_file_drops`），`FileDropEvent` 收成 `HostDrag`，由 `pointer_gesture.rs` 的 `live_file_drop_imports_and_empty_drop_attaches` 覆盖：有仓库时悬停再放下导入外部路径，空库放下附加第一条文件夹。拖放几何和放置决定仍由消息归约覆盖。卸载拖放只清标记，不清错误。
 
-打开和定位交给系统程序，入口是文件右键菜单和预览页页头，网址来自元数据里的来源链接。拖出在 Windows 上调用系统文件拖放；最小化到托盘会隐藏窗口，托盘提示是 MomoBako，左键或双击显示窗口，菜单是「打开 MomoBako」和「退出」。`quit` 或确认关闭会关掉窗口并结束进程。这些系统效果仍要真窗口点过才算设备验收。IME 留在 [设备矩阵](./nana-device-matrix.md)。
+打开和定位交给系统程序，入口是文件右键菜单和预览页页头，网址来自元数据里的来源链接。打开在 Windows 上直接调 `ShellExecuteW`，不经过 `cmd`，链接里的 `&` 不会被当成命令分隔符；网址只开 `http`、`https`、`mailto`、`tel`，和 Vue 所用 Tauri opener 的默认范围一致（`host_api::openable_url`）。拖出在 Windows 上调用系统文件拖放；最小化到托盘会隐藏窗口，托盘提示是 MomoBako，左键或双击显示窗口，菜单是「打开 MomoBako」和「退出」。`quit` 或确认关闭会关掉窗口并结束进程。这些系统效果仍要真窗口点过才算设备验收。IME 留在 [设备矩阵](./nana-device-matrix.md)。
 
 | 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
 | --- | --- | --- | --- | --- | --- |

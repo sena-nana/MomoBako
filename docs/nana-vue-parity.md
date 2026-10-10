@@ -59,6 +59,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 - 回收站里的「缩略图」分组是禁用的，但 `.ctx-menu__slot:hover` 不看按钮禁用，悬停照样弹出子菜单，里面的项还能点。Nana 禁用的分组不展开。
 - 从仓库切换列表换仓库时，Vue 等 `selectRepository` 整个跑完才关弹层（`selectRepositoryFromList` 的 `.then`），侧栏收起、回到启动页以后，切换弹层还一直浮在启动页左上角（`repo-switch-startup`）。Nana 一选就关。
 - 来源目录的「创建播放列表」失败时（缺歌单标识、建播放集或加入条目出错），`selectContextMenuItem` 只 `await item.onSelect()`，异常没人接，界面上什么都不显示。Nana 照 `runPlaylistAction` 在本地建播放集，失败写进文件列表的错误。
+- 元数据里来源链接的「打开链接」：Vue（`isOpenableSourceLink`）对除 `javascript:`、`data:`、`vbscript:` 以外的任何协议都可以点，可 Tauri opener 的默认范围只放行 `http`、`https`、`mailto`、`tel`，其余协议点了会失败，而且界面上没有任何反馈；`C:\…` 这样的盘符路径也会被当成协议。Nana 只对这四种协议启用按钮，归约里也会再拦一次（`host_api::openable_url`）。
 
 ### 搜索与筛选
 - 筛选芯片按设计值 26px 画；结果行高度按内容决定。

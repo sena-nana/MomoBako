@@ -23,6 +23,8 @@ use nana_ui::runtime::{
 use nana_ui_core::Icon;
 use serde_json::Value;
 
+use crate::host_api::openable_url;
+
 use super::files::{local_time, FileContext, FileRow, FilesMessage};
 use super::files_view::bind::{fact_row, DraftField, StyleField, ValidationTextField};
 use super::files_view::style::{self, ButtonLook};
@@ -474,18 +476,18 @@ fn right_fact(label: &str, value: impl Fn() -> String + Send + Clone + 'static, 
 }
 
 /// 来源链接：右对齐的地址，后面是「打开链接」「复制链接」两个 26 方的描边按钮。
-/// 只有带协议、且不是 javascript / data / vbscript 的地址才能打开。点下时现读地址。没有地址时不占位。
+/// 只有 http、https、mailto、tel 链接才能打开（`host_api::openable_url`）。点下时现读地址。没有地址时不占位。
 fn source_link_row(recorded: Signal<RecordedView>, shown: impl Fn() -> bool + Send + 'static) -> AnyView {
     let url = move || recorded.with(|view| view.source_url.clone());
     let mut value = style::value(recorded.with_untracked(|view| view.source_url.clone()));
     value.style.text_horizontal_alignment = nana_ui::runtime::TextHorizontalAlignment::End;
-    let openable = move || recorded.with(|view| openable_link(&view.source_url));
+    let openable = move || recorded.with(|view| openable_url(&view.source_url));
     let actions = widget(Stack::row(4.0).grow(0.0).shrink(0.0)).key("inspect-source-actions").children((
         source_action(EXTERNAL_LINK, "inspect-source-open")
             .prop::<bool, fields::button::disabled>(move || !openable())
             .on_cx(move |_, _: &Activate, cx| {
                 let url = recorded.with_untracked(|view| view.source_url.clone());
-                if openable_link(&url) {
+                if openable_url(&url) {
                     cx.dispatch_program_all(ShellMessage::Input(InputMessage::OpenExternalUrl { url }));
                 }
             }),
@@ -521,16 +523,6 @@ fn source_action(icon: Icon, key: &str) -> El<nana_ui::runtime::Button> {
     let mut button = button.style(outlined);
     Arc::make_mut(&mut button.style.layout).width = Some(LengthSpec::Px(26.0));
     widget(button).key(key.to_string())
-}
-
-/// 和 Vue `isOpenableSourceLink` 一致：要有协议，且不是脚本或内联数据。
-fn openable_link(url: &str) -> bool {
-    let Some((scheme, _)) = url.trim().split_once(':') else {
-        return false;
-    };
-    let valid = scheme.chars().next().is_some_and(|first| first.is_ascii_alphabetic())
-        && scheme.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '+' | '.' | '-'));
-    valid && !matches!(scheme.to_ascii_lowercase().as_str(), "javascript" | "data" | "vbscript")
 }
 
 /// 标签组的投影：展开状态按用户点过的来，菜单里的已有标签按输入过滤。
@@ -573,7 +565,7 @@ mod tests {
 
     use serde_json::Value;
 
-    use super::{custom_fields, openable_link};
+    use super::custom_fields;
 
     /// 通用字段、后端种下的系统字段都不进自定义行；作品信息认领的键只在区块画出来时才让出。
     #[test]
@@ -618,15 +610,5 @@ mod tests {
         assert_eq!(labelled("1920 × 1080"), 1);
         assert_eq!(labelled("artist"), 1, "真正的自定义字段照常列出");
         assert_eq!(labelled("Momo"), 1);
-    }
-
-    #[test]
-    fn only_real_protocols_can_be_opened() {
-        assert!(openable_link("https://example.com/cover"));
-        assert!(openable_link("eagle://item/1"));
-        assert!(!openable_link("javascript:alert(1)"));
-        assert!(!openable_link("DATA:text/html,x"));
-        assert!(!openable_link("example.com"));
-        assert!(!openable_link("1http://x"));
     }
 }
