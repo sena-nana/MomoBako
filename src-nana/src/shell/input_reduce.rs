@@ -2,7 +2,7 @@
 //!
 //! 服务请求只进入已有的移动、导入和附加效果。系统动作记到宿主请求里。
 
-use crate::host_api::{HostInputRequest, HostRequest};
+use crate::host_api::{openable_url, HostInputRequest, HostRequest};
 use crate::shell::admin::AdminMessage;
 
 use super::support::{
@@ -477,8 +477,14 @@ fn reveal_entry(model: &mut ShellViewModel, absolute_path: &str) {
     model.input.remember_external(absolute_path, true);
 }
 
+/// 打开外部网址。只放行 `host_api::openable_url` 认的协议，别的入口发来的也一样拦下。
 fn open_url(model: &mut ShellViewModel, url: &str) {
-    if url.trim().is_empty() {
+    let url = url.trim();
+    if url.is_empty() {
+        return;
+    }
+    if !openable_url(url) {
+        eprintln!("Nana 不打开这个网址，协议不在允许范围内：{url}");
         return;
     }
     model.input.remember_external(url, false);

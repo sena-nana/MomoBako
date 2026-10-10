@@ -485,6 +485,23 @@ fn box_selection_open_reveal_and_external_drag_follow_the_vue_guards() {
     assert_eq!(model.status.failure().map(|failure| failure.message.as_str()), Some("保留"));
 }
 
+/// 外部网址只排 http、https、mailto、tel：盘符路径和 `file:` 不交给系统；能开的整串原样交出（去掉首尾空白），
+/// 链接里的 `&` 由宿主当成网址的一部分，不会被拆开。
+#[test]
+fn external_urls_outside_the_allowed_protocols_are_not_opened() {
+    let mut model = ready("repo");
+    for url in ["C:\\Windows\\System32\\calc.exe", "file:///C:/Windows/System32/calc.exe", "eagle://item/1", "javascript:alert(1)"] {
+        send(&mut model, InputMessage::OpenExternalUrl { url: url.into() });
+    }
+    assert!(model.input.host_requests.is_empty(), "协议不在范围内的网址不该排给宿主");
+
+    send(&mut model, InputMessage::OpenExternalUrl { url: " https://example.com/?a=1&calc ".into() });
+    assert!(matches!(
+        model.input.host_requests.as_slice(),
+        [crate::host_api::HostRequest::OpenExternal(request)] if !request.reveal && request.target == "https://example.com/?a=1&calc"
+    ));
+}
+
 #[test]
 fn close_confirmation_and_file_dialogs_do_not_pretend_the_host_finished() {
     let mut model = ShellViewModel::default();
