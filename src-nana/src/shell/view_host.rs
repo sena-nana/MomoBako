@@ -399,13 +399,13 @@ pub fn mount_shell(document: &mut RuntimeDocument, model: &ShellViewModel) -> Re
     })
 }
 
-/// 测试用：照生产 `prepare` 跑一帧准备，视图用 `mount_shell` 挂在这份文档里的那个。
+/// 测试用：照生产 `prepare` 跑一帧准备，一帧按 16ms 算，视图用 `mount_shell` 挂在这份文档里的那个。
 #[cfg(test)]
 pub(crate) fn prepare_registered(model: &mut ShellViewModel, window: &mut nana_ui::ApplicationWindow) {
     REGISTERED.with(|views| {
         let mut views = views.borrow_mut();
         let view = views.iter_mut().find(|view| view.alive() && view.owns(&window.document));
-        crate::window_host::prepare_motion(model, view, window);
+        crate::window_host::prepare_motion(model, view, window, crate::frame_clock::FrameStep::millis(16));
     })
 }
 

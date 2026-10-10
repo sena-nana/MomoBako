@@ -71,10 +71,15 @@ impl ShellHarness {
         self.model.surface_dirty = false;
     }
 
-    /// 照生产 `prepare` 跑一帧准备（计时器和播放时钟、动效时钟、指针、同步），再刷新布局。
+    /// 照生产 `prepare` 跑一帧准备（计时器和播放时钟、动效时钟、指针、同步），再刷新布局。一帧按 16ms 算。
     pub fn frame(&mut self) {
-        super::poll_timers(&mut self.model);
-        crate::window_host::prepare_motion(&mut self.model, Some(&mut self.view), &mut self.window);
+        self.frame_with(crate::frame_clock::FrameStep::millis(16));
+    }
+
+    /// 同 [`Self::frame`]，步长由调用方给，按帧时钟模拟不同帧率时用。
+    pub fn frame_with(&mut self, step: crate::frame_clock::FrameStep) {
+        super::poll_timers(&mut self.model, step);
+        crate::window_host::prepare_motion(&mut self.model, Some(&mut self.view), &mut self.window, step);
         self.flush();
     }
 

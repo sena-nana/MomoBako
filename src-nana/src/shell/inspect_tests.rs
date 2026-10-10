@@ -577,7 +577,7 @@ fn avi_preview_plays_pauses_and_seeks_on_the_shared_session() {
     model.reduce(ShellMessage::Player(PlayerMessage::SetPlaying(true)));
     assert_eq!(model.player.session.status, "playing");
     assert_eq!(model.inspect.media_session().expect("会话").status, "playing");
-    assert!(super::poll_timers(&mut model));
+    assert!(super::poll_timers(&mut model, crate::frame_clock::FrameStep::millis(16)));
     assert_eq!(model.player.session.current_time_ms, 16);
     assert_eq!(model.inspect.media_session().expect("会话").current_time_ms, 16);
     model.reduce(ShellMessage::Player(PlayerMessage::Seek(500)));
