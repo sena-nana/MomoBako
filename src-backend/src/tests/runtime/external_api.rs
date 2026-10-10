@@ -1,53 +1,24 @@
+//! 外部素材 API 运行时测试：健康检查、令牌校验和可写资源库列表。
+
 use crate::services::{
-    repository::RepositoryState, runtime::external_api::start_external_api_server,
+    repository::test_support::{
+        create_local_repository_record_for_external_tests, create_test_state,
+    },
+    runtime::external_api::start_external_api_server,
 };
-use rusqlite::{params, Connection};
 use std::{
     fs,
     io::{Read, Write},
     net::TcpStream,
     sync::{Arc, Mutex},
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
-
-const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "momobako.local-filesystem";
-
-fn unique_temp_dir(label: &str) -> std::path::PathBuf {
-    let unique = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system time should be after unix epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!(
-        "momobako-runtime-{label}-{}-{unique}",
-        std::process::id()
-    ))
-}
 
 #[test]
 fn external_api_serves_health_and_requires_token() {
-    let root = unique_temp_dir("external-api");
-    let service_root = root.join("state");
-    let repo_root = root.join("repo");
-    fs::create_dir_all(&repo_root).expect("repo root should be created");
-    let state = RepositoryState::from_root(service_root.clone());
-    state
-        .ensure_initialized()
-        .expect("repository state should initialize");
-    let repo_id = "repo-external-api".to_string();
-    let registry =
-        Connection::open(service_root.join("repositories.db")).expect("registry should open");
-    registry
-        .execute(
-            r#"
-            INSERT INTO repositories (
-              repo_id, name, path, backend_plugin_id, backend_config_json, status, created_at, updated_at
-            )
-            VALUES (?1, 'External API Repo', ?2, ?3, '{}', 'ready', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
-            "#,
-            params![&repo_id, repo_root.to_string_lossy(), LOCAL_FILESYSTEM_PLUGIN_ID],
-        )
-        .expect("repository should be registered");
-    drop(registry);
+    // 和生产一样先注册本地文件系统插件、写好 `.momo`，列表才认得这个可写资源库。
+    let (state, root, repo_root, _thumbnail_root) = create_test_state("external-api");
+    let repo_id = create_local_repository_record_for_external_tests(&state, &repo_root);
 
     let token = "token-test".to_string();
     let addr = start_external_api_server(Arc::new(state), Arc::new(Mutex::new(())), token.clone())
