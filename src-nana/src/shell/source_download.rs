@@ -12,7 +12,7 @@
 //!
 //! 同名跳过：去处里已有的同名文件都保留原文件。下载到本地时插件不覆盖目录里已有的文件，结果的 `skippedEntries` 列出
 //! 保留了哪些（插件原来直接覆盖，Vue 也没有提示）；下载到其他资源库时，下载回来的文件按 `skipExisting` 导入目标
-//! 资源库（`admin_dispatch`），目标里已有同名文件的不导入、其余照常导入（Vue 的导入遇到一个同名就整批失败）。两种都
+//! 资源库（`download_dispatch.rs`），目标里已有同名文件的不导入、其余照常导入（Vue 的导入遇到一个同名就整批失败）。两种都
 //! 把条数写进状态区（只有跳过时是提醒）、路径写进日志。
 //!
 //! 什么也没下到：插件报告的是一批（结果里有 `completed` 数组）却一项也没有、也没有交回文件时，状态区用警告色提醒
@@ -286,4 +286,4 @@ fn identifier(value: Option<&Value>) -> Option<String> {
 
 #[cfg(test)]
 #[path = "source_download_tests.rs"]
-mod tests;
+pub(crate) mod tests;

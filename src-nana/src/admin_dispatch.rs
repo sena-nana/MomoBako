@@ -8,10 +8,10 @@ use nana_ui::runtime::Task;
 use nana_ui::RuntimeProgramContext;
 
 use crate::backend::services::mutsuki_runner::{
-    PROTOCOL_ENTRY_IMPORT, PROTOCOL_REPOSITORY_ACTION_RUN, PROTOCOL_REPOSITORY_CREATE, PROTOCOL_REPOSITORY_SYNC,
+    PROTOCOL_REPOSITORY_ACTION_RUN, PROTOCOL_REPOSITORY_CREATE, PROTOCOL_REPOSITORY_SYNC,
 };
 use crate::backend::services::repository::{
-    BinaryFileWriteRequest, FileCreateRequest, FileImportRequest, NeteaseRepositoryCacheConfigureRequest, PluginCallRequest,
+    BinaryFileWriteRequest, NeteaseRepositoryCacheConfigureRequest, PluginCallRequest,
     PluginConfigDeleteRequest,
     PluginConfigSetRequest, PluginConfigSnapshot, PluginEnabledRequest, PluginHookExecutionListRequest, PluginInstallRequest,
     PlaylistItemsByPathsAddRequest, PlaylistMutationRequest, PlaylistPlayerContribution, PluginManifest, RepositoryAction,
@@ -20,7 +20,7 @@ use crate::backend::services::repository::{
 };
 use crate::backend::viewmodels::PluginViewModel;
 use crate::shell::admin::api::{self, ApiMessage, HttpRequest};
-use crate::shell::admin::source_download::{DownloadOutcome, DownloadRun};
+use crate::shell::admin::source_download::DownloadOutcome;
 use crate::shell::admin::{AdminEffect, AdminMessage, PluginCallOrigin, SourceStep};
 use crate::shell::ShellMessage;
 use crate::MomoBakoApplication;
@@ -93,7 +93,9 @@ fn dispatch_one(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<S
         AdminEffect::CreateSourcePlaylist { repo_id, playlist_id, name, player_type_id, path } => {
             create_source_playlist(app, context, repo_id, playlist_id, name, player_type_id, path);
         }
-        AdminEffect::DownloadToRepository { run, payload, parent_path } => download_to_repository(app, context, run, payload, parent_path),
+        AdminEffect::DownloadToRepository { run, payload, parent_path } => {
+            crate::download_dispatch::download_to_repository(app, context, run, payload, parent_path);
+        }
         AdminEffect::WriteLogs(requests) => write_logs(app, context, requests),
         AdminEffect::UpdateBackendConfig { repo_id, backend_config, step } => {
             let Some(services) = app.services.as_ref() else {
@@ -264,75 +266,6 @@ fn create_source_playlist(
     })) {
         eprintln!("Nana 创建来源播放集任务提交失败：{error}");
         app.shell.reduce(admin(AdminMessage::SourcePlaylistFinished(Err(format!("创建播放列表任务提交失败：{error}")))));
-    }
-}
-
-/// 来源下载到其他资源库（Vue `runDownloadAction` 的 `writable-repository`）：调用插件（载荷里写好了目标），把下载
-/// 回来的文件（`paths` 和 `completed[].paths`）导入目标资源库，再同步目标资源库。下载歌单时导入到以歌单命名的
-/// 文件夹，目标资源库里还没有这个文件夹就先建（导入要求文件夹已经在；Vue 不建，导入报「directory not found」）。
-/// 导入带 `skipExisting`：目标里已有同名文件的保留原文件、不导入，其余照常导入（Vue 的导入遇到一个同名就整批
-/// 失败）。哪一步失败都把原因交回，不留在进行中；成功交回插件的结果（失败的条目在里面）和跳过的同名文件。
-fn download_to_repository(
-    app: &mut MomoBakoApplication,
-    context: &RuntimeProgramContext<ShellMessage>,
-    run: DownloadRun,
-    payload: serde_json::Value,
-    parent_path: Option<String>,
-) {
-    let Some(target) = run.target().cloned() else {
-        eprintln!("Nana 下载到其他资源库没有目标资源库：{}", run.method);
-        app.shell.reduce(admin(AdminMessage::DownloadFinished { run, result: Err("没有选定目标资源库。".into()) }));
-        return;
-    };
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 来源下载需要领域服务，当前服务未启动：{}", run.method);
-        app.shell.reduce(admin(AdminMessage::DownloadFinished { run, result: Err(NO_SERVICES.into()) }));
-        return;
-    };
-    let plugin = services.plugin.clone();
-    let browser = services.file_browser.clone();
-    let tasks = services.tasks.clone();
-    let executor = services.executor.clone();
-    let failed_run = run.clone();
-    let (target_repo_id, target_path) = (target.repo_id, target.path);
-    if let Err(error) = context.run_task(Task::new(async move {
-        let method = run.method.clone();
-        let call = PluginCallRequest { plugin_id: run.plugin_id.clone(), method: method.clone(), repository_id: run.repository_id.clone(), payload };
-        let result = (|| {
-            let response = executor.block_on(plugin.call_plugin(call))?;
-            let paths = crate::shell::admin::source_target::result_paths(&response.payload);
-            if paths.is_empty() {
-                eprintln!("Nana 来源下载没有交回文件，不导入：{method}");
-                return Ok(DownloadOutcome::plugin(response.payload));
-            }
-            if let Some(folder) = parent_path.as_deref() {
-                if !std::path::Path::new(&target_path).join(folder).is_dir() {
-                    let create = FileCreateRequest { repo_id: target_repo_id.clone(), parent_path: None, name: folder.to_string() };
-                    executor.block_on(browser.create_directory(create)).map_err(|error| {
-                        eprintln!("Nana 在目标资源库建文件夹失败：{folder}：{error}");
-                        format!("在目标资源库建文件夹失败：{error}")
-                    })?;
-                }
-            }
-            let import = FileImportRequest { repo_id: target_repo_id.clone(), parent_path, source_paths: paths, skip_existing: true };
-            let (imported, _) = executor.block_on(tasks.execute(PROTOCOL_ENTRY_IMPORT, import)).map_err(|error| {
-                eprintln!("Nana 下载的文件导入目标资源库失败：{target_repo_id}：{error}");
-                format!("导入目标资源库失败：{error}")
-            })?;
-            let outcome = DownloadOutcome::imported(response.payload, &imported);
-            if !outcome.skipped.is_empty() {
-                eprintln!("Nana 目标资源库已有同名文件，跳过 {} 个：{target_repo_id}", outcome.skipped.len());
-            }
-            executor.block_on(tasks.execute(PROTOCOL_REPOSITORY_SYNC, SyncRequest { repo_id: target_repo_id.clone() })).map_err(|error| {
-                eprintln!("Nana 同步目标资源库失败：{target_repo_id}：{error}");
-                format!("同步目标资源库失败：{error}")
-            })?;
-            Ok(outcome)
-        })();
-        admin(AdminMessage::DownloadFinished { run, result })
-    })) {
-        eprintln!("Nana 来源下载任务提交失败：{error}");
-        app.shell.reduce(admin(AdminMessage::DownloadFinished { run: failed_run, result: Err(format!("来源下载任务提交失败：{error}")) }));
     }
 }
 

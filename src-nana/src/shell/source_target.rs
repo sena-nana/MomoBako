@@ -4,8 +4,9 @@
 //! `useEntryActionRepositoryDialog.ts`：候选是就绪、可写、不是当前这个的资源库（`requireReady`、
 //! `requireWritable`）；只有一个候选时直接用它，有几个时弹「选择目标资源库」让用户挑，取消就什么也不做。
 //! 选好以后任务弹层出「{动作名} · 准备下载 …」，载荷的 `destination` 写成 `{ kind: "repository", repoId, path }`
-//! 交给宿主（`admin_dispatch`）：调用插件、把下载回来的文件导入目标资源库（下载目录时放进以歌单命名的文件夹）
-//! 并同步它，最后照 Vue `context.refreshRepo()` 刷新当前资源库（收尾在 `source_download.rs`）。
+//! 交给宿主（`download_dispatch.rs`）：给这次下载建暂存目录、调用插件、把下载回来的文件导入目标资源库（下载目录
+//! 时放进以歌单命名的文件夹）、清掉暂存并同步它，最后照 Vue `context.refreshRepo()` 刷新当前资源库（收尾在
+//! `source_download.rs`）。
 //!
 //! Vue 在没有候选时点了什么也不发生（`openDialog` 返回 null），这里在菜单上就禁用这一项并写出原因
 //! （`entry_actions::NO_TARGET_REPOSITORY`）；点的那一刻候选没了（列表刚换过）写进文件列的错误。
