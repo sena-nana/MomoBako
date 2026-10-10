@@ -163,13 +163,15 @@ fn select_field(
     };
     let initial = toolbar.get_untracked();
     let (values, current) = pick(&initial);
-    let mut select = Select::new(Some(current.clone())).options(options(values));
+    // 照原生 `<select>` 按最长的选项定宽：选哪一项外框都不动，和 Vue 一样撑到选项需要的宽度。
+    let mut select = Select::new(Some(current.clone())).options(options(values)).fit_options(true);
     {
         let style = &mut select.style;
         style.interaction.base.background_mix = Some(SemanticColorMix::alpha(Role::Background, 0.0));
         style.interaction.base.border_mix = Some(SemanticColorMix::alpha(Role::Border, 0.0));
         let layout = Arc::make_mut(&mut style.layout);
-        // Vue 的下拉框是 `width: 100%`，在最小 180 宽的框里扣掉标题和间距后约 122 宽。
+        // 宽度按内容（最长的选项加箭头）；Vue 的下拉框是 `width: 100%`，在最小 180 宽的框里扣掉标题和间距后
+        // 约 122 宽，选项都很短时不窄于它。
         layout.width = Some(LengthSpec::Shrink);
         layout.min_width = Some(LengthSpec::Px(122.0));
         layout.height = Some(LengthSpec::Px(32.0));
