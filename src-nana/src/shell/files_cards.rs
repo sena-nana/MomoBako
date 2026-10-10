@@ -41,15 +41,13 @@ impl CardBox {
     }
 }
 
-/// 缩略图盒的样子：底色、已有纹理、已有像素或类型图标。三者按「纹理、像素、图标」的先后只取一样。
+/// 缩略图盒的样子：底色，加上已有纹理或类型图标（有纹理就不画图标）。
 #[derive(Clone, Debug)]
 pub(super) struct PreviewLook {
     pub tone: Tone,
     /// 宿主已经能注册纹理的缩略图路径。
     pub texture: Option<String>,
-    /// 已有像素缩小后的缩略图，PNG data URL。
-    pub image: Option<Arc<str>>,
-    /// 纹理和像素都没有时画的类型图标。
+    /// 没有纹理时画的类型图标。
     pub icon: Option<Icon>,
     /// 缩略图宽高比，按 Vue 的范围夹过。
     pub aspect: f32,
@@ -57,7 +55,7 @@ pub(super) struct PreviewLook {
 
 impl Default for PreviewLook {
     fn default() -> Self {
-        Self { tone: Tone::Placeholder, texture: None, image: None, icon: None, aspect: 1.0 }
+        Self { tone: Tone::Placeholder, texture: None, icon: None, aspect: 1.0 }
     }
 }
 
@@ -66,7 +64,6 @@ impl PartialEq for PreviewLook {
     fn eq(&self, other: &Self) -> bool {
         self.tone == other.tone
             && self.texture == other.texture
-            && self.image == other.image
             && self.icon.map(Icon::as_ptr) == other.icon.map(Icon::as_ptr)
             && self.aspect.to_bits() == other.aspect.to_bits()
     }
@@ -80,16 +77,8 @@ impl PreviewLook {
             .texture_ready
             .then(|| row.thumbnail_path.as_deref().map(str::trim).filter(|path| !path.is_empty()).map(str::to_string))
             .flatten();
-        let image = if texture.is_none() {
-            row.thumbnail_rgba
-                .as_ref()
-                .and_then(|(w, h, rgba)| super::super::inspect::rgba_png_data_url(*w, *h, rgba))
-                .map(Arc::<str>::from)
-        } else {
-            None
-        };
-        let icon = (texture.is_none() && image.is_none()).then(|| entry_icon(row));
-        Self { tone, texture, image, icon, aspect: aspect(row.pixel_width, row.pixel_height) }
+        let icon = texture.is_none().then(|| entry_icon(row));
+        Self { tone, texture, icon, aspect: aspect(row.pixel_width, row.pixel_height) }
     }
 
     /// 缩略图槽；没有纹理时为空串（缩略图节点藏着）。
@@ -500,7 +489,7 @@ where
 
 /// 缩略图盒的样式：固定宽高（或撑满列宽）、底色和图标的自绘、裁掉溢出。
 fn preview_frame_style(look: &PreviewLook, width: Option<f32>, height: f32, icon_size: f32, radius: RadiusTier) -> NodeStyle {
-    let painter = PreviewPainter { tone: look.tone, icon: look.icon, icon_size, radius, image: look.image.clone() };
+    let painter = PreviewPainter { tone: look.tone, icon: look.icon, icon_size, radius };
     let frame = match width {
         Some(width) => style::fixed(Stack::column(0.0), width, height),
         None => Stack::column(0.0)
