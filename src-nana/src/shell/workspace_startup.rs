@@ -3,6 +3,8 @@
 //! 对应 Vue `AppShell.vue` 的启动区块和 `workspace/lifecycle.ts` 的 `emitStartupLog`：四个步骤、
 //! 当前步骤的标题和说明、进度百分比，以及「加载日志」里最近 8 条记录。日志文案、级别和
 //! `键: 值 · 键: 值` 的明细格式与 Vue 一致；时间是本地时钟的「时:分:秒」。
+//!
+//! 换仓库（Vue `navigation.ts` 的 `selectRepository` 切到别的仓库）也走这块启动页，见 [`StartupMode`]。
 
 /// 启动步骤总数。
 pub const STARTUP_TOTAL_STEPS: u8 = 4;
@@ -24,6 +26,17 @@ pub enum StartupStatus {
     Loading,
     Ready,
     Error,
+}
+
+/// 这一轮加载是首屏启动还是换仓库。
+///
+/// 换仓库照 Vue `selectRepository`：从「切换资源库」起步，不写首屏启动日志（之前的日志留着，同步日志照常
+/// 追加），第 4 步的说明不同，失败停在启动页给「重试」，结束时不重读设置包。重试走完整的首屏启动。
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum StartupMode {
+    #[default]
+    Launch,
+    Switch,
 }
 
 /// 单个启动步骤在步骤条上的状态。
@@ -58,6 +71,7 @@ pub struct StartupLog {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StartupState {
     pub status: StartupStatus,
+    pub mode: StartupMode,
     pub step_label: String,
     pub step_detail: String,
     pub current_step: u8,
@@ -71,6 +85,7 @@ impl Default for StartupState {
     fn default() -> Self {
         Self {
             status: StartupStatus::Idle,
+            mode: StartupMode::Launch,
             step_label: "准备加载仓库".into(),
             step_detail: "准备资源库状态，恢复上次打开的工作区。".into(),
             current_step: 0,
@@ -100,6 +115,21 @@ impl StartupState {
             "首屏启动流程开始。",
             &[("totalSteps", Some(total.as_str())), ("activeRepoId", active_repo_id), ("rememberedRepoId", remembered_repo_id)],
         );
+    }
+
+    /// 换仓库：回到第 1 步「切换资源库」（Vue `setWorkspaceStartupProgress(1, "切换资源库", …)`）。
+    /// 已有的加载日志留着，这一轮不再写首屏启动日志。
+    pub fn begin_switch(&mut self) {
+        self.mode = StartupMode::Switch;
+        self.set_progress(1, "切换资源库", "准备目标资源库，清理上一个资源库的首屏状态。");
+    }
+
+    /// 第 4 步「读取首屏目录」的说明：启动和换仓库各照 Vue 的原文。
+    pub fn first_screen_detail(&self) -> &'static str {
+        match self.mode {
+            StartupMode::Launch => "加载根目录、播放列表和首屏关联数据。",
+            StartupMode::Switch => "加载根目录文件、侧栏结构和首屏内容。",
+        }
     }
 
     /// 进入指定步骤。百分比按当前步除以总步数，和 Vue 一致。步骤本身不记日志。
@@ -199,8 +229,12 @@ impl StartupState {
         self.push(level, message.into(), None);
     }
 
-    /// 记一条日志。明细按 Vue `appendStartupLog` 去掉空值，用「 · 」连接。
+    /// 记一条日志。明细按 Vue `appendStartupLog` 去掉空值，用「 · 」连接。换仓库不写首屏启动日志
+    /// （Vue `selectRepository` 不调 `emitStartupLog`）。
     pub(crate) fn log(&mut self, level: &'static str, message: &str, context: &[(&str, Option<&str>)]) {
+        if self.mode == StartupMode::Switch {
+            return;
+        }
         let detail = context
             .iter()
             .filter_map(|(key, value)| value.filter(|value| !value.is_empty()).map(|value| format!("{key}: {value}")))

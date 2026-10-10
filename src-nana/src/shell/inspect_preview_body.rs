@@ -62,10 +62,9 @@ impl PixelsRef<'_> {
     }
 }
 
-/// 没有预览插件时画的东西：列表里同一路径的缩略图像素、纹理，或者类型图标。
+/// 没有预览插件时画的东西：列表里同一路径的缩略图纹理，或者类型图标。
 #[derive(Clone, Copy, Debug)]
 enum FallbackRef<'a> {
-    Pixels(PixelsRef<'a>),
     Texture(&'a str),
     Icon(Icon),
 }
@@ -128,7 +127,6 @@ enum Body {
     Pill { title: &'static str, detail: String, progress: bool, toolbar: Option<DocumentBar> },
     ArchiveLoading { detail: String },
     MediaLoading { name: String },
-    FallbackPixels(Pixels),
     FallbackTexture(String),
     FallbackIcon(Icon),
     Pending,
@@ -208,6 +206,13 @@ fn resolve(model: &ShellViewModel) -> (ContentRef<'_>, bool) {
             None => (ContentRef::Pending, true),
         },
     }
+}
+
+/// 预览框这一帧是不是从宿主纹理槽 `file-preview` 取画面：预览页开着，画的是图片纹理或视频画面。
+/// 宿主只在这时上传 `preview_pixels`（`thumbnail_host::publish_preview`）。单击只选中时预览页藏着；
+/// 预览的正是幻灯片当前项时画幻灯片的帧；PDF 和模型页图编成内容图。这几种都不从纹理槽取。
+pub(crate) fn wants_preview_texture(model: &ShellViewModel) -> bool {
+    super::super::files_view::previewing(model) && matches!(resolve(model).0, ContentRef::ImageTexture | ContentRef::Video { .. })
 }
 
 /// 预览的正是播放列表当前的图片：和 Vue 的播放器挂载一样画幻灯片这一帧，按「适应 / 填充」铺。
@@ -332,13 +337,10 @@ fn fallback_ref(model: &ShellViewModel) -> FallbackRef<'_> {
 
 fn thumbnail_ref(model: &ShellViewModel) -> Option<FallbackRef<'_>> {
     let path = model.inspect.target_path.as_deref()?;
-    // 素材详情说没有缩略图就不画；有的话像素和纹理取自列表里同一路径的行。
+    // 素材详情说没有缩略图就不画；有的话纹理取自列表里同一路径的行。
     model.inspect.facts.thumbnail_path.as_deref().map(str::trim).filter(|slot| !slot.is_empty())?;
     let files = &model.files;
     let row = files.rows.iter().chain(files.virtual_rows.iter()).find(|row| row.path == path)?;
-    if let Some((width, height, rgba)) = row.thumbnail_rgba.as_ref() {
-        return Some(FallbackRef::Pixels(PixelsRef { width: *width, height: *height, rgba }));
-    }
     let slot = row.thumbnail_path.as_deref().map(str::trim).filter(|slot| !slot.is_empty())?;
     row.texture_ready.then_some(FallbackRef::Texture(slot))
 }
@@ -384,7 +386,6 @@ impl ContentRef<'_> {
                 LoadingRef::Media { name } => (2u8, name).hash(hasher),
             },
             Self::Fallback(fallback) => match fallback {
-                FallbackRef::Pixels(pixels) => pixels.identity(hasher),
                 FallbackRef::Texture(slot) => slot.hash(hasher),
                 FallbackRef::Icon(icon) => (icon.as_ptr() as usize).hash(hasher),
             },
@@ -416,7 +417,6 @@ impl ContentRef<'_> {
             Self::Loading(LoadingRef::Pill { title, detail, progress, toolbar }) => Body::Pill { title, detail, progress, toolbar },
             Self::Loading(LoadingRef::Archive { detail }) => Body::ArchiveLoading { detail },
             Self::Loading(LoadingRef::Media { name }) => Body::MediaLoading { name: name.to_string() },
-            Self::Fallback(FallbackRef::Pixels(pixels)) => Body::FallbackPixels(pixels.to_owned()),
             Self::Fallback(FallbackRef::Texture(slot)) => Body::FallbackTexture(slot.to_string()),
             Self::Fallback(FallbackRef::Icon(icon)) => Body::FallbackIcon(icon),
             Self::Pending => Body::Pending,
@@ -463,7 +463,6 @@ pub(super) fn content_view(content: &PreviewContent) -> AnyView {
         }
         Body::ArchiveLoading { detail } => centered_status("读取压缩包", detail),
         Body::MediaLoading { name } => super::audio_stage::loading_card(name),
-        Body::FallbackPixels(pixels) => pixel_image(pixels, false, "inspect-thumbnail"),
         Body::FallbackTexture(slot) => {
             let mut thumb = Thumbnail::new(super::super::thumbs::thumbnail_slot(slot)).fit(ContentFit::Contain);
             {

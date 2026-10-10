@@ -18,8 +18,8 @@ use nana_ui::runtime::{
 };
 use nana_ui::{ControlSize, Icon};
 
-/// Vue `button:disabled` 的整体透明度。
-pub(crate) const DISABLED_OPACITY: f32 = 0.45;
+use crate::theme_map::DISABLED_OPACITY;
+
 /// 导航行高度：`.workspace-shortcuts__item` 的 `min-height: 28px`。
 const NAV_ROW_HEIGHT: f32 = 28.0;
 /// 分组标题高度：`.workspace-group__header { height: 24px }`。

@@ -1,7 +1,7 @@
 //! 实况文档上的指针拖动和框选。
 //!
-//! Nana 视图没有通用的拖动事件。`prepare` 在拆树之前读按下目标和坐标，
-//! 再交给已经对照过 Vue 的输入归约。行上的 `momobako-path:` 文本是命中标记。
+//! Nana 视图没有通用的拖动事件。每帧 `prepare`（`window_host::prepare_motion`）读主键指针的按下目标和
+//! 坐标，再交给已经对照过 Vue 的输入归约。卡片里的 `momobako-entry:{kind}:{path}` 文本是命中标记。
 
 use nana_ui::runtime::{LayoutBox, RuntimeDocument, StableNodeId, UiWorld};
 
@@ -22,7 +22,8 @@ struct RowMark {
     bounds: LayoutBox,
 }
 
-/// 读当前文档的主键指针。返回 true 表示手势还按着，调用方不要拆掉这棵树。
+/// 读当前文档的主键指针。返回 true 表示手势还按着：这一帧调用方只同步热字段、不做结构同步，
+/// 免得按着的节点被换掉。
 pub fn observe_live_pointer(model: &mut ShellViewModel, document: &RuntimeDocument) -> bool {
     let document_id = document.document();
     let context = document.context();
@@ -776,8 +777,7 @@ mod tests {
 
     fn files_model() -> ShellViewModel {
         let mut model = ShellViewModel::default();
-        model.workspace.startup.finish();
-        model.workspace.apply_repository_list(None, Ok(vec![WorkspaceRepository {
+        model.workspace.present_repository(WorkspaceRepository {
             repo_id: "repo".into(),
             name: "动画素材".into(),
             path: "D:/Libraries/Anime".into(),
@@ -786,7 +786,7 @@ mod tests {
             capabilities: vec!["write".into()],
             cache_required: false,
             cache_status: String::new(),
-        }]));
+        });
         model.reduce(ShellMessage::FileBrowserLoaded(Ok(snapshot())));
         model
     }

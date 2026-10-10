@@ -5,7 +5,7 @@
 //! 这些地方按投影现算整份样式，和旧视图用同一个构造函数，保证画面和整块重挂时一样。
 
 use nana_ui::runtime::view::{css, fields, signal, untrack, widget, AnyView, FieldWrite, InlineStyle, IntoView, Signal, StyledComponent};
-use nana_ui::runtime::{Button, IconGlyph, NodeStyle, ValidationMessage};
+use nana_ui::runtime::{IconGlyph, NodeStyle, ValidationMessage};
 use nana_ui_core::Icon;
 
 use super::super::hot::ModelField;
@@ -26,21 +26,6 @@ impl<C: StyledComponent> FieldWrite<C, NodeStyle> for StyleField {
 
     fn differs(target: &C, value: &NodeStyle) -> bool {
         target.node_style() != value
-    }
-}
-
-/// 按钮文字前的图标。图标按几何指针比较。
-pub(crate) struct ButtonIconField;
-
-impl FieldWrite<Button, Option<Icon>> for ButtonIconField {
-    const FIELD: &'static str = "Button.icon";
-
-    fn write(target: &mut Button, value: Option<Icon>) {
-        target.icon = value;
-    }
-
-    fn differs(target: &Button, value: &Option<Icon>) -> bool {
-        target.icon.map(Icon::as_ptr) != value.map(Icon::as_ptr)
     }
 }
 

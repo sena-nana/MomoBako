@@ -199,7 +199,7 @@ fn starting_a_refresh_clears_the_failure_and_shows_the_first_step() {
     assert_eq!(failure(&model), None, "刷新开始时清掉上一次失败");
     assert_eq!(progress(&model), (SyncPhase::Scanning, "扫描文件夹结构".into(), 1, 3, 33));
     assert_eq!(StatusLine::project(&model), StatusLine::Progress { label: "扫描文件夹结构".into(), percent: 33 });
-    let operation = model.admin.operation.clone().expect("操作进度");
+    let operation = model.operation.shown().cloned().expect("操作进度");
     assert_eq!((operation.label.as_str(), operation.detail.as_str(), operation.value), ("刷新文件树", "同步并读取目录结构", 12.0));
     let folders = SidebarView::project(&model).folders;
     assert!(folders.loading && folders.refresh_disabled, "同步期间刷新按钮转圈并禁用");
@@ -211,14 +211,15 @@ fn starting_a_refresh_clears_the_failure_and_shows_the_first_step() {
 }
 
 /// 三步走完：同步成功后进度到「刷新文件夹树」3/3，重读摘要、硬链接候选和目录树；都写进工作区以后重读当前
-/// 目录，读完是「刷新完成」，操作进度收起，状态区不再显示进度。
+/// 目录，仓库操作行由这次读目录接手（「读取目录」），读完是「刷新完成」，操作行停在 100% 再收起，
+/// 状态区不再显示进度。
 #[test]
 fn a_successful_refresh_reloads_the_workspace_then_completes() {
     let mut model = scene("live-files-plain");
     let token = click_refresh(&mut model);
     synced(&mut model, token, Ok(3));
     assert_eq!(progress(&model), (SyncPhase::Refreshing, "刷新文件夹树".into(), 3, 3, 100));
-    let operation = model.admin.operation.clone().expect("操作进度");
+    let operation = model.operation.shown().cloned().expect("操作进度");
     assert_eq!((operation.detail.as_str(), operation.value), ("已扫描 3 个文件", 58.0));
     assert_eq!(model.tree_sync.take_effects(), vec![TreeSyncEffect::Refresh { token, repo_id: REPO_ID.into(), tree: true }]);
 
@@ -229,11 +230,16 @@ fn a_successful_refresh_reloads_the_workspace_then_completes() {
     assert_eq!(browses(&mut model), vec![(String::new(), false)], "重读当前目录");
     assert!(model.tree_sync.running(), "目录读完以前还在刷新");
     assert!(SidebarView::project(&model).folders.refresh_disabled);
+    let operation = model.operation.shown().cloned().expect("读目录接手操作行");
+    assert_eq!((operation.label.as_str(), operation.detail.as_str()), ("读取目录", "正在读取根目录"));
 
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(root_browser(false))));
     assert!(!model.tree_sync.running());
     assert_eq!(progress(&model), (SyncPhase::Complete, "刷新完成".into(), 3, 3, 100));
-    assert!(model.admin.operation.is_none(), "完成后操作进度收起");
+    let operation = model.operation.shown().cloned().expect("读完停在 100%");
+    assert_eq!((operation.detail.as_str(), operation.value), ("整理目录条目", 100.0));
+    model.operation.tick(crate::shell::repo_operation::FINISH_LINGER_MS);
+    assert!(model.operation.shown().is_none(), "停留以后收起");
     assert_eq!(StatusLine::project(&model), StatusLine::Hidden);
     assert!(!SidebarView::project(&model).folders.refresh_disabled, "刷新完按钮可以再点");
 }
@@ -248,7 +254,7 @@ fn a_failed_sync_lands_in_the_status_area() {
     assert_eq!(StatusLine::project(&model), StatusLine::Failure("刷新文件夹树失败：拒绝访问。".into()));
     assert_eq!(progress(&model), (SyncPhase::Error, "拒绝访问。".into(), 3, 3, 100));
     assert!(!model.tree_sync.running());
-    assert!(model.admin.operation.is_none());
+    assert!(model.operation.shown().is_none(), "失败时操作行立刻收起");
     assert!(model.tree_sync.take_effects().is_empty(), "失败后不再重读");
 }
 
@@ -302,7 +308,8 @@ fn the_trash_panel_reloads_the_trash_without_the_tree() {
 #[test]
 fn virtual_views_finish_without_reading_a_directory() {
     let mut model = scene("live-files-plain");
-    model.reduce(ShellMessage::SetLibraryCategory(LibraryCategory::Untagged));
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::SelectShortcut(ShortcutId::Untagged)));
+    assert_eq!(model.workspace.library_category, LibraryCategory::Untagged);
     assert_eq!(model.workspace.panel, WorkspacePanel::Files);
     let token = click_refresh(&mut model);
     synced(&mut model, token, Ok(2));
@@ -326,7 +333,7 @@ fn stale_results_and_switched_repositories_are_dropped() {
     synced(&mut model, token, Ok(9));
     assert!(!model.tree_sync.running(), "换了仓库，这一轮作废");
     assert_eq!(progress(&model), (SyncPhase::Idle, String::new(), 0, 3, 0), "进度回到 Vue 的初值");
-    assert!(model.admin.operation.is_none());
+    assert!(model.operation.shown().is_none());
     assert!(model.tree_sync.take_effects().is_empty());
     assert_eq!(failure(&model), None);
 }

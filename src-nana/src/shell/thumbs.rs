@@ -1,4 +1,4 @@
-//! 文件缩略图的宽高比、缩小和解码。
+//! 文件缩略图的宽高比和解码。
 //!
 //! Vue 在图片加载后用原始宽高比，并夹到 0.55–2.4；各展示方式的卡片尺寸在 `files_cards.rs`。
 
@@ -19,41 +19,6 @@ pub fn content_aspect(width: u32, height: u32) -> f32 {
     } else {
         ratio.clamp(ASPECT_MIN, ASPECT_MAX)
     }
-}
-
-/// 把已有像素装进缩略图盒子。只缩小，不放大，也不补不存在的画面。
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn fit_rgba(width: u32, height: u32, rgba: &[u8], max_w: u32, max_h: u32) -> Option<(u32, u32, Vec<u8>)> {
-    fit_filtered(width, height, rgba, max_w, max_h, image::imageops::FilterType::Triangle, false)
-}
-
-fn fit_filtered(
-    width: u32,
-    height: u32,
-    rgba: &[u8],
-    max_w: u32,
-    max_h: u32,
-    filter: image::imageops::FilterType,
-    allow_upscale: bool,
-) -> Option<(u32, u32, Vec<u8>)> {
-    if width == 0 || height == 0 || max_w == 0 || max_h == 0 {
-        return None;
-    }
-    let pixels = (width as usize).checked_mul(height as usize)?.checked_mul(4)?;
-    if rgba.len() < pixels {
-        eprintln!("Nana 缩略图像素不够：{width}x{height}，字节 {}", rgba.len());
-        return None;
-    }
-    let image = image::RgbaImage::from_raw(width, height, rgba[..pixels].to_vec())?;
-    let scale = (max_w as f32 / width as f32).min(max_h as f32 / height as f32);
-    if !scale.is_finite() || scale <= 0.0 {
-        return None;
-    }
-    let scale = if allow_upscale { scale.min(8.0) } else { scale.min(1.0) };
-    let dst_w = ((width as f32 * scale).round() as u32).clamp(1, max_w);
-    let dst_h = ((height as f32 * scale).round() as u32).clamp(1, max_h);
-    let scaled = image::imageops::resize(&image, dst_w, dst_h, filter);
-    Some((scaled.width(), scaled.height(), scaled.into_raw()))
 }
 
 /// 宿主纹理槽。同一路径始终对应同一槽，方便重复挂载。
@@ -125,16 +90,5 @@ mod tests {
         assert_eq!(content_aspect(800, 600), 800.0 / 600.0);
         assert_eq!(content_aspect(4000, 1000), ASPECT_MAX);
         assert_eq!(content_aspect(100, 1000), ASPECT_MIN);
-    }
-
-    #[test]
-    fn fit_rgba_shrinks_existing_pixels_and_rejects_empty() {
-        assert!(fit_rgba(0, 2, &[0, 0, 0, 255], 8, 8).is_none());
-        assert!(fit_rgba(2, 2, &[255, 0, 0, 255], 8, 8).is_none());
-        let rgba = vec![12u8, 40, 80, 255].repeat(8 * 8);
-        let (width, height, scaled) = fit_rgba(8, 8, &rgba, 4, 2).expect("缩小");
-        assert!(width <= 4 && height <= 2 && width > 0 && height > 0);
-        assert_eq!(scaled.len(), width as usize * height as usize * 4);
-        assert_eq!(&scaled[..4], &[12, 40, 80, 255]);
     }
 }

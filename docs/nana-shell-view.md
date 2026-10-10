@@ -26,7 +26,7 @@
 
 并行改区域时各改各的文件：
 
-- 浮层和对话框：`view_part_overlay.rs`（`overlay_branch` 里自己那种浮层的分支，身份的结构见 `OverlayIdentity`），对话框框架 `overlay_dialog.rs`、`overlay_dialog_fields.rs`，会话 `overlay_session.rs`，以及 `sidebar_dialogs.rs`、`sidebar_smart_dialog.rs`、`sidebar_popover_view.rs`、`sidebar_tree_view.rs` 的菜单、`admin_view.rs` 的任务弹层、`source_prompt.rs`、`files_menu.rs`、`workspace_dialogs.rs`、`workspace_export_dialog.rs` 等浮层视图。
+- 浮层和对话框：`view_part_overlay.rs`（`overlay_branch` 里自己那种浮层的分支，身份的结构见 `OverlayIdentity`），对话框框架 `overlay_dialog.rs`、`overlay_dialog_fields.rs`，会话 `overlay_session.rs`，以及 `sidebar_dialogs.rs`、`sidebar_smart_dialog.rs`、`sidebar_popover_view.rs`、`sidebar_tree_view.rs` 的菜单、`admin_view.rs` 的任务弹层、`files_menu.rs`、`workspace_dialogs.rs`、`workspace_export_dialog.rs` 等浮层视图。
 - 文件页和详情：`route_files.rs` 和 `files_*.rs`、`inspect_*.rs`。
 - 侧栏和其余路由：`view_part_sidebar.rs`、`sidebar_*.rs`，以及 `route_search.rs`、`route_playlists.rs`、`route_settings.rs`、`route_admin.rs`、`route_startup.rs`、`route_missing.rs`、`route_empty.rs`；首页外框和滚动主体在 `route_home.rs`。
 
@@ -49,7 +49,7 @@
 
 ### 首页筛选栏
 
-筛选栏属于首页外框，有仓库的首页路由都可能显示它。信号 `FilterBarSignals` 在 `RouteSignals::filter`，启动、设置、缺失仓库和空库页以外每次同步都写（关着时不算候选和库类型快捷方式）。常驻首页路由（文件、搜索、播放集、日志、拓展和动作页）在外框里嵌 `inspect_search_view::resident_filter_bar(signals.filter)`，显隐跟「有仓库且筛选栏打开」走 `.visible`；文件页的 `FilesRouteSignals` 不另存筛选栏的状态，读的是同一份 `RouteSignals::filter`。首页外框和纵向滚动主体只有一套：`route_home::{home_page, home_scroll}`，缺失仓库和空库页也用它（不嵌筛选栏）；设置和启动页的整页滚动是 `route_home::scroll_route`。日志页和拓展、动作页一样用 `home_scroll`：面板（`admin::style::workbench_panel`）至少撑满主体，日志列表的基准高写定 360、伸展分走页头、工具条和筛选以下的高度，自己滚动，追踪时 `follow_end` 绑在列表上；窗口矮到放不下时主体滚动。里层滚动区只把自己的盒子算进外层的滚动范围（NanaUI `941df646d` 起），列表里的日志再多，放得下的主体也不滚。
+筛选栏属于首页外框，有仓库的首页路由都可能显示它。信号 `FilterBarSignals` 在 `RouteSignals::filter`，启动、设置、缺失仓库和空库页以外每次同步都写（关着时不算候选和库类型快捷方式）。常驻首页路由（文件、搜索、播放集、日志、拓展和动作页）在外框里嵌 `inspect_search_view::resident_filter_bar(signals.filter)`，显隐跟「有仓库且筛选栏打开」走 `.visible`；文件页的 `FilesRouteSignals` 不另存筛选栏的状态，读的是同一份 `RouteSignals::filter`。首页外框和纵向滚动主体只有一套：`route_home::{home_page, home_scroll}`，缺失仓库和空库页也用它（不嵌筛选栏）；设置和启动页的整页滚动是 `route_home::scroll_route`。日志页和拓展、动作页一样用 `home_scroll`：面板（`admin::style::workbench_panel`）至少撑满主体，日志列表的基准高写定为最矮高度 72（`admin_logs_view::LIST_FLOOR`）、伸展分走页头、工具条和筛选以下的高度，自己滚动，追踪时 `follow_end` 绑在列表上；窗口矮到连 72 都放不下时主体滚动。里层滚动区只把自己的盒子算进外层的滚动范围（NanaUI `941df646d` 起），列表里的日志再多，放得下的主体也不滚。
 
 ## 改成常驻的步骤
 
@@ -76,7 +76,7 @@
 - `dynamic` 和 `when` 的容器不能直接给一个 `Stack`；`each` 可以用 `.container(元素)` 把行直接建进给定的元素（播放集条目这样建进 `ReorderList`）。要替换一行有样式的芯片（筛选芯片行、结果行右侧）时用 `.horizontal(n)`，再用 `css!` 补上原来那个 `Stack` 写过的字段（`flex-wrap`、`justify-content`、`width`、`flex-grow` 等），改完跑 `scene_shots` 逐字节比较。竖排父容器里的 `dynamic` 容器不改排版：内容变了整块换、里面又没有可聚焦控件的小块（插件卡片的芯片、原因和四段）可以这样包，可有可无时再给容器 `.visible(..)`。
 - 一行里固定几个、可有可无的块（日志卡片的来源芯片和元数据芯片）直接建出来，各自 `.visible(..)`，不用嵌套列表。
 - 滚动容器写 key，并让 key 带上内容身份（例如 `workspace-page-scroll-{区域}-{面板}`）：换内容时从顶部开始，同一内容重挂时 `remount_state` 按键路径找回偏移。常驻以后滚动容器不再重建，偏移自然留着。
-- 面板高度按内容量（`workbench_panel` 的 `min-height` 是 `MinContent`）时，没写定高度的滚动区按里面的全部内容量高，和 CSS 的 `min-height: min-content` 一样：日志列表只写 `flex-basis: 0` 和最小高，面板会被量成全部日志那么高。要在面板里伸展的滚动列表写定基准高（日志列表 360）再 `flex-grow`。
+- 面板高度按内容量（`workbench_panel` 的 `min-height` 是 `MinContent`）时，没写定高度的滚动区按里面的全部内容量高，和 CSS 的 `min-height: min-content` 一样：日志列表只写 `flex-basis: 0` 和最小高，面板会被量成全部日志那么高。要在面板里伸展的滚动列表写定基准高（日志列表 72）再 `flex-grow`。
 
 ### 输入框的四条纪律
 
@@ -227,7 +227,7 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 - （已补）AppShell 原来只在自己投影时按「有没有子节点」决定 overlay 槽位挡不挡点击，浮层块只好每次换块都换掉 overlay 槽位、重新装配。现在 AppShell 盯着槽位的子节点（增删、显隐都重新判断，隐藏的不算），浮层层改成常驻的槽位内容。
 - `TreeView` 是一个自绘节点：`nodes` 只能整份绑定，展开、计数变了都整树重投影；行不是节点，放不了行内按钮、右侧计数、右键菜单和行级无障碍。侧栏的文件夹树和智能文件夹树改成按显示顺序展开的扁平行，放进按键对照的 Store，用 `keyed(..).each` 建：展开只插子级，三角、当前目录和计数原地改。
 - （已补）`ReorderList` 拖动时按自己的直接子节点取行的盒子（`reorder_row_boxes`），`each` 原来总会多一层容器，播放集页只好用按条目顺序做键的 `dynamic`，增删、重排时整个列表重建。现在 `each(..).container(元素)` 把行直接建进给定的元素，播放集条目用 Store 的 `keyed(..).each(..)` 建进 `ReorderList`，留下的行不重建。
-- `ReorderList` 按下行就开始拖动手势、把指针抓走，行里的按钮收不到点击，除非这一行的条目用 `.tools(节点)` 标出可点的区域，而且一行只能标一块。播放集条目把扩展名方块、标题、播放和移除包成一段登记成 `tools`（行挂上时写进登记表，条目跟着重算），从拖动柄和行的留白拖动。
+- （已补）`ReorderList` 原来按下行就开始拖动手势、把指针抓走，行里的按钮收不到点击，只能用 `.tools(节点)` 给一行标一块不拖的区域，播放集条目只好把扩展名方块、标题、播放和移除包成一段登记成 `tools`。NanaUI `b02eaa231` 起按在行里能获得焦点的控件上，不移动松开就是控件自己的点击，移动超过 4px 才拖这一行；`tools` 登记已删，整行都能拖，和 Vue 一样。
 - `#[derive(Store)]` 给每个字段生成同名访问器，但 `Item` 自己有 `id()`（键的哈希），名叫 `id` 的字段在行上读不到，行结构里的编号字段要换个名字（`playlist_id`、`item_id`）。
 - 结构块先删旧分支再建新分支，删的时候焦点被清空；`on_cleanup` 拿不到 `AppContext`，没有在换分支之前能读焦点的回调。原来播放集页换列表前要分两步记焦点；条目改成带键的 `each` 以后列表不再整块换，现在没有用到这条的地方。
 

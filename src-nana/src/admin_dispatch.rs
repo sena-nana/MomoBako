@@ -9,10 +9,10 @@ use nana_ui::RuntimeProgramContext;
 
 use crate::backend::services::mutsuki_runner::{PROTOCOL_REPOSITORY_ACTION_RUN, PROTOCOL_REPOSITORY_CREATE, PROTOCOL_REPOSITORY_SYNC};
 use crate::backend::services::repository::{
-    BinaryFileWriteRequest, FileBrowserRequest, NeteaseRepositoryCacheConfigureRequest, PluginCallRequest, PluginConfigDeleteRequest,
+    BinaryFileWriteRequest, NeteaseRepositoryCacheConfigureRequest, PluginCallRequest, PluginConfigDeleteRequest,
     PluginConfigSetRequest, PluginConfigSnapshot, PluginEnabledRequest, PluginHookExecutionListRequest, PluginInstallRequest,
-    PluginManifest, RepositoryAction, RepositoryActionRunRequest, RepositoryBackendConfigUpdateRequest, RepositoryMutationRequest,
-    SyncRequest, SystemLogQuery,
+    PlaylistItemsByPathsAddRequest, PlaylistMutationRequest, PluginManifest, RepositoryAction, RepositoryActionRunRequest,
+    RepositoryBackendConfigUpdateRequest, RepositoryMutationRequest, SyncRequest, SystemLogQuery,
 };
 use crate::backend::viewmodels::PluginViewModel;
 use crate::shell::admin::api::{self, ApiMessage, HttpRequest};
@@ -81,10 +81,12 @@ fn dispatch_one(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<S
         AdminEffect::OpenDataDirectory { plugin_id, name } => open_directory(app, context, plugin_id, name),
         AdminEffect::LoadActions { repo_id } => load_actions(app, context, repo_id),
         AdminEffect::RunAction { repo_id, action_id, paths } => run_action(app, context, repo_id, action_id, paths),
-        AdminEffect::ReloadBrowser { repo_id } => reload_browser(app, context, repo_id),
         AdminEffect::WriteFile { path, bytes } => write_file(app, context, path, bytes),
         AdminEffect::CallPlugin { plugin_id, method, payload, repository_id, origin } => {
             call_plugin(app, context, plugin_id, method, payload, repository_id, origin);
+        }
+        AdminEffect::CreateSourcePlaylist { repo_id, playlist_id, name, player_type_id, path } => {
+            create_source_playlist(app, context, repo_id, playlist_id, name, player_type_id, path);
         }
         AdminEffect::UpdateBackendConfig { repo_id, backend_config, step } => {
             let Some(services) = app.services.as_ref() else {
@@ -220,6 +222,41 @@ fn call_plugin(
     })) {
         eprintln!("Nana 插件调用任务提交失败：{error}");
         app.shell.reduce(plugin_result(failed_origin, failed_method, Err(format!("插件调用提交失败：{error}"))));
+    }
+}
+
+/// 「创建播放列表」照 Vue `runPlaylistAction`：先列出播放集，没有这个标识才建，再把目录按路径加进去。
+/// 哪一步失败都把原因交回，不留在进行中。
+fn create_source_playlist(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+    playlist_id: String,
+    name: String,
+    player_type_id: String,
+    path: String,
+) {
+    let Some(services) = app.services.as_ref() else {
+        eprintln!("Nana 创建来源播放集需要领域服务，当前服务未启动");
+        app.shell.reduce(admin(AdminMessage::SourcePlaylistFinished(Err(NO_SERVICES.into()))));
+        return;
+    };
+    let interaction = services.repository_interaction.clone();
+    let executor = services.executor.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        let result = (|| {
+            let existing = executor.block_on(interaction.list_playlists(repo_id.clone()))?;
+            if !existing.iter().any(|playlist| playlist.playlist_id == playlist_id) {
+                let request = PlaylistMutationRequest { repo_id: repo_id.clone(), playlist_id: Some(playlist_id.clone()), name, player_type_id };
+                executor.block_on(interaction.create_playlist(request))?;
+            }
+            let request = PlaylistItemsByPathsAddRequest { repo_id, playlist_id, paths: vec![path] };
+            executor.block_on(interaction.add_playlist_items_by_paths(request)).map(|_| ())
+        })();
+        admin(AdminMessage::SourcePlaylistFinished(result))
+    })) {
+        eprintln!("Nana 创建来源播放集任务提交失败：{error}");
+        app.shell.reduce(admin(AdminMessage::SourcePlaylistFinished(Err(format!("创建播放列表任务提交失败：{error}")))));
     }
 }
 
@@ -448,29 +485,6 @@ fn run_action(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<She
 fn action_from_value(value: serde_json::Value) -> Result<RepositoryAction, String> {
     let action = value.get("action").cloned().ok_or_else(|| "动作结果缺少 action".to_string())?;
     serde_json::from_value(action).map_err(|error| format!("动作结果无法解析：{error}"))
-}
-
-fn reload_browser(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String) {
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 动作完成后的文件刷新需要领域服务，当前服务未启动");
-        return;
-    };
-    let directory = app.shell.current_directory.clone();
-    let browser = services.file_browser.clone();
-    let executor = services.executor.clone();
-    let request = FileBrowserRequest {
-        repo_id,
-        directory_path: (!directory.is_empty()).then_some(directory),
-        include_tree: Some(false),
-        special_location: None,
-        offset: Some(0),
-        limit: Some(200),
-    };
-    if let Err(error) = context.run_task(Task::new(async move {
-        ShellMessage::FileBrowserLoaded(executor.block_on(browser.get_file_browser(request)))
-    })) {
-        eprintln!("Nana 动作完成后的文件刷新任务提交失败：{error}");
-    }
 }
 
 fn write_file(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, path: String, bytes: Vec<u8>) {

@@ -8,13 +8,13 @@ use crate::backend::services::repository::{
     AssetDetail, AssetSummary, FileBrowserSnapshot, FilePreviewSourceResponse, MetadataEntry, RepositoryBackendSummary,
     RepositoryOverview, RepositorySnapshot, RepositoryStructureCacheState, RepositorySummary,
 };
-use crate::plugin_api::{NativeContributionKind, NativePluginContribution};
-
 use super::super::workspace::{WorkspacePanel, WorkspaceRepository};
 use super::super::player::PlayerMessage;
 use super::super::view_part_primary::RouteKey;
 use super::super::{PreviewPixels, ShellMessage, ShellPage, ShellViewModel};
-use super::{InspectEffect, InspectMessage, InspectState, PreviewBinding, PreviewBody, PreviewKind};
+use super::super::player::StillShow;
+use super::bridge::{MeshData, NativeLoad, PageFrame};
+use super::{InspectEffect, InspectMessage, InspectState, PreviewBody, PreviewKind};
 
 fn asset(path: &str, extension: &str, version: i64, virtual_asset: bool, metadata: Vec<MetadataEntry>) -> AssetDetail {
     let filename = path.rsplit(['/', '\\']).next().unwrap_or(path).to_string();
@@ -66,13 +66,6 @@ fn writable_shell() -> ShellViewModel {
     model
 }
 
-fn preview_binding(kind: NativeContributionKind, extension: &str) -> PreviewBinding {
-    PreviewBinding {
-        extensions: vec![extension.into()],
-        contribution: NativePluginContribution::new("plugin", kind, "官方预览", "view-pdf"),
-    }
-}
-
 fn source(path: &str) -> FilePreviewSourceResponse {
     FilePreviewSourceResponse {
         repo_id: "repo".into(),
@@ -86,37 +79,30 @@ fn source(path: &str) -> FilePreviewSourceResponse {
     }
 }
 
+/// 分派照 Vue `filePreviewExtensions.ts`：图片、Markdown（先于文本）、文本、音视频，再是内置的 PDF、
+/// 模型和压缩包；随附插件（`office-preview` 的 pdf、`three-model-preview`、`preview-archive`）声明的扩展名
+/// 都落到内置视图上，认不出的扩展名（例如只有第三方插件认得的 psd）照 Vue 没有预览插件时一样不预览。
 #[test]
 fn extension_dispatch_prefers_markdown_and_native_preview() {
-    assert_eq!(super::support::classify("PNG", &[]), PreviewKind::Image);
-    assert_eq!(super::support::classify("md", &[]), PreviewKind::Markdown);
-    assert_eq!(super::support::classify("txt", &[]), PreviewKind::Text);
-    assert_eq!(super::support::classify("vue", &[]), PreviewKind::Text);
-    assert_eq!(super::support::classify("mp3", &[]), PreviewKind::Media);
+    assert_eq!(super::support::classify("PNG"), PreviewKind::Image);
+    assert_eq!(super::support::classify("md"), PreviewKind::Markdown);
+    assert_eq!(super::support::classify("txt"), PreviewKind::Text);
+    assert_eq!(super::support::classify("vue"), PreviewKind::Text);
+    assert_eq!(super::support::classify("mp3"), PreviewKind::Media);
     assert_eq!(
-        super::support::classify("pdf", &[]),
+        super::support::classify("pdf"),
         PreviewKind::Native { view_id: "momobako.preview.pdf".into(), label: "PDF".into() }
     );
     assert_eq!(
-        super::support::classify("glb", &[]),
+        super::support::classify("glb"),
         PreviewKind::Native { view_id: "momobako.preview.model".into(), label: "模型".into() }
     );
     assert_eq!(
-        super::support::classify("zip", &[]),
+        super::support::classify("zip"),
         PreviewKind::Native { view_id: "momobako.preview.archive".into(), label: "压缩包".into() }
     );
-    assert_eq!(super::support::classify("bin", &[]), PreviewKind::Unsupported);
-
-    let native = preview_binding(NativeContributionKind::Preview, "pdf");
-    assert_eq!(
-        super::support::classify("pdf", &[native]),
-        PreviewKind::Native { view_id: "momobako.preview.pdf".into(), label: "PDF".into() }
-    );
-    let playlist = preview_binding(NativeContributionKind::PlaylistPlayer, "pdf");
-    assert_eq!(
-        super::support::classify("pdf", &[playlist]),
-        PreviewKind::Native { view_id: "momobako.preview.pdf".into(), label: "PDF".into() }
-    );
+    assert_eq!(super::support::classify("bin"), PreviewKind::Unsupported);
+    assert_eq!(super::support::classify("psd"), PreviewKind::Unsupported);
 }
 
 #[test]
@@ -144,19 +130,11 @@ fn text_decodes_boms_and_drops_a_character_cut_by_the_limit() {
 #[test]
 fn preview_kind_starts_the_matching_body() {
     let mut state = InspectState::default();
-    state.reduce(true, Some("repo"), InspectMessage::RegisterPreview(preview_binding(NativeContributionKind::PlaylistPlayer, "pdf")));
     state.note_detail(&asset("docs/a.pot", "pot", 1, false, Vec::new()));
     assert!(matches!(
         state.take_effects().pop(),
         Some(InspectEffect::LoadNative { view_id, path, .. }) if view_id == "momobako.preview.office" && path == "docs/a.pot"
     ));
-    state.note_detail(&asset("docs/a.pdf", "pdf", 1, false, Vec::new()));
-    assert!(matches!(
-        state.take_effects().pop(),
-        Some(InspectEffect::LoadNative { view_id, .. }) if view_id == "momobako.preview.pdf"
-    ));
-
-    state.reduce(true, Some("repo"), InspectMessage::RegisterPreview(preview_binding(NativeContributionKind::Preview, "pdf")));
     state.note_detail(&asset("docs/a.pdf", "pdf", 1, false, Vec::new()));
     assert!(matches!(
         state.take_effects().pop(),
@@ -476,7 +454,7 @@ fn search_route_appears_only_after_startup_with_a_repository() {
     model.workspace.panel = WorkspacePanel::Search;
     assert_eq!(RouteKey::of(&model), RouteKey::Startup);
 
-    model.reduce(ShellMessage::RepositoriesLoaded(Ok(vec![RepositorySummary {
+    model.reduce(ShellMessage::WorkspaceListLoaded { generation: 0, result: Ok(vec![RepositorySummary {
         repo_id: "repo".into(),
         name: "库".into(),
         path: "C:/repo".into(),
@@ -491,9 +469,9 @@ fn search_route_appears_only_after_startup_with_a_repository() {
         updated_at: String::new(),
         local_cache: None,
         authentication: None,
-    }])));
-    model.reduce(ShellMessage::StartupSyncFinished { generation: 0, result: Ok(()) });
-    model.reduce(ShellMessage::RepositorySnapshotLoaded(Ok(RepositorySnapshot {
+    }]) });
+    model.reduce(ShellMessage::RepositorySynced { generation: 0, result: Ok(()) });
+    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation: 0, result: Ok(RepositorySnapshot {
         repository: RepositorySummary {
             repo_id: "repo".into(),
             name: "库".into(),
@@ -526,7 +504,7 @@ fn search_route_appears_only_after_startup_with_a_repository() {
             trash_count: 0,
             readme_content: None,
         },
-    })));
+    }) });
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(FileBrowserSnapshot {
         repo_id: "repo".into(),
         root_path: "C:/repo".into(),
@@ -595,6 +573,7 @@ fn avi_preview_plays_pauses_and_seeks_on_the_shared_session() {
     assert_eq!(model.player.session.status, "paused");
     assert!(model.preview_token.as_deref().unwrap_or_default().starts_with("video:"));
     assert_eq!(model.preview_pixels.as_ref().expect("画面").rgba[0], 255);
+    assert!(crate::shell::wants_preview_texture(&model), "视频画面从纹理槽取，宿主要上传");
     model.reduce(ShellMessage::Player(PlayerMessage::SetPlaying(true)));
     assert_eq!(model.player.session.status, "playing");
     assert_eq!(model.inspect.media_session().expect("会话").status, "playing");
@@ -621,4 +600,79 @@ fn video_player() -> crate::backend::services::repository::PlaylistPlayerContrib
         supports_preview_navigation: true,
         description: None,
     }
+}
+
+/// 原生预览读好以后从 `LoadNative` 请求里取代数。
+fn native_generation(model: &mut ShellViewModel) -> u64 {
+    match model.inspect.take_effects().pop() {
+        Some(InspectEffect::LoadNative { generation, .. }) => generation,
+        _ => panic!("没有原生预览请求"),
+    }
+}
+
+/// PDF 和模型的页图从 `deck` 编成内容图画，不复制进 `preview_pixels`，宿主没有东西可传到 `file-preview`。
+/// 上一张图片留下的画面在原生预览读好时放掉；翻页和转模型也不再写回。
+#[test]
+fn native_pages_never_reach_the_preview_texture() {
+    let mut model = writable_shell();
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("pics/a.png", "png", 1, false, Vec::new()))));
+    model.reduce(ShellMessage::PreviewPixelsLoaded {
+        source: source("pics/a.png"),
+        pixels: Ok(PreviewPixels { width: 1, height: 1, rgba: vec![1, 2, 3, 4] }),
+    });
+    assert!(crate::shell::wants_preview_texture(&model), "图片预览从纹理槽取画面");
+
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("docs/a.pdf", "pdf", 1, false, Vec::new()))));
+    let generation = native_generation(&mut model);
+    let page = |shade: u8| PageFrame { width: 2, height: 2, rgba: vec![shade; 16], text: String::new(), error: None };
+    model.reduce(ShellMessage::Inspect(InspectMessage::NativeLoaded {
+        path: "docs/a.pdf".into(),
+        generation,
+        result: Ok(NativeLoad { text: "PDF".into(), frames: vec![page(10), page(20)], mesh: None, paged: true }),
+    }));
+    assert!(model.preview_pixels.is_none() && model.preview_token.is_none(), "上一张图片的画面放掉");
+    assert_eq!(model.inspect.raster_frame().map(|(_, _, rgba)| rgba[0]), Some(10), "页图从 deck 取");
+    assert!(!crate::shell::wants_preview_texture(&model));
+    model.reduce(ShellMessage::Inspect(InspectMessage::TurnPage(1)));
+    assert_eq!(model.inspect.raster_frame().map(|(_, _, rgba)| rgba[0]), Some(20));
+    assert!(model.preview_pixels.is_none() && model.preview_token.is_none(), "翻页不写回预览像素");
+
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("models/a.obj", "obj", 1, false, Vec::new()))));
+    let generation = native_generation(&mut model);
+    let mesh = MeshData { vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], triangles: vec![[0, 1, 2]] };
+    model.reduce(ShellMessage::Inspect(InspectMessage::NativeLoaded {
+        path: "models/a.obj".into(),
+        generation,
+        result: Ok(NativeLoad { text: String::new(), frames: Vec::new(), mesh: Some(mesh), paged: false }),
+    }));
+    model.reduce(ShellMessage::Inspect(InspectMessage::Orbit { yaw: 0.5, zoom: 1.0 }));
+    assert!(model.inspect.raster_frame().is_some(), "转过以后画出网格");
+    assert!(model.preview_pixels.is_none() && model.preview_token.is_none(), "转模型不写回预览像素");
+    assert!(!crate::shell::wants_preview_texture(&model));
+}
+
+/// 宿主只在预览框这一帧从 `file-preview` 槽取画面时上传：单击只选中时预览页藏着，不传；预览的正是
+/// 幻灯片当前项时画幻灯片自己的帧，也不传。幻灯片本身不登记任何宿主纹理。
+#[test]
+fn the_preview_texture_is_wanted_only_while_the_frame_draws_it() {
+    let mut model = writable_shell();
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("pics/a.png", "png", 1, false, Vec::new()))));
+    model.reduce(ShellMessage::PreviewPixelsLoaded {
+        source: source("pics/a.png"),
+        pixels: Ok(PreviewPixels { width: 1, height: 1, rgba: vec![1, 2, 3, 4] }),
+    });
+    assert!(crate::shell::wants_preview_texture(&model));
+
+    model.files.select_only = Some("pics/a.png".into());
+    assert!(!crate::shell::wants_preview_texture(&model), "单击只选中：预览页藏着");
+    model.files.select_only = None;
+
+    model.player.repo_id = Some("repo".into());
+    model.player.still = Some(StillShow {
+        path: "pics/a.png".into(),
+        frame: Some(PreviewPixels { width: 1, height: 1, rgba: vec![9; 4] }),
+    });
+    assert!(!crate::shell::wants_preview_texture(&model), "幻灯片当前项画自己的帧");
+    model.player.still = None;
+    assert!(crate::shell::wants_preview_texture(&model));
 }

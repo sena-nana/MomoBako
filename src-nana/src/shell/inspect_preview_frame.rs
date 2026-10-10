@@ -399,7 +399,7 @@ fn action_button(label: &str, icon: Icon, icon_size: f32, height: f32, disabled:
         button.style.interaction.base.foreground_mix = Some(nana_ui_core::SemanticColorMix::new(
             SemanticColorRole::Text,
             SemanticColorRole::Surface,
-            super::super::player_view::bar::DISABLED_OPACITY,
+            crate::theme_map::DISABLED_OPACITY,
         ));
     }
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);

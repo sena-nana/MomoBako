@@ -6,8 +6,8 @@
 //!
 //! 照 Vue 的结构，页面主体（`.workspace-page__body`）和日志列表（`.logs-workbench__list`）都是滚动区。
 //! 面板至少撑满主体，列表分走页头、工具条和筛选以下的高度、自己滚动：追踪时跟随末尾，暂停后停在原位。
-//! Vue 的列表不定高、实际滚不起来，这里按它的意图给列表定高；列表最低 360（Vue 的 `min-height`），
-//! 窗口矮到放不下时主体滚动，页头和列表都滚得到。
+//! Vue 的列表不定高、实际滚不起来，这里按它的意图给列表定高。列表最矮收到 [`LIST_FLOOR`]（有意小于 Vue 的
+//! 360），常见的矮窗口里追踪时最新一条不用滚页面就看得到；矮到连下限都放不下时主体滚动，页头和列表都滚得到。
 //!
 //! 面板只建一次，只读 [`LogsSignals`]：计数、下拉框、按钮和芯片的选中态按字段绑定；日志卡片按
 //! 日志 id 做键，卡片里的文字、可有可无的芯片和上下文都是绑定和显隐，新日志到达只多建一张卡片。
@@ -74,17 +74,20 @@ pub(crate) fn logs_panel(signals: LogsSignals) -> AnyView {
     style::workbench_panel(body, "admin-log-panel")
 }
 
-/// `.logs-workbench__list` 的最小高。
-const LIST_MIN_HEIGHT: f32 = 360.0;
+/// 日志列表最矮收到多高。Vue `.logs-workbench__list` 写的是 `min-height: 360px`，这里有意改小：
+/// 一张单行消息的日志卡片从消息行到卡片底边约 70，列表跟到末尾时要把最新一条的消息和标签露出来，
+/// 取 72。960×480 的窗口里页头、工具条和筛选以下还剩 74，放得下，最新一条不用滚页面就看得到；
+/// 窗口矮到连这 72 都放不下时主体才滚。
+pub(crate) const LIST_FLOOR: f32 = 72.0;
 
-/// 日志列表的滚动区：高度从 [`LIST_MIN_HEIGHT`] 起伸展，分走面板里页头、工具条和筛选以外的高度。
-/// 基准写定 360，面板按内容量高度时列表只算 360、不按里面的日志算；里面的日志再多也只把列表自己的
+/// 日志列表的滚动区：从 [`LIST_FLOOR`] 起伸展，分走面板里页头、工具条和筛选以外的高度。
+/// 基准写定这个下限，面板按内容量高度时列表只算下限、不按里面的日志算；里面的日志再多也只把列表自己的
 /// 盒子算进主体的滚动范围，窗口放得下时主体不滚。
 fn list_scroll() -> ScrollView {
     ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
         layout.width = Some(LengthSpec::Fill);
-        layout.height = Some(LengthSpec::Px(LIST_MIN_HEIGHT));
-        layout.min_height = Some(LengthSpec::Px(LIST_MIN_HEIGHT));
+        layout.height = Some(LengthSpec::Px(LIST_FLOOR));
+        layout.min_height = Some(LengthSpec::Px(LIST_FLOOR));
         layout.flex_grow = Some(1.0);
         layout.flex_shrink = Some(0.0);
     })
@@ -160,13 +163,15 @@ fn select_field(
     };
     let initial = toolbar.get_untracked();
     let (values, current) = pick(&initial);
-    let mut select = Select::new(Some(current.clone())).options(options(values));
+    // 照原生 `<select>` 按最长的选项定宽：选哪一项外框都不动，和 Vue 一样撑到选项需要的宽度。
+    let mut select = Select::new(Some(current.clone())).options(options(values)).fit_options(true);
     {
         let style = &mut select.style;
         style.interaction.base.background_mix = Some(SemanticColorMix::alpha(Role::Background, 0.0));
         style.interaction.base.border_mix = Some(SemanticColorMix::alpha(Role::Border, 0.0));
         let layout = Arc::make_mut(&mut style.layout);
-        // Vue 的下拉框是 `width: 100%`，在最小 180 宽的框里扣掉标题和间距后约 122 宽。
+        // 宽度按内容（最长的选项加箭头）；Vue 的下拉框是 `width: 100%`，在最小 180 宽的框里扣掉标题和间距后
+        // 约 122 宽，选项都很短时不窄于它。
         layout.width = Some(LengthSpec::Shrink);
         layout.min_width = Some(LengthSpec::Px(122.0));
         layout.height = Some(LengthSpec::Px(32.0));

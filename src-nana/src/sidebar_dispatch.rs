@@ -36,8 +36,8 @@ pub fn dispatch_sidebar_effects(app: &mut MomoBakoApplication, context: &Runtime
             SidebarEffect::LoadPlaylistDetail { repo_id, playlist_id } => {
                 dispatch_playlist_detail(app, context, repo_id, playlist_id);
             }
-            SidebarEffect::Browse { repo_id, path, trash } => {
-                app.shell.note_sidebar_browse(&path);
+            SidebarEffect::Browse { repo_id, path, trash, progress } => {
+                app.shell.note_sidebar_browse(&path, trash, progress);
                 dispatch_browse_request(app, context, browse_request(repo_id, path, trash));
             }
             SidebarEffect::AttachRepository { path } => dispatch_attach(app, context, path),
@@ -286,6 +286,7 @@ fn dispatch_create_backend(
         return;
     };
     let tasks = services.tasks.clone();
+    let query = services.repository_query.clone();
     let executor = services.executor.clone();
     let request = crate::backend::services::repository::RepositoryMutationRequest {
         repo_id: None,
@@ -298,7 +299,7 @@ fn dispatch_create_backend(
     if let Err(error) = context.run_task(Task::new(async move {
         let result = executor
             .block_on(tasks.execute(crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_CREATE, request))
-            .map(|_| ());
+            .and_then(|(output, _)| crate::app_dispatch::mutated_repository(&executor, &query, &output));
         sidebar_message(SidebarMessage::RepositoryAttachFinished(result))
     })) {
         eprintln!("Nana 创建资源库任务提交失败：{error}");
@@ -394,7 +395,7 @@ pub(crate) fn dispatch_prepared_browses(shell: &mut crate::shell::ShellViewModel
     staged
         .into_iter()
         .filter_map(|effect| match effect {
-            SidebarEffect::Browse { repo_id, path, trash } => Some(browse_request(repo_id, path, trash)),
+            SidebarEffect::Browse { repo_id, path, trash, .. } => Some(browse_request(repo_id, path, trash)),
             _ => None,
         })
         .collect()
@@ -438,11 +439,12 @@ fn dispatch_attach(app: &mut MomoBakoApplication, context: &RuntimeProgramContex
         return;
     };
     let tasks = services.tasks.clone();
+    let query = services.repository_query.clone();
     let executor = services.executor.clone();
     if let Err(error) = context.run_task(Task::new(async move {
         let result = executor
             .block_on(tasks.execute(PROTOCOL_REPOSITORY_ATTACH, RepositoryFolderRequest { path }))
-            .map(|_| ());
+            .and_then(|(output, _)| crate::app_dispatch::mutated_repository(&executor, &query, &output));
         sidebar_message(SidebarMessage::RepositoryAttachFinished(result))
     })) {
         eprintln!("Nana 附加资源库任务提交失败：{error}");

@@ -91,8 +91,8 @@ pub(super) fn start(model: &mut ShellViewModel, repo_id: &str) {
     let generation = model.workspace.prepare_initial_list();
     let steps = [
         ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(repo_id, "ready")]) },
-        ShellMessage::StartupSyncFinished { generation, result: Ok(()) },
-        ShellMessage::RepositorySnapshotLoaded(Ok(snapshot(repo_id))),
+        ShellMessage::RepositorySynced { generation, result: Ok(()) },
+        ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(repo_id)) },
     ];
     let mut early = Vec::new();
     for message in steps {
@@ -502,7 +502,7 @@ fn running_tasks_feed_the_popover_and_the_footer_count() {
 
     model.reduce(ShellMessage::Sidebar(SidebarMessage::SidebarTreeLoaded { repo_id: REPO.into(), result: Ok(Default::default()) }));
     model.reduce(ShellMessage::Sidebar(SidebarMessage::RefreshFolderTree));
-    assert!(model.admin.operation.is_some(), "刷新文件夹树是一行仓库操作");
+    assert!(model.operation.shown().is_some(), "刷新文件夹树是一行仓库操作");
     assert_eq!(SidebarView::project(&model).footer.tasks, 2, "仓库操作也算一行");
 
     model.reduce(ShellMessage::TaskProgressLoaded(Vec::new()));
@@ -549,6 +549,7 @@ fn binding_a_repository_reads_actions_and_hardlinks() {
     model.reduce(ShellMessage::Files(FilesMessage::HardlinksChecked(Ok(vec![prompt]))));
     assert_eq!(model.files.dialog, FileDialog::Hardlink, "有候选就弹出确认");
 
-    model.reduce(ShellMessage::RepositorySnapshotLoaded(Ok(snapshot(REPO))));
+    let generation = model.workspace.list_generation;
+    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(REPO)) });
     assert!(!admin_effects(&mut model).iter().any(|effect| matches!(effect, AdminEffect::LoadActions { .. })), "同一个仓库的摘要不重读动作");
 }

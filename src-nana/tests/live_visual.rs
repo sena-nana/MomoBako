@@ -1,7 +1,9 @@
-//! 实况工作区的视觉和点击验收。
+//! 实况工作区的视觉、点击和输入验收。
 //!
-//! 文档来自生产 `acceptance_document_for_model`。布局盒相交、中文窗口按钮
-//! 或缺少像素时失败。`nonclear_ratio > 0` 不算通过。
+//! 文档由生产挂载函数建出（`acceptance_document_at_width`，内部是 `mount_shell`），在 1200×800 和
+//! 960×600 的浅深色下截图，再查布局盒：标题栏控件和中文窗口按钮都在，文件列、详情和播放条不互相压住，
+//! 底部入口留在侧栏里；读不到像素时失败，不当作通过。另测窗口按钮、启动页、缺失页和智能文件夹对话框的
+//! 点击，以及重挂以后输入框里的字和光标不丢。
 
 use std::fs;
 use std::path::PathBuf;
@@ -540,10 +542,7 @@ fn intersects(a: &BoundsDump, b: &BoundsDump) -> bool {
 
 fn live_files() -> ShellViewModel {
     let mut model = ShellViewModel::default();
-    model.workspace.startup.finish();
-    model
-        .workspace
-        .apply_repository_list(None, Ok(vec![repository("ready")]));
+    model.workspace.present_repository(repository("ready"));
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(snapshot())));
     model.reduce(ShellMessage::TaskProgressLoaded(vec![running_task("task-1"), running_task("task-2")]));
     model

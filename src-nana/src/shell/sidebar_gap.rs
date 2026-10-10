@@ -188,7 +188,6 @@ pub enum EscapeLayer {
     SmartDelete,
     SmartDialog,
     PlaylistDialog,
-    SourcePlaylist,
     RepositoryPopover,
     TaskPopover,
     TagMenu,
@@ -213,8 +212,6 @@ pub fn escape_layer(model: &super::super::ShellViewModel) -> Option<EscapeLayer>
         EscapeLayer::SmartDialog
     } else if model.playlist_dialog_open {
         EscapeLayer::PlaylistDialog
-    } else if model.input.source_playlist.is_some() {
-        EscapeLayer::SourcePlaylist
     } else if sidebar.popover != super::PopoverMode::Closed {
         EscapeLayer::RepositoryPopover
     } else if model.admin.popover_open {
@@ -245,9 +242,6 @@ pub fn dismiss_top(model: &mut super::super::ShellViewModel) -> bool {
             model.sidebar.close_smart_dialog();
         }
         EscapeLayer::PlaylistDialog => model.close_playlist_dialog(),
-        EscapeLayer::SourcePlaylist => {
-            model.reduce(super::super::ShellMessage::Input(super::super::input::InputMessage::CloseSourcePlaylist));
-        }
         EscapeLayer::RepositoryPopover => {
             model.sidebar.close_popover();
         }

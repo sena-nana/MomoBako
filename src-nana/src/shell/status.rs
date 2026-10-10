@@ -16,10 +16,10 @@
 //! 就近显示的失败不进这里。
 //!
 //! **什么时候清。** 照 Vue `error.value = null` 的时机：用户开始一个会写全局错误的操作时清掉上一次失败，
-//! 成功不专门清。开始的迹象有两种（[`starts_operation`]、[`Activity`]）：打开、定位、拖出，换仓库、
-//! 刷新资源库列表、重试启动、打开智能文件夹这几条消息；以及读目录、文件变更、刷新文件夹树、选中别的文件、
-//! 保存元数据、搜索、导出、智能文件夹增改删、插件操作和执行仓库动作这些操作的忙碌标志由假变真。后台的
-//! 静默刷新不算。同一次归约里新记的失败不会被这次清掉。
+//! 成功不专门清。开始的迹象有两种（[`starts_operation`]、[`Activity`]）：打开、定位、拖出，选仓库、
+//! 重试启动、打开智能文件夹这几条消息；以及读目录、文件变更、刷新文件夹树、选中别的文件、
+//! 保存元数据、搜索、导出、智能文件夹增改删、插件操作、执行仓库动作、刷新资源库和选仓库这些操作的忙碌
+//! 标志由假变真。后台的静默刷新不算。同一次归约里新记的失败不会被这次清掉。
 //!
 //! 没有失败时依次是忙碌行和同步进度（文件夹树刷新时的扫描、写入、刷新三档）。
 
@@ -134,7 +134,7 @@ impl StatusState {
 /// 一个操作（Vue 在这些操作开始时 `error.value = null`）。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Activity {
-    busy: [bool; 9],
+    busy: [bool; 11],
     /// 正在看的文件：换成别的文件对应 Vue `selectAsset`。
     selection: Option<String>,
 }
@@ -157,6 +157,10 @@ impl Activity {
                 // 用户还没看到的失败会被后台刷新抹掉，这里不照抄。
                 model.admin.managing,
                 model.admin.actions_running,
+                // 刷新资源库（Vue `loadRepositories`）和选仓库（`selectRepository`）开始时都清错误：附加、
+                // 新建、删除以后切过去，来源动作完成以后的刷新都从这里开始。
+                model.workspace.list_loading,
+                model.workspace.snapshot_loading,
             ],
             selection: model.inspect.target_path.clone(),
         }
@@ -169,8 +173,7 @@ impl Activity {
     }
 }
 
-/// 不靠忙碌标志、由消息本身表示的操作开始：打开、定位、拖出，换仓库、刷新资源库列表、重试启动和打开
-/// 智能文件夹。打开、定位和拖出照 Vue 先过守卫（有仓库、有路径、能拖出），守卫拦下的请求不清。
+/// 不靠忙碌标志、由消息本身表示的操作开始：打开、定位、拖出，选仓库、重试启动和打开智能文件夹。打开、定位和拖出照 Vue 先过守卫（有仓库、有路径、能拖出），守卫拦下的请求不清。
 /// 刷新文件夹树看忙碌标志（[`Activity`]），被拦下的点击不清。
 pub(super) fn starts_operation(message: &ShellMessage) -> bool {
     let filled = |text: &str| !text.trim().is_empty();
@@ -182,7 +185,6 @@ pub(super) fn starts_operation(message: &ShellMessage) -> bool {
             !*trash && backend_kind == "filesystem" && paths.iter().any(|path| filled(path))
         }
         ShellMessage::SelectWorkspaceRepository(_)
-        | ShellMessage::Refresh
         | ShellMessage::StartupRetry
         | ShellMessage::Sidebar(SidebarMessage::OpenSmartFolder(_)) => true,
         _ => false,
@@ -271,7 +273,8 @@ fn shown_in_place(model: &ShellViewModel, source: FailureSource) -> bool {
     }
 }
 
-/// Vue `isBusy`：在读资源库列表、仓库摘要或素材详情。启动阶段由启动页显示进度，不算在这里。
+/// Vue `isBusy`：在刷新资源库（从读列表到选完仓库）、选仓库（同步、读摘要到重读目录）或读素材详情。
+/// 启动和换仓库由启动页显示进度，侧栏收着，不显示这一行。
 pub(crate) fn busy(model: &ShellViewModel) -> bool {
     let workspace = &model.workspace;
     workspace.list_loading || workspace.snapshot_loading || model.inspect.detail_loading()

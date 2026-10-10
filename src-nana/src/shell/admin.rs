@@ -59,6 +59,8 @@ pub(crate) mod source_provision;
 pub(crate) use actions_view::{actions_panel, ActionsSignals, ActionsView};
 pub(crate) use logs_state::{LogsSignals, LogsView};
 pub(crate) use logs_view::logs_panel;
+#[cfg(test)]
+pub(crate) use logs_view::LIST_FLOOR as LOG_LIST_FLOOR;
 pub(crate) use plugins_state::{PluginPanelSignals, PluginPanelView};
 pub(crate) use plugins_view::delete_dialog as plugin_delete_dialog;
 pub(crate) use reduce::{open_settings_page, reduce_message};
@@ -128,7 +130,6 @@ pub enum AdminMessage {
     ToggleTaskPopover,
     /// 弹层头部的关闭按钮和弹层外的点击层。Escape 走全局的 [`crate::shell::escape_layer`]。
     CloseTaskPopover,
-    SetOperation(Option<OperationProgress>),
     SelectAction(String),
     RunAction(Option<String>),
     ActionsLoaded { repo_id: String, result: Result<Vec<RepositoryAction>, String> },
@@ -146,6 +147,10 @@ pub enum AdminMessage {
     },
     /// 文件插件动作结束。成功写到文件活动，失败写到文件错误。
     FilePluginFinished { method: String, result: Result<serde_json::Value, String> },
+    /// 文件右键里的「创建播放列表」：在本地建来源歌单对应的播放集，再把目录加进去（Vue `runPlaylistAction`）。
+    CreateSourcePlaylist { playlist: super::entry_actions::SourcePlaylist, repository_id: Option<String> },
+    /// 来源播放集建好、目录加进去了，或者哪一步失败了。
+    SourcePlaylistFinished(Result<(), String>),
     /// 来源登录：连接新账号或重新登录。`repo_id` 为空是连接新账号。
     BeginSourceAuth { plugin_id: String, repo_id: Option<String> },
     /// 来源登录：查询仓库登录状态。
@@ -174,14 +179,7 @@ pub enum PluginCallOrigin {
     Playground,
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct OperationProgress {
-    pub label: String,
-    pub detail: String,
-    pub value: f64,
-    pub indeterminate: bool,
-    pub updated_at_ms: i64,
-}
+pub use super::repo_operation::OperationProgress;
 
 /// 拓展页左侧的一个工具页。Nana 只能画内置的三个；其它插件的工具页没有原生控件。
 #[derive(Clone, Debug, PartialEq)]
@@ -213,7 +211,6 @@ pub enum AdminEffect {
     OpenDataDirectory { plugin_id: String, name: String },
     LoadActions { repo_id: String },
     RunAction { repo_id: String, action_id: String, paths: Vec<String> },
-    ReloadBrowser { repo_id: String },
     PersistCorners,
     /// 主题改动后立即写设置文件。
     SaveSettings,
@@ -229,6 +226,8 @@ pub enum AdminEffect {
         repository_id: Option<String>,
         origin: PluginCallOrigin,
     },
+    /// 建来源歌单对应的播放集（已经有就不建），再把目录加进去。
+    CreateSourcePlaylist { repo_id: String, playlist_id: String, name: String, player_type_id: String, path: String },
     /// 来源登录成功后更新已有仓库的后端配置。
     UpdateBackendConfig { repo_id: String, backend_config: serde_json::Value, step: SourceStep },
     /// 需要本地缓存的来源仓库写入缓存目录，并迁移旧缓存。
@@ -286,7 +285,8 @@ pub struct AdminState {
     /// 展开了上下文的日志。
     pub log_context_open: std::collections::BTreeSet<String>,
     pub popover_open: bool,
-    pub operation: Option<OperationProgress>,
+    /// 在途的来源下载：插件方法和它在任务弹层里的仓库操作行。
+    download_operation: Option<(String, super::repo_operation::OperationId)>,
     pub actions: Vec<RepositoryAction>,
     pub active_action_id: Option<String>,
     pub actions_loading: bool,
@@ -340,7 +340,7 @@ impl Default for AdminState {
             log_signature: String::new(),
             log_context_open: std::collections::BTreeSet::new(),
             popover_open: false,
-            operation: None,
+            download_operation: None,
             actions: Vec::new(),
             active_action_id: None,
             actions_loading: false,
@@ -417,6 +417,19 @@ impl AdminState {
     pub fn note_backends(&mut self, repositories: &[RepositorySummary]) {
         self.backends = support::backend_counts(repositories);
         self.repository_summaries = repositories.to_vec();
+    }
+
+    /// 记下来源下载在任务弹层里的进度行，插件方法回来时收尾。
+    pub(crate) fn note_download_operation(&mut self, method: String, operation: super::repo_operation::OperationId) {
+        self.download_operation = Some((method, operation));
+    }
+
+    /// 方法 `method` 的调用回来了：是在途的下载就交出它的进度行。
+    pub(crate) fn take_download_operation(&mut self, method: &str) -> Option<super::repo_operation::OperationId> {
+        if self.download_operation.as_ref().is_some_and(|(pending, _)| pending == method) {
+            return self.download_operation.take().map(|(_, operation)| operation);
+        }
+        None
     }
 
     pub fn queue_actions(&mut self, repo_id: Option<String>) {
@@ -532,18 +545,9 @@ impl ShellViewModel {
     }
 
     /// 任务弹层的行：仓库操作加运行中的任务，按更新时间降序。侧栏「任务」的计数也是这些行的个数，
-    /// 和 Vue `TaskPopover.vue` 的 `activeTaskCount` 一样。
-    ///
-    /// Vue 的仓库操作只有一个槽位（`operationProgress`）：文件变更进行中时是它，否则是刷新文件夹树。
+    /// 和 Vue `TaskPopover.vue` 的 `activeTaskCount` 一样。仓库操作只有一个槽位，见 `repo_operation.rs`。
     pub(crate) fn task_rows(&self) -> Vec<support::PopoverRow> {
-        let files = self.files.operation.as_ref().map(|operation| OperationProgress {
-            label: operation.label.clone(),
-            detail: operation.detail.clone(),
-            value: f64::from(operation.value),
-            indeterminate: operation.indeterminate,
-            updated_at_ms: operation.updated_at_ms,
-        });
-        support::popover_rows(&self.task_progress, files.as_ref().or(self.admin.operation.as_ref()))
+        support::popover_rows(&self.task_progress, self.operation.shown())
     }
 
     pub(crate) fn set_audio_preference(&mut self, plugin_id: Option<String>) {

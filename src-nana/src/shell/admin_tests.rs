@@ -20,7 +20,8 @@ use super::super::{ShellMessage, ShellViewModel};
 use super::api::{ApiMessage, HttpResponse};
 use super::support::{self, action_can_run};
 use super::tool_native::{self, ImportButton, ImportView};
-use super::{AdminEffect, AdminMessage, OperationProgress, PluginCallOrigin, ToolPageEntry};
+use super::super::repo_operation::OperationStart;
+use super::{AdminEffect, AdminMessage, PluginCallOrigin, ToolPageEntry};
 
 fn send(model: &mut ShellViewModel, message: AdminMessage) {
     model.reduce(ShellMessage::Admin(message));
@@ -428,11 +429,15 @@ fn theme_corners_and_external_connection() {
 #[test]
 fn repository_backends_and_audio_player_choices() {
     let mut model = ShellViewModel::default();
-    model.reduce(ShellMessage::RepositoriesLoaded(Ok(vec![
-        repository("one", "filesystem", "本地"),
-        repository("two", "filesystem", "本地"),
-        repository("three", "webdav", "WebDAV"),
-    ])));
+    let generation = model.workspace.prepare_initial_list();
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(vec![
+            repository("one", "filesystem", "本地"),
+            repository("two", "filesystem", "本地"),
+            repository("three", "webdav", "WebDAV"),
+        ]),
+    });
     assert_eq!(support::backend_summary(&model.admin.backends), "本地 (2) / WebDAV (1)");
     assert_eq!(support::backend_summary(&[]), "无");
 
@@ -578,13 +583,7 @@ fn task_popover_merges_repository_operation_and_closes() {
         error: None,
         updated_at: "1970-01-01T00:00:00.020Z".into(),
     }]));
-    send(&mut model, AdminMessage::SetOperation(Some(OperationProgress {
-        label: "导入".into(),
-        detail: "复制".into(),
-        value: 8.0,
-        indeterminate: false,
-        updated_at_ms: 50,
-    })));
+    let operation = model.operation.start(OperationStart::new("导入", "复制", 8.0));
     let rows = model.task_rows();
     assert_eq!((rows[0].id.as_str(), rows[0].source.as_str()), ("workspace-operation", "资源库"));
     assert_eq!((rows[1].id.as_str(), rows[1].source.as_str(), rows[1].detail.as_str()), ("task-1", "任务", "scanning"));
@@ -597,7 +596,7 @@ fn task_popover_merges_repository_operation_and_closes() {
     assert!(crate::shell::escape_layer(&model).is_some(), "任务弹层是 Escape 能关的一层");
     model.reduce(ShellMessage::Sidebar(crate::shell::SidebarMessage::Gap(crate::shell::GapMessage::Escape)));
     assert!(!model.admin.popover_open);
-    model.admin.operation = None;
+    model.operation.cancel(operation);
     model.task_progress.clear();
     assert!(model.task_rows().is_empty());
 }
@@ -635,9 +634,22 @@ fn repository_actions_follow_selection_and_refuse_when_not_runnable() {
         model.admin.take_effects().pop(),
         Some(AdminEffect::RunAction { action_id, paths, .. }) if action_id == "copy" && paths == ["a.txt"]
     ));
+    // Vue `refreshWorkspaceAfterMutation`：执行完重读摘要和当前目录，任务弹层出「读取目录」。
+    model.workspace.present_repository(WorkspaceRepository {
+        repo_id: "repo".into(),
+        name: "库".into(),
+        path: "C:/repo".into(),
+        status: "ready".into(),
+        backend_plugin_id: "local".into(),
+        capabilities: vec!["write".into()],
+        cache_required: false,
+        cache_status: String::new(),
+    });
     send(&mut model, AdminMessage::ActionRunFinished { result: Ok(action("copy", "ready", true)) });
     assert!(!model.admin.actions_running);
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::ReloadBrowser { repo_id }) if repo_id == "repo"));
+    assert!(model.files.take_effects().iter().any(|effect| matches!(effect, crate::shell::FilesEffect::Browse { repo_id, .. } if repo_id == "repo")));
+    assert!(model.workspace.take_effects().iter().any(|effect| matches!(effect, crate::shell::WorkspaceEffect::LoadSnapshotSilent { repo_id } if repo_id == "repo")));
+    assert_eq!(model.operation.shown().map(|row| row.label.as_str()), Some("读取目录"));
 }
 
 #[test]
@@ -817,6 +829,38 @@ fn file_plugin_call_keeps_repository_and_writes_activity() {
     assert!(matches!(model.workspace.take_effects().as_slice(), [crate::shell::WorkspaceEffect::RefreshRepositories { .. }]));
     send(&mut model, AdminMessage::FilePluginFinished { method: "media.clearTrackCache".into(), result: Err(String::new()) });
     assert_eq!(model.files.error, "media.clearTrackCache 调用失败。");
+}
+
+/// 「创建播放列表」照 Vue `runPlaylistAction` 在本地建播放集，不调用插件；建好以后刷新资源库，
+/// 缺仓库或缺歌单标识时只报错，失败写进文件列表的错误。
+#[test]
+fn source_playlist_is_created_locally_then_the_repository_refreshes() {
+    let playlist = |id: Option<&str>| super::super::entry_actions::SourcePlaylist {
+        playlist_id: id.map(str::to_string),
+        name: "夜曲".into(),
+        player_type_id: "momobako.playlist.audio-sequence".into(),
+        path: "playlists/night".into(),
+    };
+    let mut model = ShellViewModel::default();
+    send(&mut model, AdminMessage::CreateSourcePlaylist { playlist: playlist(Some("netease-3")), repository_id: Some("repo".into()) });
+    match model.admin.take_effects().as_slice() {
+        [AdminEffect::CreateSourcePlaylist { repo_id, playlist_id, name, player_type_id, path }] => {
+            assert_eq!((repo_id.as_str(), playlist_id.as_str(), name.as_str()), ("repo", "netease-3", "夜曲"));
+            assert_eq!((player_type_id.as_str(), path.as_str()), ("momobako.playlist.audio-sequence", "playlists/night"));
+        }
+        other => panic!("unexpected {other:?}"),
+    }
+    model.workspace.take_effects();
+    send(&mut model, AdminMessage::SourcePlaylistFinished(Ok(())));
+    assert!(matches!(model.workspace.take_effects().as_slice(), [crate::shell::WorkspaceEffect::RefreshRepositories { .. }]));
+    send(&mut model, AdminMessage::SourcePlaylistFinished(Err("播放集已存在".into())));
+    assert_eq!(model.files.error, "播放集已存在");
+
+    send(&mut model, AdminMessage::CreateSourcePlaylist { playlist: playlist(None), repository_id: Some("repo".into()) });
+    assert_eq!(model.files.error, "来源目录缺少播放列表标识");
+    send(&mut model, AdminMessage::CreateSourcePlaylist { playlist: playlist(Some("netease-3")), repository_id: None });
+    assert_eq!(model.files.error, "没有当前资源库，不能创建播放列表。");
+    assert!(model.admin.take_effects().is_empty(), "缺仓库或缺歌单标识都不建");
 }
 
 #[test]

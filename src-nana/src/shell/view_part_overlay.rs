@@ -53,8 +53,6 @@ pub(crate) enum OverlayKey {
     RepositoryDelete,
     /// 删除插件。
     PluginDelete,
-    /// 创建来源播放列表时的名称框。
-    SourcePlaylist,
     /// 新建播放集。
     PlaylistCreate,
     /// 新建或重命名文件夹。
@@ -89,8 +87,6 @@ impl OverlayKey {
             Self::RepositoryDelete
         } else if model.admin.pending_delete.is_some() {
             Self::PluginDelete
-        } else if model.input.source_playlist.is_some() {
-            Self::SourcePlaylist
         } else if model.playlist_dialog_open {
             Self::PlaylistCreate
         } else if sidebar.folder_dialog.open {
@@ -162,7 +158,6 @@ pub(crate) fn overlay_branch(key: OverlayKey, model: &ShellViewModel) -> Option<
         OverlayKey::SmartDelete => super::sidebar_view::smart_delete_dialog(model),
         OverlayKey::RepositoryDelete => super::sidebar_view::repository_delete_dialog(model),
         OverlayKey::PluginDelete => super::admin::plugin_delete_dialog(model),
-        OverlayKey::SourcePlaylist => super::input::playlist_name_dialog(model),
         OverlayKey::PlaylistCreate => super::sidebar_view::playlist_create_dialog(model),
         OverlayKey::FolderDialog => super::sidebar_view::folder_dialog(model),
         OverlayKey::SmartFolderDialog => super::sidebar_view::smart_folder_dialog(model),

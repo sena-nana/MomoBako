@@ -102,9 +102,6 @@ pub(crate) enum Tone {
     Danger,
 }
 
-/// 禁用按钮的整体不透明度。
-pub(crate) const DISABLED_OPACITY: f32 = 0.45;
-
 /// Vue 原生 `<button>`：高 32、左右内边距 10、字 14/500、图标 14、间距 6、圆角 sm。
 /// 禁用时整体 45% 不透明，不换颜色。要绑定禁用时用 `bind::ActionDisabled`，透明度一起换。
 pub(crate) fn action(text: impl Into<String>, icon: Option<Icon>, tone: Tone, disabled: bool) -> Button {
@@ -144,7 +141,7 @@ pub(crate) fn action(text: impl Into<String>, icon: Option<Icon>, tone: Tone, di
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(0.0);
         if disabled {
-            layout.opacity = Some(DISABLED_OPACITY);
+            layout.opacity = Some(crate::theme_map::DISABLED_OPACITY);
         }
     }
     let mut button = Button::new(text).icon_gap(6.0).disabled(disabled).style(style);

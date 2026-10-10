@@ -71,16 +71,15 @@ impl Painter for SliderTrack {
     }
 }
 
-/// Vue 禁用控件整体 0.45 不透明，盖在 bg-elev 卡片上。这里在 sRGB 里和卡片底色直接混，
-/// 和浏览器的合成结果一致；NanaUI 的线性合成会比 Vue 亮。
-pub(super) const DIM_RATIO: f32 = 0.45;
-
+/// Vue 禁用控件整体 0.45 不透明（`theme_map::DISABLED_OPACITY`），盖在 bg-elev 卡片上。这里在 sRGB 里和
+/// 卡片底色直接混，和浏览器的合成结果一致；NanaUI 的线性合成会比 Vue 亮。
 fn dim_on_surface(cx: &PaintContext<'_>, color: [f32; 4], dim: bool) -> [f32; 4] {
     if !dim {
         return color;
     }
     let base = cx.color(SemanticColorRole::Surface);
-    std::array::from_fn(|index| if index == 3 { color[3] } else { color[index] * DIM_RATIO + base[index] * (1.0 - DIM_RATIO) })
+    let ratio = crate::theme_map::DISABLED_OPACITY;
+    std::array::from_fn(|index| if index == 3 { color[3] } else { color[index] * ratio + base[index] * (1.0 - ratio) })
 }
 
 fn fill_circle(cx: &mut PaintContext<'_>, center_x: f32, center_y: f32, radius: f32, color: [f32; 4]) {

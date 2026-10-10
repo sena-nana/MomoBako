@@ -249,8 +249,7 @@ fn login_settings() -> ShellViewModel {
 
 fn ready_library() -> ShellViewModel {
     let mut model = ShellViewModel::default();
-    model.workspace.startup.finish();
-    model.workspace.apply_repository_list(None, Ok(vec![WorkspaceRepository {
+    model.workspace.present_repository(WorkspaceRepository {
         repo_id: "repo".into(),
         name: "动画素材".into(),
         path: "D:/Libraries/Anime".into(),
@@ -259,7 +258,7 @@ fn ready_library() -> ShellViewModel {
         capabilities: vec!["write".into()],
         cache_required: false,
         cache_status: String::new(),
-    }]));
+    });
     model
 }
 

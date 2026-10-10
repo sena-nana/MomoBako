@@ -5,9 +5,10 @@
 //! 外边距由壳层主区统一给，这里只负责两列本身；面板固定高度，列表和详情各自滚动。
 //!
 //! 常驻：文件列只建一次。工作台和预览页都留着，按「是否在预览」`.visible` 显隐；排法（窄窗口上下排）
-//! 和外部文件拖入的描边按字段绑定，卡片圆角是主题的 2xl 档，跟着设置里的圆角半径变。播放条、关闭确认
-//! 和文件对话框是别的模块的旧视图，这里只留占位节点，内容由主区块按岛刷新（见 `route_files.rs`）。
-//! 外部文件拖放的处理器只发意图消息，当时能不能放、放到哪由归约按当时的 ViewModel 决定。
+//! 和外部文件拖入的描边按字段绑定，卡片圆角是主题的 2xl 档，跟着设置里的圆角半径变。播放条是播放器
+//! 模块的旧视图，这里只在工作台左列底下和预览页底部各留一个占位节点，内容由主区块按岛刷新（见
+//! `route_files.rs`）；文件对话框和右键菜单在浮层里。外部文件拖放的处理器只发意图消息，当时能不能放、
+//! 放到哪由归约按当时的 ViewModel 决定。
 
 use nana_ui::runtime::view::{node_ref, signal, widget, AnyView, IntoView, NodeRef, Signal};
 use nana_ui::runtime::{AlignSpec, FileDropEvent, LengthSpec, NodeStyle, PositionSpec, RadiusTier, SemanticColorRole, Stack};
@@ -121,7 +122,7 @@ impl ColumnSignals {
     }
 }
 
-/// 文件面板主体：工作台和预览页二选一显示，对话框盖在整个窗口上。整列都是外部文件的拖放目标。
+/// 文件面板主体：工作台和预览页二选一显示。整列都是外部文件的拖放目标。
 pub(super) fn file_column(
     signals: ColumnSignals,
     slots: ColumnSlots,
