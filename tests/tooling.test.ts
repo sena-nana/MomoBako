@@ -13,6 +13,28 @@ function expectNoSourceResidue(content: string) {
   expect(content).not.toContain("scripts/build-builtin-plugins.mjs");
 }
 
+/** 校验 workflow 的 Rust 缓存跟随根 Cargo workspace：只缓存根 target，key 由 rustc 版本和根 Cargo.lock 决定。 */
+function expectWorkspaceRustCache(workflow: string, cachePrefixes: string[]) {
+  const steps = workflow.replace(/\r\n/g, "\n").split(/\n\s+- name: /);
+  const toolchainSteps = steps.filter((step) => step.includes("uses: dtolnay/rust-toolchain@"));
+  const cacheSteps = steps.filter((step) => step.includes("uses: actions/cache@"));
+
+  expect(workflow).toContain("CARGO_INCREMENTAL: 0");
+  expect(toolchainSteps).toHaveLength(cachePrefixes.length);
+  expect(cacheSteps).toHaveLength(cachePrefixes.length);
+  for (const step of toolchainSteps) {
+    expect(step).toContain("id: toolchain");
+  }
+  cacheSteps.forEach((step, index) => {
+    const restoreKey = `\${{ runner.os }}-${cachePrefixes[index]}-\${{ steps.toolchain.outputs.cachekey }}-`;
+
+    expect(step).toMatch(/^\s+target$/m);
+    expect(step).not.toMatch(/\/target$/m);
+    expect(step).toContain(`key: ${restoreKey}\${{ hashFiles('Cargo.lock') }}`);
+    expect(step.match(/restore-keys: \|\n\s+(.+)/)?.[1]).toBe(restoreKey);
+  });
+}
+
 describe("MomoBako 工具链", () => {
   it("package.json 提供文档脚本并保留插件验证链路", () => {
     const pkg = JSON.parse(read("package.json"));
@@ -135,7 +157,6 @@ describe("MomoBako 工具链", () => {
     expect(ci).toContain("working-directory: External/Plugins");
     expect(ci).toContain("corepack yarn package");
     expect(ci).toContain("corepack yarn docs:build");
-    expect(ci).toContain("src-tauri/target");
     expectNoSourceResidue(ci);
   });
 
@@ -150,6 +171,11 @@ describe("MomoBako 工具链", () => {
     expect(release).toContain("tauriScript: corepack yarn tauri");
     expect(release).toContain("releaseName: MomoBako");
     expect(release).toContain("releaseDraft: true");
+  });
+
+  it("GitHub workflow 的 Rust 缓存跟随根 Cargo workspace 并按 rustc 版本分代", () => {
+    expectWorkspaceRustCache(read(".github/workflows/ci.yml"), ["cargo", "external-plugins-cargo"]);
+    expectWorkspaceRustCache(read(".github/workflows/release.yml"), ["cargo"]);
   });
 
   it("GitHub Pages 使用文档产物和 Pages 权限", () => {
