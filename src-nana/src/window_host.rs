@@ -56,8 +56,12 @@ pub(crate) fn after_update(app: &mut MomoBakoApplication, context: &RuntimeProgr
 ///
 /// 指针手势先读当前文档。动效和播放推进只同步热信号，不重挂；这一帧里有过归约、标了脏
 /// 或者工作台排法要换时才整体同步，手势进行中不重挂，否则按下目标会随节点一起消失。
-/// 悬停、预取、仓库操作行和动效的时钟都按 `step.ui_ms` 往前拨。
-pub(crate) fn prepare_motion(shell: &mut ShellViewModel, view: Option<&mut ShellView>, window: &mut ApplicationWindow, step: FrameStep) {
+/// 悬停、预取、仓库操作行和动效的时钟都按 `step.ui_ms` 往前拨。文档变了以后先把挂着的缩略图报给文件表面，
+/// 预取只解码挂着的，纹理回收也按它（`thumbnail_host.rs`）。
+pub(crate) fn prepare_motion(shell: &mut ShellViewModel, mut view: Option<&mut ShellView>, window: &mut ApplicationWindow, step: FrameStep) {
+    if let Some(mounted) = view.as_deref_mut().and_then(|view| view.mounted_thumbnails(&window.document)) {
+        shell.files.note_mounted_thumbnails(mounted);
+    }
     crate::shell::poll_media_keys(shell);
     crate::drag_out::apply_result(shell);
     drive_prefetch(shell, step.ui_ms);

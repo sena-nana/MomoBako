@@ -256,6 +256,22 @@ impl ShellHarness {
         crate::window_host::note_modifiers(&mut self.model, &payload);
     }
 
+    /// 在 `(x, y)` 滚一下滚轮，`delta_y` 按像素，负数往下滚。滚动后要 [`Self::frame`] 或 [`Self::flush`]
+    /// 才会按新的视口建行、卸行。
+    pub fn wheel(&mut self, x: f32, y: f32, delta_y: f32) {
+        let pointer_id = nana_ui::PointerInput::mouse(nana_ui::PointerPhase::Move, x, y).pointer_id;
+        let wheel = nana_ui::WheelInput {
+            pointer_id,
+            x,
+            y,
+            delta_x: 0.0,
+            delta_y,
+            unit: nana_ui::WheelUnit::Pixels,
+            modifiers: nana_ui::InputModifiers::default(),
+        };
+        self.input.route(self.window.document.context_mut(), nana_ui::InputPayload::Wheel(wheel)).expect("滚轮");
+    }
+
     /// 在 `from` 按下主键，分几步挪到 `to` 再松开，返回这次拖动发出的消息，不归约。之前排着的消息
     /// 留给调用方。
     pub fn drag_messages(&mut self, from: (f32, f32), to: (f32, f32)) -> Vec<ShellMessage> {

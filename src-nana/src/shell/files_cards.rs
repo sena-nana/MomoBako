@@ -45,7 +45,10 @@ impl CardBox {
 #[derive(Clone, Debug)]
 pub(super) struct PreviewLook {
     pub tone: Tone,
-    /// 宿主已经能注册纹理的缩略图路径。
+    /// 行引用的缩略图文件，有没有纹理都写：缩略图节点一直引用这个槽，宿主按挂着的缩略图节点决定解码哪些、
+    /// 回收哪些（`thumbnail_cache.rs`）。没有纹理时节点藏着、不画。
+    pub slot: Option<String>,
+    /// 宿主已经登记了纹理的缩略图路径。
     pub texture: Option<String>,
     /// 没有纹理时画的类型图标。
     pub icon: Option<Icon>,
@@ -55,7 +58,7 @@ pub(super) struct PreviewLook {
 
 impl Default for PreviewLook {
     fn default() -> Self {
-        Self { tone: Tone::Placeholder, texture: None, icon: None, aspect: 1.0 }
+        Self { tone: Tone::Placeholder, slot: None, texture: None, icon: None, aspect: 1.0 }
     }
 }
 
@@ -63,6 +66,7 @@ impl Default for PreviewLook {
 impl PartialEq for PreviewLook {
     fn eq(&self, other: &Self) -> bool {
         self.tone == other.tone
+            && self.slot == other.slot
             && self.texture == other.texture
             && self.icon.map(Icon::as_ptr) == other.icon.map(Icon::as_ptr)
             && self.aspect.to_bits() == other.aspect.to_bits()
@@ -73,17 +77,15 @@ impl PreviewLook {
     /// 文件行的缩略图盒。没有缩略图时画类型图标。
     pub(super) fn of(row: &FileRow) -> Self {
         let tone = if row.kind == "directory" { Tone::Folder } else { Tone::Placeholder };
-        let texture = row
-            .texture_ready
-            .then(|| row.thumbnail_path.as_deref().map(str::trim).filter(|path| !path.is_empty()).map(str::to_string))
-            .flatten();
+        let slot = row.thumbnail_path.as_deref().map(str::trim).filter(|path| !path.is_empty()).map(str::to_string);
+        let texture = slot.clone().filter(|_| row.texture_ready);
         let icon = texture.is_none().then(|| entry_icon(row));
-        Self { tone, texture, icon, aspect: aspect(row.pixel_width, row.pixel_height) }
+        Self { tone, slot, texture, icon, aspect: aspect(row.pixel_width, row.pixel_height) }
     }
 
-    /// 缩略图槽；没有纹理时为空串（缩略图节点藏着）。
+    /// 缩略图槽；行没有缩略图时为空串。有缩略图、还没有纹理时节点藏着。
     fn resource(&self) -> Arc<str> {
-        self.texture.as_deref().map(super::super::thumbs::thumbnail_slot).unwrap_or_default().into()
+        self.slot.as_deref().map(super::super::thumbs::thumbnail_slot).unwrap_or_default().into()
     }
 }
 

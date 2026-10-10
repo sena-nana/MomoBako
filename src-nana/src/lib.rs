@@ -7,7 +7,7 @@
 use nana_ui::runtime::{DocumentId, FrameworkError, Task};
 use nana_ui::{
     ApplicationIdentity, ApplicationState, ApplicationWindow, DiagnosticsConfig, NanaApplication,
-    GpuTexture, RuntimeApplication, RuntimeProgramContext, RuntimeProgramUpdate,
+    HostTexture, RuntimeApplication, RuntimeProgramContext, RuntimeProgramUpdate,
 };
 
 pub mod shell;
@@ -45,10 +45,11 @@ use backend::services::repository::{
     SyncRequest,
 };
 pub mod settings;
+mod thumbnail_cache;
 mod thumbnail_host;
 pub mod appearance;
 
-use thumbnail_host::{PendingThumb, ThumbnailGpu};
+use thumbnail_host::ThumbnailHost;
 
 /// Nana 宿主应用状态，持有共享领域 Runtime 和原生壳层 ViewModel。
 pub struct MomoBakoApplication {
@@ -56,8 +57,8 @@ pub struct MomoBakoApplication {
     shell: ShellViewModel,
     repositories_load_scheduled: bool,
     preview_gpu: Option<NativePreviewGpu>,
-    pub(crate) thumbnail_gpu: Vec<ThumbnailGpu>,
-    pub(crate) pending_thumbs: Vec<PendingThumb>,
+    /// 缩略图纹理：等上传的像素和已经登记的纹理，见 `thumbnail_host.rs`。
+    pub(crate) thumbnails: ThumbnailHost<HostTexture>,
     host: window_host::HostSession,
     /// 宿主报告的系统深浅色，「跟随系统」时用。
     system_appearance: Option<nana_ui_platform::SystemAppearance>,
@@ -69,9 +70,9 @@ pub struct MomoBakoApplication {
     view: Option<ShellView>,
 }
 
+/// 已经登记在 `file-preview` 槽上的预览画面：纹理由宿主纹理表持有，这里记下是哪一张，同一张画面不再登记。
 pub(crate) struct NativePreviewGpu {
     pub(crate) token: String,
-    pub(crate) texture: GpuTexture,
     pub(crate) width: u32,
     pub(crate) height: u32,
 }
@@ -83,8 +84,7 @@ impl Default for MomoBakoApplication {
             shell: ShellViewModel::default(),
             repositories_load_scheduled: false,
             preview_gpu: None,
-            thumbnail_gpu: Vec::new(),
-            pending_thumbs: Vec::new(),
+            thumbnails: ThumbnailHost::default(),
             host: window_host::HostSession::default(),
             system_appearance: None,
             applied_appearance: None,
@@ -146,8 +146,7 @@ impl ApplicationState for MomoBakoApplication {
             shell,
             repositories_load_scheduled: false,
             preview_gpu: None,
-            thumbnail_gpu: Vec::new(),
-            pending_thumbs: Vec::new(),
+            thumbnails: ThumbnailHost::default(),
             host: window_host::HostSession::default(),
             system_appearance,
             applied_appearance: None,
