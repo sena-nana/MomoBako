@@ -174,3 +174,42 @@ fn empty_and_missing_launches_close_the_log_after_the_settings_bundle() {
         ]
     );
 }
+
+/// 「首屏启动流程失败。」照 Vue 带 `activeRepoId`：读完摘要以前还是这一轮开始时的值（冷启动是空的，只写
+/// `targetRepoId`），读完摘要以后是这次的仓库；重试时「流程开始」和这一轮的失败都带着上一轮已经换上的仓库。
+#[test]
+fn a_failed_launch_logs_the_active_repository_once_the_summary_is_read() {
+    let last = |model: &ShellViewModel| logs(model).last().cloned().expect("有日志");
+    let retry = |model: &mut ShellViewModel| -> u64 {
+        model.reduce(ShellMessage::StartupRetry);
+        model.workspace.list_generation
+    };
+    let mut model = ShellViewModel::default();
+    let generation = model.workspace.prepare_initial_list();
+    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(REPO, "ready")]) });
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Err("磁盘不可读".into()) });
+    assert_eq!(last(&model), entry("error", "首屏启动流程失败。", "step: 2 · stepLabel: 加载失败 · error: 磁盘不可读 · targetRepoId: repo-a"));
+
+    let generation = retry(&mut model);
+    assert_eq!(logs(&model)[0], entry("info", "首屏启动流程开始。", "totalSteps: 4"), "上一轮没读到摘要，还没有活动仓库");
+    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(REPO, "ready")]) });
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(SyncCounts::default()) });
+    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(REPO)) });
+    model.reduce(ShellMessage::FileBrowserLoaded(Err("拒绝访问".into())));
+    assert_eq!(model.workspace.startup.status, StartupStatus::Error);
+    assert_eq!(
+        last(&model),
+        entry("error", "首屏启动流程失败。", "step: 4 · stepLabel: 加载失败 · error: 拒绝访问 · activeRepoId: repo-a · targetRepoId: repo-a"),
+        "读完摘要以后带上活动仓库"
+    );
+
+    let generation = retry(&mut model);
+    assert_eq!(logs(&model)[0], entry("info", "首屏启动流程开始。", "totalSteps: 4 · activeRepoId: repo-a · rememberedRepoId: repo-a"));
+    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(REPO, "ready")]) });
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Err("磁盘不可读".into()) });
+    assert_eq!(
+        last(&model),
+        entry("error", "首屏启动流程失败。", "step: 2 · stepLabel: 加载失败 · error: 磁盘不可读 · activeRepoId: repo-a · targetRepoId: repo-a"),
+        "Vue 的 activeRepoId 还是上一轮换上的仓库"
+    );
+}
