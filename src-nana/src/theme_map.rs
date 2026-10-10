@@ -1,7 +1,9 @@
 //! `DESIGN.md` 令牌到 Nana 主题角色的对应。
 //!
-//! 壳层只消费这里的角色，不在按钮或文本上写死 RGB。Nana 调色板的具体数值
-//! 由 `SemanticPalette` 持有；本模块只锁住角色、字号和侧栏尺寸的对应关系。
+//! 壳层的按钮和表面只取这里对应的主题角色，不写死 RGB；按钮由 `theme_map_button_tests.rs` 扫源码检查，
+//! Vue 也写死、两套主题共用的少数颜色（日志级别、页纸、投影……）列在那里的允许清单里。Nana 调色板的
+//! 具体数值由 `SemanticPalette` 持有；本模块只锁住颜色角色、字号、侧栏宽度和圆角刻度的对应，另给离屏
+//! 清屏色比对用的背景色。
 
 use nana_ui::theme::{SemanticPalette, ThemeAppearance, ThemeMetrics, UI_METRICS, type_scale};
 
@@ -85,7 +87,7 @@ pub const COLOR_ROLES: &[ColorRole] = &[
     },
 ];
 
-/// Vue 侧栏宽度约束，单位是逻辑像素。Phase 1 接入壳层时使用这组值。
+/// Vue 侧栏宽度约束，单位是逻辑像素：拖宽的上下限和默认宽。
 pub const SIDEBAR_MIN_PX: f32 = 220.0;
 pub const SIDEBAR_DEFAULT_PX: f32 = 276.0;
 pub const SIDEBAR_MAX_PX: f32 = 480.0;
