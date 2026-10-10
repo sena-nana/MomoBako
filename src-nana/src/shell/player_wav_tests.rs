@@ -259,15 +259,16 @@ fn the_clock_advances_and_a_natural_end_moves_to_the_next_item() {
     send(&mut model, PlayerMessage::PlayItem { item_id: "first".into() });
     assert_eq!(model.player.session.status, "playing");
     assert_eq!(model.player.session.duration_ms, Some(20));
-    assert!(crate::shell::poll_timers(&mut model));
+    let frame = crate::frame_clock::FrameStep::millis(16);
+    assert!(crate::shell::poll_timers(&mut model, frame));
     assert_eq!(model.player.session.current_time_ms, 16);
-    assert!(crate::shell::poll_timers(&mut model));
+    assert!(crate::shell::poll_timers(&mut model, frame));
     assert_eq!(model.player.current_id.as_deref(), Some("second"), "到头切下一项");
     super::super::fulfill_loads(&mut model);
     assert_eq!(model.player.session.status, "playing");
     assert_eq!(model.player.session.current_time_ms, 0);
     send(&mut model, PlayerMessage::SetPlaying(false));
-    assert!(!crate::shell::poll_timers(&mut model), "暂停时时钟不动");
+    assert!(!crate::shell::poll_timers(&mut model, frame), "暂停时时钟不动");
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -317,5 +318,67 @@ fn restoring_a_session_resumes_at_the_stored_position() {
     beyond.player.take_effects();
     send(&mut beyond, PlayerMessage::RestoreDetail(Ok(playlist)));
     assert_eq!(beyond.player.session.current_time_ms, 1_000, "超过时长时夹到结尾");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// 播放时钟按真实时间走：30 帧和 120 帧走同样的 3 秒，音频进度、到头切项和图片停留切项的时刻都一样。
+///
+/// 队列是 600ms 的音频、停留 2 秒的图片和另一段音频。从点播放开始，每帧照产品准备帧拨时钟，步长由帧时钟
+/// 按帧的时刻算；播放中准备帧一直要帧，时钟才不会停在两次重绘之间。
+#[test]
+fn the_playback_clock_and_image_dwell_follow_real_time_at_any_frame_rate() {
+    use std::time::{Duration, Instant};
+
+    let dir = temp_dir("wav-cadence");
+    let tone = dir.join("tone.wav");
+    let ending = dir.join("ending.wav");
+    let slide = dir.join("slide.png");
+    let samples = [128u8; 4_800];
+    std::fs::write(&tone, pcm_wav(8_000, 1, 8, &samples)).unwrap();
+    std::fs::write(&ending, pcm_wav(8_000, 1, 8, &samples)).unwrap();
+    image::RgbaImage::from_pixel(2, 2, image::Rgba([40, 80, 120, 255])).save(&slide).unwrap();
+
+    let run = |fps: u64| {
+        let mut model = shell(true);
+        model.player.repo_id = Some("repo".into());
+        model.player.contributions = vec![crate::backend::services::repository::PlaylistPlayerContribution {
+            player_type_id: "slides".into(),
+            label: "幻灯片".into(),
+            file_class: "image".into(),
+            supported_extensions: vec!["png".into()],
+            supports_seek: false,
+            supports_volume: false,
+            supports_preview_navigation: false,
+            description: None,
+        }];
+        let mut still = queue_item("slide", "png");
+        still.path = slide.display().to_string();
+        still.player_type_id = "slides".into();
+        still.file_class = "image".into();
+        model.player.queue = vec![wav_queue_item("tone", &tone), still, wav_queue_item("ending", &ending)];
+        send(&mut model, PlayerMessage::SetImageDuration(2_000));
+        send(&mut model, PlayerMessage::PlayItem { item_id: "tone".into() });
+        assert_eq!(model.player.session.duration_ms, Some(600));
+        let mut window = nana_ui::ApplicationWindow::new();
+        let mut clock = crate::frame_clock::FrameClock::default();
+        let start = Instant::now();
+        let mut samples = Vec::new();
+        for frame in 0..=3 * fps {
+            let at_us = frame * 1_000_000 / fps;
+            let step = clock.step(start + Duration::from_micros(at_us));
+            crate::shell::poll_timers(&mut model, step);
+            super::super::fulfill_loads(&mut model);
+            crate::window_host::prepare_motion(&mut model, None, &mut window, step);
+            clock.note_demand(window.demand);
+            if at_us % 1000 == 0 && [500, 1_000, 2_500, 3_000].contains(&(at_us / 1000)) {
+                samples.push((model.player.current_id.clone().unwrap_or_default(), model.player.session.current_time_ms));
+            }
+        }
+        samples
+    };
+    let slow = run(30);
+    assert_eq!(slow, run(120));
+    let expected = [("tone", 500), ("slide", 400), ("slide", 1_900), ("ending", 400)];
+    assert_eq!(slow, expected.map(|(id, time)| (id.to_string(), time)), "600ms 切到图片，图片停 2 秒切到下一段");
     let _ = std::fs::remove_dir_all(dir);
 }

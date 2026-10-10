@@ -1,21 +1,31 @@
 //! 窗口准备阶段的动效时钟、预取、分隔条回写，全局 Escape，以及关闭、托盘和几何恢复。
+//!
+//! 计时器和动效每帧按 [`FrameStep`] 推进，步长是两帧之间真实流逝的时间，见 `frame_clock.rs`。
 
 use nana_ui::runtime::{component_descriptors, Entity, Workspace};
 use nana_ui::{ApplicationWindow, InputPayload, KeyState, RegionId, RuntimeProgramContext, RuntimeProgramUpdate};
 
+use crate::frame_clock::{FrameClock, FrameStep};
 use crate::shell::{GapMessage, ShellMessage, ShellView, ShellViewModel, SidebarMessage, WindowAction};
 use crate::{host_api, MomoBakoApplication};
 
-/// 托盘和图标失败原因。窗口几何会话跟这一扇主窗口走。
+/// 托盘和图标失败原因。窗口几何会话和帧时钟跟这一扇主窗口走。
 pub(crate) struct HostSession {
     pub tray: Option<crate::tray::TrayHost>,
     pub tray_error: Option<String>,
     pub windows: crate::window_state::Session,
+    /// 准备帧的时钟：每帧的步长是两帧之间真实流逝的时间。
+    pub frames: FrameClock,
 }
 
 impl Default for HostSession {
     fn default() -> Self {
-        Self { tray: None, tray_error: None, windows: crate::window_state::Session::default() }
+        Self {
+            tray: None,
+            tray_error: None,
+            windows: crate::window_state::Session::default(),
+            frames: FrameClock::default(),
+        }
     }
 }
 
@@ -42,16 +52,17 @@ pub(crate) fn after_update(app: &mut MomoBakoApplication, context: &RuntimeProgr
     crate::shell::sync_media_session(&window, &app.shell);
 }
 
-/// 动效还在走时按 30 帧继续画，并把工作区拖动后的宽度写回壳层。
+/// 动效、计时器或播放还在走时按 30 帧继续画，并把工作区拖动后的宽度写回壳层。
 ///
 /// 指针手势先读当前文档。动效和播放推进只同步热信号，不重挂；这一帧里有过归约、标了脏
 /// 或者工作台排法要换时才整体同步，手势进行中不重挂，否则按下目标会随节点一起消失。
-pub(crate) fn prepare_motion(shell: &mut ShellViewModel, view: Option<&mut ShellView>, window: &mut ApplicationWindow) {
+/// 悬停、预取、仓库操作行和动效的时钟都按 `step.ui_ms` 往前拨。
+pub(crate) fn prepare_motion(shell: &mut ShellViewModel, view: Option<&mut ShellView>, window: &mut ApplicationWindow, step: FrameStep) {
     crate::shell::poll_media_keys(shell);
     crate::drag_out::apply_result(shell);
-    drive_prefetch(shell);
+    drive_prefetch(shell, step.ui_ms);
     if shell.input.live_gesture.is_some() || shell.sidebar.hover_since_ms.is_some() {
-        shell.sidebar.tick_hover(16);
+        shell.sidebar.tick_hover(step.ui_ms);
     }
     let tracking = crate::shell::observe_live_pointer(shell, &window.document);
     shell.stage_browses();
@@ -60,11 +71,11 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, view: Option<&mut Shell
         shell.mark_surface_dirty();
     }
     // 仓库操作行往上爬、完成后收起，任务弹层和「任务」计数跟着整体同步。
-    if shell.operation.tick(16) {
+    if shell.operation.tick(step.ui_ms) {
         shell.mark_surface_dirty();
     }
     if shell.motion.active() {
-        shell.motion.advance(shell.motion.now_ms().saturating_add(16));
+        shell.motion.advance(shell.motion.now_ms().saturating_add(step.ui_ms));
     }
     let mut overlay_leaving = false;
     if let Some(view) = view {
@@ -84,7 +95,7 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, view: Option<&mut Shell
         view.settle_overlays(&mut window.document);
         overlay_leaving = view.overlay_leaving();
     }
-    let busy = shell.motion.active() || tracking || overlay_leaving;
+    let busy = shell.motion.active() || tracking || overlay_leaving || shell.player.clock_running();
     window.demand = if busy || shell.files.prefetch_pending() || shell.inspect.timers_pending() || shell.operation.pending() {
         nana_ui::FrameDemand::Continuous(std::num::NonZeroU32::new(30).expect("30"))
     } else {
@@ -93,11 +104,11 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, view: Option<&mut Shell
     sync_sidebar_resize(shell, &window.document);
 }
 
-fn drive_prefetch(shell: &mut ShellViewModel) {
+fn drive_prefetch(shell: &mut ShellViewModel, step_ms: u64) {
     if !shell.files.prefetch_pending() {
         return;
     }
-    let now = shell.files.tick_prefetch(16);
+    let now = shell.files.tick_prefetch(step_ms);
     let paths = shell.files.undecoded_thumbnail_paths();
     shell.files.poll_thumbnail_prefetch(now, &paths);
 }

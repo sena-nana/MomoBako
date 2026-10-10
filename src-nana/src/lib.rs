@@ -20,6 +20,7 @@ mod sidebar_dispatch;
 mod sync_dispatch;
 mod task_watch;
 mod window_host;
+pub(crate) mod frame_clock;
 mod host_bridge;
 mod window_state;
 mod drag_out;
@@ -199,10 +200,12 @@ impl ApplicationState for MomoBakoApplication {
         window: &mut ApplicationWindow,
         context: &RuntimeProgramContext<Self::Message>,
     ) {
-        if crate::shell::poll_timers(&mut self.shell) {
+        let step = self.host.frames.step(std::time::Instant::now());
+        if crate::shell::poll_timers(&mut self.shell, step) {
             inspect_dispatch::dispatch_inspect_effects(self, context);
         }
-        window_host::prepare_motion(&mut self.shell, self.view.as_mut(), window);
+        window_host::prepare_motion(&mut self.shell, self.view.as_mut(), window, step);
+        self.host.frames.note_demand(window.demand);
         for request in sidebar_dispatch::dispatch_prepared_browses(&mut self.shell) {
             sidebar_dispatch::dispatch_browse_request(self, context, request);
         }
