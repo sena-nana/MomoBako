@@ -94,6 +94,25 @@ fn tagged_fixtures_change_the_untagged_count() {
     }
 }
 
+/// 截图拿到的是静止画面：任务弹层开着的场景，各行进度条停在自己的目标宽度上，不停在过渡的起点或半路。
+#[test]
+fn task_fills_rest_on_their_targets() {
+    let pages = [ShellPage::TaskRunning, ShellPage::TaskCancelling].map(|page| (format!("{page:?}"), ShellViewModel::for_page(page)));
+    let scenes = crate::shell::acceptance_gap_models().into_iter().map(|(name, model)| (name.to_string(), model));
+    let mut checked = Vec::new();
+    for (name, model) in pages.into_iter().chain(scenes) {
+        let targets = crate::shell::admin::task_fill_targets(&model);
+        if targets.is_empty() {
+            continue;
+        }
+        assert_eq!(model.motion.task_fills(), targets, "{name} 的任务进度条没有停在目标宽度");
+        checked.push(name);
+    }
+    for name in ["TaskRunning", "file-operation-progress", "repo-refresh-sync"] {
+        assert!(checked.iter().any(|checked| checked == name), "{name} 应开着任务弹层：{checked:?}");
+    }
+}
+
 /// 播放集类场景的播放集经侧栏的读取结果进来；登录场景的资源库列表里还有网易云仓库。
 #[test]
 fn scene_specific_data_arrives_through_the_same_messages() {
