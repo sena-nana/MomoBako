@@ -487,19 +487,20 @@ fn dispatch_confirm_hardlink(
 ) {
     let Some(services) = app.services.as_ref() else {
         eprintln!("Nana 确认硬链接需要领域服务，当前服务未启动");
-        app.shell.reduce(files_message(FilesMessage::HardlinkConfirmed(Err("领域服务未启动".into()))));
+        app.shell.reduce(files_message(FilesMessage::HardlinkConfirmed { repo_id, result: Err("领域服务未启动".into()) }));
         return;
     };
     let interaction = services.repository_interaction.clone();
     let executor = services.executor.clone();
+    let reply_repo = repo_id.clone();
     if let Err(error) = context.run_task(Task::new(async move {
-        let result = executor
-            .block_on(interaction.confirm_hardlink_candidate(HardlinkConfirmRequest { repo_id, candidate_id: candidate_id.clone() }))
-            .map(|_| candidate_id);
-        files_message(FilesMessage::HardlinkConfirmed(result))
+        let request = HardlinkConfirmRequest { repo_id: reply_repo.clone(), candidate_id: candidate_id.clone() };
+        let result = executor.block_on(interaction.confirm_hardlink_candidate(request)).map(|_| candidate_id);
+        files_message(FilesMessage::HardlinkConfirmed { repo_id: reply_repo, result })
     })) {
         eprintln!("Nana 确认硬链接任务提交失败：{error}");
-        app.shell.reduce(files_message(FilesMessage::HardlinkConfirmed(Err(format!("确认硬链接任务提交失败：{error}")))));
+        let result = Err(format!("确认硬链接任务提交失败：{error}"));
+        app.shell.reduce(files_message(FilesMessage::HardlinkConfirmed { repo_id, result }));
     }
 }
 

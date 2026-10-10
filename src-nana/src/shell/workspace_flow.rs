@@ -6,9 +6,27 @@ use crate::backend::services::repository::{FileBrowserSnapshot, RepositorySnapsh
 use super::files::FileContext;
 use super::status::FailureSource;
 use super::workspace::{RefreshStage, StartupMode};
-use super::{MainRegion, ShellPage, ShellViewModel, StartupStatus, WorkspaceRepository};
+use super::{MainRegion, ShellPage, ShellViewModel, StartupStatus, WorkspaceEffect, WorkspaceRepository};
 
 impl ShellViewModel {
+    /// 变更以后刷新工作区（Vue `refreshWorkspaceAfterMutation`，仓库动作执行完、确认硬链接以后）：静默重读
+    /// 仓库摘要；当前不在回收站、也不是智能文件夹时非静默地重读当前目录，选择留着，任务弹层出「读取目录」。
+    /// 已经换了仓库就不读。
+    pub(super) fn reload_after_mutation(&mut self, repo_id: &str) {
+        if self.workspace.active_repo_id.as_deref() != Some(repo_id) {
+            eprintln!("Nana 变更完成时已经换了仓库，不重读：{repo_id}");
+            return;
+        }
+        let context = FileContext::from_model(self);
+        if !context.trash && !context.smart_folder {
+            let path = self.files.current_path.clone();
+            if !self.files.request_refresh_read(&context, &path) {
+                eprintln!("Nana 变更完成后没能重读目录：{path}");
+            }
+        }
+        self.workspace.effects.push(WorkspaceEffect::LoadSnapshotSilent { repo_id: repo_id.to_string() });
+    }
+
     /// 把仓库列表结果写进工作台，再同步壳层上的仓库名称和页面。启动以后读失败时进状态区（缺失页自己显示）。
     pub(super) fn apply_loaded_repositories(&mut self, generation: Option<u64>, result: Result<Vec<RepositorySummary>, String>) {
         let mapped = match result {

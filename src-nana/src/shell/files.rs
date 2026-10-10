@@ -309,7 +309,8 @@ pub enum FilesMessage {
     HardlinksRefreshed(Result<Vec<HardlinkPrompt>, String>),
     /// 启动和换仓库后查到的候选：换掉列表，没有别的对话框时有候选就弹出确认。
     HardlinksChecked(Result<Vec<HardlinkPrompt>, String>),
-    HardlinkConfirmed(Result<String, String>),
+    /// 确认硬链接的结果：成功时是确认掉的候选。`repo_id` 是确认时的仓库。
+    HardlinkConfirmed { repo_id: String, result: Result<String, String> },
     NoteError(String),
     /// 缩略图已经写入。路径是缓存文件，用来重新解码纹理。
     ThumbnailSaved { path: String, thumbnail_path: Option<String>, custom: bool },
