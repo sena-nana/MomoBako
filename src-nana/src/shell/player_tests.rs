@@ -31,6 +31,9 @@ fn shell(writable: bool) -> ShellViewModel {
         capabilities: if writable { vec!["write".into()] } else { Vec::new() },
         cache_required: false,
         cache_status: String::new(),
+        cache_path: None,
+        login_expired: false,
+        logged_out: false,
     });
     model.workspace.active_repo_id = Some("repo".into());
     model

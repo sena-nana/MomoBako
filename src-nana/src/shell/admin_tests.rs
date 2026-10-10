@@ -644,6 +644,9 @@ fn repository_actions_follow_selection_and_refuse_when_not_runnable() {
         capabilities: vec!["write".into()],
         cache_required: false,
         cache_status: String::new(),
+        cache_path: None,
+        login_expired: false,
+        logged_out: false,
     });
     send(&mut model, AdminMessage::ActionRunFinished { result: Ok(action("copy", "ready", true)) });
     assert!(!model.admin.actions_running);
@@ -693,6 +696,9 @@ fn attach_repository(model: &mut ShellViewModel, capabilities: Vec<String>) {
         capabilities,
         cache_required: false,
         cache_status: String::new(),
+        cache_path: None,
+        login_expired: false,
+        logged_out: false,
     }];
 }
 

@@ -15,6 +15,9 @@ fn repo(id: &str, status: &str) -> WorkspaceRepository {
         capabilities: vec!["localRootPath".into()],
         cache_required: false,
         cache_status: String::new(),
+        cache_path: None,
+        login_expired: false,
+        logged_out: false,
     }
 }
 

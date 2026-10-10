@@ -13,7 +13,8 @@ use serde_json::Value;
 
 use crate::backend::services::repository::{
     AssetSummary, FileBrowserEntry, FileBrowserSnapshot, FileTreeNode, FolderSummary, PlaylistPlayerContribution, PlaylistSummary,
-    RepositoryBackendSummary, RepositoryOverview, RepositorySnapshot, RepositoryStructureCacheState, RepositorySummary,
+    RepositoryAuthenticationStatus, RepositoryBackendSummary, RepositoryLocalCacheStatus, RepositoryOverview, RepositorySnapshot,
+    RepositoryStructureCacheState, RepositorySummary,
 };
 
 use super::super::admin::{AdminEffect, AdminMessage};
@@ -52,6 +53,18 @@ pub(super) struct Base {
     pub others: Vec<RepositorySummary>,
     /// 读插件目录的报错。有值时设置包每次都读失败（启动结束那次也是），也就不读播放器类型。
     pub plugins_error: Option<&'static str>,
+    /// 当前资源库挂在来源插件下时（网易云这类）的来源状况；`None` 是本地文件夹仓库。
+    pub source: Option<SourceState>,
+}
+
+/// 来源资源库的后端和状况：后端插件、本地缓存目录、登录状态。
+#[derive(Clone, Copy)]
+pub(super) struct SourceState {
+    pub plugin_id: &'static str,
+    pub kind: &'static str,
+    pub cache_path: &'static str,
+    pub logged_in: bool,
+    pub login_expired: bool,
 }
 
 impl Default for Base {
@@ -65,6 +78,7 @@ impl Default for Base {
             players: playlist_players(),
             others: Vec::new(),
             plugins_error: None,
+            source: None,
         }
     }
 }
@@ -86,7 +100,7 @@ impl Base {
         model.workspace.last_active_repo_id = Some(REPO_ID.into());
         model.files.display_mode = self.mode;
         let generation = model.workspace.prepare_initial_list();
-        let mut repositories = vec![summary(self.name, "ready")];
+        let mut repositories = vec![self.repository()];
         repositories.extend(self.others.iter().cloned());
         model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(repositories) });
         let scanned_files = self.assets().len() as i64;
@@ -110,6 +124,23 @@ impl Base {
         settle(model);
     }
 
+    /// 当前资源库的摘要：本地文件夹，或者照 [`SourceState`] 挂在来源插件下（只读，要本地缓存和登录）。
+    fn repository(&self) -> RepositorySummary {
+        let mut repository = summary(self.name, "ready");
+        if let Some(source) = self.source {
+            repository.backend.plugin_id = source.plugin_id.into();
+            repository.backend.kind = source.kind.into();
+            repository.backend.capabilities = ["list", "read", "sync"].map(String::from).to_vec();
+            repository.local_cache = Some(RepositoryLocalCacheStatus { required: true, path: Some(source.cache_path.into()), status: "ready".into() });
+            repository.authentication = Some(RepositoryAuthenticationStatus {
+                required: true,
+                logged_in: source.logged_in,
+                login_expired: source.login_expired,
+            });
+        }
+        repository
+    }
+
     /// 仓库摘要里的素材：条目里的文件，标签跟着条目走。
     fn assets(&self) -> Vec<AssetSummary> {
         self.entries.iter().filter(|entry| entry.kind == "file").map(asset).collect()
@@ -119,7 +150,7 @@ impl Base {
     fn snapshot(&self) -> RepositorySnapshot {
         let assets = self.assets();
         RepositorySnapshot {
-            repository: summary(self.name, "ready"),
+            repository: self.repository(),
             folder_label: "根目录".into(),
             folders: self
                 .tree

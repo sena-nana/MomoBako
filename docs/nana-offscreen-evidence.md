@@ -14,10 +14,10 @@ yarn test:nana:offscreen
 
 ## 场景和视口
 
-`src-nana/tests/offscreen_acceptance.rs` 出 61 个场景，每个场景出 4 个视口（1200×800、960×600，浅色、深色），共 244 组证据：
+`src-nana/tests/offscreen_acceptance.rs` 出 68 个场景，每个场景出 4 个视口（1200×800、960×600，浅色、深色），共 272 组证据：
 
 - 15 页：`ShellPage` 的每一种，经 `ShellViewModel::for_page` → `acceptance::seed` 铺数据。
-- 47 个补充场景：`acceptance_gap_models()`，定义在 `src-nana/src/shell/acceptance_*.rs` 各自的 `models()`。
+- 49 个补充场景：`acceptance_gap_models()`，定义在 `src-nana/src/shell/acceptance_*.rs` 各自的 `models()`。
 - 4 个压力场景，只在这个测试里：`long-content` 根目录读回一个超长文件名，`empty-list` 根目录读回空列表，`disabled-feedback` 在设置错误页上保存设置被拒（状态区写原因），`dense-list` 任务弹层里 12 个运行中任务。都经真实消息归约。
 
 有仓库的场景都从 `acceptance_base.rs` 的共用底子起步：照产品启动依次归约资源库列表、同步、仓库摘要、首屏目录和侧栏的读取结果，数据和 Vue 夹具 `base()` 一致。场景要别的条目、目录树、播放集、播放器或仓库时改底子的字段。
@@ -30,6 +30,7 @@ yarn test:nana:offscreen
 | `acceptance_player.rs` | `playlist-open`、`playback-queue`、`still-playback`、`outside-playback`、`live-preview`、`live-asmr`、`preview-text`、`preview-image`、`preview-audio`、`preview-audio-failed`、`preview-no-player` |
 | `acceptance_admin.rs` | `logs-paused`、`extensions`、`downloader-settings`、`office-convert`、`source-auth-gap`、`source-auth-methods`、`foreign-tool` |
 | `acceptance_search.rs` | `filter-bar`、`filter-bar-active`、`search-results`、`search-empty` |
+| `acceptance_source.rs` | `source-menu-unavailable`、`source-download-target` |
 | 压力场景（`special_models`） | `long-content`、`empty-list`、`disabled-feedback`、`dense-list` |
 
 ## 每组证据检查什么
@@ -56,7 +57,7 @@ NANA_SCENES=live-files,settings NANA_SIZES=1200x800,960x600 NANA_THEMES=light,da
   cargo test -p momobako-nana --test scene_shots -- --nocapture
 ```
 
-`src-nana/tests/scene_shots.rs` 只渲染 `NANA_SCENES` 点名的场景，可选的是 15 页和 42 个补充场景，共 57 个，不含压力场景。`NANA_SIZES` 默认 `1200x800`，`NANA_THEMES` 默认 `light`。没给 `NANA_SCENES` 时不出图；名字不认识时测试失败，并列出可选的场景。
+`src-nana/tests/scene_shots.rs` 只渲染 `NANA_SCENES` 点名的场景，可选的是 15 页和 49 个补充场景，共 64 个，不含压力场景。`NANA_SIZES` 默认 `1200x800`，`NANA_THEMES` 默认 `light`。没给 `NANA_SCENES` 时不出图；名字不认识时测试失败，并列出可选的场景。
 
 - 截图前先把视图量到尺寸后发回的程序消息（播放条宽、文件列表宽）归约、同步，最多四轮，截到的是稳定以后的画面；四轮后还有消息就打印一行提示。
 - 有激活的对话框时同样先走完进场动效。

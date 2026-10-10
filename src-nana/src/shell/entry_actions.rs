@@ -2,10 +2,16 @@
 //!
 //! 清单 `contributes.source.entryActions[]` 的 operation 只有插件 SDK 约定的五种（`SourceEntryActionOperation`，
 //! `docs/api-design.md`）：宿主负责每一种的目录选择、进度、导入和刷新，声明不能让宿主执行别的命令。
-//! 能直接调用的方法接到现有 `call_plugin`。下载先要系统目录对话框，选好目录才带上目录调用。
+//! 能直接调用的方法接到现有 `call_plugin`。下载照 Vue `downloadTargets` 分「到本地」和「到其他资源库」两项
+//! （声明了 `targets` 时只出声明的）：到本地先要系统目录对话框，到其他资源库先选目标资源库（`source_target.rs`），
+//! 选好才带上 `destination` 调用。清理缓存、重新获取播放资源和下载的载荷照 Vue 带上当前资源库的本地缓存目录
+//! （`managedCacheRoot`），网易云插件据此找到真正的播放缓存和暂存目录。
 //! 「创建播放列表」（`playlist-from-directory`）照 Vue `runPlaylistAction` 不调用插件：在本地建一个以来源
 //! 歌单命名的播放集（已经有就不建），把这个目录加进去，再刷新资源库（`admin_reduce.rs`）。约定以外的 operation
 //! 和没写 scope 的声明不出菜单，只记日志（Vue 把约定以外的 operation 一律当成「创建播放列表」，是缺陷）。
+//!
+//! 来源认证或本地缓存不可用时（Vue `actionDisabled`：登录过期、没有登录、要本地缓存但没就绪，或者条目自己标了
+//! 登录过期），这些动作都禁用，菜单里写出原因；没有能下载到的其他资源库时「到其他资源库」禁用。
 
 use serde_json::{Map, Value};
 
@@ -14,22 +20,76 @@ use crate::backend::services::repository::PluginManifest;
 use super::files::FileRow;
 use super::player::AUDIO_SEQUENCE_TYPE;
 
+/// 来源认证或本地缓存不可用时，禁用的来源动作下面写的原因（Vue `actionDisabled` 的 `confirmLabel`）。
+pub const SOURCE_UNAVAILABLE: &str = "来源认证或本地缓存不可用";
+/// 没有就绪、可写的其他资源库时，「下载到其他资源库」下面写的原因。
+pub const NO_TARGET_REPOSITORY: &str = "没有可下载到的其他资源库";
+
+/// 来源动作要看的当前资源库情况，由菜单从工作台算好交进来。
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SourceContext {
+    /// 当前资源库的本地缓存目录（`localCache.path`），载荷里的 `managedCacheRoot`；没有时写 null。
+    pub managed_cache_root: Option<String>,
+    /// 来源认证或本地缓存不可用（仓库这一侧，见 `WorkspaceRepository::source_unavailable`）。
+    pub source_unavailable: bool,
+    /// 有没有能下载到的其他资源库：就绪、可写、不是当前这个。
+    pub has_target_repository: bool,
+}
+
 /// 右键可以画出的一条插件动作。
 #[derive(Clone, Debug, PartialEq)]
 pub struct FilePluginAction {
     pub value: String,
     pub label: String,
+    /// 不能用的原因：有原因时菜单里禁用这一项，并写出原因。
+    pub unavailable: Option<&'static str>,
     pub dispatch: FilePluginDispatch,
 }
 
-/// 立刻调用插件、先问目录再调用，或者在本地建播放集。
+/// 立刻调用插件、先问目录或目标资源库再调用，或者在本地建播放集。
 #[derive(Clone, Debug, PartialEq)]
 pub enum FilePluginDispatch {
     Call { plugin_id: String, method: String, payload: Value },
-    /// 选中文件夹后把 `destination` 写进载荷再调用。`progress` 是这次下载在任务弹层里的进度行。
+    /// 下载到本地：选中文件夹后把 `destination` 写进载荷再调用。`progress` 是这次下载在任务弹层里的进度行。
     AskFolder { plugin_id: String, method: String, payload: Value, progress: DownloadProgress },
+    /// 下载到其他资源库：选好目标资源库，把 `destination` 写进载荷再调用；下载回来的文件导入目标资源库并同步它。
+    /// `parent_path` 是导入到目标资源库的哪个文件夹：下载目录时是以歌单命名的文件夹（Vue `playlistName`），没有时
+    /// 先建，单曲放在根目录。
+    AskRepository { plugin_id: String, method: String, payload: Value, progress: DownloadProgress, parent_path: Option<String> },
     /// 来源目录建成本地播放集（Vue `runPlaylistAction`），不调用插件。
     CreatePlaylist(SourcePlaylist),
+}
+
+/// 下载的去处，对应清单 `targets` 的两种取值。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DownloadTarget {
+    LocalDirectory,
+    WritableRepository,
+}
+
+impl DownloadTarget {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "local-directory" => Some(Self::LocalDirectory),
+            "writable-repository" => Some(Self::WritableRepository),
+            _ => None,
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Self::LocalDirectory => "local-directory",
+            Self::WritableRepository => "writable-repository",
+        }
+    }
+
+    /// Vue `targetLabel`。
+    fn label(self) -> &'static str {
+        match self {
+            Self::LocalDirectory => "本地",
+            Self::WritableRepository => "其他资源库",
+        }
+    }
 }
 
 /// 来源目录要建成的播放集。标识是「来源-歌单」，名称取来源的歌单名、没有时用目录名，播放器类型取动作声明的、
@@ -49,14 +109,14 @@ impl SourcePlaylist {
         let item = source_number(row, "playlistId").map(|id| id.to_string()).or_else(|| row.provider_item_id.clone());
         Self {
             playlist_id: item.map(|item| format!("{provider}-{item}")),
-            name: source_string(row, "playlistName").unwrap_or_else(|| row.name.clone()),
+            name: playlist_name(row),
             player_type_id: text(action, "playerTypeId").unwrap_or_else(|| AUDIO_SEQUENCE_TYPE.to_string()),
             path: row.path.clone(),
         }
     }
 }
 
-/// 来源下载在任务弹层里的进度行（Vue `runDownloadAction`）：种类是动作名；选好目录先是「准备下载 …」，
+/// 来源下载在任务弹层里的进度行（Vue `runDownloadAction`）：种类是动作名；选好去处先是「准备下载 …」，
 /// 调用插件时单曲是「正在下载 …」。下载目录时 Vue 先列出目录里的文件再写「正在处理 N 个文件」，
 /// Nana 不列目录，停在「准备下载目录」。
 #[derive(Clone, Debug, PartialEq)]
@@ -81,7 +141,7 @@ impl DownloadProgress {
 }
 
 /// 按清单 `entryActions` 和当前行的类型、来源载荷匹配菜单项。
-pub fn actions_for(plugins: &[PluginManifest], row: &FileRow) -> Vec<FilePluginAction> {
+pub fn actions_for(plugins: &[PluginManifest], row: &FileRow, context: &SourceContext) -> Vec<FilePluginAction> {
     let mut actions = Vec::new();
     for plugin in plugins {
         if !plugin.enabled || matches!(plugin.status.as_str(), "disabled" | "unavailable" | "error") {
@@ -91,50 +151,86 @@ pub fn actions_for(plugins: &[PluginManifest], row: &FileRow) -> Vec<FilePluginA
             continue;
         };
         for action in list {
-            if !matches_row(action, row) {
-                continue;
-            }
-            if let Some(prepared) = prepare(plugin, action, row) {
-                actions.push(prepared);
+            if matches_row(action, row) {
+                actions.extend(prepare(plugin, action, row, context));
             }
         }
     }
     actions
 }
 
-/// 按 operation 把声明换成能执行的动作。要调用插件的 operation 找不到方法、或者 operation 不在约定里时返回
-/// `None` 并记下原因。
-fn prepare(plugin: &PluginManifest, action: &Value, row: &FileRow) -> Option<FilePluginAction> {
+/// 按 operation 把声明换成能执行的动作（下载按去处可能是两项）。要调用插件的 operation 找不到方法、或者
+/// operation 不在约定里时返回空并记下原因。
+fn prepare(plugin: &PluginManifest, action: &Value, row: &FileRow, context: &SourceContext) -> Vec<FilePluginAction> {
     let action_id = text(action, "actionId").unwrap_or_else(|| "action".into());
     let label = text(action, "label").unwrap_or_else(|| action_id.clone());
     let operation = text(action, "operation").unwrap_or_default();
     let value = format!("plugin/{}/{}", plugin.plugin_id, action_id);
+    let disabled = (context.source_unavailable || entry_login_expired(row)).then_some(SOURCE_UNAVAILABLE);
     let method = action_method(plugin, action, &operation);
     if method.is_none() && matches!(operation.as_str(), "clear-cache" | "refresh-playback" | "download-entry" | "download-directory") {
         eprintln!("Nana 文件插件动作没有可调用的方法：{}/{action_id}（{operation}）", plugin.plugin_id);
-        return None;
+        return Vec::new();
     }
-    let dispatch = match operation.as_str() {
+    let single = |dispatch| vec![FilePluginAction { value: value.clone(), label: label.clone(), unavailable: disabled, dispatch }];
+    match operation.as_str() {
         "clear-cache" | "refresh-playback" => {
-            let method = method?;
-            FilePluginDispatch::Call { plugin_id: plugin.plugin_id.clone(), method, payload: call_payload(action, row, &operation) }
+            let Some(method) = method else { return Vec::new() };
+            let payload = call_payload(row, &operation, context);
+            single(FilePluginDispatch::Call { plugin_id: plugin.plugin_id.clone(), method, payload })
         }
         "download-entry" | "download-directory" => {
-            let method = method?;
-            FilePluginDispatch::AskFolder {
-                plugin_id: plugin.plugin_id.clone(),
-                method,
-                payload: call_payload(action, row, &operation),
-                progress: DownloadProgress::of(&label, row, &operation),
-            }
+            let Some(method) = method else { return Vec::new() };
+            let targets = download_targets(action, &plugin.plugin_id, &action_id);
+            let several = targets.len() > 1;
+            targets
+                .into_iter()
+                .map(|target| {
+                    let payload = call_payload(row, &operation, context);
+                    let progress = DownloadProgress::of(&label, row, &operation);
+                    let plugin_id = plugin.plugin_id.clone();
+                    let method = method.clone();
+                    let (dispatch, unavailable) = match target {
+                        DownloadTarget::LocalDirectory => (FilePluginDispatch::AskFolder { plugin_id, method, payload, progress }, disabled),
+                        DownloadTarget::WritableRepository => {
+                            let parent_path = if operation == "download-directory" { download_folder(row) } else { None };
+                            let unavailable = disabled.or((!context.has_target_repository).then_some(NO_TARGET_REPOSITORY));
+                            (FilePluginDispatch::AskRepository { plugin_id, method, payload, progress, parent_path }, unavailable)
+                        }
+                    };
+                    FilePluginAction {
+                        value: if several { format!("{value}/{}", target.key()) } else { value.clone() },
+                        label: if several { format!("{label}到{}", target.label()) } else { label.clone() },
+                        unavailable,
+                        dispatch,
+                    }
+                })
+                .collect()
         }
-        "playlist-from-directory" => FilePluginDispatch::CreatePlaylist(SourcePlaylist::of(action, row)),
+        "playlist-from-directory" => single(FilePluginDispatch::CreatePlaylist(SourcePlaylist::of(action, row))),
         other => {
             eprintln!("Nana 文件插件动作的 operation 不在插件约定里，不出菜单：{}/{action_id}（{other}）", plugin.plugin_id);
-            return None;
+            Vec::new()
         }
+    }
+}
+
+/// 下载的去处（Vue `downloadTargets`）：声明了 `targets` 就只出声明的，没声明时两种都出。约定以外的去处不出，
+/// 只记日志。
+fn download_targets(action: &Value, plugin_id: &str, action_id: &str) -> Vec<DownloadTarget> {
+    let Some(declared) = action.get("targets").and_then(Value::as_array).filter(|targets| !targets.is_empty()) else {
+        return vec![DownloadTarget::LocalDirectory, DownloadTarget::WritableRepository];
     };
-    Some(FilePluginAction { value, label, dispatch })
+    declared
+        .iter()
+        .filter_map(|target| {
+            let parsed = target.as_str().and_then(DownloadTarget::parse);
+            if parsed.is_none() {
+                eprintln!("Nana 文件插件动作的下载去处不在插件约定里，不出这一项：{plugin_id}/{action_id}（{target}）");
+            }
+            parsed
+        })
+        .collect()
 }
 
 fn action_method(plugin: &PluginManifest, action: &Value, operation: &str) -> Option<String> {
@@ -185,7 +281,16 @@ fn matches_row(action: &Value, row: &FileRow) -> bool {
     }
 }
 
-fn call_payload(action: &Value, row: &FileRow, operation: &str) -> Value {
+/// 条目自己标了登录过期（来源载荷或元数据里的 `loginExpired`，Vue `actionDisabled` 的条目部分）。
+fn entry_login_expired(row: &FileRow) -> bool {
+    let flagged = |value: Option<&Value>| value.and_then(Value::as_bool) == Some(true);
+    flagged(row.source_payload.as_ref().and_then(|payload| payload.get("loginExpired"))) || flagged(row.metadata.get("loginExpired"))
+}
+
+/// 调用插件的载荷，照 Vue 各动作的载荷：歌曲、歌单标识，音质，公开的来源载荷，以及当前资源库的本地缓存目录
+/// （`managedCacheRoot`，没有时写 null）；重新获取播放资源多一个 `forceRefresh`，下载多一个歌单名。下载的
+/// `destination` 选好去处以后再写。
+fn call_payload(row: &FileRow, operation: &str, context: &SourceContext) -> Value {
     let mut payload = Map::new();
     if let Some(song_id) = source_number(row, "songId") {
         payload.insert("songId".into(), Value::from(song_id));
@@ -193,13 +298,29 @@ fn call_payload(action: &Value, row: &FileRow, operation: &str) -> Value {
     if let Some(playlist_id) = source_number(row, "playlistId") {
         payload.insert("playlistId".into(), Value::from(playlist_id));
     }
+    if matches!(operation, "download-entry" | "download-directory") {
+        payload.insert("playlistName".into(), Value::String(playlist_name(row)));
+    }
     payload.insert("level".into(), Value::String(source_string(row, "level").unwrap_or_else(|| "standard".into())));
     if operation == "refresh-playback" {
         payload.insert("forceRefresh".into(), Value::Bool(true));
     }
+    payload.insert("managedCacheRoot".into(), context.managed_cache_root.clone().map_or(Value::Null, Value::String));
     payload.insert("sourcePayload".into(), public_payload(row.source_payload.as_ref()));
-    let _ = action;
     Value::Object(payload)
+}
+
+/// 来源歌单名，没有时用条目名（Vue `sourceString(entry, "playlistName") ?? entry.name`）。
+fn playlist_name(row: &FileRow) -> String {
+    source_string(row, "playlistName").unwrap_or_else(|| row.name.clone())
+}
+
+/// 歌单下载到其他资源库时放进的文件夹：来源歌单名，路径分隔符换成「_」（导入只认一层文件夹名）；名字是空的或
+/// 只有点时放在根目录。
+fn download_folder(row: &FileRow) -> Option<String> {
+    let name = playlist_name(row).replace(['/', '\\'], "_");
+    let name = name.trim();
+    (!name.is_empty() && name != "." && name != "..").then(|| name.to_string())
 }
 
 fn public_payload(payload: Option<&Value>) -> Value {
@@ -239,157 +360,5 @@ fn text(value: &Value, key: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::collections::BTreeMap;
-
-    fn row() -> FileRow {
-        FileRow::from_entry(&crate::backend::services::repository::FileBrowserEntry {
-            path: "song".into(),
-            name: "song".into(),
-            kind: "file".into(),
-            extension: Some("mp3".into()),
-            size_bytes: None,
-            size_label: None,
-            modified_at: None,
-            asset_id: None,
-            status: None,
-            thumbnail_path: None,
-            thumbnail_custom: false,
-            hardlink_group_id: None,
-            hardlink_state: None,
-            tags: Vec::new(),
-            alias_paths: Vec::new(),
-            folder_metadata: None,
-            metadata: BTreeMap::new(),
-            is_virtual: false,
-            provider_id: Some("netease".into()),
-            provider_item_id: Some("9".into()),
-            source_payload: Some(serde_json::json!({"entryKind": "track", "songId": 9, "cookie": "hide"})),
-            local_absolute_path: None,
-        })
-    }
-
-    fn manifest() -> PluginManifest {
-        PluginManifest {
-            plugin_id: "momobako.netease.source".into(),
-            package_format_version: None,
-            package_hash: None,
-            provenance: None,
-            trust_level: None,
-            deployment: None,
-            target_triple: None,
-            legacy_plugin_ids: Vec::new(),
-            name: "网易云".into(),
-            version: "0.2.0".into(),
-            r#type: None,
-            kind: "netease-cloud-music".into(),
-            category: "source".into(),
-            description: String::new(),
-            capabilities: Vec::new(),
-            enabled: true,
-            sdk: "backend".into(),
-            entry: Value::Null,
-            contributes: serde_json::json!({
-                "source": {
-                    "media": { "clearCacheMethod": "media.clearTrackCache" },
-                    "entryActions": [
-                        { "actionId": "clear-track-cache", "label": "清理播放缓存", "scope": "file", "entryKind": "track", "operation": "clear-cache", "method": "media.clearTrackCache" },
-                        { "actionId": "download-track", "label": "下载单曲", "scope": "file", "entryKind": "track", "operation": "download-entry", "method": "media.downloadTrackPackage" },
-                        { "actionId": "create-audio-playlist", "label": "创建播放列表", "scope": "directory", "entryKind": "playlist-folder", "operation": "playlist-from-directory" }
-                    ]
-                }
-            }),
-            source: "builtin".into(),
-            runtime: "native-dylib".into(),
-            permissions: Vec::new(),
-            requires: Vec::new(),
-            optional: Vec::new(),
-            hooks: Vec::new(),
-            compat: Default::default(),
-            status: "ready".into(),
-            dependency_status: Default::default(),
-            disable_reason: None,
-            degraded: false,
-            degradation_reason: None,
-            archive_path: None,
-        }
-    }
-
-    #[test]
-    fn clear_cache_calls_plugin_and_download_asks_for_a_folder() {
-        let actions = actions_for(&[manifest()], &row());
-        assert_eq!(actions.len(), 2);
-        match &actions[0].dispatch {
-            FilePluginDispatch::Call { method, payload, .. } => {
-                assert_eq!(method, "media.clearTrackCache");
-                assert_eq!(payload["songId"], 9);
-                assert!(payload["sourcePayload"]["cookie"].is_null());
-            }
-            other => panic!("unexpected {other:?}"),
-        }
-        match &actions[1].dispatch {
-            FilePluginDispatch::AskFolder { method, payload, .. } => {
-                assert_eq!(method, "media.downloadTrackPackage");
-                assert_eq!(payload["songId"], 9);
-                assert!(payload.get("destination").is_none());
-            }
-            other => panic!("unexpected {other:?}"),
-        }
-    }
-
-    /// 「创建播放列表」照 Vue `runPlaylistAction` 在本地建播放集：标识是「来源-歌单」，名称取来源的歌单名，
-    /// 播放器类型取动作声明的；没有声明时是音频顺序播放，没有歌单名时用目录名。不再调用插件。
-    #[test]
-    fn playlist_from_directory_builds_a_local_playlist() {
-        let mut directory = row();
-        directory.kind = "directory".into();
-        directory.name = "夜曲合集".into();
-        directory.path = "playlists/night".into();
-        directory.source_payload = Some(serde_json::json!({"entryKind": "playlist-folder", "playlistId": 3, "playlistName": "夜曲"}));
-        let actions = actions_for(&[manifest()], &directory);
-        assert_eq!(actions.len(), 1);
-        assert_eq!(
-            actions[0].dispatch,
-            FilePluginDispatch::CreatePlaylist(SourcePlaylist {
-                playlist_id: Some("netease-3".into()),
-                name: "夜曲".into(),
-                player_type_id: AUDIO_SEQUENCE_TYPE.into(),
-                path: "playlists/night".into(),
-            })
-        );
-
-        directory.source_payload = Some(serde_json::json!({"entryKind": "playlist-folder"}));
-        directory.provider_id = None;
-        let actions = actions_for(&[manifest()], &directory);
-        let FilePluginDispatch::CreatePlaylist(playlist) = &actions[0].dispatch else { panic!("不是本地建播放集") };
-        assert_eq!(playlist.playlist_id.as_deref(), Some("source-9"), "没有歌单标识时用来源条目标识，来源缺省是 source");
-        assert_eq!(playlist.name, "夜曲合集", "没有歌单名时用目录名");
-
-        directory.provider_item_id = None;
-        let actions = actions_for(&[manifest()], &directory);
-        let FilePluginDispatch::CreatePlaylist(playlist) = &actions[0].dispatch else { panic!("不是本地建播放集") };
-        assert_eq!(playlist.playlist_id, None, "两样标识都没有：点了只报错");
-    }
-
-    /// 插件 SDK 只约定了五种 operation。约定以外的值不出菜单，声明了 method 也不调用（Vue 一律当成「创建播放列表」，
-    /// 拿单曲也会建播放集，是缺陷）；没写 scope 的声明也不出（Vue 要求 scope 和条目类型相同）。
-    #[test]
-    fn declarations_outside_the_sdk_contract_are_not_offered() {
-        let mut plugin = manifest();
-        plugin.contributes = serde_json::json!({
-            "source": {
-                "media": { "clearCacheMethod": "media.clearTrackCache" },
-                "entryActions": [
-                    { "actionId": "rename-remote", "label": "改远端名", "scope": "file", "entryKind": "track", "operation": "rename-remote", "method": "media.renameTrack" },
-                    { "actionId": "mystery", "label": "神秘动作", "scope": "file", "entryKind": "track", "operation": "mystery" },
-                    { "actionId": "no-scope", "label": "清理播放缓存", "entryKind": "track", "operation": "clear-cache" },
-                    { "actionId": "clear", "label": "清理播放缓存", "scope": "file", "entryKind": "track", "operation": "clear-cache" }
-                ]
-            }
-        });
-        let actions = actions_for(&[plugin], &row());
-        let labels: Vec<&str> = actions.iter().map(|action| action.value.as_str()).collect();
-        assert_eq!(labels, ["plugin/momobako.netease.source/clear"], "只剩约定里、写了 scope 的那一条");
-    }
-}
+#[path = "entry_actions_tests.rs"]
+mod tests;

@@ -476,6 +476,7 @@ fn adopt_created(model: &mut ShellViewModel, payload: &Value) {
     }
     let backend = repository.get("backend");
     let cache = repository.get("localCache");
+    let authentication = repository.get("authentication");
     model.workspace.repositories.push(WorkspaceRepository {
         repo_id,
         name: text_at(repository.get("name")).unwrap_or_default(),
@@ -489,6 +490,9 @@ fn adopt_created(model: &mut ShellViewModel, payload: &Value) {
             .unwrap_or_default(),
         cache_required: cache.and_then(|item| item.get("required")).and_then(Value::as_bool) == Some(true),
         cache_status: cache.and_then(|item| text_at(item.get("status"))).unwrap_or_default(),
+        cache_path: cache.and_then(|item| text_at(item.get("path"))),
+        login_expired: authentication.and_then(|item| item.get("loginExpired")).and_then(Value::as_bool) == Some(true),
+        logged_out: authentication.and_then(|item| item.get("loggedIn")).and_then(Value::as_bool) == Some(false),
     });
 }
 

@@ -55,6 +55,8 @@ pub(crate) enum OverlayKey {
     PluginDelete,
     /// 新建播放集。
     PlaylistCreate,
+    /// 来源下载的「选择目标资源库」。
+    DownloadTarget,
     /// 新建或重命名文件夹。
     FolderDialog,
     /// 新建或编辑智能文件夹。
@@ -89,6 +91,8 @@ impl OverlayKey {
             Self::PluginDelete
         } else if model.playlist_dialog_open {
             Self::PlaylistCreate
+        } else if model.admin.download_target.is_some() {
+            Self::DownloadTarget
         } else if sidebar.folder_dialog.open {
             Self::FolderDialog
         } else if sidebar.smart_draft.open {
@@ -132,6 +136,13 @@ impl OverlayIdentity {
                 model.sidebar.folder_menu.as_ref().map(|menu| format!("{}@{},{}", menu.path, menu.x, menu.y)).unwrap_or_default()
             }
             OverlayKey::EntryMenu => entry_menu_structure(model),
+            // 候选在打开时定下；换了一批候选（关上又开了另一次）就换块。
+            OverlayKey::DownloadTarget => model
+                .admin
+                .download_target
+                .as_ref()
+                .map(|pick| pick.candidates.iter().map(|candidate| candidate.repo_id.as_str()).collect::<Vec<_>>().join("|"))
+                .unwrap_or_default(),
             _ => String::new(),
         };
         Some(Self { key, structure })
@@ -159,6 +170,7 @@ pub(crate) fn overlay_branch(key: OverlayKey, model: &ShellViewModel) -> Option<
         OverlayKey::RepositoryDelete => super::sidebar_view::repository_delete_dialog(model),
         OverlayKey::PluginDelete => super::admin::plugin_delete_dialog(model),
         OverlayKey::PlaylistCreate => super::sidebar_view::playlist_create_dialog(model),
+        OverlayKey::DownloadTarget => super::admin::download_target_dialog(model),
         OverlayKey::FolderDialog => super::sidebar_view::folder_dialog(model),
         OverlayKey::SmartFolderDialog => super::sidebar_view::smart_folder_dialog(model),
         OverlayKey::RepositoryPopover => super::sidebar_view::repository_popover(model),
