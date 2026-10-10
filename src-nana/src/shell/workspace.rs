@@ -2,8 +2,10 @@
 //!
 //! 对应 Vue `AppShell.vue`、`workspace/lifecycle.ts`、`workspace/state.ts`、
 //! `MissingRepositoryState.vue`、`EmptyRepositoryState.vue` 和缺失仓库动作。
-//! 启动步骤、主区、侧栏和删除对话框都在这里归约，页面控件只消费结果。换仓库和同一个仓库的刷新在
-//! `workspace_switch.rs`。
+//! 这里是工作台的状态、主区和侧栏偏好，页面控件只消费结果。按流程分在子模块里：首屏启动在
+//! `workspace_launch.rs`（步骤条和加载日志的数据在 `workspace_startup.rs`），换仓库和同一个仓库的刷新在
+//! `workspace_switch.rs`，缺失仓库的动作和删除对话框在 `workspace_missing.rs`，记住上次打开的资源库在
+//! `workspace_remember.rs`。
 
 use std::{fs, path::Path};
 
@@ -11,7 +13,7 @@ use crate::backend::services::repository::RepositorySummary;
 use crate::settings;
 use crate::theme_map::{SIDEBAR_DEFAULT_PX, SIDEBAR_MAX_PX, SIDEBAR_MIN_PX};
 
-use super::repo_operation::{OperationRequests, OperationStart};
+use super::repo_operation::OperationRequests;
 
 /// 与 Vue `momobako.sidebarCollapsed` 相同的存储键。
 pub const SIDEBAR_COLLAPSED_KEY: &str = "momobako.sidebarCollapsed";
@@ -29,6 +31,11 @@ pub use switch::{RefreshRun, RefreshStage};
 #[path = "workspace_remember.rs"]
 mod remember;
 pub use remember::last_repository_path;
+#[path = "workspace_launch.rs"]
+mod launch;
+#[path = "workspace_missing.rs"]
+mod missing;
+
 /// 工作台主面板，对应 `WorkspacePanelKey`。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum WorkspacePanel {
@@ -261,248 +268,9 @@ impl WorkspaceState {
         self.relocating || self.deleting_mode.is_some()
     }
 
-    /// 首屏任务提交前把步骤条切到“正在读取仓库列表”。
-    pub fn prepare_initial_list(&mut self) -> u64 {
-        if self.startup.status == StartupStatus::Idle {
-            self.list_generation = self.list_generation.saturating_add(1);
-            self.begin_startup();
-        }
-        self.list_generation
-    }
-
-    /// 失败后重试。已就绪时不再重入，避免把当前工作区打回加载页。
-    pub fn retry_startup(&mut self) -> bool {
-        if self.startup.status == StartupStatus::Ready {
-            return false;
-        }
-        self.list_generation = self.list_generation.saturating_add(1);
-        self.begin_startup();
-        self.effects.push(WorkspaceEffect::RefreshRepositories { generation: self.list_generation });
-        true
-    }
-
-    /// 开始一轮启动：记下「流程开始」和「开始读取资源库列表」，步骤条进入第 1 步。「流程开始」的活动仓库是
-    /// 上一轮留下的（[`Self::logged_active_repo_id`]），重试时和 Vue 一样带着失败那一轮已经换上的仓库。
-    fn begin_startup(&mut self) {
-        let active = self.logged_active_repo_id();
-        self.startup.begin_with(active.as_deref(), self.last_active_repo_id.as_deref());
-        self.startup.set_progress(1, "加载仓库列表", "读取已注册资源库，并匹配上次打开的工作区。");
-        self.startup.log("info", "首屏启动开始读取资源库列表。", &[("step", Some("1"))]);
-    }
-
-    /// 加载日志里的活动仓库，照 Vue `activeRepoId` 的时机：首屏启动换上目标（读完摘要、选中缺失仓库、列表为空）
-    /// 以前还是这一轮开始时的值，换仓库一开始就是目标。Nana 的 `active_repo_id` 在选中时就换成目标，日志不能直接用它。
-    fn logged_active_repo_id(&self) -> Option<String> {
-        if self.startup.active_applied || self.startup.mode == StartupMode::Switch {
-            self.active_repo_id.clone()
-        } else {
-            self.startup.base_repo_id.clone()
-        }
-    }
-
-    /// 启动失败：停在当前步骤，日志照 Vue 带上活动仓库（读完摘要以后才是这次的仓库）和正在加载的目标资源库。
-    /// 换仓库失败照 Vue 不写日志（`StartupState::log` 跳过），任务弹层这一行取消。
-    fn fail_startup(&mut self, error: impl Into<String>) {
-        let (active, target) = (self.logged_active_repo_id(), self.active_repo_id.clone());
-        self.startup.fail_with(error, active.as_deref(), target.as_deref());
-        self.presence = RepositoryPresence::LoadError;
-        self.snapshot_loading = false;
-        if self.startup.mode == StartupMode::Switch {
-            self.operation.cancel();
-        }
-    }
-
     /// 刷新资源库，读完列表照 Vue 选当前仓库（不在列表里选第一项），见 [`Self::refresh_repositories`]。
     pub fn request_repository_refresh(&mut self) {
         self.refresh_repositories(None);
-    }
-
-    /// 应用一轮仓库列表，返回是否应用了。`generation` 不匹配时保留当前步骤和已选仓库。
-    /// 启动以后的列表接着选仓库（[`Self::apply_ready_list`]）；读失败时取消「加载资源库」这一行。
-    pub fn apply_repository_list(&mut self, generation: Option<u64>, result: Result<Vec<WorkspaceRepository>, String>) -> bool {
-        if let Some(generation) = generation
-            && generation != self.list_generation
-        {
-            eprintln!("Nana 忽略过期的资源库列表结果：代次 {generation}，当前 {}", self.list_generation);
-            return false;
-        }
-        let startup_open = self.startup.status != StartupStatus::Ready;
-        match result {
-            Err(error) => {
-                eprintln!("Nana 读取资源库列表失败：{error}");
-                self.list_loading = false;
-                if startup_open {
-                    if self.startup.status != StartupStatus::Loading {
-                        self.begin_startup();
-                    }
-                    self.fail_startup(error);
-                } else {
-                    self.refresh = None;
-                    self.operation.cancel();
-                    self.missing_error = error;
-                }
-            }
-            Ok(items) if startup_open => {
-                self.list_loading = false;
-                self.apply_repository_items(items);
-            }
-            Ok(items) => self.apply_ready_list(items),
-        }
-        true
-    }
-
-    /// 同步的结果：启动和换仓库接着读摘要；同一个仓库的刷新见 [`Self::note_refresh_synced`]。
-    /// 返回要写进状态区的失败（只有同仓库刷新会有，启动的失败停在启动页上）。
-    pub fn note_sync_finished(&mut self, generation: u64, result: Result<SyncCounts, String>) -> Option<String> {
-        if self.startup.status != StartupStatus::Loading {
-            return self.note_refresh_synced(generation, result.map(|_| ()));
-        }
-        if generation != self.list_generation {
-            eprintln!("Nana 忽略过期的资源库同步结果：代次 {generation}");
-            return None;
-        }
-        match result {
-            Ok(counts) => {
-                if let Some(repo_id) = self.active_repo_id.clone() {
-                    let numbers = [
-                        counts.scanned_files,
-                        counts.created_assets,
-                        counts.updated_assets,
-                        counts.deleted_assets,
-                        counts.created_events,
-                        counts.hardlink_candidates,
-                    ]
-                    .map(|count| count.to_string());
-                    self.startup.log(
-                        "info",
-                        "首屏启动文件变化同步完成。",
-                        &[
-                            ("step", Some("2")),
-                            ("scannedFiles", Some(numbers[0].as_str())),
-                            ("createdAssets", Some(numbers[1].as_str())),
-                            ("updatedAssets", Some(numbers[2].as_str())),
-                            ("deletedAssets", Some(numbers[3].as_str())),
-                            ("createdEvents", Some(numbers[4].as_str())),
-                            ("hardlinkCandidates", Some(numbers[5].as_str())),
-                        ],
-                    );
-                    self.startup.set_progress(
-                        3,
-                        "读取仓库摘要",
-                        "读取资源库摘要、素材索引和默认预览对象。",
-                    );
-                    self.startup.log("info", "首屏启动开始读取资源库摘要。", &[("step", Some("3"))]);
-                    self.load_snapshot(repo_id);
-                } else {
-                    self.fail_startup("同步完成时没有活动资源库");
-                }
-            }
-            Err(error) => {
-                eprintln!("Nana 同步资源库失败：{error}");
-                self.fail_startup(error);
-            }
-        }
-        None
-    }
-
-    /// 启动（含换仓库）第 3 步的摘要到了：成功记下摘要计数、进入第 4 步、排下首屏目录的读取，记住这个仓库
-    /// （Vue 读完摘要才 `rememberLastActiveRepository`）；失败停在第 3 步。调用方先用 [`Self::awaits_snapshot`]
-    /// 认过代次和仓库。
-    pub fn note_index_finished(&mut self, result: Result<IndexCounts, String>) {
-        if self.startup.status != StartupStatus::Loading || self.startup.current_step != 3 {
-            return;
-        }
-        let Some(repo_id) = self.active_repo_id.clone() else {
-            self.fail_startup("读完摘要时没有活动资源库");
-            return;
-        };
-        match result {
-            Ok(counts) => {
-                let (assets, playlists) = (counts.asset_count.to_string(), counts.playlist_count.to_string());
-                self.startup.log(
-                    "info",
-                    "首屏启动资源库摘要读取完成。",
-                    &[
-                        ("step", Some("3")),
-                        ("assetCount", Some(assets.as_str())),
-                        ("playlistCount", Some(playlists.as_str())),
-                        ("defaultAssetId", counts.default_asset_id.as_deref()),
-                    ],
-                );
-                self.startup.index = Some(counts);
-                self.startup.active_applied = true;
-                self.remember_repository(Some(repo_id.clone()));
-                if self.startup.mode == StartupMode::Switch {
-                    self.operation.update(super::repo_operation::OperationPatch::step("加载资源索引", 46.0));
-                }
-                let detail = self.startup.first_screen_detail();
-                self.startup.set_progress(4, "读取首屏目录", detail);
-                self.startup.log("info", "首屏启动开始加载首屏目录与关联数据。", &[("step", Some("4"))]);
-                self.effects.push(WorkspaceEffect::LoadFirstScreen { repo_id });
-            }
-            Err(error) => {
-                eprintln!("Nana 读取资源库摘要失败：{error}");
-                self.fail_startup(error);
-            }
-        }
-    }
-
-    /// 首屏目录到了：换仓库到这里结束、任务弹层的「加载资源库」完成；首屏启动接着等设置包（[`Self::finish_loading_run`]）。
-    /// 失败停在第 4 步。已经在等设置包时再来的目录不算。
-    pub fn note_first_screen_finished(&mut self, result: Result<(), String>) {
-        if self.startup.status != StartupStatus::Loading
-            || self.startup.current_step < 4
-            || self.startup.settings != SettingsWait::None
-        {
-            return;
-        }
-        match result {
-            Ok(()) => {
-                let playlists = self.startup.index.as_ref().map_or(0, |counts| counts.playlist_count).to_string();
-                self.startup.log(
-                    "info",
-                    "首屏启动首屏目录与关联数据加载完成。",
-                    &[("step", Some("4")), ("playlistCount", Some(playlists.as_str()))],
-                );
-                self.presence = RepositoryPresence::Ready;
-                self.finish_loading_run();
-            }
-            Err(error) => {
-                eprintln!("Nana 读取首屏目录失败：{error}");
-                self.fail_startup(error);
-            }
-        }
-    }
-
-    /// 首屏启动等的设置包回来了（失败也算）。`players_requested`：插件列表换了新的、排下了播放器类型的读取，接着等它；
-    /// 否则首屏启动到这里结束。不是首屏启动在等的设置包（打开设置页、插件面板「刷新」）什么也不做。
-    pub fn note_settings_loaded(&mut self, players_requested: bool) {
-        if self.startup.settings != SettingsWait::Bundle {
-            return;
-        }
-        if players_requested {
-            self.startup.settings = SettingsWait::Players;
-        } else {
-            self.finish_launch();
-        }
-    }
-
-    /// 首屏启动等的播放器类型回来了（失败也算）：首屏启动结束。别的时候读回的播放器类型什么也不做。
-    pub fn note_players_loaded(&mut self) {
-        if self.startup.settings == SettingsWait::Players {
-            self.finish_launch();
-        }
-    }
-
-    fn finish_launch(&mut self) {
-        let repo_id = self.active_repo_id.clone();
-        self.startup.finish_launch(repo_id.as_deref());
-    }
-
-    /// 工作区的内容已经读好：启动结束了，或者首屏启动读完首屏目录、只在等设置包。Vue 这时已经换上了
-    /// `activeRepoId`，结构更新照常静默刷新，Nana 在等设置包的这段也一样，不丢掉外面的改动。
-    pub fn content_loaded(&self) -> bool {
-        self.startup.status == StartupStatus::Ready || self.startup.settings != SettingsWait::None
     }
 
     pub fn toggle_sidebar(&mut self) {
@@ -563,172 +331,6 @@ impl WorkspaceState {
         }
     }
 
-    pub fn refresh_missing(&mut self) {
-        if self.missing_busy() {
-            return;
-        }
-        self.missing_error.clear();
-        self.request_repository_refresh();
-    }
-
-    pub fn choose_missing_path(&mut self) {
-        if self.active_repo_id.is_none() || self.missing_busy() {
-            return;
-        }
-        self.missing_error.clear();
-        self.path_prompt = true;
-    }
-
-    pub fn set_path_draft(&mut self, value: String) {
-        self.path_draft = value;
-    }
-
-    /// 空选择不进入重定向，避免对话框取消被当成一次修复。
-    pub fn submit_missing_path(&mut self) {
-        if self.missing_busy() {
-            return;
-        }
-        let Some(repo_id) = self.active_repo_id.clone() else {
-            return;
-        };
-        let path = self.path_draft.trim().to_string();
-        if path.is_empty() {
-            return;
-        }
-        self.path_prompt = false;
-        self.relocating = true;
-        self.missing_error.clear();
-        self.operation.start(OperationStart::new("重定向资源库", "校验资源库位置", 12.0));
-        self.effects.push(WorkspaceEffect::RelocateRepository { repo_id, path });
-    }
-
-    /// 来源缓存没就绪时「打开来源设置」：返回要打开设置的来源插件。忙着或不是缓存问题时不打开。
-    pub fn open_source_settings(&mut self) -> Option<String> {
-        if self.missing_busy() {
-            return None;
-        }
-        let plugin_id = self
-            .active_repository()
-            .filter(|repository| repository.is_source_cache_issue())
-            .map(|repository| repository.backend_plugin_id.clone())?;
-        self.missing_error.clear();
-        Some(plugin_id)
-    }
-
-    pub fn delete_dialog_open(&self) -> bool {
-        self.dialogs.iter().any(|dialog| matches!(dialog, WorkspaceDialog::Delete(_)))
-    }
-
-    pub fn open_delete_dialog(&mut self) {
-        let Some(repo_id) = self.active_repo_id.clone() else {
-            return;
-        };
-        if self.missing_busy() || !self.repositories.iter().any(|repository| repository.repo_id == repo_id) {
-            return;
-        }
-        self.missing_error.clear();
-        if let Some(WorkspaceDialog::Delete(dialog)) = self.dialogs.last_mut() {
-            dialog.repo_id = repo_id;
-            dialog.error.clear();
-            return;
-        }
-        self.dialogs.push(WorkspaceDialog::Delete(DeleteDialog { repo_id, error: String::new() }));
-    }
-
-    pub fn close_delete_dialog(&mut self) {
-        if self.deleting_mode.is_some() {
-            return;
-        }
-        self.dialogs.pop();
-    }
-
-    pub fn confirm_delete(&mut self, mode: DeleteMode) -> bool {
-        if self.deleting_mode.is_some() || !self.delete_mode_enabled(mode) {
-            return false;
-        }
-        let Some(WorkspaceDialog::Delete(dialog)) = self.dialogs.last() else {
-            return false;
-        };
-        let repo_id = dialog.repo_id.clone();
-        self.deleting_mode = Some(mode);
-        self.effects.push(WorkspaceEffect::DeleteRepository { repo_id, mode });
-        true
-    }
-
-    pub fn note_delete_finished(&mut self, result: Result<(), String>) {
-        let mode = self.deleting_mode.take();
-        let Some(mode) = mode else {
-            return;
-        };
-        match result {
-            Ok(()) => {
-                let repo_id = self.dialogs.last().and_then(|dialog| match dialog {
-                    WorkspaceDialog::Delete(dialog) => Some(dialog.repo_id.clone()),
-                });
-                self.dialogs.clear();
-                if let Some(repo_id) = repo_id {
-                    self.remove_repository(&repo_id);
-                }
-                let _ = mode;
-            }
-            Err(error) => {
-                eprintln!("Nana 删除资源库失败：{error}");
-                if let Some(WorkspaceDialog::Delete(dialog)) = self.dialogs.last_mut() {
-                    dialog.error = error;
-                }
-            }
-        }
-    }
-
-    pub fn delete_mode_enabled(&self, mode: DeleteMode) -> bool {
-        let Some(WorkspaceDialog::Delete(dialog)) = self.dialogs.last() else {
-            return false;
-        };
-        let Some(repository) = self.repositories.iter().find(|item| item.repo_id == dialog.repo_id) else {
-            return false;
-        };
-        match mode {
-            DeleteMode::RecordOnly => true,
-            DeleteMode::DeleteMetadata => can_delete_metadata(repository),
-            DeleteMode::DeleteFolder => can_delete_folder(repository),
-        }
-    }
-
-    pub fn delete_mode_detail(&self, mode: DeleteMode) -> String {
-        let cache_required = self
-            .dialogs
-            .last()
-            .and_then(|dialog| match dialog {
-                WorkspaceDialog::Delete(dialog) => self.repositories.iter().find(|item| item.repo_id == dialog.repo_id),
-            })
-            .is_some_and(|repository| repository.cache_required);
-        let enabled = self.delete_mode_enabled(mode);
-        match mode {
-            DeleteMode::RecordOnly => "只从 MomoBako 移除这条资源库记录，保留文件夹、.momo 和应用托管数据。".into(),
-            DeleteMode::DeleteMetadata if enabled && cache_required => {
-                "删除该资源库的 Momo 元数据目录与索引缓存，保留缓存文件夹中的其他用户内容。".into()
-            }
-            DeleteMode::DeleteMetadata if enabled => "删除该资源库的 .momo 数据目录，保留原文件夹与用户文件。".into(),
-            DeleteMode::DeleteMetadata => "当前资源库的 .momo 目录不可直接访问，请先恢复路径后再删除元数据。".into(),
-            DeleteMode::DeleteFolder if enabled => "递归删除当前资源库文件夹，目录内的 .momo 数据与用户文件会一起删除。".into(),
-            DeleteMode::DeleteFolder => "当前资源库目录不可直接访问，暂时不能删除整个文件夹。".into(),
-        }
-    }
-
-    pub fn missing_primary_label(&self) -> &'static str {
-        if self.active_repository().is_some_and(|repository| repository.is_source_cache_issue()) {
-            "打开来源设置"
-        } else if self.relocating {
-            "重定向中..."
-        } else {
-            "重定向"
-        }
-    }
-
-    pub fn missing_delete_label(&self) -> &'static str {
-        if self.deleting_mode.is_some() { "删除中..." } else { "删除资源库" }
-    }
-
     pub fn take_effects(&mut self) -> Vec<WorkspaceEffect> {
         std::mem::take(&mut self.effects)
     }
@@ -742,86 +344,6 @@ impl WorkspaceState {
         self.repositories = vec![repository];
         self.presence = RepositoryPresence::Ready;
         self.startup.finish();
-    }
-
-    /// 启动时读回的列表。选择顺序：当前 id、上次记住的 id（还在列表里时）、列表第一项。空列表清空记住的仓库，
-    /// 选中的仓库缺失时立即记住它。
-    fn apply_repository_items(&mut self, items: Vec<WorkspaceRepository>) {
-        self.repositories = items;
-        let total = self.repositories.len().to_string();
-        let ready = self.repositories.iter().filter(|item| item.status == "ready").count().to_string();
-        let missing = self.repositories.iter().filter(|item| item.status == "missing").count().to_string();
-        self.startup.log(
-            "info",
-            "首屏启动资源库列表读取完成。",
-            &[("step", Some("1")), ("repositoryCount", Some(&total)), ("readyRepositoryCount", Some(&ready)), ("missingRepositoryCount", Some(&missing))],
-        );
-        if self.repositories.is_empty() {
-            self.startup.log("warn", "首屏启动未找到可加载的资源库。", &[("repositoryCount", Some("0"))]);
-            self.assign_active(None);
-            self.startup.active_applied = true;
-            self.remember_repository(None);
-            self.reset_library_category();
-            self.presence = RepositoryPresence::Empty;
-            self.finish_loading_run();
-            return;
-        }
-        let next_id = self
-            .active_repo_id
-            .clone()
-            .filter(|repo_id| self.repositories.iter().any(|item| &item.repo_id == repo_id))
-            .or_else(|| {
-                self.last_active_repo_id.clone().filter(|repo_id| {
-                    self.repositories.iter().any(|item| &item.repo_id == repo_id)
-                })
-            })
-            .unwrap_or_else(|| self.repositories[0].repo_id.clone());
-        let next = self.repositories.iter().find(|item| item.repo_id == next_id).cloned();
-        let missing = next.as_ref().is_some_and(|item| item.status == "missing");
-        let remembered = self.last_active_repo_id.clone();
-        self.startup.log(
-            "info",
-            "首屏启动已选定资源库。",
-            &[
-                ("repositoryCount", Some(&total)),
-                ("rememberedRepoId", remembered.as_deref()),
-                ("repositoryStatus", next.as_ref().map(|item| item.status.as_str())),
-                ("repositoryName", next.as_ref().map(|item| item.name.as_str())),
-                ("repositoryPath", next.as_ref().map(|item| item.path.as_str())),
-            ],
-        );
-        self.assign_active(Some(next_id.clone()));
-        if missing {
-            self.startup.log(
-                "warn",
-                "首屏启动遇到缺失资源库。",
-                &[
-                    ("repositoryName", next.as_ref().map(|item| item.name.as_str())),
-                    ("repositoryPath", next.as_ref().map(|item| item.path.as_str())),
-                ],
-            );
-            self.startup.active_applied = true;
-            self.remember_repository(Some(next_id));
-            self.reset_library_category();
-            self.presence = RepositoryPresence::Missing;
-            self.finish_loading_run();
-            return;
-        }
-        self.presence = RepositoryPresence::Ready;
-        self.begin_sync(next_id);
-    }
-
-    /// 启动和换仓库进入第 2 步：记下「开始同步文件变化」并发出同步请求。
-    fn begin_sync(&mut self, repo_id: String) {
-        self.startup.set_progress(2, "扫描资源库文件", "同步文件变化，更新新增、移动和删除记录。");
-        self.startup.log("info", "首屏启动开始同步文件变化。", &[("step", Some("2"))]);
-        self.effects.push(WorkspaceEffect::SyncRepository { repo_id, generation: self.list_generation });
-    }
-
-    /// 读仓库摘要，带上这一代，过期的结果认得出来。
-    fn load_snapshot(&mut self, repo_id: String) {
-        self.snapshot_loading = true;
-        self.effects.push(WorkspaceEffect::LoadSnapshot { repo_id, generation: self.list_generation });
     }
 
     fn assign_active(&mut self, next: Option<String>) {
@@ -864,31 +386,6 @@ pub fn parse_sidebar_width(raw: Option<&str>) -> f32 {
         return SIDEBAR_DEFAULT_PX;
     };
     raw.parse::<f32>().map(clamp_sidebar_width).unwrap_or(SIDEBAR_DEFAULT_PX)
-}
-
-fn repository_uses_local_metadata(repository: &WorkspaceRepository) -> bool {
-    repository.capabilities.iter().any(|capability| capability == "localRootPath")
-        || (repository.cache_required && repository.cache_status != "unconfigured")
-}
-
-fn repository_metadata_accessible(repository: &WorkspaceRepository) -> bool {
-    if repository.cache_required {
-        repository.cache_status == "ready"
-    } else {
-        repository.status == "ready"
-    }
-}
-
-fn can_delete_metadata(repository: &WorkspaceRepository) -> bool {
-    if repository_uses_local_metadata(repository) {
-        repository_metadata_accessible(repository)
-    } else {
-        true
-    }
-}
-
-fn can_delete_folder(repository: &WorkspaceRepository) -> bool {
-    repository_uses_local_metadata(repository) && repository_metadata_accessible(repository)
 }
 
 #[cfg(test)]
