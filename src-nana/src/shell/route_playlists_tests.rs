@@ -212,6 +212,69 @@ fn removing_items_by_click_and_keyboard_keeps_the_other_rows() {
     );
 }
 
+/// 行里的按钮单击照常是按钮的动作：扩展名方块和标题打开预览，「播放」从这一条播放，「移除」移除它。
+/// 场景里的播放集缺少播放插件、「播放」是禁用的，先登记一个音频播放器让它能点。
+#[test]
+fn row_buttons_click_their_own_actions() {
+    let mut harness = listed();
+    harness.apply(ShellMessage::PlaylistPlayersLoaded(Ok(vec![crate::backend::services::repository::PlaylistPlayerContribution {
+        player_type_id: "audio".into(),
+        label: "音频".into(),
+        file_class: "audio".into(),
+        supported_extensions: vec!["mp3".into(), "wav".into()],
+        supports_seek: true,
+        supports_volume: true,
+        supports_preview_navigation: true,
+        description: None,
+    }])));
+    harness.flush();
+    harness.take_messages();
+    let opens_preview = |messages: &[ShellMessage]| {
+        matches!(messages, [ShellMessage::Player(PlayerMessage::OpenPreview { item_id: Some(id) })] if id == "item-02")
+    };
+    for key in ["playlist-item-ext-item-02", "playlist-item-title-item-02"] {
+        let (x, y) = harness.center(harness.keyed(key).expect("按钮"));
+        let messages = harness.click_messages(x, y);
+        assert!(opens_preview(&messages), "点 {key} 应该打开这一条的预览：{} 条消息", messages.len());
+    }
+    let (x, y) = harness.center(harness.keyed("playlist-item-play-item-02").expect("播放"));
+    let messages = harness.click_messages(x, y);
+    assert!(
+        matches!(messages.as_slice(), [ShellMessage::Player(PlayerMessage::PlayListed { item_id: Some(id) })] if id == "item-02"),
+        "点「播放」应该从这一条播放：{} 条消息",
+        messages.len()
+    );
+    let (x, y) = harness.center(harness.keyed("playlist-remove-item-02").expect("移除"));
+    let messages = harness.click_messages(x, y);
+    assert!(
+        matches!(messages.as_slice(), [ShellMessage::RemovePlaylistItem { item_id, .. }] if item_id == "item-02"),
+        "点「移除」应该移除这一条：{} 条消息",
+        messages.len()
+    );
+}
+
+/// 从按钮上按下拖动会拖动这一行（和 Vue 整行都能拖一样）：拖到第一条上面发排序消息，按钮自己的动作不发。
+#[test]
+fn dragging_from_a_row_button_reorders_instead_of_clicking() {
+    for key in ["playlist-item-ext-item-02", "playlist-item-title-item-02", "playlist-remove-item-02"] {
+        let mut harness = listed();
+        harness.take_messages();
+        let first = harness.keyed("playlist-item-item-01").expect("第一条");
+        let start = harness.center(harness.keyed(key).expect("按钮"));
+        let top = harness.document().context().world().layout_box(first).expect("第一条的盒子").y + 4.0;
+        let messages = harness.drag_messages(start, (start.0, top));
+        let reorder = messages.iter().any(|message| {
+            matches!(message, ShellMessage::Player(PlayerMessage::Reorder { source, before })
+                if source == "item-02" && before.as_deref() == Some("item-01"))
+        });
+        assert!(reorder, "从 {key} 拖到第一条上面应该发排序消息：{} 条消息", messages.len());
+        let clicked = messages.iter().any(|message| {
+            matches!(message, ShellMessage::Player(PlayerMessage::OpenPreview { .. }) | ShellMessage::RemovePlaylistItem { .. })
+        });
+        assert!(!clicked, "拖动以后 {key} 不该再当成点击");
+    }
+}
+
 /// 换到文件面板再回来：分支重建，回来以后条目、播放条岛和新挂的一样；换到别的面板就是别的路由，
 /// 播放集页这个页面身份不再把主区留在播放集路由上。
 #[test]
