@@ -14,7 +14,8 @@ use crate::backend::services::repository::{
     BinaryFileWriteRequest, FileCreateRequest, FileImportRequest, NeteaseRepositoryCacheConfigureRequest, PluginCallRequest,
     PluginConfigDeleteRequest,
     PluginConfigSetRequest, PluginConfigSnapshot, PluginEnabledRequest, PluginHookExecutionListRequest, PluginInstallRequest,
-    PlaylistItemsByPathsAddRequest, PlaylistMutationRequest, PluginManifest, RepositoryAction, RepositoryActionRunRequest,
+    PlaylistItemsByPathsAddRequest, PlaylistMutationRequest, PlaylistPlayerContribution, PluginManifest, RepositoryAction,
+    RepositoryActionRunRequest,
     RepositoryBackendConfigUpdateRequest, RepositoryMutationRequest, SyncRequest, SystemLogQuery,
 };
 use crate::backend::viewmodels::PluginViewModel;
@@ -353,7 +354,8 @@ fn http_request(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<S
     }
 }
 
-/// 设置页一次读五份数据：插件、钩子记录、缓存、API 设计和外部连接。
+/// 设置页一次读五份数据：插件、钩子记录、缓存、API 设计和外部连接。首屏启动第 4 步等着它，任务 panic 也按失败
+/// 交回（[`bundle_message`]）。
 fn load_bundle(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
     let Some(services) = app.services.as_ref() else {
         eprintln!("Nana 设置页数据需要领域服务，当前服务未启动");
@@ -364,16 +366,29 @@ fn load_bundle(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<Sh
     let system = services.system.clone();
     let executor = services.executor.clone();
     if let Err(error) = context.run_task(Task::new(async move {
-        let plugins = executor.block_on(plugin.list_plugins());
-        let hooks = executor.block_on(plugin.list_plugin_hook_executions(Some(PluginHookExecutionListRequest { plugin_id: None, limit: Some(200) })));
-        let cache = executor.block_on(plugin.get_cache_snapshot());
-        let api = executor.block_on(plugin.get_api_design_snapshot());
-        let external = executor.block_on(system.get_external_api_connection_status());
-        admin(AdminMessage::SettingsBundleLoaded { plugins, hooks: hooks.map(|response| response.records), cache, api, external })
+        bundle_message(move || {
+            let plugins = executor.block_on(plugin.list_plugins());
+            let hooks = executor.block_on(plugin.list_plugin_hook_executions(Some(PluginHookExecutionListRequest { plugin_id: None, limit: Some(200) })));
+            let cache = executor.block_on(plugin.get_cache_snapshot());
+            let api = executor.block_on(plugin.get_api_design_snapshot());
+            let external = executor.block_on(system.get_external_api_connection_status());
+            AdminMessage::SettingsBundleLoaded { plugins, hooks: hooks.map(|response| response.records), cache, api, external }
+        })
     })) {
         eprintln!("Nana 设置页数据任务提交失败：{error}");
         app.shell.reduce(admin(failed_bundle(&format!("设置页数据任务提交失败：{error}"))));
     }
+}
+
+/// 设置包任务交回的消息：`read` 在任务线程里读五份数据；panic 时记日志，按五份都失败交回，首屏启动照常结束。
+pub(crate) fn bundle_message(read: impl FnOnce() -> AdminMessage) -> ShellMessage {
+    admin(crate::task_guard::settle("设置页数据", read, |error| failed_bundle(&error)))
+}
+
+/// 播放器类型任务交回的消息：`read` 在任务线程里读插件登记的播放器类型；panic 时记日志并按失败交回，首屏启动照常
+/// 结束。
+pub(crate) fn players_message(read: impl FnOnce() -> Result<Vec<PlaylistPlayerContribution>, String>) -> ShellMessage {
+    ShellMessage::PlaylistPlayersLoaded(crate::task_guard::settle("播放器类型", read, Err))
 }
 
 /// 历史日志一次读的条数，和 Vue `loadSystemLogsInWorkspace(limit = 200)` 一致。
@@ -428,7 +443,8 @@ fn load_app_settings(app: &mut MomoBakoApplication, context: &RuntimeProgramCont
     }
 }
 
-/// 读插件登记的播放器类型。结果回 `PlaylistPlayersLoaded`，播放集侧栏、播放器和新建对话框共用。
+/// 读插件登记的播放器类型。结果回 `PlaylistPlayersLoaded`，播放集侧栏、播放器和新建对话框共用；首屏启动第 4 步
+/// 也等着它，任务 panic 也按失败交回（[`players_message`]）。
 fn load_players(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
     let Some(services) = app.services.as_ref() else {
         eprintln!("Nana 播放器类型需要领域服务，当前服务未启动");
@@ -438,7 +454,7 @@ fn load_players(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<S
     let plugin = services.plugin.clone();
     let executor = services.executor.clone();
     if let Err(error) = context.run_task(Task::new(async move {
-        ShellMessage::PlaylistPlayersLoaded(executor.block_on(plugin.list_playlist_players()))
+        players_message(move || executor.block_on(plugin.list_playlist_players()))
     })) {
         eprintln!("Nana 播放器类型任务提交失败：{error}");
         app.shell.reduce(ShellMessage::PlaylistPlayersLoaded(Err(format!("播放器类型任务提交失败：{error}"))));

@@ -111,7 +111,7 @@ fn dispatch_browse_and_preview(
     }
 }
 
-/// 启动和换仓库的第 4 步：读根目录首屏。服务没起来或提交失败时按失败写回，启动不会停在第 4 步。
+/// 启动和换仓库的第 4 步：读根目录首屏。服务没起来、提交失败或任务 panic 时按失败写回，启动不会停在第 4 步。
 pub(crate) fn dispatch_first_screen(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
@@ -132,7 +132,7 @@ pub(crate) fn dispatch_first_screen(
         limit: Some(200),
     };
     if let Err(error) = context.run_task(Task::new(async move {
-        ShellMessage::FileBrowserLoaded(executor.block_on(browser.get_file_browser(request)))
+        ShellMessage::FileBrowserLoaded(crate::task_guard::settle("首屏目录", || executor.block_on(browser.get_file_browser(request)), Err))
     })) {
         eprintln!("Nana 首屏目录任务提交失败：{error}");
         app.shell.reduce(ShellMessage::FileBrowserLoaded(Err(format!("首屏目录任务提交失败：{error}"))));
