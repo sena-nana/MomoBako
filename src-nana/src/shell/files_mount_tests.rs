@@ -2,7 +2,7 @@
 //!
 //! 一是输入框的键路径在打字时不变（壳层重挂后按键路径找回焦点），用户文本拼进键也不会让挂载失败，
 //! 滚动区按显示的内容取键（换目录、换选中项回顶，同一内容重挂保持位置）；
-//! 二是浮层的指针行为：点在导入菜单、右键菜单外面就收起，回收站的「彻底删除」要点两次，
+//! 二是浮层的指针行为：点在导入菜单、右键菜单外面就收起，点右键菜单的分组只展开子菜单，回收站的「彻底删除」要点两次，
 //! 点对话框遮罩等于取消，点卡片里面不取消；
 //! 三是元数据保存冲突：冲突说明紧挨注释、草稿保留，点「采用服务器版本」换成服务器内容；
 //! 四是预览页只有预览框架贴在页底的那一条播放条，页底不再多出间距；
@@ -189,14 +189,20 @@ fn import_menu_items_still_take_their_own_clicks() {
 }
 
 #[test]
-fn context_menu_closes_outside_and_opens_submenus_on_click() {
+fn context_menu_closes_outside_and_a_clicked_group_stays_open() {
     let mut model = scene("live-menu");
     let mut window = laid_out(&model);
     let (x, y) = labeled_center(&window, "缩略图");
-    for message in click(&mut window, x, y) {
+    let messages = click(&mut window, x, y);
+    assert!(
+        messages.iter().all(|message| matches!(message, ShellMessage::Files(FilesMessage::MenuBranchChanged { inside: true, .. }))),
+        "点分组只展开它的子菜单：{} 条消息",
+        messages.len()
+    );
+    for message in messages {
         model.reduce(message);
     }
-    assert_eq!(model.files.menu_branch.as_deref(), Some("thumbnail"));
+    assert_eq!(model.files.menu_branch.open(), Some("thumbnail"));
     let mut window = laid_out(&model);
     assert!(has_label(&window, "刷新缩略图"), "子菜单展开");
 
@@ -209,7 +215,7 @@ fn context_menu_closes_outside_and_opens_submenus_on_click() {
     for message in messages {
         model.reduce(message);
     }
-    assert!(model.files.entry_menu.is_none() && model.files.menu_branch.is_none());
+    assert!(model.files.entry_menu.is_none() && model.files.menu_branch.open().is_none());
 }
 
 #[test]

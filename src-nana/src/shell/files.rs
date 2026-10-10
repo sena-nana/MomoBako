@@ -304,8 +304,8 @@ pub enum FilesMessage {
     OpenRow(String),
     OpenEntryMenu { path: String, x: f32, y: f32 },
     CloseEntryMenu,
-    /// 展开或收起右键菜单里的子菜单。
-    ToggleMenuBranch(String),
+    /// 指针或键盘焦点进出了右键菜单里的分组（含它的子菜单），子菜单跟着展开或收起。
+    MenuBranchChanged { branch: String, source: BranchSource, inside: bool },
     /// 需要二次确认的菜单项第一次被点：只变成待确认，菜单不关。
     ArmMenuConfirm(String),
     /// 列表区内容宽度变了。瀑布流按新宽度重新分列。
@@ -438,8 +438,8 @@ pub struct FilesState {
     pub(super) select_only: Option<String>,
     /// 单击发起、还没回来的素材读取。回来时保持「只选中」；别处发起的读取回来就进入预览。
     pub(super) click_load: Option<String>,
-    /// 右键菜单里展开子菜单的那一项（「缩略图」「加入播放列表」）。
-    pub(super) menu_branch: Option<String>,
+    /// 右键菜单里指针和焦点所在的分组（「缩略图」「加入播放列表」），决定展开哪个子菜单。
+    pub(super) menu_branch: MenuBranch,
     /// 右键菜单里等第二次点击确认的那一项（回收站的「彻底删除」）。
     pub(super) menu_pending: Option<String>,
     /// 列表区内容的实际宽度，瀑布流按它定列数。还没有布局回报时为 `None`。
@@ -786,13 +786,13 @@ impl FilesState {
             FilesMessage::OpenEntryMenu { path, x, y } => self.open_entry_menu(ctx, &path, x, y),
             FilesMessage::CloseEntryMenu => {
                 self.entry_menu = None;
-                self.menu_branch = None;
+                self.menu_branch = MenuBranch::default();
                 self.menu_pending = None;
             }
             FilesMessage::ArmMenuConfirm(item) => self.menu_pending = Some(item),
-            FilesMessage::ToggleMenuBranch(branch) => {
-                self.menu_branch = if self.menu_branch.as_deref() == Some(branch.as_str()) { None } else { Some(branch) };
-            }
+            FilesMessage::MenuBranchChanged { branch, source, inside } if self.entry_menu.is_some() => self.menu_branch.note(source, branch, inside),
+            // 菜单关掉以后才到的进出（节点拆掉时的离开）不再记。
+            FilesMessage::MenuBranchChanged { .. } => {}
             FilesMessage::ListResized(width) => self.note_list_width(width),
             FilesMessage::ToggleTags { path, expanded } => self.tags_open = Some((path, !expanded)),
             FilesMessage::SetTagDraft(value) => self.tag_draft = value,
@@ -969,6 +969,10 @@ include!("files_actions.rs");
 
 #[path = "files_selection.rs"]
 mod selection;
+#[path = "files_menu_branch.rs"]
+mod menu_branch;
+pub use menu_branch::BranchSource;
+pub(crate) use menu_branch::MenuBranch;
 
 #[path = "local_time.rs"]
 pub(crate) mod local_time;
