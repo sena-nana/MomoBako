@@ -10,6 +10,10 @@
 //! 写进状态区（来源 [`FailureSource::Download`]），每一条的名称和原因写进系统日志，提示里写明去「日志」看原因。
 //! 收尾的刷新不清这条提示（`RefreshRun::keeps_status`），用户开始下一个操作时照常清掉；全部成功时不提示。
 //!
+//! 同名跳过：下载到其他资源库时，下载回来的文件按 `skipExisting` 导入目标资源库（`admin_dispatch`）：目标里已有
+//! 同名文件的保留原文件、不导入，其余照常导入，跳过的条数写进状态区（只有跳过时是提醒）、路径写进日志。Vue 的导入
+//! 遇到一个同名就整批失败，重复下载同一个歌单时新下的文件一个也进不去。
+//!
 //! 什么也没下到：插件报告的是一批（结果里有 `completed` 数组）却一项也没有、也没有交回文件时，状态区用警告色提醒
 //! 「没有下载到任何条目」。Nana 下载歌单不列目录，由插件按歌单标识取来源里完整的歌单；网易云插件取不到歌单详情时
 //! 什么也不下、照样交回空结果，不提醒的话界面上只有一闪而过的「下载完成」。
@@ -24,6 +28,31 @@ use super::super::status::FailureSource;
 use super::super::ShellViewModel;
 use super::source_target::TargetCandidate;
 use super::AdminEffect;
+
+/// 来源下载的结果：插件交回的载荷（失败的条目在 `failed` 里），以及导入目标资源库时因为目标里已有同名文件而跳过的
+/// 条目（目标资源库里的相对路径；下载到本地时为空）。
+#[derive(Clone, Debug, PartialEq)]
+pub struct DownloadOutcome {
+    pub payload: Value,
+    pub skipped: Vec<String>,
+}
+
+impl DownloadOutcome {
+    /// 只有插件交回的载荷：下载到本地，或者没有要导入的文件。
+    pub(crate) fn plugin(payload: Value) -> Self {
+        Self { payload, skipped: Vec::new() }
+    }
+
+    /// 插件交回的载荷，加上导入目标资源库的结果里跳过的同名条目（导入结果的 `skippedEntries`，没有这个键时为空）。
+    pub(crate) fn imported(payload: Value, import: &Value) -> Self {
+        let skipped = import
+            .get("skippedEntries")
+            .and_then(Value::as_array)
+            .map(|items| items.iter().filter_map(Value::as_str).map(str::to_string).collect())
+            .unwrap_or_default();
+        Self { payload, skipped }
+    }
+}
 
 /// 一次开始了的来源下载：任务弹层里的进度行，收尾的提示和日志要用的名字。下载结果带着它回来。
 #[derive(Clone, Debug, PartialEq)]
@@ -59,9 +88,9 @@ impl DownloadRun {
 /// 下载结果回来了。成功时进度行照 Vue 写完「下载完成」（有失败的条目时「下载完成，N 项失败」）收起；有要告诉用户的
 /// 结果（[`notice`]）时写进状态区和系统日志；再刷新当前资源库，有提示时这一轮刷新不清它。失败时进度行收起，原因
 /// 写进文件列。
-pub(crate) fn finish(model: &mut ShellViewModel, run: DownloadRun, result: Result<Value, String>) {
-    let payload = match result {
-        Ok(payload) => payload,
+pub(crate) fn finish(model: &mut ShellViewModel, run: DownloadRun, result: Result<DownloadOutcome, String>) {
+    let outcome = match result {
+        Ok(outcome) => outcome,
         Err(error) => {
             eprintln!("Nana 来源下载失败：{}：{error}", run.method);
             model.operation.cancel(run.operation);
@@ -70,11 +99,11 @@ pub(crate) fn finish(model: &mut ShellViewModel, run: DownloadRun, result: Resul
         }
     };
     model.files.error.clear();
-    let failed = failed_items(&payload);
+    let failed = failed_items(&outcome.payload);
     let detail = if failed.is_empty() { "下载完成".to_string() } else { format!("下载完成，{} 项失败", failed.len()) };
     model.operation.update(run.operation, OperationPatch::step(detail, 100.0).with_indeterminate(false));
     model.operation.finish(run.operation);
-    let Some(notice) = notice(&run, &payload, &failed) else {
+    let Some(notice) = notice(&run, &outcome, &failed) else {
         model.workspace.request_repository_refresh();
         return;
     };
@@ -96,17 +125,34 @@ struct Notice {
     logs: Vec<SystemLogWriteRequest>,
 }
 
-/// 下载结果里要告诉用户的：有失败的条目时写几项失败、去「日志」看原因，每一条写一条日志；插件报告的是一批、却一项
-/// 也没有（网易云下载歌单时取不到歌单详情就什么也不下，照样交回空结果）时提醒没有下载到任何条目。全部成功时没有。
-fn notice(run: &DownloadRun, payload: &Value, failed: &[FailedItem]) -> Option<Notice> {
+/// 下载结果里要告诉用户的，全部成功时没有：
+/// - 有失败的条目：写几项失败、去「日志」看原因，每一条写一条日志；
+/// - 导入目标资源库时跳过了同名文件：写目标资源库里已有几个同名文件、保留了原文件没有导入，跳过的路径写一条日志；
+/// - 插件报告的是一批、却一项也没有（网易云下载歌单时取不到歌单详情就什么也不下，照样交回空结果）：提醒没有下载到
+///   任何条目。
+///
+/// 有失败的条目时是失败，只有跳过或空结果时是提醒。
+fn notice(run: &DownloadRun, outcome: &DownloadOutcome, failed: &[FailedItem]) -> Option<Notice> {
     let (label, subject) = (&run.progress.label, &run.progress.subject);
+    let mut parts = Vec::new();
+    let mut logs = Vec::new();
     if !failed.is_empty() {
-        return Some(Notice {
-            message: format!("{label}「{subject}」有 {} 项失败，原因见「日志」。", failed.len()),
-            warning: false,
-            logs: failed.iter().map(|item| item.log(run)).collect(),
-        });
+        parts.push(format!("{label}「{subject}」有 {} 项失败，原因见「日志」", failed.len()));
+        logs.extend(failed.iter().map(|item| item.log(run)));
     }
+    if !outcome.skipped.is_empty() {
+        let target = run.target.as_ref().map_or("目标资源库", |target| target.name.as_str());
+        let kept = format!("目标资源库「{target}」已有 {} 个同名文件，保留原文件、没有导入", outcome.skipped.len());
+        let context = json!({ "method": run.method, "subject": subject, "skippedPaths": outcome.skipped });
+        let mut log = host_log(run, "warn", "downloadImportSkipped", format!("{label}「{subject}」：{kept}。"), context);
+        log.repo_id = run.target.as_ref().map(|target| target.repo_id.clone()).or(log.repo_id);
+        logs.push(log);
+        parts.push(if failed.is_empty() { format!("{label}「{subject}」：{kept}") } else { kept });
+    }
+    if !parts.is_empty() {
+        return Some(Notice { message: format!("{}。", parts.join("；")), warning: failed.is_empty(), logs });
+    }
+    let payload = &outcome.payload;
     let empty_batch = payload.get("completed").and_then(Value::as_array).is_some_and(Vec::is_empty);
     if empty_batch && super::source_target::result_paths(payload).is_empty() {
         let message = format!("{label}「{subject}」没有下载到任何条目。");

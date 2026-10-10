@@ -13,7 +13,7 @@ use crate::shell::status::{FailureSource, StatusLine};
 use crate::shell::view_harness::ShellHarness;
 use crate::shell::{ShellMessage, ShellViewModel, SyncCounts};
 
-use super::{failed_items, DownloadRun};
+use super::{failed_items, DownloadOutcome, DownloadRun};
 
 /// 网易云资源库根目录里的单曲，场景自带。
 const TRACK: &str = "晴天.mp3";
@@ -86,6 +86,29 @@ fn notice(model: &ShellViewModel) -> Option<(FailureSource, String)> {
     model.status.failure().map(|failure| (failure.source, failure.message.clone()))
 }
 
+/// 只有插件载荷的下载结果（下载到本地，或者没有跳过同名文件）。
+fn plugin(payload: serde_json::Value) -> Result<DownloadOutcome, String> {
+    Ok(DownloadOutcome::plugin(payload))
+}
+
+/// 下载到其他资源库的结果：插件载荷加上导入时宿主交回的结果（`FileImportResponse` 的 JSON）。
+fn imported(payload: serde_json::Value, import: serde_json::Value) -> Result<DownloadOutcome, String> {
+    Ok(DownloadOutcome::imported(payload, &import))
+}
+
+/// 写进系统日志的那一批。
+fn written_logs(model: &mut ShellViewModel) -> Vec<crate::backend::services::repository::SystemLogWriteRequest> {
+    model
+        .admin
+        .take_effects()
+        .into_iter()
+        .find_map(|effect| match effect {
+            AdminEffect::WriteLogs(logs) => Some(logs),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
 /// 两项失败：状态区写出几项失败、去哪里看原因；系统日志里每一项写一条，带上是哪一首、为什么失败、插件和来源资源库；
 /// 照 Vue 接着刷新资源库，刷新的「加载资源库」占住进度行。
 #[test]
@@ -93,7 +116,7 @@ fn a_partly_failed_download_says_how_many_failed_and_where_to_look() {
     let mut model = netease();
     let run = download_playlist(&mut model);
     assert_eq!((run.progress.label.as_str(), run.progress.subject.as_str()), ("下载歌单", FOLDER));
-    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Ok(partly_failed()) }));
+    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: plugin(partly_failed()) }));
 
     assert_eq!(notice(&model), Some((FailureSource::Download, NOTICE.into())));
     assert_eq!(StatusLine::project(&model), StatusLine::Failure(NOTICE.into()), "文件页上也要看得到");
@@ -130,7 +153,7 @@ fn a_partly_failed_download_says_how_many_failed_and_where_to_look() {
 fn the_notice_outlives_the_refresh_that_follows_the_download() {
     let mut model = netease();
     let run = download_playlist(&mut model);
-    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Ok(partly_failed()) }));
+    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: plugin(partly_failed()) }));
     let repositories = model.admin.repository_summaries.clone();
     assert!(!repositories.is_empty(), "场景里读过资源库列表");
 
@@ -158,10 +181,53 @@ fn a_fully_successful_download_says_nothing() {
     model.status.fail(FailureSource::Host, "定位失败：拒绝访问。");
     let run = download_playlist(&mut model);
     let result = json!({ "completed": [{ "paths": ["D:/stage/夜曲/周杰伦 - 晴天.mp3"] }], "failed": [] });
-    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Ok(result) }));
+    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: plugin(result) }));
     assert_eq!(notice(&model), None, "全部成功不提示，刷新开始清掉以前的失败");
     assert!(model.admin.take_effects().iter().all(|effect| !matches!(effect, AdminEffect::WriteLogs(_))), "没有要写的日志");
     assert!(model.workspace.refresh.as_ref().is_some_and(|run| !run.keeps_status), "照常刷新");
+}
+
+/// 再下一次同一个歌单：目标资源库里已有的同名文件保留原文件、不导入（导入带 `skipExisting`），其余照常导入。状态区
+/// 用警告色写出目标资源库里已有几个同名文件，跳过的路径写一条警告日志，记在目标资源库名下。Vue 的导入遇到一个同名
+/// 就整批失败，新下的文件一个也进不去。
+#[test]
+fn files_already_in_the_target_are_kept_and_reported() {
+    let mut model = netease();
+    let run = download_playlist(&mut model);
+    let paths = ["D:/stage/夜曲/周杰伦 - 晴天.mp3", "D:/stage/夜曲/周杰伦 - 晴天.lrc", "D:/stage/夜曲/周杰伦 - 七里香.mp3"];
+    let payload = json!({ "completed": [{ "paths": paths }], "failed": [] });
+    let skipped = ["夜曲/周杰伦 - 晴天.mp3", "夜曲/周杰伦 - 晴天.lrc"];
+    let import = json!({ "repoId": "third-repo", "currentPath": FOLDER, "entries": [], "skippedEntries": skipped });
+    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: imported(payload, import) }));
+
+    let message = "下载歌单「夜曲」：目标资源库「第三资源库」已有 2 个同名文件，保留原文件、没有导入。";
+    assert_eq!(StatusLine::project(&model), StatusLine::Warning(message.into()), "只有跳过时是提醒");
+    let logs = written_logs(&mut model);
+    assert_eq!(logs.len(), 1);
+    assert_eq!((logs[0].level.as_str(), logs[0].action.as_str(), logs[0].message.as_str()), ("warn", "downloadImportSkipped", message));
+    assert_eq!(logs[0].repo_id.as_deref(), Some("third-repo"), "记在目标资源库名下");
+    assert_eq!(logs[0].context.as_ref().map(|context| context["skippedPaths"].clone()), Some(json!(skipped)));
+    assert!(model.workspace.refresh.as_ref().is_some_and(|run| run.keeps_status), "收尾的刷新不清提醒");
+
+    let mut clean = netease();
+    let run = download_playlist(&mut clean);
+    let import = json!({ "repoId": "third-repo", "currentPath": FOLDER, "entries": [] });
+    let result = imported(json!({ "completed": [{ "paths": paths }], "failed": [] }), import);
+    clean.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result }));
+    assert_eq!(notice(&clean), None, "导入结果里没有跳过的，不提醒");
+}
+
+/// 有失败的条目，又跳过了同名文件：一句话里两样都写，按失败显示，日志里各自一条。
+#[test]
+fn failures_and_skipped_files_share_one_notice() {
+    let mut model = netease();
+    let run = download_playlist(&mut model);
+    let import = json!({ "repoId": "third-repo", "currentPath": FOLDER, "entries": [], "skippedEntries": ["夜曲/周杰伦 - 晴天.mp3"] });
+    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: imported(partly_failed(), import) }));
+    let message = "下载歌单「夜曲」有 2 项失败，原因见「日志」；目标资源库「第三资源库」已有 1 个同名文件，保留原文件、没有导入。";
+    assert_eq!(StatusLine::project(&model), StatusLine::Failure(message.into()));
+    let actions: Vec<String> = written_logs(&mut model).into_iter().map(|log| log.action).collect();
+    assert_eq!(actions, ["downloadItemFailed", "downloadItemFailed", "downloadImportSkipped"]);
 }
 
 /// 下载歌单不列目录：选好目标以后任务弹层和单曲一样写「准备下载 夜曲」→「正在下载 夜曲」，载荷里是歌单标识和
@@ -195,7 +261,7 @@ fn an_empty_batch_is_called_out_as_a_warning() {
     let mut model = netease();
     let run = download_playlist(&mut model);
     let empty = json!({ "completed": [], "failed": [], "summary": { "total": 0, "succeeded": 0, "failed": 0 } });
-    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Ok(empty) }));
+    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: plugin(empty) }));
     let warning = "下载歌单「夜曲」没有下载到任何条目。";
     assert_eq!(StatusLine::project(&model), StatusLine::Warning(warning.into()));
     assert_eq!(notice(&model), Some((FailureSource::Download, warning.into())));
@@ -225,7 +291,7 @@ fn an_empty_batch_is_called_out_as_a_warning() {
         })
         .expect("开始下载单曲");
     let single = json!({ "songId": 186016, "paths": ["D:/stage/周杰伦 - 晴天.mp3"], "destination": "repository" });
-    track.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Ok(single) }));
+    track.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: plugin(single) }));
     assert_eq!(notice(&track), None, "单曲交回了文件，不提醒");
 }
 
@@ -234,7 +300,7 @@ fn an_empty_batch_is_called_out_as_a_warning() {
 fn the_sidebar_shows_the_warning_in_its_own_tone() {
     let mut harness = ShellHarness::mount(netease());
     let run = download_playlist(&mut harness.model);
-    harness.apply(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Ok(json!({ "completed": [], "failed": [] })) }));
+    harness.apply(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: plugin(json!({ "completed": [], "failed": [] })) }));
     harness.flush();
     assert!(harness.find("下载歌单「夜曲」没有下载到任何条目。").is_some(), "提醒画在侧栏顶部");
     let hidden = |key: &str| {
@@ -253,7 +319,7 @@ fn the_sidebar_shows_the_notice() {
     let sidebar = harness.sidebar_root();
     assert!(harness.find(NOTICE).is_none());
     let run = download_playlist(&mut harness.model);
-    harness.apply(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Ok(partly_failed()) }));
+    harness.apply(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: plugin(partly_failed()) }));
     harness.flush();
     assert!(harness.find(NOTICE).is_some(), "提示画在侧栏顶部");
     assert_eq!(harness.sidebar_root(), sidebar, "侧栏不该重挂");

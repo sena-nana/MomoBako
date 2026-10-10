@@ -131,6 +131,13 @@
 - `mutateTrash` supports `action: "restore" | "restoreAll" | "empty"` to restore a selected trash item, restore all tracked trash items, or clear `.momo/trash`.
 - Eagle imports map `isDeleted: true` assets into the same recoverable trash model: the file is written under `.momo/trash`, `.momo/trash.json` stores `originalPath`, `trashPath`, `deletedAt` and `kind`, and the asset row keeps its original repository path with `status: "deleted"`.
 - Eagle Library source mounts may keep deleted assets in the source itself. The host merges its local trash model with source-managed trash entries so Eagle `isDeleted` items appear in the existing trash UI without copying business data into `.momo/trash`.
+- `POST /repositories/{repoId}/files:import`
+  - Tauri command `import_entries`, Mutsuki protocol `momobako.entry.import`.
+  - Request includes `repoId`, optional `parentPath`, absolute `sourcePaths`, and optional `skipExisting`.
+  - By default a source whose name already exists in the target folder, or repeats within the batch, rejects the whole batch with `entry already exists: {name}` before anything is copied.
+  - With `skipExisting: true` those sources are skipped and the rest are imported. Existing files are never overwritten or merged; a skipped directory is skipped as a whole.
+  - Response is the refreshed file-browser snapshot of the target folder plus `skippedEntries`: the repository-relative target paths of the skipped sources, omitted when nothing was skipped.
+  - Source downloads to another repository import with `skipExisting: true`, so downloading the same playlist again imports only the new files and reports the rest.
 - `POST /repositories/{repoId}/files:importArchive`
   - Request includes `repoId`, optional `parentPath`, and `archivePath`.
   - Current scope supports `.zip` only and preserves the archive's internal directory structure under the target directory.

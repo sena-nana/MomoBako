@@ -84,15 +84,26 @@ pub(super) struct FileMovePlanEntry {
     pub(super) is_directory: bool,
 }
 
+/// 外部导入的计划：要复制的条目，以及 `skip_existing` 时因为目标已有同名条目跳过的（目标资源库里的相对路径）。
+#[derive(Debug, Clone)]
+pub(super) struct ExternalImportPlan {
+    pub(super) entries: Vec<FileImportPlanEntry>,
+    pub(super) skipped: Vec<String>,
+}
+
+/// 核对外部导入的源和目标：源要存在、名字合法、不能把资源库或上级目录导进自己。目标文件夹里已有同名条目（或
+/// 同一批里名字重复）时，`skip_existing` 为假整批拒绝（一个都不复制），为真跳过它、记下目标里的相对路径。
 pub(super) fn validate_external_import_entries(
     source_paths: &[String],
     repo_root: &Path,
     target_dir: &Path,
-) -> Result<Vec<FileImportPlanEntry>, String> {
+    skip_existing: bool,
+) -> Result<ExternalImportPlan, String> {
     let repo_canonical = repo_root.canonicalize().map_err(io_error)?;
     let target_canonical_parent = target_dir.canonicalize().map_err(io_error)?;
     let mut planned_targets = Vec::<PathBuf>::new();
     let mut plan = Vec::with_capacity(source_paths.len());
+    let mut skipped = Vec::new();
 
     for source_path in source_paths {
         let source = PathBuf::from(source_path);
@@ -115,6 +126,10 @@ pub(super) fn validate_external_import_entries(
             .to_string_lossy()
             .replace('\\', "/");
         if target.exists() || planned_targets.iter().any(|planned| planned == &target) {
+            if skip_existing {
+                skipped.push(target_relative_path);
+                continue;
+            }
             return Err(format!("entry already exists: {name}"));
         }
 
@@ -150,7 +165,10 @@ pub(super) fn validate_external_import_entries(
         planned_targets.push(target);
     }
 
-    Ok(plan)
+    Ok(ExternalImportPlan {
+        entries: plan,
+        skipped,
+    })
 }
 
 pub(super) fn validate_repository_copy_entries(
