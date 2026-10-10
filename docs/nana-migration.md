@@ -77,9 +77,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 
 归约和服务派发已经写好、但产品界面触发不到的路径，以及 Vue 有、Nana 还没接上的反馈：
 
-- `ShellMessage::Refresh`（重读资源库列表）有归约和派发，没有发送方，只有测试在用。
 - `InspectMessage::RegisterPreview`（登记插件的预览贡献）没有发送方：预览贡献只有内置的那几项（`native_preview::builtin_bindings`），插件声明的预览贡献不会登记，「原生预览 · 名称 · 视图 id」在产品里出不来。
-- `ShellMessage::SetSidebarWidth`、`CommitSidebarWidth` 和 `SetLibraryCategory` 没有发送方：侧栏宽度由宿主在准备帧里直接写进工作台（`window_host::sync_sidebar_resize`），分类视图由侧栏快捷方式直接切换。
 
 ### 设备验证和其它
 

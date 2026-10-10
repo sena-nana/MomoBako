@@ -41,10 +41,6 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
             }
             Some(ShellMessage::SelectWorkspaceRepository(repo_id))
         }
-        ShellMessage::RepositoriesLoaded(Ok(items)) => {
-            model.admin.note_backends(&items);
-            Some(ShellMessage::RepositoriesLoaded(Ok(items)))
-        }
         ShellMessage::WorkspaceListLoaded { generation, result: Ok(items) } => {
             model.admin.note_backends(&items);
             Some(ShellMessage::WorkspaceListLoaded { generation, result: Ok(items) })

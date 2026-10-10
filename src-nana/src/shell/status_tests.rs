@@ -2,6 +2,7 @@
 //! 操作失败在文件列表显示着时不重复显示；侧栏顶部的状态条原地换内容、侧栏不重挂，和新挂的文档一致。
 //! 文件夹树刷新本身的流程在 `tree_sync_tests.rs`。
 
+use crate::shell::admin::AdminMessage;
 use crate::shell::player::PlayerMessage;
 use crate::shell::sidebar::SidebarMessage;
 use crate::shell::view_harness::ShellHarness;
@@ -47,8 +48,8 @@ fn host_failures_show_until_the_next_operation_starts() {
     model.reduce(ShellMessage::Inspect(InspectMessage::ToggleFilterBar));
     assert!(failure(&model).is_some(), "无关的消息不该清掉失败");
 
-    // 刷新资源库列表是一个新操作：清掉上一次失败，读列表时显示忙碌行。
-    model.reduce(ShellMessage::Refresh);
+    // 来源动作完成以后刷新资源库是一个新操作：清掉上一次失败，读列表时显示忙碌行。
+    model.reduce(ShellMessage::Admin(AdminMessage::FilePluginFinished { method: "source.clearCache".into(), result: Ok(serde_json::Value::Null) }));
     assert_eq!(failure(&model), None);
     assert_eq!(StatusLine::project(&model), StatusLine::Busy);
 }
@@ -161,7 +162,7 @@ fn repository_reads_are_busy_until_their_result_arrives() {
     assert!(!model.workspace.snapshot_loading);
     assert_eq!(failure(&model), Some((FailureSource::Repository, "无法读取资源库摘要：索引损坏".into())));
 
-    model.reduce(ShellMessage::Refresh);
+    model.reduce(ShellMessage::Admin(AdminMessage::FilePluginFinished { method: "source.clearCache".into(), result: Ok(serde_json::Value::Null) }));
     assert!(model.workspace.list_loading && super::busy(&model));
     let generation = model.workspace.list_generation;
     model.reduce(ShellMessage::WorkspaceListLoaded { generation: generation - 1, result: Ok(Vec::new()) });

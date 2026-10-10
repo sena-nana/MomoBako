@@ -308,7 +308,8 @@ fn the_trash_panel_reloads_the_trash_without_the_tree() {
 #[test]
 fn virtual_views_finish_without_reading_a_directory() {
     let mut model = scene("live-files-plain");
-    model.reduce(ShellMessage::SetLibraryCategory(LibraryCategory::Untagged));
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::SelectShortcut(ShortcutId::Untagged)));
+    assert_eq!(model.workspace.library_category, LibraryCategory::Untagged);
     assert_eq!(model.workspace.panel, WorkspacePanel::Files);
     let token = click_refresh(&mut model);
     synced(&mut model, token, Ok(2));
