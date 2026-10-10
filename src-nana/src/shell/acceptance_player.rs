@@ -5,6 +5,7 @@
 //! 工作区从 `acceptance_base.rs` 的共用底子起步，播放集也经侧栏的读取结果进来。
 //! 15 页里的「播放集」「播放中」也由这里填数据，状态都走产品归约，不手写会话字段。
 //! 预览场景的文件字节（`preview_fixtures/cover.png`、`audio_fixtures/tone.mp3`、文本）和 Vue 夹具逐字节相同。
+//! 没有音频播放插件时的预览和 `tmp/vue-mock/scenes/states.ts` 同名。
 
 use std::collections::BTreeMap;
 
@@ -28,6 +29,8 @@ const TEXT_FIXTURE: &str = "{\n  \"name\": \"MomoBako\",\n  \"theme\": \"light\"
 const COVER_PNG: &[u8] = include_bytes!("preview_fixtures/cover.png");
 /// 音频预览的字节。Vue 场景的 `TONE_MP3` 解出来是同一份。
 const TONE_MP3: &[u8] = include_bytes!("audio_fixtures/tone.mp3");
+/// 视频预览的字节：32×18 的两帧深灰未压缩画面加一小段 PCM。
+const CLIP_AVI: &[u8] = include_bytes!("preview_fixtures/clip.avi");
 /// Vue 夹具里 `cover.png` 登记的大小。
 const COVER_SIZE: i64 = 2_400_000;
 
@@ -44,6 +47,7 @@ pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
         ("preview-image", preview_image_scene()),
         ("preview-audio", preview_audio_scene()),
         ("preview-audio-failed", preview_audio_failed_scene()),
+        ("preview-no-player", preview_no_player_scene()),
     ]
 }
 
@@ -375,6 +379,38 @@ fn preview_image_scene() -> ShellViewModel {
 fn preview_audio_scene() -> ShellViewModel {
     let mut model = preview_scene("track-01.mp3", TONE_MP3.len() as i64);
     answer_media(&mut model);
+    model
+}
+
+/// 没有视频播放插件（Vue 场景滤掉了 `momobako.preview.media`，只剩音频播放器）时预览 clip.avi：播放条不接管，
+/// 第二行写「没有可用于播放此媒体的插件」。音频不一样：Nana 有内置解码器认领 mp3 这些格式，没有音频插件也照常
+/// 接管播放条，所以这里用视频。预览照样自己解 AVI，不靠插件；离屏会话没有宿主纹理，画面帧画不出来，只交
+/// 会话和音轨，预览框画没有画面时的唱片舞台（真窗口里是 AVI 的画面）。
+fn preview_no_player_scene() -> ShellViewModel {
+    let path = "clip.avi";
+    let size = CLIP_AVI.len() as i64;
+    let mut base = Base::default();
+    base.players.retain(|player| player.file_class == "audio");
+    base.entries.push(tagged_file(path, size, &[], BTreeMap::new()));
+    let mut model = base.model();
+    model.reduce(ShellMessage::SelectFile { path: path.into(), asset_id: Some(path.replace('/', "-")) });
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(preview_detail(path, size))));
+    let request = take_effect(&mut model, |effect| match effect {
+        InspectEffect::LoadMedia { path, generation, .. } => Some((path, generation)),
+        _ => None,
+    });
+    if let Some((path, generation)) = request {
+        match crate::shell::preview_media_parts(REPO_ID, CLIP_AVI) {
+            Ok(parts) => model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded {
+                path,
+                generation,
+                result: Ok(parts.session),
+                pcm: parts.pcm,
+                frames: None,
+            })),
+            Err(error) => eprintln!("Nana 验收视频夹具解不开：{error}"),
+        }
+    }
     model
 }
 

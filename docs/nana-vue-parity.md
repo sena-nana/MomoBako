@@ -57,6 +57,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 - 列表模式在 960 宽下标题列被压到 0、内容溢出卡片；Nana 给标题至少留 80px。
 - 右键子菜单离分组 4px，中间是父菜单的内边距，不属于 `.ctx-menu__slot`：指针慢慢移过去时 `:hover` 断一下，子菜单闪关。Nana 的子菜单连同这 4px 接缝整块接住指针，在分组和子菜单之间、子菜单里移动都不收起。
 - 回收站里的「缩略图」分组是禁用的，但 `.ctx-menu__slot:hover` 不看按钮禁用，悬停照样弹出子菜单，里面的项还能点。Nana 禁用的分组不展开。
+- 从仓库切换列表换仓库时，Vue 等 `selectRepository` 整个跑完才关弹层（`selectRepositoryFromList` 的 `.then`），侧栏收起、回到启动页以后，切换弹层还一直浮在启动页左上角（`repo-switch-startup`）。Nana 一选就关。
 - 来源目录的「创建播放列表」失败时（缺歌单标识、建播放集或加入条目出错），`selectContextMenuItem` 只 `await item.onSelect()`，异常没人接，界面上什么都不显示。Nana 照 `runPlaylistAction` 在本地建播放集，失败写进文件列表的错误。
 
 ### 搜索与筛选
@@ -105,6 +106,13 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
   - 下载目录在 Vue 里先分页列出目录里的全部文件，进度写「正在处理 N 个文件」，曲目列表放进载荷；Nana 不列目录，停在「准备下载目录」，载荷里没有 `tracks`。
   - Vue 的爬升定时器会把更新到 88 以上的值压回 88（更新和完成总在同一拍，看不到）；Nana 不往回压。
   - 「同步资源库」「导入资源库」「配置网易云缓存」「导出资源库」在 Vue 里也有进度行，但入口函数（`syncActiveRepository`、`importExistingRepository`、`configureNeteaseRepositoryCacheInWorkspace`、`exportCurrentRepository`）没有界面调用方，Nana 不做。
+- 过程中的状态（`tmp/vue-mock/scenes/states.ts` 和同名 Nana 场景）：
+  - `file-operation-progress`（cover.png 拖进 assets，移动没回来）：两边都是「移动文件 · 移动到目标文件夹」爬到 88%、文件列「正在处理文件」、详情是 cover。Vue 的「正在处理文件」撑满列表宽，Nana 宽度随内容。
+  - `repo-switch-startup`（换到第二资源库，同步没回来）：两边都回到启动页、收起侧栏，停在第 2 步「扫描资源库文件」。加载日志不同：Vue 首屏启动还记「开始加载应用配置与插件设置」「应用配置与插件设置加载完成」「首屏启动流程完成」三条，明细带 repoId、assetCount、playlistCount 这些字段；Nana 首屏启动不记这三条，明细只有 step，所以最近 8 条不一样。Vue 的日志时间是截图时的真实时钟，Nana 场景固定成 16:00:00。
+  - `repo-refresh-sync`（刷新当前资源库，同步没回来）：两边侧栏状态区都是「正在同步仓库状态」，任务弹层都是「加载资源库 · 加载资源库摘要」的不定进度。Vue 的状态行撑满侧栏宽，Nana 宽度随内容；Vue 不定进度的条按 `progress-pulse` 闪烁，Nana 是实色。
+  - `preview-no-player`（滤掉 media-preview 插件后预览 clip.avi）：两边播放条第一行「未选择播放内容」、第二行「没有可用于播放此媒体的插件」。预览框 Vue 没有预览插件，是空白；Nana 自己解 AVI，真窗口里画画面（离屏会话没有宿主纹理，场景只交会话和音轨，画的是没有画面时的唱片舞台）。音频不会出这条提示：Nana 的内置解码器认领 mp3 这些格式，没有音频插件也接管播放条（见设置页「音频播放」的内置解码器）。
+  - `files-multi-select`（单击 cover、Shift 单击 clip-01、Ctrl 单击 clip-03）：两边都是 cover、page、clip-01、clip-03 四项选中，详情「4 个项目 · 4 个文件」。1200×800 下 Nana 的播放条是三行排版，文件列表矮，第二行卡片露不出来。
+  - 任务弹层的位置两边不同（`task-running` 也是）：Vue 按估算高度（至少 180）把弹层放在按钮上方，内容少时离按钮空一段；Nana 按实际高度贴着按钮上方。
 - 刷新文件夹树要同步整个仓库。Vue 在整轮刷新期间把文件列表换成「正在读取目录」；Nana 在同步和重读期间照常显示列表，进度写在侧栏状态区，最后重读目录时列表才显示读取中。刷新按钮除了 Vue 的「正在读目录」，在目录树自己读取时也换成加载图标并禁用。实现见 [壳层绑定式视图](./nana-shell-view.md) 的「全局状态区」。
 
 ### 外观

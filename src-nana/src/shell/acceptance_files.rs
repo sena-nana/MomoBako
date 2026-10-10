@@ -5,6 +5,7 @@
 //! 修改时间都是 2026-10-08T08:00:00Z，目录树 assets → covers 不展开，默认网格展示。工作区从
 //! `acceptance_base.rs` 的共用底子起步。
 //! 15 页里的「冲突」「未保存」也在这里，都在同一个文件页上走单击选中、读回详情和编辑注释的产品归约。
+//! 文件操作进行中和 Ctrl / Shift 多选两个场景和 `tmp/vue-mock/scenes/states.ts` 同名。
 
 use std::collections::BTreeMap;
 
@@ -12,10 +13,12 @@ use serde_json::Value;
 
 use crate::backend::services::repository::{AssetDetail, AssetSummary, MetadataEntry};
 
-use super::super::files::{DisplayMode, EntryMenu, FileRow, HardlinkPrompt};
+use super::super::admin::AdminMessage;
+use super::super::files::{DisplayMode, EntryMenu, FileRow, FilesMessage, HardlinkPrompt};
+use super::super::input::{HeldModifiers, InputMessage};
 use super::super::inspect::InspectMessage;
 use super::super::{InspectEffect, ShellMessage, ShellPage, ShellViewModel};
-use super::base_scene::{tagged_file, Base, NOW, REPO_ID};
+use super::base_scene::{file, settle, tagged_file, Base, NOW, REPO_ID, REPO_PATH};
 /// Vue `scenes/files.ts` 的右键落点。
 const MENU_POINT: (f32, f32) = (400.0, 470.0);
 /// 「未保存」页注释框里还没自动保存的草稿。离屏验收按这段文字找注释输入框。
@@ -42,6 +45,8 @@ pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
         ("files-list-mode", mode_scene(DisplayMode::List)),
         ("files-adaptive", mode_scene(DisplayMode::Adaptive)),
         ("files-masonry", mode_scene(DisplayMode::Masonry)),
+        ("file-operation-progress", file_operation_progress_scene()),
+        ("files-multi-select", multi_select_scene()),
     ]
 }
 
@@ -163,6 +168,60 @@ fn mode_scene(mode: DisplayMode) -> ShellViewModel {
     let mut model = files_base_scene();
     model.files.display_mode = mode;
     model
+}
+
+/// 把 cover.png 拖进 assets，移动协议还没回来：任务弹层里「移动文件 · 移动到目标文件夹」从 36 每 220ms
+/// 往上爬，停在上限 88；文件列写「正在处理文件」。和 Vue 场景一样点「任务」打开弹层。
+fn file_operation_progress_scene() -> ShellViewModel {
+    let mut model = files_base_scene();
+    model.reduce(ShellMessage::Input(InputMessage::BeginEntryDrag {
+        path: "cover.png".into(),
+        selected: Vec::new(),
+        x: 560.0,
+        y: 280.0,
+        writable: true,
+        trash: false,
+        smart_folder: false,
+        backend_kind: "filesystem".into(),
+        repo_root: REPO_PATH.into(),
+        hover_folder: None,
+        over_browser: true,
+    }));
+    model.reduce(ShellMessage::Input(InputMessage::EntryDragEnd { hover_folder: Some("assets".into()), over_browser: false, has_pointer: true }));
+    // 移动请求排下了，宿主不答，变更一直在进行中。
+    let _ = model.files.take_effects();
+    model.reduce(ShellMessage::Admin(AdminMessage::ToggleTaskPopover));
+    climb_to_ceiling(&mut model);
+    settle(&mut model);
+    model
+}
+
+/// 单击 cover.png，Shift 单击 clip-01.png 选出一段，再 Ctrl 单击 clip-03.png 加进来。修饰键照产品由宿主在
+/// 单击前记下；右侧详情跟着主选中项 clip-03.png，读回它的素材详情。
+fn multi_select_scene() -> ShellViewModel {
+    let mut base = Base::default();
+    base.entries.extend(["clip-01.png", "clip-02.png", "clip-03.png", "clip-04.png"].map(|path| file(path, 1024)));
+    let mut model = base.model();
+    click_entry(&mut model, "cover.png", HeldModifiers::default());
+    click_entry(&mut model, "clip-01.png", HeldModifiers { shift: true, command: false });
+    click_entry(&mut model, "clip-03.png", HeldModifiers { shift: false, command: true });
+    model.input.modifiers = HeldModifiers::default();
+    note_selection(&mut model, "clip-03.png");
+    model
+}
+
+/// 按着 `modifiers` 单击一条：宿主先记下修饰键，再交单击消息。读素材的请求由调用方回答。
+fn click_entry(model: &mut ShellViewModel, path: &str, modifiers: HeldModifiers) {
+    model.input.modifiers = modifiers;
+    model.reduce(ShellMessage::Files(FilesMessage::ActivateRow(path.into())));
+    let _ = model.files.take_effects();
+}
+
+/// 照产品帧时钟推进任务弹层的仓库操作行，直到它爬到上限 88 不再动。
+fn climb_to_ceiling(model: &mut ShellViewModel) {
+    for _ in 0..64 {
+        model.operation.tick(220);
+    }
 }
 
 /// `files.ts` 的 `metadataScene` 写在 cover.png 上的元数据。
