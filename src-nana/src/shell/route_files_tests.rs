@@ -306,14 +306,14 @@ fn filter_bar_on_the_files_route_keeps_its_input_through_updates() {
     harness.assert_same_as_fresh_mount();
 }
 
-/// 一步操作：归约一条消息，或者在归约之外改 ViewModel 再同步（拖动中的放置态、加载更多、窄窗口、圆角）。
+/// 一步操作：归约一条消息，或者在归约之外改 ViewModel 再同步（拖动中的放置态、加载更多、窄窗口）。
 enum Step {
     Message(ShellMessage),
     Edit(fn(&mut ShellViewModel)),
 }
 
 /// 一串文件页上的操作：换展示方式、选中、评分、换目录、进回收站、打开预览再返回、编辑元数据、开关筛选栏和
-/// 导入菜单，以及拖动中的放置态、加载更多、窄窗口和圆角这些绑在样式、图标和禁用上的状态。每一步之后
+/// 导入菜单，以及拖动中的放置态、加载更多和窄窗口这些绑在样式、图标和禁用上的状态。每一步之后
 /// 增量同步的文档都和同一 ViewModel 新挂的一样。
 #[test]
 fn incremental_files_route_matches_a_fresh_mount_step_by_step() {
@@ -345,7 +345,6 @@ fn incremental_files_route_matches_a_fresh_mount_step_by_step() {
         Step::Message(ShellMessage::Files(FilesMessage::ToggleImportMenu)),
         Step::Message(ShellMessage::Inspect(InspectMessage::ToggleFilterBar)),
         Step::Message(ShellMessage::Inspect(InspectMessage::ToggleFilterBar)),
-        Step::Edit(|model| model.admin.corner_radius = 4.0),
         Step::Edit(|model| {
             model.set_viewport_width(880.0);
         }),

@@ -4,7 +4,7 @@
 //! 类型 / 大小 / 硬链接 / 受保护 / 修改时间各行，文件再接元数据编辑；没有选择时是当前目录的
 //! 直属计数；回收站和分类视图没有选择时是居中的提示。卡片自己纵向滚动，播放条不会盖住它。
 //!
-//! 常驻：外框只建一次，宽度和圆角按投影绑定。里面按「显示什么」（[`DetailKey`]）换一整块：
+//! 常驻：外框只建一次，宽度按投影绑定，圆角是主题的 2xl 档。里面按「显示什么」（[`DetailKey`]）换一整块：
 //! 换了选中项、选中数或卡片种类时回到顶部；同一项里的文字、缩略图和可有可无的行按字段绑定，
 //! 元数据编辑区常驻，输入框不因为别的更新重建。
 
@@ -68,12 +68,11 @@ struct SummaryView {
     counts: [String; 3],
 }
 
-/// 外框的宽度排法和圆角。
+/// 外框的宽度排法。
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct FrameLook {
     /// 窄窗口里详情排到文件卡片下面，整行宽。
     stacked: bool,
-    radius: f32,
 }
 
 /// 详情的常驻信号。元数据编辑区的信号在 [`MetadataSignals`]，和预览页共用。
@@ -135,7 +134,7 @@ impl Projection {
             .copied()
             .filter(|row| files.selected.iter().any(|item| item == &row.path) || files.primary.as_deref() == Some(row.path.as_str()))
             .collect::<Vec<_>>();
-        let frame = FrameLook { stacked: model.viewport_width <= super::STACKED_VIEWPORT_PX, radius: super::card_radius(model) };
+        let frame = FrameLook { stacked: model.viewport_width <= super::STACKED_VIEWPORT_PX };
         let mut projected = Self {
             frame,
             key: DetailKey { kind: DetailKind::Idle, scroll: String::new() },
@@ -244,12 +243,12 @@ pub(super) fn detail_aside(signals: DetailSignals, metadata: MetadataSignals) ->
         .into_any()
 }
 
-/// 外框：`--bg-elev` 圆角卡片，裁掉溢出；宽排版定宽 300，窄排版铺满。
+/// 外框：`--bg-elev`、`--radius-2xl` 的卡片，裁掉溢出；宽排版定宽 300，窄排版铺满。
 fn frame_style(look: FrameLook) -> NodeStyle {
     let frame = Stack::fill_column(0.0)
         .min_height(LengthSpec::Px(0.0))
         .surface(SemanticColorRole::Surface)
-        .radius_px(look.radius)
+        .radius(RadiusTier::Xxl)
         .with_layout(|layout| {
             layout.overflow_x = OverflowSpec::Hidden;
             layout.overflow_y = OverflowSpec::Hidden;

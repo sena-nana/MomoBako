@@ -126,16 +126,21 @@ fn new_logs_append_rows_without_rebuilding_the_list() {
 
 /// 日志列表滚动区和日志页主体的键。
 const LOG_SCROLL: &str = "admin-log-scroll";
-const LOGS_BODY: &str = "workspace-page-body-HasRepository-Logs";
+const LOGS_BODY: &str = "workspace-page-scroll-HasRepository-Logs";
 
-/// 最小窗口（960×600）的日志面板，再收到第 5..=`last` 条实时日志，多到一屏放不下。
-fn crowded_logs(last: u32) -> ShellHarness {
-    let mut harness = ShellHarness::mount_at(ShellViewModel::for_page(ShellPage::Logs), 960.0, 600.0);
+/// `width`×`height` 窗口里的日志面板，再收到第 5..=`last` 条实时日志，多到列表放不下。
+fn crowded_logs_at(width: f32, height: f32, last: u32) -> ShellHarness {
+    let mut harness = ShellHarness::mount_at(ShellViewModel::for_page(ShellPage::Logs), width, height);
     for index in 5..=last {
         harness.apply(log(index));
     }
     harness.flush();
     harness
+}
+
+/// 最小窗口（960×600）里日志多到放不下的面板。
+fn crowded_logs(last: u32) -> ShellHarness {
+    crowded_logs_at(960.0, 600.0, last)
 }
 
 /// 滚动区现在的纵向偏移。
@@ -169,25 +174,40 @@ fn at_end(harness: &ShellHarness) -> bool {
     (scroll_y(harness, LOG_SCROLL) - scroll_end(harness, LOG_SCROLL)).abs() < 0.5
 }
 
-/// 最小窗口下日志多到放不下：日志页主体不是滚动区，面板正好收在主体里，页头、工具条和筛选留在视口里；
-/// 日志列表在筛选下面占满剩下的高度、自己滚，追踪时停在末尾。
+/// 窗口放得下页头和 360 高的列表（1200×800）：主体的滚动范围只算到列表自己的盒子，日志再多主体也不滚；
+/// 面板正好撑满主体，列表在筛选下面占满剩下的高度、自己滚，追踪时停在末尾。
 #[test]
-fn log_list_scrolls_under_a_fixed_header() {
-    let harness = crowded_logs(12);
-    let body = harness.keyed(LOGS_BODY).expect("日志页主体");
-    assert!(harness.document().context().world().scroll_metrics(body).is_none(), "日志页主体不该是滚动区");
-    let (body_box, panel) = (bounds(&harness, LOGS_BODY), bounds(&harness, "admin-log-panel"));
-    assert!(panel.y + panel.height <= body_box.y + body_box.height + 0.5, "面板超出了主体：{panel:?} / {body_box:?}");
-    for key in ["admin-log-title", "admin-log-toolbar", "admin-log-filters"] {
-        let node = bounds(&harness, key);
-        assert!(node.y >= panel.y && node.y + node.height <= 600.0, "{key} 不在视口里：{node:?}");
-    }
+fn a_roomy_window_scrolls_only_the_log_list() {
+    let harness = crowded_logs_at(1200.0, 800.0, 12);
+    assert_eq!(scroll_end(&harness, LOGS_BODY), 0.0, "主体放得下时不该随列表里的日志滚动");
+    let (body, panel) = (bounds(&harness, LOGS_BODY), bounds(&harness, "admin-log-panel"));
+    assert!((panel.y + panel.height - (body.y + body.height)).abs() < 0.5, "面板要正好撑满主体：{panel:?} / {body:?}");
     let (filters, list) = (bounds(&harness, "admin-log-filters"), bounds(&harness, LOG_SCROLL));
     assert!(list.y >= filters.y + filters.height, "列表要在筛选下面：{list:?}");
-    assert!(list.height >= 150.0, "最小窗口下列表至少放得下一张卡片：{list:?}");
+    assert!(list.height >= 360.0, "列表不该矮过 360：{list:?}");
     assert!((panel.y + panel.height - 23.0 - (list.y + list.height)).abs() < 0.5, "列表要占满面板剩下的高度：{list:?} / {panel:?}");
     assert!(scroll_end(&harness, LOG_SCROLL) > 0.0, "日志多到放不下时列表要能滚");
     assert!(at_end(&harness), "追踪时列表停在末尾");
+}
+
+/// 矮窗口（960×600、960×480）：列表保持 Vue 的最小高 360，面板比主体高，主体滚动。一开始页头在视口里；
+/// 主体正好滚到面板底边，列表的内容没有算进主体的范围；列表照样自己滚、追踪时停在末尾，滚主体不动它。
+#[test]
+fn a_short_window_scrolls_the_page_to_reach_the_list() {
+    for height in [600.0, 480.0] {
+        let mut harness = crowded_logs_at(960.0, height, 12);
+        let (body, panel, list) = (bounds(&harness, LOGS_BODY), bounds(&harness, "admin-log-panel"), bounds(&harness, LOG_SCROLL));
+        assert!((list.height - 360.0).abs() < 0.5, "{height} 高时列表要保持 360：{list:?}");
+        let end = scroll_end(&harness, LOGS_BODY);
+        assert!(end > 0.0, "{height} 高时主体要能滚");
+        assert!((panel.y + panel.height - (body.y + body.height) - end).abs() < 0.5, "主体要正好滚到面板底边：{end} / {panel:?} / {body:?}");
+        let title = bounds(&harness, "admin-log-title");
+        assert!(title.y >= body.y && title.y + title.height <= body.y + body.height, "一开始页头要在视口里：{title:?}");
+        assert!(scroll_end(&harness, LOG_SCROLL) > 0.0 && at_end(&harness), "列表要自己滚、追踪时停在末尾");
+        scroll_list_to(&mut harness, LOGS_BODY, end);
+        assert_eq!(scroll_y(&harness, LOGS_BODY), end, "主体滚不到底");
+        assert!(at_end(&harness), "滚主体不该动列表");
+    }
 }
 
 /// 暂停追踪：滚到中间后新日志到达，列表停在原位；恢复追踪后下一条日志到达时回到末尾。
@@ -255,7 +275,7 @@ fn log_filters_keep_the_rows_they_still_show() {
 }
 
 /// 插件筛选框和日志搜索框正在组合输入：后台消息不换输入框节点、不断预编辑；提交后字落在原节点上。
-/// 日志搜索框在固定的页头里，聚焦不滚动任何东西。
+/// 日志搜索框在页头里，1200×800 的主体放得下，聚焦不滚动任何东西。
 #[test]
 fn admin_inputs_keep_their_preedit_through_updates() {
     for (page, label, scroll) in [(ShellPage::Settings, "筛选插件", Some("settings-scroll")), (ShellPage::Logs, "搜索日志", None)] {
@@ -449,4 +469,29 @@ fn the_logs_panel_shows_loading_until_history_arrives() {
     assert!(harness.find("正在加载系统日志").is_none());
     assert!(harness.find("第 1 条后台日志").is_some(), "读回的历史日志要画出来");
     harness.assert_same_as_fresh_mount();
+}
+
+/// 插件卡片的「权限」段是 `56px minmax(0, 1fr)` 的网格：芯片在内容列里折成几行，这一段就是几行芯片
+/// 那么高，不按芯片最窄时排成一列的高度量（NanaUI 网格先定列宽再量行高）。
+#[test]
+fn plugin_grid_sections_are_as_tall_as_their_wrapped_chips() {
+    let mut harness = ShellHarness::mount_at(ShellViewModel::for_page(ShellPage::PluginSettings), 960.0, 600.0);
+    let permissions = (0..12).map(|index| format!("filesystem:permission-{index}")).collect::<Vec<_>>();
+    let plugin = harness.model.admin.plugins.first_mut().expect("场景里有插件");
+    plugin.permissions = permissions.clone();
+    let key = format!("admin-plugin-permissions-{}", crate::shell::admin::style::key_part(&plugin.plugin_id));
+    harness.model.mark_surface_dirty();
+    harness.sync();
+    harness.flush();
+    let section = bounds(&harness, &key);
+    let world = harness.document().context().world();
+    let chips = permissions
+        .iter()
+        .map(|label| world.layout_box(harness.node(label)).unwrap_or_else(|| panic!("{label} 没有布局盒")))
+        .collect::<Vec<_>>();
+    let rows = chips.iter().map(|chip| chip.y.round() as i32).collect::<std::collections::BTreeSet<_>>();
+    assert!(rows.len() >= 2, "960 宽下十二个权限芯片要折行：{rows:?}");
+    let bottom = chips.iter().map(|chip| chip.y + chip.height).fold(f32::MIN, f32::max);
+    assert!(bottom <= section.y + section.height + 0.5, "芯片超出了这一段：{section:?}，芯片底边 {bottom}");
+    assert!(section.y + section.height - bottom < 6.0, "这一段比折行的芯片高出一截：{section:?}，芯片底边 {bottom}");
 }

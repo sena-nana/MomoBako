@@ -39,7 +39,8 @@ use panel_state::{HitChip, HitRow, SearchHead, SearchStatus};
 /// 结果行在 Store 里的句柄。
 type HitItem = Item<Store<Vec<HitRow>>, String, HitRow>;
 
-/// 常驻搜索面板：只读 `signals`，高度随内容，内容更高时随页面主体一起滚动。
+/// 常驻搜索面板（`.search-workbench__panel`，`--radius-2xl`）：只读 `signals`，高度随内容，内容更高时
+/// 随页面主体一起滚动。
 ///
 /// Vue 的样式写了面板 `min-height: 100%`、空状态 `flex: 1`，但父级高度不定，实际渲染是内容高度。
 /// 撑满整页的大虚线框违背 DESIGN.md「避免装饰面板」的克制原则，这里保留实际的内容高度。
@@ -56,7 +57,7 @@ pub(crate) fn resident_search_panel(signals: SearchPanelSignals) -> AnyView {
         Stack::column(16.0)
             .padding(23.0)
             .surface(SemanticColorRole::Surface)
-            .radius(RadiusTier::Xl)
+            .radius(RadiusTier::Xxl)
             .grow(0.0)
             .shrink(0.0),
     )

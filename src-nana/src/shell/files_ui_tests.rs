@@ -10,7 +10,7 @@ use nana_ui_platform::WindowId;
 use crate::backend::services::repository::{AssetDetail, AssetSummary, FileBrowserEntry};
 use crate::shell::{ShellMessage, ShellPage, ShellViewModel, WorkspaceRepository};
 
-use super::{FileContext, FileDialog, FileRow, FilesEffect, FilesMessage, FilesState};
+use super::{BranchSource, FileContext, FileDialog, FileRow, FilesEffect, FilesMessage, FilesState};
 
 fn row(path: &str, kind: &str, extension: Option<&str>) -> FileRow {
     FileRow::from_entry(&FileBrowserEntry {
@@ -93,16 +93,26 @@ fn context_menu_selects_like_a_click_and_confirms_permanent_delete_twice() {
     assert!(state.entry_menu.is_some());
     assert!(matches!(state.take_effects().as_slice(), [FilesEffect::LoadAsset { .. }]));
 
-    state.reduce(&writable(), FilesMessage::ToggleMenuBranch("thumbnail".into()));
-    assert_eq!(state.menu_branch.as_deref(), Some("thumbnail"));
-    state.reduce(&writable(), FilesMessage::ToggleMenuBranch("thumbnail".into()));
-    assert_eq!(state.menu_branch, None, "再点一次收起子菜单");
+    let branch = |branch: &str, source, inside| FilesMessage::MenuBranchChanged { branch: branch.into(), source, inside };
+    state.reduce(&writable(), branch("thumbnail", BranchSource::Pointer, true));
+    assert_eq!(state.menu_branch.open(), Some("thumbnail"), "指针进来就展开");
+    state.reduce(&writable(), branch("thumbnail", BranchSource::Focus, true));
+    state.reduce(&writable(), branch("playlist-membership", BranchSource::Pointer, true));
+    state.reduce(&writable(), branch("thumbnail", BranchSource::Pointer, false));
+    assert_eq!(state.menu_branch.open(), Some("playlist-membership"), "先进下一个分组、后离开上一个，展开指针所在的那个");
+    state.reduce(&writable(), branch("playlist-membership", BranchSource::Pointer, false));
+    assert_eq!(state.menu_branch.open(), Some("thumbnail"), "指针离开以后，焦点还在的分组照 :focus-within 留着");
+    state.reduce(&writable(), branch("thumbnail", BranchSource::Focus, false));
+    assert_eq!(state.menu_branch.open(), None);
 
     state.reduce(&writable(), FilesMessage::ArmMenuConfirm("delete".into()));
     assert_eq!(state.menu_pending.as_deref(), Some("delete"), "第一次只进入待确认");
     assert!(state.entry_menu.is_some(), "待确认时菜单不关");
+    state.reduce(&writable(), branch("thumbnail", BranchSource::Pointer, true));
     state.reduce(&writable(), FilesMessage::CloseEntryMenu);
-    assert!(state.entry_menu.is_none() && state.menu_pending.is_none() && state.menu_branch.is_none());
+    assert!(state.entry_menu.is_none() && state.menu_pending.is_none() && state.menu_branch.open().is_none());
+    state.reduce(&writable(), branch("thumbnail", BranchSource::Pointer, true));
+    assert_eq!(state.menu_branch.open(), None, "菜单关掉以后才到的进出不再记");
 }
 
 #[test]

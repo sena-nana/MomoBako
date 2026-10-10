@@ -2,7 +2,7 @@
 
 本文锁定 `momobako-nana` 当前构建能用的 Nana 组件、和旧 Tauri/Vue 工作台的对应关系，以及还没有现成组件的宿主缺口。稳定 id 以 `src-nana/src/capability.rs` 的 `COMPILED_COMPONENT_IDS` 为准；目录变了，`compiled_catalog_matches_the_locked_product_set` 会失败。
 
-`src-nana/Cargo.toml` 给 `nana-ui` 开 `hosted`、`bundled-fonts`、`components`、`icons-tabler`、`view-macro`，给 `nana-ui-platform` 开 `clipboard`。`components` 打开 calendar、charts、controls、graph-canvas、image-viewer、rich-text；`hosted` 带上 GPU 和 AccessKit 平台适配；`view-macro` 提供结构块容器的 `css!` 和 `#[derive(Store)]`。没开 `syntax-highlighting` 和 `packaged-resources`。Nana 修订是 `c6dc1086bb1b21406ee5e20a40ac6207c664913b`，不保留本地副本。
+`src-nana/Cargo.toml` 给 `nana-ui` 开 `hosted`、`bundled-fonts`、`components`、`icons-tabler`、`view-macro`，给 `nana-ui-platform` 开 `clipboard`。`components` 打开 calendar、charts、controls、graph-canvas、image-viewer、rich-text；`hosted` 带上 GPU 和 AccessKit 平台适配；`view-macro` 提供结构块容器的 `css!` 和 `#[derive(Store)]`。没开 `syntax-highlighting` 和 `packaged-resources`。Nana 修订是 `941df646d3d9b25b529674299c787594f63f0149`，不保留本地副本。
 
 ## 已编译组件
 
@@ -70,7 +70,7 @@
 
 字号：页面标题用 Nana `title`（18px）。设计标准的 14px 工作文本对应 Nana `section`，13px 行标签对应 Nana `body`。Nana 默认主题把这两个数字对调了，迁移时按这个角色用，不在控件上再写一个 14。元信息用 `meta`（12px），微型标签用 `hint`（11px）。对应表是 `TYPE_ROLES`。
 
-圆角基数来自设置（0–20，默认 8），`corner_metrics` 换成 xs 到 xl 五档，2xl 用 `radius_2xl`。
+圆角基数来自设置（0–20，默认 8），`corner_metrics` 换成 xs 到 2xl 六档，2xl 是 `RadiusTier::Xxl`。
 
 间距用 Nana `space` 阶梯。产品侧栏宽度是上面的 220 / 276 / 480，不属于间距阶梯。
 

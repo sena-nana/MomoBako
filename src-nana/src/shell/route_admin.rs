@@ -1,8 +1,9 @@
 //! 管理路由（常驻）：首页里的日志、拓展和仓库动作面板，以及它们和设置页共用的信号。
 //!
 //! 三个面板各是一条路由，分支只在进入时建一次，之后同步只写 [`AdminSignals`] 里当前面板的那份。
-//! 首页外框上方是常驻筛选栏。拓展和动作页的主体是纵向滚动；日志页的主体不滚，面板撑满主体，页头和
-//! 筛选固定，日志列表自己滚动、追踪时跟随末尾。设置页和拓展页都有插件管理面板，共用同一份插件信号。
+//! 首页外框上方是常驻筛选栏，下面的主体照 `.workspace-page__body` 纵向滚动。日志面板至少撑满主体，
+//! 日志列表分走页头、工具条和筛选以下的高度、自己滚动，追踪时跟随末尾；窗口矮到列表不到 Vue 的
+//! 最小高 360 时主体滚动。设置页和拓展页都有插件管理面板，共用同一份插件信号。
 
 use nana_ui::runtime::view::AnyView;
 
@@ -10,7 +11,7 @@ use super::admin::{
     ActionsSignals, ActionsView, LogsSignals, LogsView, PluginPanelSignals, PluginPanelView, SettingsSignals, SettingsView, ToolsSignals,
 };
 use super::inspect_search_view::{resident_filter_bar, FilterBarSignals};
-use super::route_home::{home_fixed, home_page, home_scroll};
+use super::route_home::{home_page, home_scroll};
 use super::ShellViewModel;
 
 /// 设置、日志、拓展和动作页的常驻信号，在主区块的骨架作用域里建，进出路由都不重建。
@@ -58,10 +59,9 @@ impl AdminSignals {
     }
 }
 
-/// 日志面板：主体不滚，面板撑满主体，页头和筛选固定，日志列表自己滚动、追踪时跟随末尾。
+/// 日志面板：主体滚动，面板至少撑满主体；日志列表在筛选下面自己滚动、追踪时跟随末尾。
 pub(super) fn logs(filter: FilterBarSignals, signals: AdminSignals) -> AnyView {
-    let page = super::workbench::page(vec![super::admin::logs_panel(signals.logs)]);
-    home_page(Some(resident_filter_bar(filter)), home_fixed("workspace-page-body-HasRepository-Logs", page))
+    panel(filter, "workspace-page-scroll-HasRepository-Logs", super::admin::logs_panel(signals.logs))
 }
 
 /// 拓展页。
