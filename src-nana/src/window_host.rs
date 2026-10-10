@@ -238,10 +238,7 @@ pub(crate) fn answer_close(
     let decision = crate::shell::input::decide_close(app.shell.settings.close_behavior.as_str(), app.shell.close_is_dirty());
     match decision {
         crate::shell::input::CloseDecision::CloseNow => RuntimeProgramUpdate {
-            window_commands: host_api::WindowCommand::Close
-                .to_platform_command(id, context.geometry().maximized)
-                .into_iter()
-                .collect(),
+            window_commands: vec![host_api::WindowCommand::Close.to_platform_command(id, context.geometry().maximized)],
             ..RuntimeProgramUpdate::redraw(id)
         },
         crate::shell::input::CloseDecision::Ask { .. } | crate::shell::input::CloseDecision::HoldForTray => {

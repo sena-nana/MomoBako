@@ -312,9 +312,7 @@ impl InputState {
         pending
             .into_iter()
             .filter_map(|command| match command {
-                PendingHostCommand::Close => {
-                    crate::host_api::WindowCommand::Close.to_platform_command(id, maximized)
-                }
+                PendingHostCommand::Close => Some(crate::host_api::WindowCommand::Close.to_platform_command(id, maximized)),
                 PendingHostCommand::OpenSaveDialog => Some(WindowCommand::OpenFileDialog {
                     id,
                     request: support::save_export_request(),
