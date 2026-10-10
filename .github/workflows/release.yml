@@ -18,6 +18,10 @@ on:
 permissions:
   contents: write
 
+env:
+  # 发布流程同样从缓存快照冷编译，关闭增量编译，避免增量产物进 target 缓存。
+  CARGO_INCREMENTAL: 0
+
 jobs:
   publish-windows:
     name: Verify and publish Windows bundle
@@ -56,6 +60,7 @@ jobs:
         uses: sena-nana/LiliaUI/.github/actions/setup-node-yarn@8cdf9fce6f86b903a475ac852bce0627f237baf5
 
       - name: Set up Rust
+        id: toolchain
         uses: dtolnay/rust-toolchain@stable
 
       - name: Cache Rust
@@ -64,10 +69,10 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            src-tauri/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+            target
+          key: ${{ runner.os }}-cargo-${{ steps.toolchain.outputs.cachekey }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-cargo-
+            ${{ runner.os }}-cargo-${{ steps.toolchain.outputs.cachekey }}-
 
       - name: Install external plugin dependencies
         working-directory: External/Plugins
