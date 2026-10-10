@@ -516,10 +516,7 @@ pub(super) fn observe(model: &mut ShellViewModel, message: &ShellMessage) {
         ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Ok(snapshot))) => note_snapshot(&mut model.inspect, snapshot),
         ShellMessage::FileBrowserLoaded(result) => reveal_after_browse(model, result),
         // 用户已经去了别处：等待中的命中不再打开，免得以后读到同一目录时突然跳进预览。
-        ShellMessage::OpenDirectory(_)
-        | ShellMessage::SelectFile { .. }
-        | ShellMessage::SetWorkspacePanel(_)
-        | ShellMessage::SetLibraryCategory(_) => {
+        ShellMessage::OpenDirectory(_) | ShellMessage::SelectFile { .. } | ShellMessage::SetWorkspacePanel(_) => {
             if model.inspect.search_ui.reveal_hit.take().is_some() {
                 eprintln!("Nana 打开搜索结果前已经切到别处，放弃等待中的命中");
             }

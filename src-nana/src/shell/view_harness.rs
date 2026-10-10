@@ -487,7 +487,7 @@ mod tests {
         assert_eq!(harness.model.inspect.query, "封面中");
         let settled = ShellHarness::stats();
         for _ in 0..3 {
-            harness.apply(ShellMessage::Refresh);
+            harness.apply(ShellMessage::ThumbnailPixels(Vec::new()));
             harness.flush();
         }
         let after = ShellHarness::stats();

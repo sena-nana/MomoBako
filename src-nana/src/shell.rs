@@ -72,8 +72,6 @@ pub use workspace::{
 pub enum ShellMessage {
     /// 打开设置页：读设置包和应用设置，和 Vue `Settings.vue` 挂载时的 `loadSettingsData` 一致。
     OpenSettings,
-    Refresh,
-    RepositoriesLoaded(Result<Vec<RepositorySummary>, String>),
     /// 带代次的仓库摘要结果：启动和换仓库的第 3 步，或者同一个仓库刷新时的读摘要。代次不对的丢掉。
     RepositorySnapshotLoaded { generation: u64, result: Result<RepositorySnapshot, String> },
     FileBrowserLoaded(Result<FileBrowserSnapshot, String>),
@@ -115,8 +113,6 @@ pub enum ShellMessage {
     /// 带代次的同步结果：启动、换仓库和同一个仓库的刷新都先同步资源库。
     RepositorySynced { generation: u64, result: Result<(), String> },
     ToggleSidebar,
-    SetSidebarWidth(f32),
-    CommitSidebarWidth,
     StartupRetry,
     MissingRefresh,
     MissingChoosePath,
@@ -131,7 +127,6 @@ pub enum ShellMessage {
     MissingOpenSourceSettings,
     SelectWorkspaceRepository(String),
     SetWorkspacePanel(WorkspacePanel),
-    SetLibraryCategory(LibraryCategory),
     /// 侧栏导航。具体分支在 `sidebar::reduce_message` 里归约。
     Sidebar(sidebar::SidebarMessage),
     /// 文件浏览和变更。具体分支在 `files::reduce_message` 里归约。
@@ -445,7 +440,6 @@ impl ShellViewModel {
             return;
         };
         match message {
-            ShellMessage::RepositoriesLoaded(result) => self.apply_loaded_repositories(None, result),
             ShellMessage::WorkspaceListLoaded { generation, result } => {
                 self.apply_loaded_repositories(Some(generation), result);
             }
@@ -561,11 +555,8 @@ impl ShellViewModel {
             | ShellMessage::TaskProgressLoaded(_)
             | ShellMessage::Admin(_) => {}
             ShellMessage::WindowAction(_) => {}
-            ShellMessage::Refresh => self.workspace.request_repository_refresh(),
             ShellMessage::RepositorySynced { generation, result } => self.note_repository_synced(generation, result),
             ShellMessage::ToggleSidebar => self.workspace.toggle_sidebar(),
-            ShellMessage::SetSidebarWidth(width) => self.workspace.set_sidebar_width(width),
-            ShellMessage::CommitSidebarWidth => self.workspace.commit_sidebar_width(),
             ShellMessage::StartupRetry => {
                 self.workspace.retry_startup();
             }
@@ -588,7 +579,6 @@ impl ShellViewModel {
             }
             ShellMessage::SelectWorkspaceRepository(repo_id) => self.select_workspace_repository(&repo_id),
             ShellMessage::SetWorkspacePanel(panel) => self.workspace.panel = panel,
-            ShellMessage::SetLibraryCategory(category) => self.workspace.library_category = category,
             ShellMessage::Sidebar(_) => {}
             ShellMessage::Files(_) => {}
             ShellMessage::Inspect(_) => {}

@@ -476,7 +476,7 @@ fn search_route_appears_only_after_startup_with_a_repository() {
     model.workspace.panel = WorkspacePanel::Search;
     assert_eq!(RouteKey::of(&model), RouteKey::Startup);
 
-    model.reduce(ShellMessage::RepositoriesLoaded(Ok(vec![RepositorySummary {
+    model.reduce(ShellMessage::WorkspaceListLoaded { generation: 0, result: Ok(vec![RepositorySummary {
         repo_id: "repo".into(),
         name: "库".into(),
         path: "C:/repo".into(),
@@ -491,7 +491,7 @@ fn search_route_appears_only_after_startup_with_a_repository() {
         updated_at: String::new(),
         local_cache: None,
         authentication: None,
-    }])));
+    }]) });
     model.reduce(ShellMessage::RepositorySynced { generation: 0, result: Ok(()) });
     model.reduce(ShellMessage::RepositorySnapshotLoaded { generation: 0, result: Ok(RepositorySnapshot {
         repository: RepositorySummary {

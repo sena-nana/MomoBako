@@ -429,11 +429,15 @@ fn theme_corners_and_external_connection() {
 #[test]
 fn repository_backends_and_audio_player_choices() {
     let mut model = ShellViewModel::default();
-    model.reduce(ShellMessage::RepositoriesLoaded(Ok(vec![
-        repository("one", "filesystem", "本地"),
-        repository("two", "filesystem", "本地"),
-        repository("three", "webdav", "WebDAV"),
-    ])));
+    let generation = model.workspace.prepare_initial_list();
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(vec![
+            repository("one", "filesystem", "本地"),
+            repository("two", "filesystem", "本地"),
+            repository("three", "webdav", "WebDAV"),
+        ]),
+    });
     assert_eq!(support::backend_summary(&model.admin.backends), "本地 (2) / WebDAV (1)");
     assert_eq!(support::backend_summary(&[]), "无");
 

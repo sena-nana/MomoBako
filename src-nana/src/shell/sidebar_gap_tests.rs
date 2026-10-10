@@ -65,14 +65,14 @@ fn folder_dialog_waits_for_the_file_service_and_keeps_errors() {
     // 文件服务失败：对话框留着并显示错误。
     model.files.mutating = false;
     model.files.error = "目录已存在".into();
-    model.reduce(ShellMessage::Refresh);
+    model.reduce(ShellMessage::ThumbnailPixels(Vec::new()));
     assert!(model.sidebar.folder_dialog.open);
     assert_eq!(model.sidebar.folder_dialog.error, "目录已存在");
     // 再提交一次，这次成功：关掉并展开父级。
     gap(&mut model, GapMessage::SubmitFolderDialog);
     assert!(model.files.error.is_empty(), "新的提交清掉上一次的错误");
     model.files.mutating = false;
-    model.reduce(ShellMessage::Refresh);
+    model.reduce(ShellMessage::ThumbnailPixels(Vec::new()));
     assert!(!model.sidebar.folder_dialog.open);
     assert!(model.sidebar.expanded_folders.iter().any(|path| path == "photos"));
 }
@@ -94,7 +94,7 @@ fn folder_delete_offers_move_to_parent_and_trash() {
         "处理文件夹走文件服务的 moveToParent：{effects:?}"
     );
     model.files.mutating = false;
-    model.reduce(ShellMessage::Refresh);
+    model.reduce(ShellMessage::ThumbnailPixels(Vec::new()));
     assert!(!model.sidebar.folder_delete_open());
     assert_eq!(FolderDeleteMode::Delete.as_str(), "delete");
     assert!(matches!(
