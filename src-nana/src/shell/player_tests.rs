@@ -506,6 +506,13 @@ fn listed_playback_distinguishes_missing_plugin_upgrade_and_decoder_failure() {
     assert_eq!(decoded.player.session.current_time_ms, time);
     assert!(decoded.player.session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
     assert_ne!(decoded.player.session.status, "playing");
+    // 没装好的条目没有控制落点：暂停不动，播放重新装载、照样报没有原生解码器，不读文件。
+    decoded.player.take_effects();
+    send(&mut decoded, PlayerMessage::SetPlaying(false));
+    send(&mut decoded, PlayerMessage::SetPlaying(true));
+    assert_eq!(decoded.player.session.status, "failed");
+    assert!(decoded.player.session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
+    assert!(!decoded.player.take_effects().iter().any(|effect| matches!(effect, PlayerEffect::LoadItem { .. })), "不读文件");
 
     let mut image = shell(true);
     image.player.candidates = vec![candidate("native.image", "audio", "image", &["png"])];

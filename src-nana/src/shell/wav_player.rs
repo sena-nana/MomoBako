@@ -284,13 +284,12 @@ pub(super) enum Action {
     Volume(f32),
 }
 
-/// 控制落到哪里：PCM 在游标里就出声；装好了但没有声音（只有画面的视频）只走时钟；
-/// 都不是时按缺解码器报错。
+/// 控制落到哪里：PCM 在游标里就出声；装好了但没有声音（只有画面的视频）只走时钟。当前项还没装好时没有落点，
+/// 调用方不驱动控制器（见 `PlayerState::output`）。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Output {
     Cursor,
     Clock,
-    Missing,
 }
 
 /// 按 [`Output`] 驱动播放、暂停、跳转和音量，返回新的会话和可能的错误。
@@ -303,7 +302,6 @@ pub(super) fn drive(
     match output {
         Output::Cursor => control(wav.clone(), session, action),
         Output::Clock => control(ClockOnly, session, action),
-        Output::Missing => control(MissingDecoder, session, action),
     }
 }
 
@@ -340,26 +338,6 @@ impl PlaybackMediaPlugin for ClockOnly {
 
     fn set_volume(&mut self, _volume: f32) -> Result<(), String> {
         Ok(())
-    }
-}
-
-struct MissingDecoder;
-
-impl PlaybackMediaPlugin for MissingDecoder {
-    fn play(&mut self) -> Result<(), String> {
-        Err("没有原生解码器".into())
-    }
-
-    fn pause(&mut self) -> Result<(), String> {
-        Err("没有原生解码器".into())
-    }
-
-    fn seek(&mut self, _position_ms: u64) -> Result<(), String> {
-        Err("没有原生解码器".into())
-    }
-
-    fn set_volume(&mut self, _volume: f32) -> Result<(), String> {
-        Err("没有原生解码器".into())
     }
 }
 
