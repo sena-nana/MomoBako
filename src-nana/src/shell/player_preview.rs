@@ -46,14 +46,15 @@ impl PlayerState {
         self.cursor_item.is_some() && self.cursor_item == self.current_id
     }
 
-    /// 控制落点：出声、只走时钟，或缺解码器。
-    pub(super) fn output(&self) -> Output {
+    /// 控制落点：当前项的 PCM 在游标里就出声，装好了但没有声音只走时钟。还没装好（停过、失败过、换过仓库，或者
+    /// 登记的播放器没有原生解码器）时为 `None`：调用方不驱动控制器，「没有原生解码器」这类失败在装载时就写进会话。
+    pub(super) fn output(&self) -> Option<Output> {
         if self.audible() {
-            Output::Cursor
+            Some(Output::Cursor)
         } else if self.item_loaded() {
-            Output::Clock
+            Some(Output::Clock)
         } else {
-            Output::Missing
+            None
         }
     }
 
