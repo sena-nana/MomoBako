@@ -21,6 +21,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 | 领域服务数据 | 当前目录下的 `.service-data` | `src-backend/src/services/runtime/mod.rs` |
 | 应用设置 | `%LOCALAPPDATA%\MomoBako\settings.json`，没有这个变量时依次退到 `%APPDATA%`、当前目录 | `src-nana/src/settings.rs` |
 | 侧栏、展示方式、圆角 | 设置文件旁的 `sidebar.json`、`file-display.json`、`corners.json` | `workspace.rs`、`files_display.rs`、`admin_support.rs` |
+| 上次打开的资源库 | 设置文件旁的 `last-repository.json`（键同 Vue 本地存储 `momobako.lastActiveRepositoryId`） | `workspace_remember.rs` |
 | 播放设置、播放会话、播放器偏好 | 设置文件旁的 `playback-settings.json`、`playback-sessions.json`、`playlist-player-preferences.json` | `player_support.rs` |
 | 主窗口位置、尺寸和最大化 | 应用数据目录下的 `com.momobako.desktop/nana-main-window-state.json` | `src-nana/src/window_state.rs` |
 
@@ -53,7 +54,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 
 下文的「Windows 非测试构建」指 `cfg(all(windows, not(test)))`：只有单元测试构建（`cfg(test)`）不开声卡、不注册系统媒体会话。代码路径都在 `src-nana/src/shell/` 下，另有说明的除外。
 
-- **启动**：四步依次读资源库列表、同步仓库（`PROTOCOL_REPOSITORY_SYNC`）、读仓库摘要、读首屏目录；缺失仓库和空列表不进同步。失败停在当前步，保留已完成的步骤，给「重试」；启动页显示最近 8 条加载日志，条目和明细照 Vue `emitStartupLog`，设置包读完再记「应用配置与插件设置加载完成」「首屏启动流程完成」。侧栏在同步以后（读到摘要时）才绑定仓库、读目录树。见 `workspace.rs`、`workspace_startup.rs`、`route_startup.rs`。
+- **启动**：四步依次读资源库列表、同步仓库（`PROTOCOL_REPOSITORY_SYNC`）、读仓库摘要、读首屏目录；缺失仓库和空列表不进同步。照 Vue 先打开上次打开的资源库（`last-repository.json`），它不在列表里时打开第一项；读完摘要（缺失仓库是选中时）记住这次的仓库，列表空了清掉。失败停在当前步，保留已完成的步骤，给「重试」；启动页显示最近 8 条加载日志，条目和明细照 Vue `emitStartupLog`，设置包读完再记「应用配置与插件设置加载完成」「首屏启动流程完成」。侧栏在同步以后（读到摘要时）才绑定仓库、读目录树。见 `workspace.rs`、`workspace_startup.rs`、`route_startup.rs`。
 - **换仓库和刷新**：照 Vue `selectRepository` / `loadRepositories`（`workspace_switch.rs`、`workspace_flow.rs`）。
   - 换到别的仓库（切换列表、附加或新建资源库成功、删除当前仓库后选下一个、搜索命中在别的仓库、刷新后当前仓库已不在列表里）：回到启动页、收起侧栏，从「切换资源库」走「扫描资源库文件 → 读取仓库摘要 → 读取首屏目录」；不写首屏启动日志、不重读设置包；目标缺失时直接进缺失页。失败停在启动页给「重试」，重试是完整的首屏启动。上一个仓库的条目、选择、预览、搜索和侧栏内容在活动仓库变了的那次归约里清掉。
   - 同一个仓库（来源动作完成后的刷新、缺失页「刷新」、切换列表选当前仓库、重定向成功）：先同步，再读摘要、重读当前目录（读失败退回根目录），侧栏在后台重读；整轮状态区写「正在同步仓库状态」，失败写进状态区，不回启动页。从刷新进来时先重读资源库列表。

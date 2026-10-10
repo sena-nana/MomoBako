@@ -65,7 +65,7 @@ pub use sidebar::{
 };
 pub(crate) use sidebar::escape_layer;
 pub use workspace::{
-    sidebar_prefs_path, DeleteMode, LibraryCategory, MainRegion, StartupStatus, SyncCounts, WorkspaceEffect,
+    last_repository_path, sidebar_prefs_path, DeleteMode, LibraryCategory, MainRegion, StartupStatus, SyncCounts, WorkspaceEffect,
     WorkspacePanel, WorkspaceRepository, WorkspaceState,
 };
 

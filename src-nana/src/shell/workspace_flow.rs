@@ -90,6 +90,8 @@ impl ShellViewModel {
                 self.repository_id = Some(repo_id.clone());
                 self.apply_snapshot_sidebar(&snapshot);
                 if refreshing {
+                    // Vue `selectRepository` 同一个仓库读完摘要也 `rememberLastActiveRepository`。
+                    self.workspace.remember_repository(Some(repo_id.clone()));
                     self.reload_repository_side_data(&repo_id);
                     self.begin_refresh_directory();
                 } else {
