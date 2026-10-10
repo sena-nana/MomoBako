@@ -144,28 +144,6 @@ fn reduce_input(model: &mut ShellViewModel, message: InputMessage) {
             model.input.pending_download = Some(super::source_prompt::PendingDownload { plugin_id, method, payload, repository_id, progress });
             model.input.queue_download_dialog();
         }
-        InputMessage::OpenSourcePlaylist { plugin_id, method, payload, repository_id } => {
-            model.input.source_playlist = Some(super::source_prompt::SourcePlaylistPrompt {
-                plugin_id,
-                method,
-                payload,
-                repository_id,
-                draft: String::new(),
-            });
-        }
-        InputMessage::SourcePlaylistDraft(value) => {
-            if let Some(prompt) = model.input.source_playlist.as_mut() {
-                prompt.draft = value;
-            } else {
-                eprintln!("Nana 没有打开的来源播放列表名称");
-            }
-        }
-        InputMessage::SubmitSourcePlaylist => super::source_prompt::submit_source_playlist(model),
-        InputMessage::CloseSourcePlaylist => {
-            if model.input.source_playlist.take().is_none() {
-                eprintln!("Nana 没有打开的来源播放列表名称");
-            }
-        }
         InputMessage::BeginThumbnailFile { repo_id, path, kind } => super::thumbnail_prompt::begin(model, repo_id, path, kind),
         InputMessage::PasteThumbnail { repo_id, path, kind } => super::thumbnail_prompt::paste(model, repo_id, path, kind),
         InputMessage::ClearThumbnail { repo_id, path, kind } => super::thumbnail_prompt::clear(model, repo_id, path, kind),

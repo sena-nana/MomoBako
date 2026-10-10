@@ -131,24 +131,6 @@ pub(super) fn cases() -> Vec<Case> {
             close_button: false,
         },
         Case {
-            name: "source-playlist",
-            model: || {
-                opened(
-                    "live-files-plain",
-                    ShellMessage::Input(InputMessage::OpenSourcePlaylist {
-                        plugin_id: "source".into(),
-                        method: "playlist.create".into(),
-                        payload: serde_json::json!({}),
-                        repository_id: None,
-                    }),
-                )
-            },
-            key: OverlayKey::SourcePlaylist,
-            closes: |message| matches!(message, ShellMessage::Input(InputMessage::CloseSourcePlaylist)),
-            busy: None,
-            close_button: false,
-        },
-        Case {
             name: "playlist-create-dialog",
             model: || scene("playlist-create-dialog"),
             key: OverlayKey::PlaylistCreate,
@@ -383,11 +365,10 @@ fn dialog_state_changes_patch_the_bound_fields_in_place() {
 /// 每个带输入框的对话框：焦点放进输入框开始组合，后台消息和动效帧都不打断，提交后文字进草稿。
 #[test]
 fn composing_in_dialog_inputs_is_never_interrupted() {
-    let cases: [(&str, fn() -> ShellViewModel, &str); 4] = [
+    let cases: [(&str, fn() -> ShellViewModel, &str); 3] = [
         ("smart-folder-dialog", || scene("smart-folder-dialog"), "名称"),
         ("copy-dialog", || scene("copy-dialog"), "目标目录"),
         ("playlist-create-dialog", || scene("playlist-create-dialog"), "名称"),
-        ("source-playlist", || cases().into_iter().find(|case| case.name == "source-playlist").map(|case| (case.model)()).expect("用例"), "播放列表名称"),
     ];
     for (name, model, label) in cases {
         let mut harness = ShellHarness::mount(model());

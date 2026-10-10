@@ -265,6 +265,8 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
             model.admin.push_effect(AdminEffect::CallPlugin { plugin_id, method, payload, repository_id, origin: PluginCallOrigin::FileMenu });
         }
         AdminMessage::FilePluginFinished { method, result } => finish_file_plugin(model, &method, result),
+        AdminMessage::CreateSourcePlaylist { playlist, repository_id } => create_source_playlist(model, playlist, repository_id),
+        AdminMessage::SourcePlaylistFinished(result) => finish_source_playlist(model, result),
         AdminMessage::BeginSourceAuth { plugin_id, repo_id } => flow::begin(model, &plugin_id, repo_id),
         AdminMessage::CheckSourceAuth { plugin_id, repo_id } => flow::refresh_status(model, &plugin_id, &repo_id),
         AdminMessage::ClearSourceAuth { plugin_id, repo_id } => flow::clear(model, &plugin_id, &repo_id),
@@ -577,6 +579,42 @@ fn finish_file_plugin(model: &mut ShellViewModel, method: &str, result: Result<s
                 model.operation.cancel(operation);
             }
             model.files.error = if error.is_empty() { format!("{method} 调用失败。") } else { error };
+        }
+    }
+}
+
+/// 「创建播放列表」照 Vue `runPlaylistAction` 交给服务：没有当前仓库或来源歌单标识时只报错，不建。
+fn create_source_playlist(model: &mut ShellViewModel, playlist: super::super::entry_actions::SourcePlaylist, repository_id: Option<String>) {
+    let Some(repo_id) = repository_id.filter(|id| !id.trim().is_empty()) else {
+        eprintln!("Nana 创建来源播放集没有当前仓库：{}", playlist.path);
+        model.files.error = "没有当前资源库，不能创建播放列表。".into();
+        return;
+    };
+    let Some(playlist_id) = playlist.playlist_id else {
+        eprintln!("Nana 来源目录缺少播放列表标识：{}", playlist.path);
+        model.files.error = "来源目录缺少播放列表标识".into();
+        return;
+    };
+    model.admin.push_effect(AdminEffect::CreateSourcePlaylist {
+        repo_id,
+        playlist_id,
+        name: playlist.name,
+        player_type_id: playlist.player_type_id,
+        path: playlist.path,
+    });
+}
+
+/// 建好以后和别的来源动作一样刷新资源库（Vue `context.refreshRepo()`），新播放集随摘要出现在侧栏。
+/// 失败写进文件列表的错误；Vue 在这里没有任何提示，失败只留在控制台。
+fn finish_source_playlist(model: &mut ShellViewModel, result: Result<(), String>) {
+    match result {
+        Ok(()) => {
+            model.files.error.clear();
+            model.workspace.request_repository_refresh();
+        }
+        Err(error) => {
+            eprintln!("Nana 创建来源播放集失败：{error}");
+            model.files.error = if error.is_empty() { "创建播放列表失败。".into() } else { error };
         }
     }
 }

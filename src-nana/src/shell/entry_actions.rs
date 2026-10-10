@@ -1,13 +1,15 @@
 //! 文件右键里的来源插件动作。
 //!
-//! 能直接调用的方法接到现有 `call_plugin`。下载先要系统目录对话框，
-//! 创建来源播放列表先要名称；确认后才带上目录或名称调用。
+//! 能直接调用的方法接到现有 `call_plugin`。下载先要系统目录对话框，选好目录才带上目录调用。
+//! 「创建播放列表」（`playlist-from-directory`）照 Vue `runPlaylistAction` 不调用插件：在本地建一个以来源
+//! 歌单命名的播放集（已经有就不建），把这个目录加进去，再刷新资源库（`admin_reduce.rs`）。
 
 use serde_json::{Map, Value};
 
 use crate::backend::services::repository::PluginManifest;
 
 use super::files::FileRow;
+use super::player::AUDIO_SEQUENCE_TYPE;
 
 /// 右键可以画出的一条插件动作。
 #[derive(Clone, Debug, PartialEq)]
@@ -17,14 +19,38 @@ pub struct FilePluginAction {
     pub dispatch: FilePluginDispatch,
 }
 
-/// 立刻调用插件，或先问目录、名称再调用。
+/// 立刻调用插件、先问目录再调用，或者在本地建播放集。
 #[derive(Clone, Debug, PartialEq)]
 pub enum FilePluginDispatch {
     Call { plugin_id: String, method: String, payload: Value },
     /// 选中文件夹后把 `destination` 写进载荷再调用。`progress` 是这次下载在任务弹层里的进度行。
     AskFolder { plugin_id: String, method: String, payload: Value, progress: DownloadProgress },
-    /// 名称非空后把名称和当前仓库写进载荷再调用。
-    AskName { plugin_id: String, method: String, payload: Value },
+    /// 来源目录建成本地播放集（Vue `runPlaylistAction`），不调用插件。
+    CreatePlaylist(SourcePlaylist),
+}
+
+/// 来源目录要建成的播放集。标识是「来源-歌单」，名称取来源的歌单名、没有时用目录名，播放器类型取动作声明的、
+/// 默认音频顺序播放。来源载荷里没有歌单标识、条目也没有来源标识时 `playlist_id` 为空，点了只报错。
+#[derive(Clone, Debug, PartialEq)]
+pub struct SourcePlaylist {
+    pub playlist_id: Option<String>,
+    pub name: String,
+    pub player_type_id: String,
+    pub path: String,
+}
+
+impl SourcePlaylist {
+    /// 照 Vue `runPlaylistAction` 从动作声明和目录行算出要建的播放集。
+    fn of(action: &Value, row: &FileRow) -> Self {
+        let provider = row.provider_id.clone().unwrap_or_else(|| "source".into());
+        let item = source_number(row, "playlistId").map(|id| id.to_string()).or_else(|| row.provider_item_id.clone());
+        Self {
+            playlist_id: item.map(|item| format!("{provider}-{item}")),
+            name: source_string(row, "playlistName").unwrap_or_else(|| row.name.clone()),
+            player_type_id: text(action, "playerTypeId").unwrap_or_else(|| AUDIO_SEQUENCE_TYPE.to_string()),
+            path: row.path.clone(),
+        }
+    }
 }
 
 /// 来源下载在任务弹层里的进度行（Vue `runDownloadAction`）：种类是动作名；选好目录先是「准备下载 …」，
@@ -95,16 +121,7 @@ fn prepare(plugin: &PluginManifest, action: &Value, row: &FileRow) -> Option<Fil
                 progress: DownloadProgress::of(&label, row, &operation),
             }
         }
-        "playlist-from-directory" => {
-            let method = method.unwrap_or_else(|| "source.playlistFromDirectory".into());
-            let mut payload = call_payload(action, row, &operation);
-            if let Some(player_type) = text(action, "playerTypeId") {
-                if let Some(object) = payload.as_object_mut() {
-                    object.insert("playerTypeId".into(), Value::String(player_type));
-                }
-            }
-            FilePluginDispatch::AskName { plugin_id: plugin.plugin_id.clone(), method, payload }
-        }
+        "playlist-from-directory" => FilePluginDispatch::CreatePlaylist(SourcePlaylist::of(action, row)),
         _ if method.is_some() => FilePluginDispatch::Call {
             plugin_id: plugin.plugin_id.clone(),
             method: method.unwrap_or_default(),
@@ -314,20 +331,37 @@ mod tests {
         }
     }
 
+    /// 「创建播放列表」照 Vue `runPlaylistAction` 在本地建播放集：标识是「来源-歌单」，名称取来源的歌单名，
+    /// 播放器类型取动作声明的；没有声明时是音频顺序播放，没有歌单名时用目录名。不再调用插件。
     #[test]
-    fn playlist_from_directory_asks_for_a_name() {
+    fn playlist_from_directory_builds_a_local_playlist() {
         let mut directory = row();
         directory.kind = "directory".into();
-        directory.source_payload = Some(serde_json::json!({"entryKind": "playlist-folder", "playlistId": 3}));
+        directory.name = "夜曲合集".into();
+        directory.path = "playlists/night".into();
+        directory.source_payload = Some(serde_json::json!({"entryKind": "playlist-folder", "playlistId": 3, "playlistName": "夜曲"}));
         let actions = actions_for(&[manifest()], &directory);
         assert_eq!(actions.len(), 1);
-        match &actions[0].dispatch {
-            FilePluginDispatch::AskName { method, payload, .. } => {
-                assert_eq!(method, "source.playlistFromDirectory");
-                assert_eq!(payload["playlistId"], 3);
-                assert!(payload.get("name").is_none());
-            }
-            other => panic!("unexpected {other:?}"),
-        }
+        assert_eq!(
+            actions[0].dispatch,
+            FilePluginDispatch::CreatePlaylist(SourcePlaylist {
+                playlist_id: Some("netease-3".into()),
+                name: "夜曲".into(),
+                player_type_id: AUDIO_SEQUENCE_TYPE.into(),
+                path: "playlists/night".into(),
+            })
+        );
+
+        directory.source_payload = Some(serde_json::json!({"entryKind": "playlist-folder"}));
+        directory.provider_id = None;
+        let actions = actions_for(&[manifest()], &directory);
+        let FilePluginDispatch::CreatePlaylist(playlist) = &actions[0].dispatch else { panic!("不是本地建播放集") };
+        assert_eq!(playlist.playlist_id.as_deref(), Some("source-9"), "没有歌单标识时用来源条目标识，来源缺省是 source");
+        assert_eq!(playlist.name, "夜曲合集", "没有歌单名时用目录名");
+
+        directory.provider_item_id = None;
+        let actions = actions_for(&[manifest()], &directory);
+        let FilePluginDispatch::CreatePlaylist(playlist) = &actions[0].dispatch else { panic!("不是本地建播放集") };
+        assert_eq!(playlist.playlist_id, None, "两样标识都没有：点了只报错");
     }
 }

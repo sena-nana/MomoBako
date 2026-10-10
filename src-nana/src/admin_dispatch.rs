@@ -11,8 +11,8 @@ use crate::backend::services::mutsuki_runner::{PROTOCOL_REPOSITORY_ACTION_RUN, P
 use crate::backend::services::repository::{
     BinaryFileWriteRequest, NeteaseRepositoryCacheConfigureRequest, PluginCallRequest, PluginConfigDeleteRequest,
     PluginConfigSetRequest, PluginConfigSnapshot, PluginEnabledRequest, PluginHookExecutionListRequest, PluginInstallRequest,
-    PluginManifest, RepositoryAction, RepositoryActionRunRequest, RepositoryBackendConfigUpdateRequest, RepositoryMutationRequest,
-    SyncRequest, SystemLogQuery,
+    PlaylistItemsByPathsAddRequest, PlaylistMutationRequest, PluginManifest, RepositoryAction, RepositoryActionRunRequest,
+    RepositoryBackendConfigUpdateRequest, RepositoryMutationRequest, SyncRequest, SystemLogQuery,
 };
 use crate::backend::viewmodels::PluginViewModel;
 use crate::shell::admin::api::{self, ApiMessage, HttpRequest};
@@ -84,6 +84,9 @@ fn dispatch_one(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<S
         AdminEffect::WriteFile { path, bytes } => write_file(app, context, path, bytes),
         AdminEffect::CallPlugin { plugin_id, method, payload, repository_id, origin } => {
             call_plugin(app, context, plugin_id, method, payload, repository_id, origin);
+        }
+        AdminEffect::CreateSourcePlaylist { repo_id, playlist_id, name, player_type_id, path } => {
+            create_source_playlist(app, context, repo_id, playlist_id, name, player_type_id, path);
         }
         AdminEffect::UpdateBackendConfig { repo_id, backend_config, step } => {
             let Some(services) = app.services.as_ref() else {
@@ -219,6 +222,41 @@ fn call_plugin(
     })) {
         eprintln!("Nana 插件调用任务提交失败：{error}");
         app.shell.reduce(plugin_result(failed_origin, failed_method, Err(format!("插件调用提交失败：{error}"))));
+    }
+}
+
+/// 「创建播放列表」照 Vue `runPlaylistAction`：先列出播放集，没有这个标识才建，再把目录按路径加进去。
+/// 哪一步失败都把原因交回，不留在进行中。
+fn create_source_playlist(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+    playlist_id: String,
+    name: String,
+    player_type_id: String,
+    path: String,
+) {
+    let Some(services) = app.services.as_ref() else {
+        eprintln!("Nana 创建来源播放集需要领域服务，当前服务未启动");
+        app.shell.reduce(admin(AdminMessage::SourcePlaylistFinished(Err(NO_SERVICES.into()))));
+        return;
+    };
+    let interaction = services.repository_interaction.clone();
+    let executor = services.executor.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        let result = (|| {
+            let existing = executor.block_on(interaction.list_playlists(repo_id.clone()))?;
+            if !existing.iter().any(|playlist| playlist.playlist_id == playlist_id) {
+                let request = PlaylistMutationRequest { repo_id: repo_id.clone(), playlist_id: Some(playlist_id.clone()), name, player_type_id };
+                executor.block_on(interaction.create_playlist(request))?;
+            }
+            let request = PlaylistItemsByPathsAddRequest { repo_id, playlist_id, paths: vec![path] };
+            executor.block_on(interaction.add_playlist_items_by_paths(request)).map(|_| ())
+        })();
+        admin(AdminMessage::SourcePlaylistFinished(result))
+    })) {
+        eprintln!("Nana 创建来源播放集任务提交失败：{error}");
+        app.shell.reduce(admin(AdminMessage::SourcePlaylistFinished(Err(format!("创建播放列表任务提交失败：{error}")))));
     }
 }
 

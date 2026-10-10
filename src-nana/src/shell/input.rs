@@ -22,8 +22,6 @@ mod source_prompt;
 #[path = "thumbnail_prompt.rs"]
 mod thumbnail_prompt;
 
-pub(crate) use source_prompt::playlist_name_dialog;
-
 pub(crate) use reduce::{begin_relocate_dialog, reduce_message};
 pub(crate) use support::{decide_close, CloseDecision};
 pub(crate) use view::close_prompt;
@@ -132,15 +130,6 @@ pub enum InputMessage {
         repository_id: Option<String>,
         progress: super::entry_actions::DownloadProgress,
     },
-    OpenSourcePlaylist {
-        plugin_id: String,
-        method: String,
-        payload: serde_json::Value,
-        repository_id: Option<String>,
-    },
-    SourcePlaylistDraft(String),
-    SubmitSourcePlaylist,
-    CloseSourcePlaylist,
     BeginThumbnailFile { repo_id: String, path: String, kind: String },
     PasteThumbnail { repo_id: String, path: String, kind: String },
     ClearThumbnail { repo_id: String, path: String, kind: String },
@@ -218,8 +207,6 @@ pub struct InputState {
     pub modifiers: HeldModifiers,
     /// 下载菜单已经点过，正在等目录对话框。
     pub pending_download: Option<source_prompt::PendingDownload>,
-    /// 来源播放列表正在问名称。
-    pub source_playlist: Option<source_prompt::SourcePlaylistPrompt>,
     /// 自定义缩略图正在等选文件对话框。
     pub pending_thumbnail: Option<thumbnail_prompt::PendingThumbnail>,
     session: Option<InternalSession>,

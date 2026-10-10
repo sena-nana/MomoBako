@@ -39,7 +39,7 @@ fn vue_look(name: &str) -> Look {
         "copy-dialog" | "hardlink-dialog" => Look { size: MODAL_CARD, danger: false, icon: Some(COPY) },
         "export-dialog" => Look { size: DialogSize::capped(560.0, 92.0), danger: false, icon: Some(DOWNLOAD) },
         "smart-folder-dialog" => plain(SMART_FOLDER),
-        "folder-create-dialog" | "source-playlist" | "playlist-create-dialog" | "close-confirm" => plain(MODAL_CARD),
+        "folder-create-dialog" | "playlist-create-dialog" | "close-confirm" => plain(MODAL_CARD),
         other => panic!("没写 {other} 在 Vue 里的样子"),
     }
 }

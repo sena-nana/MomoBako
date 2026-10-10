@@ -61,6 +61,7 @@ fn file(path: &str, metadata: BTreeMap<String, Value>) -> FileRow {
         tags: Vec::new(),
         thumbnail_custom: false,
         provider_id: None,
+        provider_item_id: None,
         source_payload: None,
         metadata,
     }
