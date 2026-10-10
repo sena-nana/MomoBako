@@ -480,7 +480,7 @@ fn protocol_success_reloads_without_rewriting_rows() {
         [
             FilesEffect::Browse { path, append: false, limit, .. },
             FilesEffect::LoadHardlinks { repo_id },
-        ] if path == "photos" && *limit == super::INITIAL_PAGE_SIZE && repo_id == "repo"
+        ] if path == "photos" && *limit == super::browse::INITIAL_PAGE_SIZE && repo_id == "repo"
     ));
 }
 
@@ -569,7 +569,7 @@ fn directory_replace_opens_and_file_activation_loads_the_asset() {
     assert!(state.selected.is_empty());
     assert!(matches!(
         state.take_effects().as_slice(),
-        [FilesEffect::Browse { path, limit, .. }] if path == "photos" && *limit == super::INITIAL_PAGE_SIZE
+        [FilesEffect::Browse { path, limit, .. }] if path == "photos" && *limit == super::browse::INITIAL_PAGE_SIZE
     ));
     state.loading = false;
     state.pending = None;
@@ -644,7 +644,7 @@ fn append_uses_the_larger_page_and_display_mode_persists() {
     assert!(state.load_more(&ctx));
     assert!(matches!(
         state.take_effects().as_slice(),
-        [FilesEffect::Browse { offset: 1, limit, append: true, .. }] if *limit == super::APPEND_PAGE_SIZE
+        [FilesEffect::Browse { offset: 1, limit, append: true, .. }] if *limit == super::browse::APPEND_PAGE_SIZE
     ));
     state.loading_more = false;
     state.reduce(&ctx, FilesMessage::SetDisplayMode(DisplayMode::List));
