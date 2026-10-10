@@ -328,7 +328,7 @@ fn hardlink_skip_hides_candidate_and_confirm_failure_keeps_it() {
     let ctx = writable();
     let first = HardlinkPrompt { id: "one".into(), new_path: "n".into(), existing_path: "e".into(), size_label: "1 KB".into() };
     let second = HardlinkPrompt { id: "two".into(), new_path: "n2".into(), existing_path: "e2".into(), size_label: "2 KB".into() };
-    state.reduce(&ctx, FilesMessage::HardlinksLoaded(Ok(vec![first.clone(), second.clone()])));
+    state.reduce(&ctx, FilesMessage::HardlinksLoaded { epoch: 0, result: Ok(vec![first.clone(), second.clone()]) });
     assert_eq!(state.dialog, FileDialog::Hardlink);
     assert_eq!(state.current_hardlink().map(|item| item.id.as_str()), Some("one"));
     state.reduce(&ctx, FilesMessage::SkipHardlink);
@@ -365,7 +365,7 @@ fn silent_hardlink_refresh_keeps_dialog_skipped_and_error() {
     state.error = "旧错误".into();
     state.loading = true;
 
-    state.reduce(&ctx, FilesMessage::HardlinksRefreshed(Ok(vec![fresh.clone()])));
+    state.reduce(&ctx, FilesMessage::HardlinksRefreshed { epoch: 0, result: Ok(vec![fresh.clone()]) });
     assert_eq!(state.hardlinks, vec![fresh.clone()]);
     assert_eq!(state.dialog, FileDialog::Closed);
     assert_eq!(state.skipped_hardlinks, vec!["kept".to_string()]);
@@ -373,14 +373,14 @@ fn silent_hardlink_refresh_keeps_dialog_skipped_and_error() {
     assert!(state.loading);
 
     state.dialog = FileDialog::Rename;
-    state.reduce(&ctx, FilesMessage::HardlinksRefreshed(Err("刷新失败".into())));
+    state.reduce(&ctx, FilesMessage::HardlinksRefreshed { epoch: 0, result: Err("刷新失败".into()) });
     assert_eq!(state.hardlinks, vec![fresh]);
     assert_eq!(state.dialog, FileDialog::Rename);
     assert_eq!(state.skipped_hardlinks, vec!["kept".to_string()]);
     assert_eq!(state.error, "旧错误");
     assert!(state.loading);
 
-    state.reduce(&ctx, FilesMessage::HardlinksLoaded(Ok(vec![kept.clone()])));
+    state.reduce(&ctx, FilesMessage::HardlinksLoaded { epoch: 0, result: Ok(vec![kept.clone()]) });
     assert_eq!(state.dialog, FileDialog::Hardlink);
     assert_eq!(state.hardlinks, vec![kept]);
     assert!(state.skipped_hardlinks.is_empty());
@@ -395,7 +395,7 @@ fn silent_hardlink_refresh_keeps_dialog_skipped_and_error() {
     state.refresh_hardlinks_silent("repo");
     assert!(matches!(
         state.effects.as_slice(),
-        [FilesEffect::RefreshHardlinks { repo_id }] if repo_id == "repo"
+        [FilesEffect::RefreshHardlinks { repo_id, .. }] if repo_id == "repo"
     ));
     assert_eq!(state.dialog, FileDialog::Copy);
     assert!(!state.loading);
@@ -479,7 +479,7 @@ fn protocol_success_reloads_without_rewriting_rows() {
         state.take_effects().as_slice(),
         [
             FilesEffect::Browse { path, append: false, limit, .. },
-            FilesEffect::LoadHardlinks { repo_id },
+            FilesEffect::LoadHardlinks { repo_id, .. },
         ] if path == "photos" && *limit == super::browse::INITIAL_PAGE_SIZE && repo_id == "repo"
     ));
 }

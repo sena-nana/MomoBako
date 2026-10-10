@@ -96,6 +96,24 @@ fn finish_switch(model: &mut ShellViewModel, repo_id: &str) {
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(directory(repo_id, "", &["cover.png"]))));
 }
 
+/// 换仓库以后，上一个仓库后台查的硬链接候选晚到：读取是换仓库以前发出的，不认，新仓库里不弹别的仓库的确认。
+#[test]
+fn hardlink_candidates_of_the_previous_repository_are_dropped() {
+    let mut model = ready_on_alpha();
+    let epoch = model.files.hardlink_epoch();
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::SelectRepositoryFromSwitcher(BETA.into())));
+    finish_switch(&mut model, BETA);
+    let prompt = crate::shell::HardlinkPrompt {
+        id: "alpha-link".into(),
+        new_path: "inbox/a.png".into(),
+        existing_path: "a.png".into(),
+        size_label: "1 KB".into(),
+    };
+    model.reduce(ShellMessage::Files(FilesMessage::HardlinksChecked { epoch, result: Ok(vec![prompt]) }));
+    assert_eq!(model.files.dialog, crate::shell::files::FileDialog::Closed, "别的仓库的候选不弹确认");
+    assert!(model.files.current_hardlink().is_none());
+}
+
 /// 切换列表选了别的仓库：回到启动页、侧栏收起，第 2 步「扫描资源库文件」，任务弹层「加载资源库」；
 /// 不写首屏启动日志；三步走完回到文件页、侧栏回来，不重读设置包，任务弹层这一行完成。
 #[test]

@@ -115,10 +115,10 @@ impl FilesState {
             FilesMessage::ProtocolFinished { result, reload, hardlinks } => {
                 self.note_protocol_finished(ctx, result, reload, hardlinks);
             }
-            FilesMessage::HardlinksLoaded(result) => self.note_hardlinks(result),
-            FilesMessage::HardlinksRefreshed(result) => self.note_hardlinks_silent(result),
-            FilesMessage::HardlinksChecked(Ok(prompts)) => self.note_hardlinks_synced(prompts),
-            FilesMessage::HardlinksChecked(Err(error)) => eprintln!("Nana 后台读取硬链接候选失败：{error}"),
+            FilesMessage::HardlinksLoaded { epoch, result } => self.note_hardlinks(epoch, result),
+            FilesMessage::HardlinksRefreshed { epoch, result } => self.note_hardlinks_silent(epoch, result),
+            FilesMessage::HardlinksChecked { epoch, result: Ok(prompts) } => self.note_hardlinks_synced(epoch, prompts),
+            FilesMessage::HardlinksChecked { epoch, result: Err(error) } => self.note_hardlinks_check_failed(epoch, &error),
             FilesMessage::HardlinkConfirmed { result, .. } => self.note_hardlink_confirmed(result),
             FilesMessage::NoteError(error) => self.note_error(error),
             FilesMessage::ThumbnailSaved { path, thumbnail_path, custom } => self.note_custom_thumbnail(&path, thumbnail_path, custom),
@@ -128,7 +128,7 @@ impl FilesState {
     }
 
     /// Escape 现在能关掉文件页的哪一层：右键菜单、导入菜单、导出对话框、硬链接确认、文件对话框。
-    /// 导出中和变更进行中的对话框不关，没有可关的为 `None`。
+    /// 导出中、变更进行中的对话框和处理中的硬链接确认（含确认以后等候选重读）不关，没有可关的为 `None`。
     pub(crate) fn escape_layer(&self) -> Option<FilesLayer> {
         if self.entry_menu.is_some() {
             Some(FilesLayer::EntryMenu)
@@ -136,8 +136,8 @@ impl FilesState {
             Some(FilesLayer::ImportMenu)
         } else if self.export.open && !self.export.busy {
             Some(FilesLayer::Export)
-        } else if self.dialog == FileDialog::Hardlink && !self.mutating {
-            Some(FilesLayer::Hardlink)
+        } else if self.dialog == FileDialog::Hardlink {
+            (!self.hardlink_busy()).then_some(FilesLayer::Hardlink)
         } else if self.dialog != FileDialog::Closed && !self.mutating {
             Some(FilesLayer::Dialog)
         } else {

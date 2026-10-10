@@ -668,16 +668,22 @@ fn binding_a_repository_reads_actions_and_hardlinks() {
     let admin = admin_effects(&mut model);
     assert!(admin.iter().any(|effect| matches!(effect, AdminEffect::LoadActions { repo_id } if repo_id == REPO)), "绑定仓库要读动作：{admin:?}");
     let files = model.files.take_effects();
-    assert!(files.iter().any(|effect| matches!(effect, FilesEffect::CheckHardlinks { repo_id } if repo_id == REPO)), "绑定仓库要查硬链接候选");
+    let epoch = files
+        .iter()
+        .find_map(|effect| match effect {
+            FilesEffect::CheckHardlinks { repo_id, epoch } if repo_id == REPO => Some(*epoch),
+            _ => None,
+        })
+        .expect("绑定仓库要查硬链接候选");
 
     assert_eq!(SidebarView::project(&model).nav.actions, 0);
     model.reduce(ShellMessage::Admin(AdminMessage::ActionsLoaded { repo_id: REPO.into(), result: Ok(vec![repository_action("act-1")]) }));
     assert_eq!(SidebarView::project(&model).nav.actions, 1, "读回动作后侧栏有「动作」入口");
 
-    model.reduce(ShellMessage::Files(FilesMessage::HardlinksChecked(Err("索引被占用".into()))));
+    model.reduce(ShellMessage::Files(FilesMessage::HardlinksChecked { epoch, result: Err("索引被占用".into()) }));
     assert!(model.files.error.is_empty(), "后台读取失败不写进文件列表");
     let prompt = HardlinkPrompt { id: "c-1".into(), new_path: "b.png".into(), existing_path: "a.png".into(), size_label: "1 KB".into() };
-    model.reduce(ShellMessage::Files(FilesMessage::HardlinksChecked(Ok(vec![prompt]))));
+    model.reduce(ShellMessage::Files(FilesMessage::HardlinksChecked { epoch, result: Ok(vec![prompt]) }));
     assert_eq!(model.files.dialog, FileDialog::Hardlink, "有候选就弹出确认");
 
     let generation = model.workspace.list_generation;

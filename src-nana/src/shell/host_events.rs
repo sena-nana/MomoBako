@@ -227,7 +227,7 @@ mod tests {
             browse.as_slice(),
             [
                 crate::shell::FilesEffect::Browse { path, trash: false, append: false, .. },
-                crate::shell::FilesEffect::RefreshHardlinks { repo_id },
+                crate::shell::FilesEffect::RefreshHardlinks { repo_id, .. },
             ] if path == "photos" && repo_id == "repo"
         ));
         assert!(!files.files.loading);
@@ -256,7 +256,7 @@ mod tests {
             trash.files.take_effects().as_slice(),
             [
                 crate::shell::FilesEffect::Browse { path, trash: true, .. },
-                crate::shell::FilesEffect::RefreshHardlinks { repo_id },
+                crate::shell::FilesEffect::RefreshHardlinks { repo_id, .. },
             ] if path == "bin" && repo_id == "repo"
         ));
 
@@ -265,7 +265,7 @@ mod tests {
         send(&mut category, HostMessage::StructureUpdated { repo_id: "repo".into(), reason: "watcher".into() });
         assert!(matches!(
             category.files.take_effects().as_slice(),
-            [crate::shell::FilesEffect::RefreshHardlinks { repo_id }] if repo_id == "repo"
+            [crate::shell::FilesEffect::RefreshHardlinks { repo_id, .. }] if repo_id == "repo"
         ));
 
         let mut playlist = ready(WorkspacePanel::Playlist);
@@ -276,7 +276,7 @@ mod tests {
         }));
         assert!(matches!(
             playlist.files.take_effects().as_slice(),
-            [crate::shell::FilesEffect::RefreshHardlinks { repo_id }] if repo_id == "repo"
+            [crate::shell::FilesEffect::RefreshHardlinks { repo_id, .. }] if repo_id == "repo"
         ));
 
         let mut busy = ready(WorkspacePanel::Files);
