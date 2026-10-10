@@ -59,6 +59,7 @@
 - `GET /repositories`
   - List registered repositories from `MetaHub/repositories.db`
   - Local filesystem repositories return `status: "ready"` when the registered path exists and `status: "missing"` when the local directory cannot be found.
+  - Repositories whose backend plugin is not registered (package removed or unreadable) are still listed with `backend.kind: "unavailable"` and `assetCount: 0`. Listing does not open or rebuild their storage, so one such repository cannot fail the whole list, the file watcher or runtime startup; the host logs one `backendUnregistered` warning per repository until the plugin is registered again.
   - Account-backed repositories that require a local managed cache, currently 网易云音乐, include `localCache: { required, path, status }`.
   - 网易云 `localCache.required` is always `true`; `status` is `"ready"` when the configured cache directory exists, `"missing"` when a configured directory is gone, and `"unconfigured"` for legacy URI-style repositories that have not selected a local cache directory.
   - Repositories whose Source declares authentication include the public state `authentication: { required, loggedIn, loginExpired }`. This state is derived only from the persisted credential reference and last-known expiry flag; credentials are never returned. Logout sets `loggedIn=false` and `loginExpired=true` while preserving the repository and cache.

@@ -276,6 +276,37 @@ pub(crate) fn create_local_repository_record_for_external_tests(
     repo_id
 }
 
+/// 只写一条资源库登记，不准备存储也不注册后端插件，模拟插件被移除后留下的登记。
+#[cfg(test)]
+pub(crate) fn register_repository_without_backend_plugin(
+    state: &RepositoryState,
+    repo_id: &str,
+    repo_root: &Path,
+    backend_plugin_id: &str,
+) {
+    state
+        .ensure_initialized()
+        .expect("repository state should initialize");
+    let registry = Connection::open(&state.registry_path).expect("registry should open");
+    registry
+        .execute(
+            r#"
+            INSERT INTO repositories (
+              repo_id, name, path, backend_plugin_id, backend_config_json, status, created_at, updated_at
+            )
+            VALUES (?1, ?2, ?3, ?4, '{}', 'ready', ?5, ?5)
+            "#,
+            params![
+                repo_id,
+                "Orphaned Backend Repo",
+                repo_root.to_string_lossy().to_string(),
+                backend_plugin_id,
+                now_rfc3339()
+            ],
+        )
+        .expect("repository should be registered");
+}
+
 #[cfg(test)]
 pub(crate) fn serve_test_http_body(body: impl AsRef<[u8]> + Send + 'static) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").expect("test HTTP server should bind");
