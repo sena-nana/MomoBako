@@ -150,18 +150,18 @@ pub(super) fn body(signals: ListSignals, hot: HotSignals) -> AnyView {
     .into_any()
 }
 
-/// `.asset-browser__state`：圆角小框，白底描边；出错时是浅红底红字。
+/// `.asset-browser__state`：圆角小框，白底描边；出错时是浅红底红字。它在 Vue 里是纵向 flex 容器的子项，
+/// `display: inline-flex` 也被拉满宽度，所以左右各留 20 的边距撑满列表宽，不随文字收窄。
 fn state_box(label: String, error: bool, spinner: bool, hot: HotSignals) -> AnyView {
     let (fill, border, color) = if error {
         (None, SemanticColorRole::Danger, SemanticColorRole::Danger)
     } else {
         (Some(SemanticColorRole::Background), SemanticColorRole::Border, SemanticColorRole::Muted)
     };
-    let mut frame = Stack::row(8.0).align(AlignSpec::Center).padding_xy(12.0, 10.0).radius(RadiusTier::Xl).with_layout(|layout| {
+    let mut frame = Stack::row(8.0).align(AlignSpec::Center).width(LengthSpec::Fill).padding_xy(12.0, 10.0).radius(RadiusTier::Xl).with_layout(|layout| {
         layout.margin_top = Some(LengthSpec::Px(16.0));
         layout.margin_left = Some(LengthSpec::Px(LIST_PADDING_X));
         layout.margin_right = Some(LengthSpec::Px(LIST_PADDING_X));
-        layout.align_self = Some(AlignSpec::Start);
     });
     let mut node_style = frame.node_style();
     node_style.background = fill;

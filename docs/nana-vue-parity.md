@@ -110,9 +110,9 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
   - Vue 的爬升定时器会把更新到 88 以上的值压回 88（更新和完成总在同一拍，看不到）；Nana 不往回压。
   - 「同步资源库」「导入资源库」「配置网易云缓存」「导出资源库」在 Vue 里也有进度行，但入口函数（`syncActiveRepository`、`importExistingRepository`、`configureNeteaseRepositoryCacheInWorkspace`、`exportCurrentRepository`）没有界面调用方，Nana 不做。
 - 过程中的状态（`tmp/vue-mock/scenes/states.ts` 和同名 Nana 场景）：
-  - `file-operation-progress`（cover.png 拖进 assets，移动没回来）：两边都是「移动文件 · 移动到目标文件夹」爬到 88%、文件列「正在处理文件」、详情是 cover。Vue 的「正在处理文件」撑满列表宽，Nana 宽度随内容。
+  - `file-operation-progress`（cover.png 拖进 assets，移动没回来）：两边都是「移动文件 · 移动到目标文件夹」爬到 88%、文件列「正在处理文件」、详情是 cover。「正在处理文件」两边都撑满列表宽：Vue 的 `.asset-browser__state` 写的是 `inline-flex`，但它是纵向 flex 容器的子项，照样被拉满，Nana 原来按字面画成随内容宽，已改。
   - `repo-switch-startup`（换到第二资源库，同步没回来）：两边都回到启动页、收起侧栏，停在第 2 步「扫描资源库文件」。加载日志的最近 8 条和明细两边一样（从「首屏启动流程完成。」到「首屏启动文件变化同步完成。」）；Vue 的日志时间是截图时的真实时钟，Nana 场景固定成 16:00:00。
-  - `repo-refresh-sync`（刷新当前资源库，同步没回来）：两边侧栏状态区都是「正在同步仓库状态」，任务弹层都是「加载资源库 · 加载资源库摘要」的不定进度。Vue 的状态行撑满侧栏宽，Nana 宽度随内容；不定进度的条两边都按 `progress-pulse` 呼吸（截图停在某一刻，透明度不同）。
+  - `repo-refresh-sync`（刷新当前资源库，同步没回来）：两边侧栏状态区都是「正在同步仓库状态」，任务弹层都是「加载资源库 · 加载资源库摘要」的不定进度。状态行两边都撑满侧栏宽（`.workspace-state` 同样是纵向 flex 容器里的 `inline-flex`，Nana 原来随内容宽，已改）；不定进度的条两边都按 `progress-pulse` 呼吸（截图停在某一刻，透明度不同）。
   - `preview-no-player`（滤掉 media-preview 插件后预览 clip.avi）：两边播放条第一行「未选择播放内容」、第二行「没有可用于播放此媒体的插件」。预览框 Vue 没有预览插件，是空白；Nana 自己解 AVI，真窗口里画画面（离屏会话没有宿主纹理，场景只交会话和音轨，画的是没有画面时的唱片舞台）。音频不会出这条提示：Nana 的内置解码器认领 mp3 这些格式，没有音频插件也接管播放条（见设置页「音频播放」的内置解码器）。
   - `files-multi-select`（单击 cover、Shift 单击 clip-01、Ctrl 单击 clip-03）：两边都是 cover、page、clip-01、clip-03 四项选中，详情「4 个项目 · 4 个文件」。1200×800 下两边的播放条都是一行，文件列表一样高，第二行卡片露出上半截；Nana 的标题在这个宽度按省略号收尾，音量在卡片里（见上文播放条的宽排版下限）。
   - 任务弹层的位置两边不同（`task-running` 也是）：Vue 按估算高度（至少 180）把弹层放在按钮上方，内容少时离按钮空一段；Nana 按实际高度贴着按钮上方。

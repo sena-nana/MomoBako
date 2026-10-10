@@ -487,6 +487,24 @@ fn the_player_bar_stays_on_one_row_in_the_standard_files_page() {
     assert!(play.1 > media.1 + media.3, "卡片放不下一行时换三行，传输在媒体下面");
 }
 
+/// 文件列的状态框（「正在处理文件」）和侧栏的忙碌行（「正在同步仓库状态」）照 Vue 撑满所在的列：两处在 Vue 里都写
+/// `inline-flex`，但都是纵向 flex 容器的子项，被拉满宽度。状态框左右各留 20，忙碌行占满侧栏内容宽。
+#[test]
+fn state_rows_fill_their_column_like_vue() {
+    let mut harness = ShellHarness::mount(scene("file-operation-progress"));
+    settle(&mut harness);
+    let browser = bounds(&harness, "file-browser-card");
+    let state = bounds(&harness, "file-state");
+    assert!((state.0 - (browser.0 + 21.0)).abs() <= 1.0, "状态框左边留 20：{state:?} / {browser:?}");
+    assert!((state.0 + state.2 - (browser.0 + browser.2 - 21.0)).abs() <= 1.0, "状态框右边也留 20：{state:?} / {browser:?}");
+
+    let mut harness = ShellHarness::mount(scene("repo-refresh-sync"));
+    settle(&mut harness);
+    let busy = bounds(&harness, "sidebar-status-busy");
+    let all = bounds(&harness, "shortcut-all");
+    assert!((busy.0 - all.0).abs() <= 1.0 && (busy.2 - all.2).abs() <= 1.0, "忙碌行和快捷方式一样宽：{busy:?} / {all:?}");
+}
+
 /// 播放条量到的宽度和原来一样时归约不改状态，播放条岛不重建；列表宽度的回报也一样。
 /// 否则新的播放条又量一次、又发一次，变成每帧重建。
 #[test]
