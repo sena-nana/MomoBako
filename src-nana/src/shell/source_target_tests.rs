@@ -154,6 +154,42 @@ fn downloading_to_another_repository_asks_for_the_target_first() {
     );
 }
 
+/// 第三方来源的单曲：来源载荷里只有条目种类、没有歌曲标识。右键清理播放缓存、下载到其他资源库时，`songId` 退回条目
+/// 的来源标识（`providerItemId`），`playlistId` 不退回（Vue 把歌曲的标识也填成歌单标识）。
+#[test]
+fn a_track_without_a_song_id_is_identified_by_its_provider_item_id() {
+    let mut model = menu_open();
+    let row = model.files.rows.iter_mut().find(|row| row.path == TRACK).expect("晴天.mp3");
+    row.source_payload = Some(json!({ "entryKind": "track", "songName": "晴天" }));
+    assert_eq!(row.provider_item_id.as_deref(), Some("186016"));
+
+    click(&mut model, "清理播放缓存");
+    let effects = model.admin.take_effects();
+    let payload = effects
+        .iter()
+        .find_map(|effect| match effect {
+            AdminEffect::CallPlugin { payload, origin: PluginCallOrigin::FileMenu, .. } => Some(payload.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("清理播放缓存没有调用插件：{effects:?}"));
+    assert_eq!(payload["songId"], 186016);
+    assert!(payload.get("playlistId").is_none(), "单曲不拿自己的标识去填歌单标识");
+
+    model.reduce(ShellMessage::Files(FilesMessage::OpenEntryMenu { path: TRACK.into(), x: 400.0, y: 470.0 }));
+    click(&mut model, "下载单曲到其他资源库");
+    model.reduce(ShellMessage::Admin(AdminMessage::ChooseDownloadRepository("third-repo".into())));
+    let effects = model.admin.take_effects();
+    let payload = effects
+        .iter()
+        .find_map(|effect| match effect {
+            AdminEffect::DownloadToRepository { payload, .. } => Some(payload.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("没有下载到其他资源库：{effects:?}"));
+    assert_eq!(payload["songId"], 186016);
+    assert!(payload.get("playlistId").is_none());
+}
+
 /// 取消、Escape 都不下载；导入或同步目标资源库失败时进度行收起，原因写进文件列。
 #[test]
 fn cancelling_or_failing_downloads_nothing_more() {

@@ -93,7 +93,7 @@ impl DownloadTarget {
 }
 
 /// 来源目录要建成的播放集。标识是「来源-歌单」，名称取来源的歌单名、没有时用目录名，播放器类型取动作声明的、
-/// 默认音频顺序播放。来源载荷里没有歌单标识、条目也没有来源标识时 `playlist_id` 为空，点了只报错。
+/// 默认音频顺序播放。来源载荷里没有歌单标识、目录也没有来源标识时 `playlist_id` 为空，点了只报错。
 #[derive(Clone, Debug, PartialEq)]
 pub struct SourcePlaylist {
     pub playlist_id: Option<String>,
@@ -106,7 +106,7 @@ impl SourcePlaylist {
     /// 照 Vue `runPlaylistAction` 从动作声明和目录行算出要建的播放集。
     fn of(action: &Value, row: &FileRow) -> Self {
         let provider = row.provider_id.clone().unwrap_or_else(|| "source".into());
-        let item = source_number(row, "playlistId").map(|id| id.to_string()).or_else(|| row.provider_item_id.clone());
+        let item = source_identifier(row, "playlistId");
         Self {
             playlist_id: item.map(|item| format!("{provider}-{item}")),
             name: playlist_name(row),
@@ -338,12 +338,35 @@ fn public_payload(payload: Option<&Value>) -> Value {
     Value::Object(public)
 }
 
+/// 条目在来源里的数字标识：先看来源载荷，再看元数据。都没有时，只有条目自己那一种标识退回它的来源标识
+/// （`providerItemId`，条目在来源里的标识）：单曲的 `songId`、歌单目录的 `playlistId`。Vue `sourceNumber` 不分键，
+/// 单曲没有 `playlistId` 时也拿歌曲的标识去填，这里不照抄。
 fn source_number(row: &FileRow, key: &str) -> Option<i64> {
     row.source_payload
         .as_ref()
         .and_then(|payload| payload.get(key))
         .and_then(number_of)
         .or_else(|| row.metadata.get(key).and_then(number_of))
+        .or_else(|| own_item_id(row, key).and_then(|id| id.parse().ok()))
+}
+
+/// 来源标识的文字（Vue `sourceNumber(..) ?? entry.providerItemId`）：数字标识照 [`source_number`]；条目自己那一种
+/// 标识不是数字时原样用它的来源标识。
+fn source_identifier(row: &FileRow, key: &str) -> Option<String> {
+    source_number(row, key).map(|id| id.to_string()).or_else(|| own_item_id(row, key).map(str::to_string))
+}
+
+/// `key` 是条目自己那一种标识时（文件是单曲的 `songId`，目录是歌单的 `playlistId`），条目的来源标识；空白的不算。
+fn own_item_id<'a>(row: &'a FileRow, key: &str) -> Option<&'a str> {
+    let own = match row.kind.as_str() {
+        "file" => "songId",
+        "directory" => "playlistId",
+        _ => return None,
+    };
+    if own != key {
+        return None;
+    }
+    row.provider_item_id.as_deref().map(str::trim).filter(|id| !id.is_empty())
 }
 
 fn number_of(value: &Value) -> Option<i64> {
