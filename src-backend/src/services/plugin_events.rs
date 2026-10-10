@@ -12,7 +12,7 @@
 use std::collections::BTreeSet;
 use std::sync::{Mutex, OnceLock};
 
-use mutsuki_runtime_contracts::{DomainEvent, EntryCompletion, RunnerStatus};
+use mutsuki_runtime_contracts::{DomainEvent, EntryCompletion, RunnerStatus, RuntimeError};
 use serde_json::Value;
 
 use crate::services::logging;
@@ -20,6 +20,8 @@ use crate::services::repository::{SystemLogLocationInput, SystemLogWriteRequest}
 
 /// 插件日志事件的种类（插件 SDK 的 `PLUGIN_LOG_EVENT`）。
 pub(crate) const PLUGIN_LOG_EVENT: &str = "momobako.plugin.log";
+/// 插件 handler 交回 `Err` 时的错误码（插件 SDK 的 `PLUGIN_CALL_FAILED`），`route` 是插件写的原因。
+const PLUGIN_CALL_FAILED: &str = "momobako.plugin_call_failed";
 
 /// 已经记过「丢弃」的插件和事件种类，每一对只记一次。
 static DROPPED_KINDS: OnceLock<Mutex<BTreeSet<(String, String)>>> = OnceLock::new();
@@ -35,10 +37,7 @@ pub(crate) fn settle_call(
         forward_events(plugin_id, repo_id, &result.events, write);
     }
     if let Some(error) = entry.error {
-        return Err(format!(
-            "plugin task failed: {} {:?}",
-            error.route, error.evidence
-        ));
+        return Err(error_text(&error));
     }
     let result = entry
         .result
@@ -47,6 +46,19 @@ pub(crate) fn settle_call(
         return Err(format!("plugin task did not complete: {:?}", result.status));
     }
     Ok(result.output.unwrap_or(Value::Null))
+}
+
+/// 调用失败时交回给调用方的原因。插件 handler 自己交回的错误就是插件写的原因，原样交回，界面上直接看得懂；运行时
+/// 或宿主的错误带上错误码和现场。
+fn error_text(error: &RuntimeError) -> String {
+    if error.code == PLUGIN_CALL_FAILED {
+        return error.route.clone();
+    }
+    if error.evidence.is_empty() {
+        format!("插件调用失败（{}）：{}", error.code, error.route)
+    } else {
+        format!("插件调用失败（{}）：{} {:?}", error.code, error.route, error.evidence)
+    }
 }
 
 /// 产品里的 `write`：写进系统日志。日志器不在时只记标准错误，不影响插件调用的结果。

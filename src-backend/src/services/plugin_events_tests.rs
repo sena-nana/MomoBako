@@ -119,8 +119,7 @@ fn logs_written_before_a_failed_call_reach_the_system_log() {
     let log = sdk_log(NETEASE, "error", "downloadMoveFailed", "网易云下载落盘失败。", json!({ "target": "D:/Music/晴天.mp3" }));
     let result = center.settle(NETEASE, Some("netease-cloud-music:42"), failed_with(NETEASE, vec![log], "文件被占用"));
 
-    let error = result.expect_err("调用失败");
-    assert!(error.contains("文件被占用"), "插件写的原因交回调用方：{error}");
+    assert_eq!(result.expect_err("调用失败"), "文件被占用", "插件写的原因原样交回调用方，界面上直接看得懂");
     let records = center.records();
     assert_eq!(records.len(), 1);
     let record = &records[0];
@@ -203,9 +202,25 @@ fn calls_without_events_write_nothing() {
         entry_id: "call.entry".into(),
         task_id: "call.task".into(),
         result: None,
-        error: Some(RuntimeError::new("momobako.plugin_call_failed", NETEASE, "网络超时")),
+        error: Some(RuntimeError::new("momobako.plugin_call_failed", NETEASE, "网易云登录已失效，请重新登录")),
     };
-    assert!(center.settle(NETEASE, None, quiet_failure).expect_err("失败").contains("网络超时"));
+    assert_eq!(center.settle(NETEASE, None, quiet_failure).expect_err("失败"), "网易云登录已失效，请重新登录");
     center.settle(NETEASE, None, succeeded_with(Vec::new(), Value::Null)).expect("成功");
     assert!(center.records().is_empty());
+}
+
+/// 不是插件自己交回的错误（运行时、宿主）带上错误码和现场，和插件写的原因区分开。
+#[test]
+fn runtime_failures_name_their_code() {
+    let center = LogCenter::new("runtime-error");
+    let mut error = RuntimeError::new("abi.runner.claim_conflict", NETEASE, "runner.run_batch.call");
+    let conflict = EntryCompletion { entry_id: "call.entry".into(), task_id: "call.task".into(), result: None, error: Some(error.clone()) };
+    assert_eq!(
+        center.settle(NETEASE, None, conflict).expect_err("失败"),
+        "插件调用失败（abi.runner.claim_conflict）：runner.run_batch.call"
+    );
+    error.evidence.insert("lease".into(), mutsuki_runtime_contracts::ScalarValue::String("call.lease".into()));
+    let with_evidence = EntryCompletion { entry_id: "call.entry".into(), task_id: "call.task".into(), result: None, error: Some(error) };
+    let text = center.settle(NETEASE, None, with_evidence).expect_err("失败");
+    assert!(text.starts_with("插件调用失败（abi.runner.claim_conflict）：runner.run_batch.call ") && text.contains("call.lease"), "{text}");
 }
