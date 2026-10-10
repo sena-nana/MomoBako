@@ -5,13 +5,12 @@ use super::*;
 #[cfg(test)]
 mod tests {
     use super::super::browser::mirror_netease_entries_to_assets;
+    use super::super::test_support::playback_test_lock;
     use super::*;
     use std::net::TcpListener;
-    use std::sync::MutexGuard;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     const TEST_WEBDAV_PLUGIN_ID: &str = "momobako.webdav";
-    static PLAYBACK_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
 
     struct TestWorkspace {
         root: PathBuf,
@@ -37,13 +36,6 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
         }
-    }
-
-    fn playback_test_lock() -> MutexGuard<'static, ()> {
-        PLAYBACK_TEST_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("playback test lock should succeed")
     }
 
     #[test]
@@ -3528,6 +3520,7 @@ mod tests {
 
     #[test]
     fn supplement_discovered_files_with_hint_paths_adds_missing_watched_file() {
+        let _lock = playback_test_lock();
         fn stat_hook(
             _repo: &RepositoryRecord,
             repo_root: &Path,
