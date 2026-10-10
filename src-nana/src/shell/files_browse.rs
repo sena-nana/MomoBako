@@ -94,12 +94,14 @@ impl FilesState {
                 return false;
             }
         }
-        let incoming: Vec<FileRow> = snapshot.entries.iter().map(FileRow::from_entry).collect();
+        let mut incoming: Vec<FileRow> = snapshot.entries.iter().map(FileRow::from_entry).collect();
         if append {
             self.rows = merge_rows(&self.rows, &incoming);
         } else {
+            self.carry_thumbnails(&mut incoming);
             self.rows = incoming;
             self.virtual_rows.clear();
+            self.prune_decode_requests();
         }
         self.current_path = normalize_path(&snapshot.current_path);
         self.trash = snapshot.special_location.as_deref() == Some("trash");
@@ -169,8 +171,10 @@ impl FilesState {
         true
     }
 
-    pub(in crate::shell) fn set_virtual_rows(&mut self, rows: Vec<FileRow>) {
+    pub(in crate::shell) fn set_virtual_rows(&mut self, mut rows: Vec<FileRow>) {
+        self.carry_thumbnails(&mut rows);
         self.virtual_rows = rows;
+        self.prune_decode_requests();
         let rows = self.virtual_rows.clone();
         self.prune_against(&rows);
     }

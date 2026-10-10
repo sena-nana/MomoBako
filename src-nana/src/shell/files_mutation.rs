@@ -382,7 +382,10 @@ impl FilesState {
         }
         let had_selection = !self.selected.is_empty();
         let typed = created_name.unwrap_or_default();
-        self.rows = snapshot.entries.iter().map(FileRow::from_entry).collect();
+        let mut incoming: Vec<FileRow> = snapshot.entries.iter().map(FileRow::from_entry).collect();
+        self.carry_thumbnails(&mut incoming);
+        self.rows = incoming;
+        self.prune_decode_requests();
         self.current_path = normalize_path(&snapshot.current_path);
         self.total_entries = snapshot.total_entries;
         self.trash = snapshot.special_location.as_deref() == Some("trash");

@@ -636,6 +636,8 @@ mod operation_row_tests;
 #[cfg(test)]
 mod frame_timing_tests;
 #[cfg(test)]
+mod thumbnail_host_tests;
+#[cfg(test)]
 mod workspace_switch_tests;
 #[cfg(test)]
 pub(crate) mod view_harness;
