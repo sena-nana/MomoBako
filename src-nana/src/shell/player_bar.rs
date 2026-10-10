@@ -1,8 +1,8 @@
 //! 底部播放条，对齐 Vue `WorkspacePlayerBar`。
 //!
 //! 卡片里自上而下是 8px 进度轨、「媒体 / 传输 / 时间与音量」三栏，以及图片、视频才有的
-//! 停留时长和适应 / 填充设置。窗口不宽于 1120px 时三栏拆成三行。当前队列浮在卡片右上方。
-//! 文件页、预览页和播放集页共用这一块。
+//! 停留时长和适应 / 填充设置。窗口不宽于 1120px（Vue 断点）、或者卡片比宽排版的下限还窄时，三栏拆成
+//! 三行。当前队列浮在卡片右上方（`player_bar_parts.rs`）。文件页、预览页和播放集页共用这一块。
 
 use nana_ui::runtime::view::{fields, widget, AnyView, IntoView};
 use nana_ui::runtime::{
@@ -204,7 +204,7 @@ fn narrow_layout(model: &ShellViewModel) -> bool {
     model.narrow_viewport() || (width > 0.0 && width < WIDE_MIN_WIDTH)
 }
 
-/// 播放条。`narrow` 对应 Vue 的 `max-width: 1120px` 断点。卡片是 `--radius-2xl`，跟着主题变。
+/// 播放条。窄排版按 [`narrow_layout`] 拆成三行。卡片是 `--radius-2xl`，跟着主题变。
 pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
     let props = BarProps::from_model(model);
     let narrow = narrow_layout(model);

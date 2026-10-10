@@ -45,7 +45,6 @@ where
 }
 
 /// 创建 FIFO 通道；原生宿主在自身事件循环中消费 receiver。
-#[allow(dead_code)]
 pub fn host_event_channel() -> (Arc<dyn HostEventSink>, mpsc::Receiver<HostEvent>) {
     let (sender, receiver) = mpsc::channel();
     let sink = move |event| sender.send(event).map_err(|error| error.to_string());
