@@ -55,7 +55,6 @@ pub struct MomoBakoApplication {
     shell: ShellViewModel,
     repositories_load_scheduled: bool,
     preview_gpu: Option<NativePreviewGpu>,
-    pub(crate) still_gpu: Option<NativePreviewGpu>,
     pub(crate) thumbnail_gpu: Vec<ThumbnailGpu>,
     pub(crate) pending_thumbs: Vec<PendingThumb>,
     host: window_host::HostSession,
@@ -76,14 +75,6 @@ pub(crate) struct NativePreviewGpu {
     pub(crate) height: u32,
 }
 
-impl MomoBakoApplication {
-    /// 当前图片幻灯片的路径和像素。没有帧时不返回。
-    pub(crate) fn slideshow_frame(&self) -> Option<(String, crate::shell::PreviewPixels)> {
-        let still = self.shell.player.still.as_ref()?;
-        Some((still.path.clone(), still.frame.clone()?))
-    }
-}
-
 impl Default for MomoBakoApplication {
     fn default() -> Self {
         Self {
@@ -91,7 +82,6 @@ impl Default for MomoBakoApplication {
             shell: ShellViewModel::default(),
             repositories_load_scheduled: false,
             preview_gpu: None,
-            still_gpu: None,
             thumbnail_gpu: Vec::new(),
             pending_thumbs: Vec::new(),
             host: window_host::HostSession::default(),
@@ -155,7 +145,6 @@ impl ApplicationState for MomoBakoApplication {
             shell,
             repositories_load_scheduled: false,
             preview_gpu: None,
-            still_gpu: None,
             thumbnail_gpu: Vec::new(),
             pending_thumbs: Vec::new(),
             host: window_host::HostSession::default(),
@@ -217,7 +206,6 @@ impl ApplicationState for MomoBakoApplication {
         for request in sidebar_dispatch::dispatch_prepared_browses(&mut self.shell) {
             sidebar_dispatch::dispatch_browse_request(self, context, request);
         }
-        thumbnail_host::publish_still(self, window, context);
         thumbnail_host::publish_preview(self, window, context);
         self.publish_thumbnails(window, context);
         appearance::sync(self, &mut window.document);
