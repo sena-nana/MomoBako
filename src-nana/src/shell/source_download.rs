@@ -16,8 +16,9 @@
 //! 把条数写进状态区（只有跳过时是提醒）、路径写进日志。
 //!
 //! 什么也没下到：插件报告的是一批（结果里有 `completed` 数组）却一项也没有、也没有交回文件时，状态区用警告色提醒
-//! 「没有下载到任何条目」。Nana 下载歌单不列目录，由插件按歌单标识取来源里完整的歌单；网易云插件取不到歌单详情时
-//! 什么也不下、照样交回空结果，不提醒的话界面上只有一闪而过的「下载完成」。
+//! 「没有下载到任何条目」，不提醒的话界面上只有一闪而过的「下载完成」。Nana 下载歌单不列目录，由插件按歌单标识取
+//! 来源里完整的歌单；网易云插件取不到歌单的曲目时整个调用报错（原因写进文件列），这条提醒留给真的没有曲目的歌单和
+//! 别的来源插件。
 
 use serde_json::{json, Value};
 
@@ -103,15 +104,17 @@ impl DownloadRun {
 }
 
 /// 下载结果回来了。成功时进度行照 Vue 写完「下载完成」（有失败的条目时「下载完成，N 项失败」）收起；有要告诉用户的
-/// 结果（[`notice`]）时写进状态区和系统日志；再刷新当前资源库，有提示时这一轮刷新不清它。失败时进度行收起，原因
-/// 写进文件列。
+/// 结果（[`notice`]）时写进状态区和系统日志；再刷新当前资源库，有提示时这一轮刷新不清它。失败时进度行收起，文件列
+/// 写「{动作名}「{名称}」失败：{原因}」（插件交回的原因原样写，例如登录失效、歌单不存在、网络超时；Vue 的失败没人接，
+/// 界面上什么也没有）。
 pub(crate) fn finish(model: &mut ShellViewModel, run: DownloadRun, result: Result<DownloadOutcome, String>) {
     let outcome = match result {
         Ok(outcome) => outcome,
         Err(error) => {
             eprintln!("Nana 来源下载失败：{}：{error}", run.method);
             model.operation.cancel(run.operation);
-            model.files.error = if error.is_empty() { format!("{} 调用失败。", run.method) } else { error };
+            let reason = if error.trim().is_empty() { "插件没有给出原因。".to_string() } else { error };
+            model.files.error = format!("{}「{}」失败：{reason}", run.progress.label, run.progress.subject);
             return;
         }
     };

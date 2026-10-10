@@ -217,7 +217,7 @@ fn cancelling_or_failing_downloads_nothing_more() {
         .expect("开始下载到第二资源库");
     failed.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Err("导入目标资源库失败：磁盘已满".into()) }));
     assert!(failed.operation.shown().is_none(), "失败时进度行收起");
-    assert_eq!(failed.files.error, "导入目标资源库失败：磁盘已满");
+    assert_eq!(failed.files.error, "下载单曲「晴天.mp3」失败：导入目标资源库失败：磁盘已满");
     assert_eq!(crate::shell::status::StatusLine::project(&failed), crate::shell::status::StatusLine::Hidden, "文件列已经写着，状态区不重复");
 }
 

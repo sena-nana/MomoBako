@@ -295,6 +295,26 @@ fn a_track_kept_in_full_is_not_reported_as_an_empty_download() {
     assert_eq!(actions, ["downloadItemFailed", "downloadItemFailed", "downloadLocalSkipped"]);
 }
 
+/// 插件报错（取不到歌单的曲目、登录失效、网络超时）时：进度行收起，文件列写明是哪次下载、为什么失败，原因是插件
+/// 交回的原话；状态区不重复，也不刷新资源库。插件没给原因时写明没有原因。
+#[test]
+fn a_failed_download_says_which_download_failed_and_why() {
+    let mut model = netease();
+    let run = download_to_folder(&mut model, FOLDER, "下载歌单到本地", "D:/Music");
+    model.workspace.take_effects();
+    let reason = "网易云上没有歌单 9001，可能已被删除或设为私密";
+    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Err(reason.into()) }));
+    assert!(model.operation.shown().is_none(), "失败时进度行收起");
+    assert_eq!(model.files.error, format!("下载歌单「夜曲」失败：{reason}"));
+    assert_eq!(StatusLine::project(&model), StatusLine::Hidden, "文件列已经写着，状态区不重复");
+    assert!(model.workspace.refresh.is_none(), "失败不刷新资源库");
+
+    let mut silent = netease();
+    let run = download_to_folder(&mut silent, TRACK, "下载单曲到本地", "D:/Music");
+    silent.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Err("  ".into()) }));
+    assert_eq!(silent.files.error, "下载单曲「晴天.mp3」失败：插件没有给出原因。");
+}
+
 /// 有失败的条目，又跳过了同名文件：一句话里两样都写，按失败显示，日志里各自一条。
 #[test]
 fn failures_and_skipped_files_share_one_notice() {
