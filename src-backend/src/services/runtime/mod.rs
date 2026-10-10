@@ -39,6 +39,11 @@ impl RepositoryRuntime {
         let root = std::env::current_dir()
             .map_err(|error| error.to_string())?
             .join(".service-data");
+        Self::start_at(root)
+    }
+
+    /// 在指定的服务数据目录启动 Runtime；`start` 只负责把当前目录下的 `.service-data` 交进来。
+    pub fn start_at(root: PathBuf) -> Result<Self, String> {
         let repository_state = Arc::new(RepositoryState::from_root(root.clone()));
         let write_lock = Arc::new(Mutex::new(()));
         repository_state.ensure_initialized()?;
