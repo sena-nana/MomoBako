@@ -812,6 +812,8 @@ fn acceptance_pages_use_the_player_surface() {
         tree: None,
         entries: Vec::new(),
     })));
+    assert!(!model.player_surface_visible(), "首屏启动还在等设置包");
+    crate::shell::data_load_tests::answer_settings(&mut model);
     assert!(model.player_surface_visible());
     model.workspace.panel = WorkspacePanel::Playlist;
     assert!(model.player_surface_visible());

@@ -98,9 +98,12 @@ fn a_launch_logs_every_vue_startup_entry_with_its_detail() {
     index.playlists = vec![playlist()];
     model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(index) });
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser(REPO))));
-    assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
+    assert_eq!(model.workspace.startup.status, StartupStatus::Loading, "读完首屏目录还在等设置包");
     assert_eq!(model.workspace.startup.logs.len(), 12, "设置包回来之前只记到「开始加载应用配置与插件设置」");
     model.reduce(bundle(Vec::new()));
+    assert_eq!(model.workspace.startup.logs.len(), 12, "插件列表到了还等播放器类型");
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(Vec::new())));
+    assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
     assert_eq!(
         logs(&model),
         vec![
@@ -133,7 +136,8 @@ fn a_launch_logs_every_vue_startup_entry_with_its_detail() {
     assert_eq!(model.workspace.startup.logs.len(), before, "之后再读设置包（设置页、刷新）不再记");
 }
 
-/// 没有资源库和资源库缺失的启动也读设置包：设置包读失败也照 Vue 记完两条，流程完成的素材数和播放集数是 0。
+/// 没有资源库和资源库缺失的启动也读设置包：设置包读失败也照 Vue 记完两条（不再等播放器类型），流程完成的素材数和
+/// 播放集数是 0。
 #[test]
 fn empty_and_missing_launches_close_the_log_after_the_settings_bundle() {
     let failed = || {
@@ -163,6 +167,7 @@ fn empty_and_missing_launches_close_the_log_after_the_settings_bundle() {
     let generation = missing.workspace.prepare_initial_list();
     missing.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary("gone", "missing")]) });
     missing.reduce(bundle(Vec::new()));
+    missing.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(Vec::new())));
     let tail = &logs(&missing)[4..];
     assert_eq!(
         tail,

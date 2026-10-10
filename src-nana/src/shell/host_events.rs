@@ -8,7 +8,7 @@ use crate::backend::services::host_events::HostEvent;
 use crate::backend::services::repository::SystemLogRecord;
 
 use super::files::FileContext;
-use super::{ShellMessage, ShellViewModel, StartupStatus, WorkspaceEffect, WorkspacePanel};
+use super::{ShellMessage, ShellViewModel, WorkspaceEffect, WorkspacePanel};
 
 const SYNC_LOG_CATEGORY: &str = "repository.sync";
 
@@ -62,9 +62,9 @@ fn note_log(model: &mut ShellViewModel, record: SystemLogRecord) {
     model.workspace.startup.append_sync_log(&level, message, &context);
 }
 
-/// 只在启动完成后刷新当前仓库。缺失仓库和别的仓库直接返回。
+/// 只在工作区内容读好以后（启动完成，或首屏启动只在等设置包）刷新当前仓库。缺失仓库和别的仓库直接返回。
 fn refresh_structure(model: &mut ShellViewModel, repo_id: &str, reason: &str) {
-    if model.workspace.startup.status != StartupStatus::Ready {
+    if !model.workspace.content_loaded() {
         eprintln!("Nana 启动未完成，忽略结构更新：{repo_id}");
         return;
     }
@@ -95,7 +95,7 @@ fn refresh_structure(model: &mut ShellViewModel, repo_id: &str, reason: &str) {
 mod tests {
     use super::*;
     use crate::backend::services::repository::{SystemLogLocation, SystemLogSource};
-    use crate::shell::{LibraryCategory, ShellViewModel, WorkspaceRepository};
+    use crate::shell::{LibraryCategory, ShellViewModel, StartupStatus, WorkspaceRepository};
 
     fn record(id: &str, timestamp: &str, category: &str, repo_id: &str, message: &str) -> SystemLogRecord {
         SystemLogRecord {
