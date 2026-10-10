@@ -59,6 +59,8 @@ pub(crate) mod source_provision;
 pub(crate) use actions_view::{actions_panel, ActionsSignals, ActionsView};
 pub(crate) use logs_state::{LogsSignals, LogsView};
 pub(crate) use logs_view::logs_panel;
+#[cfg(test)]
+pub(crate) use logs_view::LIST_FLOOR as LOG_LIST_FLOOR;
 pub(crate) use plugins_state::{PluginPanelSignals, PluginPanelView};
 pub(crate) use plugins_view::delete_dialog as plugin_delete_dialog;
 pub(crate) use reduce::{open_settings_page, reduce_message};

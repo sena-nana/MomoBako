@@ -7,7 +7,7 @@ use nana_ui::runtime::{Entity, ScrollOffset, ScrollView};
 use crate::backend::services::repository::{
     RepositoryAction, RepositoryActionStep, SystemLogLocation, SystemLogPage, SystemLogRecord, SystemLogSource,
 };
-use crate::shell::admin::AdminMessage;
+use crate::shell::admin::{AdminMessage, LOG_LIST_FLOOR};
 use crate::shell::host_events::HostMessage;
 use crate::shell::view_harness::ShellHarness;
 use crate::shell::{ShellMessage, ShellPage, ShellViewModel, ThumbnailFrame, WorkspacePanel};
@@ -174,8 +174,8 @@ fn at_end(harness: &ShellHarness) -> bool {
     (scroll_y(harness, LOG_SCROLL) - scroll_end(harness, LOG_SCROLL)).abs() < 0.5
 }
 
-/// 窗口放得下页头和 360 高的列表（1200×800）：主体的滚动范围只算到列表自己的盒子，日志再多主体也不滚；
-/// 面板正好撑满主体，列表在筛选下面占满剩下的高度、自己滚，追踪时停在末尾。
+/// 宽敞的窗口（1200×800）表现不变：主体的滚动范围只算到列表自己的盒子，日志再多主体也不滚；
+/// 面板正好撑满主体，列表在筛选下面占满剩下的高度（比 Vue 的 360 还高）、自己滚，追踪时停在末尾。
 #[test]
 fn a_roomy_window_scrolls_only_the_log_list() {
     let harness = crowded_logs_at(1200.0, 800.0, 12);
@@ -190,24 +190,44 @@ fn a_roomy_window_scrolls_only_the_log_list() {
     assert!(at_end(&harness), "追踪时列表停在末尾");
 }
 
-/// 矮窗口（960×600、960×480）：列表保持 Vue 的最小高 360，面板比主体高，主体滚动。一开始页头在视口里；
-/// 主体正好滚到面板底边，列表的内容没有算进主体的范围；列表照样自己滚、追踪时停在末尾，滚主体不动它。
+/// 常见的矮窗口（960×600、960×480）：列表在筛选下面收矮到主体放得下，主体不滚；追踪时列表停在末尾，
+/// 最新一条的消息落在列表和主体的可视区里，不用滚页面就看得到。有意偏离 Vue 的最小高 360。
 #[test]
-fn a_short_window_scrolls_the_page_to_reach_the_list() {
+fn short_windows_keep_the_latest_log_in_view_without_scrolling_the_page() {
     for height in [600.0, 480.0] {
-        let mut harness = crowded_logs_at(960.0, height, 12);
+        let harness = crowded_logs_at(960.0, height, 12);
+        assert_eq!(scroll_end(&harness, LOGS_BODY), 0.0, "{height} 高时主体不该滚");
         let (body, panel, list) = (bounds(&harness, LOGS_BODY), bounds(&harness, "admin-log-panel"), bounds(&harness, LOG_SCROLL));
-        assert!((list.height - 360.0).abs() < 0.5, "{height} 高时列表要保持 360：{list:?}");
-        let end = scroll_end(&harness, LOGS_BODY);
-        assert!(end > 0.0, "{height} 高时主体要能滚");
-        assert!((panel.y + panel.height - (body.y + body.height) - end).abs() < 0.5, "主体要正好滚到面板底边：{end} / {panel:?} / {body:?}");
-        let title = bounds(&harness, "admin-log-title");
-        assert!(title.y >= body.y && title.y + title.height <= body.y + body.height, "一开始页头要在视口里：{title:?}");
-        assert!(scroll_end(&harness, LOG_SCROLL) > 0.0 && at_end(&harness), "列表要自己滚、追踪时停在末尾");
-        scroll_list_to(&mut harness, LOGS_BODY, end);
-        assert_eq!(scroll_y(&harness, LOGS_BODY), end, "主体滚不到底");
-        assert!(at_end(&harness), "滚主体不该动列表");
+        assert!((panel.y + panel.height - (body.y + body.height)).abs() < 0.5, "{height} 高时面板正好撑满主体：{panel:?} / {body:?}");
+        assert!(list.height >= LOG_LIST_FLOOR - 0.5, "{height} 高时列表不矮过下限：{list:?}");
+        assert!((panel.y + panel.height - 23.0 - (list.y + list.height)).abs() < 0.5, "{height} 高时列表占满面板剩下的高度：{list:?}");
+        assert!(scroll_end(&harness, LOG_SCROLL) > 0.0 && at_end(&harness), "{height} 高时列表自己滚、追踪时停在末尾");
+        // 布局盒是列表内容里的位置，减掉列表滚过的距离就是屏幕上的位置。
+        let message = bounds(&harness, "admin-log-message-log-12");
+        let top = message.y - scroll_y(&harness, LOG_SCROLL);
+        let bottom = top + message.height;
+        assert!(top >= list.y - 0.5 && bottom <= list.y + list.height + 0.5, "{height} 高时最新一条的消息在列表可视区里：{top}..{bottom} / {list:?}");
+        assert!(bottom <= body.y + body.height + 0.5, "{height} 高时最新一条的消息在主体可视区里");
     }
+}
+
+/// 极矮的窗口（960×400）连列表的下限都放不下：列表停在下限，主体滚动、滚得到底，到底时列表底边露出来；
+/// 一开始页头在视口里，列表照样自己滚、追踪时停在末尾，滚主体不动它。
+#[test]
+fn a_very_short_window_scrolls_the_page_to_reach_the_list() {
+    let mut harness = crowded_logs_at(960.0, 400.0, 12);
+    let (body, panel, list) = (bounds(&harness, LOGS_BODY), bounds(&harness, "admin-log-panel"), bounds(&harness, LOG_SCROLL));
+    assert!((list.height - LOG_LIST_FLOOR).abs() < 0.5, "列表停在下限：{list:?}");
+    let end = scroll_end(&harness, LOGS_BODY);
+    assert!(end > 0.0, "主体要能滚");
+    assert!((panel.y + panel.height - (body.y + body.height) - end).abs() < 0.5, "主体要正好滚到面板底边：{end} / {panel:?} / {body:?}");
+    let title = bounds(&harness, "admin-log-title");
+    assert!(title.y >= body.y && title.y + title.height <= body.y + body.height, "一开始页头要在视口里：{title:?}");
+    assert!(scroll_end(&harness, LOG_SCROLL) > 0.0 && at_end(&harness), "列表要自己滚、追踪时停在末尾");
+    scroll_list_to(&mut harness, LOGS_BODY, end);
+    assert_eq!(scroll_y(&harness, LOGS_BODY), end, "主体滚不到底");
+    assert!(at_end(&harness), "滚主体不该动列表");
+    assert!(list.y + list.height - end <= body.y + body.height + 0.5, "滚到底时列表底边在视口里");
 }
 
 /// 暂停追踪：滚到中间后新日志到达，列表停在原位；恢复追踪后下一条日志到达时回到末尾。
