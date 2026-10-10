@@ -128,6 +128,7 @@
 - Local filesystem `get_repository_tree` responses also include `cacheState` and `indexedAt`, and the tree is sourced from the SQLite `directories` cache.
 - `RepositoryTreeSnapshot.tree[].fileCount` reports each directory's direct child file count and excludes nested descendants.
 - Runtime emits `repository://structure-updated` with `{ repoId, reason, indexedAt }` after watcher-driven or cold-cache refresh completes so the desktop can silently refresh the active directory and tree.
+- The file watcher drains pending filesystem events as one batch and reads only the repository registry to map them to repositories; it never opens repository databases. Changes inside `.momo` (database and WAL writes) and events on a repository root itself do not queue a structure refresh, so a refresh cannot trigger itself again.
 - Trash browser entries include `metadata.deletedAt` and `metadata.originalPath` when they were moved by MomoBako.
 - `deleteEntry` moves files or recursive directory deletes to `.momo/trash` by default. Use `mode: "permanentDelete"` only for deleting entries already shown from the trash view.
 - `mutateTrash` supports `action: "restore" | "restoreAll" | "empty"` to restore a selected trash item, restore all tracked trash items, or clear `.momo/trash`.

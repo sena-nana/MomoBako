@@ -132,3 +132,23 @@ fn failed_rebuild_leaves_no_rebuilt_markers_so_the_next_open_retries() {
 
     fs::remove_dir_all(root).expect("test temp root should be removed");
 }
+
+#[test]
+fn listing_without_asset_counts_does_not_open_repository_storage() {
+    let (state, root, repo_root, _thumbnail_root) = create_test_state("list-without-counts");
+    install_local_filesystem_test_plugin_archive(&state.root_path());
+    let repo_id = "repo-without-counts";
+    register_repository_record_only(&state, repo_id, &repo_root, LOCAL_FILESYSTEM_PLUGIN_ID);
+
+    let repositories = state
+        .list_repositories_without_asset_counts()
+        .expect("registered repositories should list");
+
+    assert!(repositories
+        .iter()
+        .any(|repository| repository.repo_id == repo_id && repository.status == "ready"));
+    // 文件监听每批事件都要列一次资源库，这里不能去打开或重建 `.momo`。
+    assert!(!repo_root.join(".momo").exists());
+
+    fs::remove_dir_all(root).expect("test temp root should be removed");
+}

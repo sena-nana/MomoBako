@@ -1408,9 +1408,30 @@ pub(super) fn migrate_legacy_meta_dir_if_needed(
     Ok(())
 }
 
+/// 把 `.momo` 设成隐藏。已经隐藏就不动：每次打开存储都起 attrib 进程很慢，改属性还会触发一次文件监听事件。
 pub(super) fn hide_repository_meta_dir(path: &Path) {
     #[cfg(target_os = "windows")]
     {
-        let _ = Command::new("attrib").arg("+H").arg(path).status();
+        use std::os::windows::fs::MetadataExt;
+        const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+        if fs::metadata(path)
+            .is_ok_and(|metadata| metadata.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0)
+        {
+            return;
+        }
+        let failure = match Command::new("attrib").arg("+H").arg(path).status() {
+            Ok(status) if status.success() => None,
+            Ok(status) => Some(format!("attrib exited with {status}")),
+            Err(error) => Some(error.to_string()),
+        };
+        if let Some(error) = failure {
+            crate::app_log!(
+                "warn",
+                "repository.storage",
+                "hideMetaDirFailed",
+                "隐藏资源库元数据目录失败。",
+                serde_json::json!({ "path": path.to_string_lossy().to_string(), "error": error })
+            );
+        }
     }
 }
