@@ -251,6 +251,7 @@
 | 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
 | --- | --- | --- | --- | --- | --- |
 | `logs.ts` `mergeSystemLogs` | `system://log-recorded` | 日志器 `write` 后的事件，没有替身 | 相同 id 替换；降序后保留前 500 条；暂停不滚动 | 日志列表 | 已测试（未离屏） |
+| 插件日志（Vue 和 Nana 共用后端） | 插件调用交回 `momobako.plugin.log` 事件（SDK `write_host_log_silently`，调用失败时也带回） | 后端 `plugin_events.rs` 写进系统日志，再经 `system://log-recorded` 合并 | 来源 `backend-plugin`、分类 `plugin.backend`，插件标识取宿主加载的插件，载荷有 `repoId` 时记在这个资源库名下；别的种类的事件丢弃，每个插件的每种事件记一次 `pluginEventDropped` | 日志页按插件、资源库筛得到 | 已测试（后端 `plugin_events_tests.rs`、SDK `runner_tests.rs`，未离屏） |
 | `lifecycle.ts` `appendStartupSyncLog` | 启动加载中的 `repository.sync` | 无新请求 | 其它分类不进入启动日志；仓库不一致则忽略；启动结束后不再追加；明细是记录的 `context`（去掉空值，对象和数组写成 JSON） | 启动日志 | 已测试（`startup_log_tests.rs`，未离屏） |
 | `lifecycle.ts` `handleRepositoryStructureUpdated` | `repository://structure-updated` | 目录树、智能文件夹、播放集、仓库动作、当前目录浏览，没有替身 | 别的仓库、启动未完成或缺失仓库不刷新；目录树正在读取时不重复请求树；文件和回收站静默重读并保留选择 | 当前列表 | 已测试（未离屏） |
 | 静默目录失败 | 重读返回错误 | 无 | 保留原列表和当前页 | 页面不变 | 已测试（未离屏） |
