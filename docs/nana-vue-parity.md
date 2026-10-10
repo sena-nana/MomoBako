@@ -28,8 +28,8 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 - 只写了裸类名、在 `src/styles` 里没有任何样式的按钮（`primary`、`ghost`、`ghost danger` 等），Vue 渲染成透明底、正文色。Nana 按 DESIGN.md 5.1 画：主操作用低饱和强调色，危险操作用低饱和红，普通操作透明。
 
 **圆角。**
-- 圆角半径基数来自设置（0–20，默认 8）。xs 到 xl 分别是基数的 0.5、0.75、1、1.25、1.5 倍。
-- Vue 的 `--radius-2xl` 没有对应档位。文件页、预览页、播放条和播放集页按 2 倍基数的像素值画（`theme_map::radius_2xl`）；插件、日志和搜索页的面板（Vue `.search-workbench__panel`）现在用 Xl 档（`admin_style.rs`、`inspect_search_view.rs`）。
+- 圆角半径基数来自设置（0–20，默认 8）。xs 到 2xl 分别是基数的 0.5、0.75、1、1.25、1.5、2 倍（`theme_map::corner_metrics`），2xl 是主题的 `RadiusTier::Xxl`。
+- Vue 用 `--radius-2xl` 的大块表面都写 2xl 档：文件卡和详情卡、预览页、播放条、播放集面板，以及插件、日志和搜索页的工作台面板（`.search-workbench__panel`）。改了圆角半径重新装主题，这些表面跟着变，不用重建。
 - 「平滑」圆角是主题的 `CornerShape::SQUIRCLE`（CSS `superellipse(2)`），「普通」是圆弧。
 
 **关闭窗口。** 和 Vue/Tauri 一样直接退出，只有存在未保存修改时才先确认。
@@ -136,5 +136,5 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 | `ReorderList` 按下行就抓走指针，行里的按钮收不到点击；一行只能用 `.tools(节点)` 标一块不开始拖动的区域 | 播放集条目把扩展名方块、标题、播放和移除包成一段登记成 `tools`，从拖动柄和行的留白拖动。需要一行标多块，或者按下按钮时不开始拖动 |
 | 应用层没有悬停事件 | 子菜单改为点击展开。上游 `150bd172e` 已加 `PointerHoverChanged { hovered }`：节点挂处理函数，指针进出它的子树时收到。现用的修订 `c6dc1086b` 还没有它，升级后改回悬停展开 |
 | 滚动范围按全部后代的盒子合并，不在里层的滚动区或裁剪盒处停下 | 滚动区里不再套滚动区：日志列表自己滚，日志页主体改成不滚的裁剪盒（`route_home::home_fixed`）。上游 `941df646d` 已修：范围只算到最近的裁剪盒，里层滚动区只贡献自己的盒子。升级修订后去掉这处绕行，矮窗口里日志页也能滚 |
-| `RadiusTier` 没有 2xl 档 | 用 2 倍基数的像素值；插件、日志和搜索页的面板用 Xl 档，见上文「圆角」。上游 `8541a2f8d` 已补 `RadiusTier::Xxl` / `ThemeMetrics::radius_xxl`，升级修订后改用它 |
+| `RadiusTier` 没有 2xl 档 | 已补：上游 `8541a2f8d` 的 `RadiusTier::Xxl` / `ThemeMetrics::radius_xxl`。`corner_metrics` 按两倍基数给，原来按像素给的 `theme_map::radius_2xl` 已删，插件、日志和搜索页的面板也从 Xl 改回 2xl，见上文「圆角」 |
 | 线性空间混合 | 设计如此，见上文「颜色合成」 |
