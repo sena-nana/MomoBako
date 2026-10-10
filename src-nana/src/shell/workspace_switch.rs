@@ -16,7 +16,7 @@ use crate::backend::services::repository::RepositorySummary;
 
 use super::super::repo_operation::{OperationPatch, OperationStart};
 use super::super::search_collate::compare_zh;
-use super::startup::StartupStatus;
+use super::startup::{StartupMode, StartupStatus};
 use super::{RepositoryPresence, WorkspaceEffect, WorkspacePanel, WorkspaceRepository, WorkspaceState};
 
 /// 同一个仓库的刷新走到哪一步。
@@ -73,7 +73,7 @@ impl WorkspaceState {
         self.operation.update(OperationPatch::step("加载资源库摘要", 38.0));
         if self.repositories.is_empty() {
             self.assign_active(None);
-            self.last_active_repo_id = None;
+            self.remember_repository(None);
             self.reset_library_category();
             self.presence = RepositoryPresence::Empty;
             self.finish_refresh();
@@ -107,14 +107,16 @@ impl WorkspaceState {
         true
     }
 
-    /// 启动或换仓库途中又选了仓库：旧的同步和摘要结果作废，从这个仓库的同步重新走。
+    /// 启动或换仓库途中又选了仓库：旧的同步和摘要结果作废，从这个仓库的同步重新走。和 Vue `selectRepository`
+    /// 换仓库一样立即换上活动仓库。
     fn restart_loading(&mut self, repository: WorkspaceRepository) {
         self.list_generation = self.list_generation.saturating_add(1);
         self.assign_active(Some(repository.repo_id.clone()));
+        self.startup.active_applied = true;
         if repository.status == "missing" {
             self.presence = RepositoryPresence::Missing;
             self.reset_library_category();
-            self.last_active_repo_id = Some(repository.repo_id);
+            self.remember_repository(Some(repository.repo_id));
             self.finish_loading_run();
             return;
         }
@@ -139,7 +141,7 @@ impl WorkspaceState {
         self.operation.start(OperationStart::new("加载资源库", "读取资源库快照", 10.0).indeterminate());
         if repository.status == "missing" {
             self.presence = RepositoryPresence::Missing;
-            self.last_active_repo_id = Some(repository.repo_id);
+            self.remember_repository(Some(repository.repo_id));
             self.finish_loading_run();
             return;
         }
@@ -155,7 +157,7 @@ impl WorkspaceState {
         if repository.status == "missing" {
             self.presence = RepositoryPresence::Missing;
             self.reset_library_category();
-            self.last_active_repo_id = Some(repository.repo_id);
+            self.remember_repository(Some(repository.repo_id));
             self.finish_refresh();
             return;
         }
@@ -255,9 +257,16 @@ impl WorkspaceState {
         self.operation.finish();
     }
 
-    /// 启动或换仓库在读列表、第 1 步就结束（空列表、目标缺失）：结束启动，换仓库的「加载资源库」完成。
+    /// 启动或换仓库的加载走完了（空列表、目标缺失时在选定以后，可用的仓库在读完首屏目录以后）：换仓库到这里结束，
+    /// 任务弹层的「加载资源库」完成；首屏启动照 Vue 先在第 4 步等设置包和播放器类型（`StartupState::await_settings`），
+    /// 都回来再结束。
     pub(super) fn finish_loading_run(&mut self) {
         self.snapshot_loading = false;
+        if self.startup.mode == StartupMode::Launch {
+            let repo_id = self.active_repo_id.clone();
+            self.startup.await_settings(repo_id.as_deref());
+            return;
+        }
         self.startup.finish();
         self.operation.finish();
     }
@@ -280,7 +289,7 @@ impl WorkspaceState {
         let Some(next) = self.repositories.first().cloned() else {
             self.assign_active(None);
             self.presence = RepositoryPresence::Empty;
-            self.last_active_repo_id = None;
+            self.remember_repository(None);
             self.reset_library_category();
             return;
         };

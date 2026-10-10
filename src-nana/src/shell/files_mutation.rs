@@ -433,7 +433,7 @@ impl FilesState {
                 }
                 if hardlinks {
                     if let Some(repo_id) = ctx.repo_id.clone() {
-                        self.effects.push(FilesEffect::LoadHardlinks { repo_id });
+                        self.effects.push(FilesEffect::LoadHardlinks { repo_id, epoch: self.hardlink_epoch() });
                     }
                 }
             }

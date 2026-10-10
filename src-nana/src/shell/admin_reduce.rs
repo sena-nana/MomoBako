@@ -265,6 +265,9 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
             model.admin.push_effect(AdminEffect::CallPlugin { plugin_id, method, payload, repository_id, origin: PluginCallOrigin::FileMenu });
         }
         AdminMessage::FilePluginFinished { method, result } => finish_file_plugin(model, &method, result),
+        AdminMessage::BeginRepositoryDownload(download) => super::source_target::begin(model, download),
+        AdminMessage::ChooseDownloadRepository(repo_id) => super::source_target::choose(model, &repo_id),
+        AdminMessage::CancelDownloadRepository => super::source_target::cancel(model),
         AdminMessage::CreateSourcePlaylist { playlist, repository_id } => create_source_playlist(model, playlist, repository_id),
         AdminMessage::SourcePlaylistFinished(result) => finish_source_playlist(model, result),
         AdminMessage::BeginSourceAuth { plugin_id, repo_id } => flow::begin(model, &plugin_id, repo_id),
@@ -464,9 +467,9 @@ fn apply_bundle(
     external: Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>,
 ) {
     model.admin.loading_settings = false;
-    // 启动结束时读的设置包：成功失败都照 Vue 记下「应用配置与插件设置加载完成」和「首屏启动流程完成」。
-    let repo_id = model.workspace.active_repo_id.clone();
-    model.workspace.startup.note_settings_finished(repo_id.as_deref());
+    // 首屏启动在等的设置包：成功时插件列表换新、接着读播放器类型，启动等它回来；失败照 Vue 吃掉错误，启动就此结束。
+    let complete = plugins.is_ok() && hooks.is_ok() && cache.is_ok() && api.is_ok() && external.is_ok();
+    model.workspace.note_settings_loaded(complete);
     match (plugins, hooks, cache, api, external) {
         (Ok(plugins), Ok(hooks), Ok(cache), Ok(api), Ok(external)) => {
             publish_plugins(model, &plugins);
@@ -567,11 +570,17 @@ fn finish_file_plugin(model: &mut ShellViewModel, method: &str, result: Result<s
     let download = model.admin.take_download_operation(method);
     match result {
         // 和 Vue 来源动作完成后的 `context.refreshRepo()` 一样重读资源库列表，再按当前仓库同步、重读摘要和目录。
-        // 下载的进度行照 Vue 写「下载完成」再完成；刷新开始的「加载资源库」会接着顶掉它。
-        Ok(_) => {
+        // 下载的进度行照 Vue 写「下载完成」（有失败的条目时「下载完成，N 项失败」）再完成；刷新开始的「加载资源库」
+        // 会接着顶掉它。
+        Ok(payload) => {
             model.files.error.clear();
             if let Some(operation) = download {
-                model.operation.update(operation, OperationPatch::step("下载完成", 100.0).with_indeterminate(false));
+                let failed = super::source_target::failed_count(&payload);
+                if failed > 0 {
+                    eprintln!("Nana 来源下载有 {failed} 项失败：{method}");
+                }
+                let detail = if failed > 0 { format!("下载完成，{failed} 项失败") } else { "下载完成".into() };
+                model.operation.update(operation, OperationPatch::step(detail, 100.0).with_indeterminate(false));
                 model.operation.finish(operation);
             }
             model.workspace.request_repository_refresh();

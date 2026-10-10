@@ -520,17 +520,17 @@ impl PlayerState {
             // 还在读取：只记下意图，装载完成后按它决定是否出声。
             return;
         }
-        if !self.item_loaded() {
+        let Some(output) = self.output() else {
             // 当前项没装好（停过、失败过或换过仓库）：要播放就重新读取，装好后按意图出声。
             if let Some(id) = self.current_id.clone().filter(|_| playing) {
                 self.play_item(&id, true);
                 self.publish(inspect);
             }
             return;
-        }
+        };
         let session = self.session.clone();
         let action = if playing { wav_player::Action::Play } else { wav_player::Action::Pause };
-        let (session, error) = wav_player::drive(self.output(), &self.wav, session, action);
+        let (session, error) = wav_player::drive(output, &self.wav, session, action);
         self.session = session;
         if let Some(error) = error {
             eprintln!("Nana 播放控制失败：{error}");
@@ -546,12 +546,12 @@ impl PlayerState {
             eprintln!("Nana 图片幻灯片不支持跳转");
             return;
         }
-        if !self.item_loaded() {
+        let Some(output) = self.output() else {
             eprintln!("Nana 当前项还没装好，不能跳转");
             return;
-        }
+        };
         let session = self.session.clone();
-        let (session, error) = wav_player::drive(self.output(), &self.wav, session, wav_player::Action::Seek(position_ms));
+        let (session, error) = wav_player::drive(output, &self.wav, session, wav_player::Action::Seek(position_ms));
         self.session = session;
         if let Some(error) = error {
             eprintln!("Nana 播放进度失败：{error}");
@@ -566,7 +566,7 @@ impl PlayerState {
             return;
         }
         let volume = volume.clamp(0.0, 1.0);
-        if !self.item_loaded() || !self.audible() {
+        if self.output() != Some(wav_player::Output::Cursor) {
             // 还没有装好的条目，或者装好的条目没有声音（只有画面的视频）：只记下音量，下一项有声音时沿用。没有声音
             // 时不经控制器，它会按「不支持音量控制」把正在放的画面改成 failed；Vue 的播放条照样收下音量。
             self.session.volume = volume;
@@ -575,7 +575,7 @@ impl PlayerState {
             return;
         }
         let session = self.session.clone();
-        let (session, error) = wav_player::drive(self.output(), &self.wav, session, wav_player::Action::Volume(volume));
+        let (session, error) = wav_player::drive(wav_player::Output::Cursor, &self.wav, session, wav_player::Action::Volume(volume));
         self.session = session;
         if let Some(error) = error {
             eprintln!("Nana 播放音量失败：{error}");

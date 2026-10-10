@@ -145,6 +145,7 @@ impl FilesState {
         self.copy_sources.clear();
         self.hardlinks.clear();
         self.skipped_hardlinks.clear();
+        self.forget_hardlink_reads();
         self.tag_draft.clear();
         self.tags_open = None;
         if self.operation_kind.take().is_some() {

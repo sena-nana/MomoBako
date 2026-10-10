@@ -98,9 +98,12 @@ fn a_launch_logs_every_vue_startup_entry_with_its_detail() {
     index.playlists = vec![playlist()];
     model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(index) });
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser(REPO))));
-    assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
+    assert_eq!(model.workspace.startup.status, StartupStatus::Loading, "读完首屏目录还在等设置包");
     assert_eq!(model.workspace.startup.logs.len(), 12, "设置包回来之前只记到「开始加载应用配置与插件设置」");
     model.reduce(bundle(Vec::new()));
+    assert_eq!(model.workspace.startup.logs.len(), 12, "插件列表到了还等播放器类型");
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(Vec::new())));
+    assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
     assert_eq!(
         logs(&model),
         vec![
@@ -133,7 +136,8 @@ fn a_launch_logs_every_vue_startup_entry_with_its_detail() {
     assert_eq!(model.workspace.startup.logs.len(), before, "之后再读设置包（设置页、刷新）不再记");
 }
 
-/// 没有资源库和资源库缺失的启动也读设置包：设置包读失败也照 Vue 记完两条，流程完成的素材数和播放集数是 0。
+/// 没有资源库和资源库缺失的启动也读设置包：设置包读失败也照 Vue 记完两条（不再等播放器类型），流程完成的素材数和
+/// 播放集数是 0。
 #[test]
 fn empty_and_missing_launches_close_the_log_after_the_settings_bundle() {
     let failed = || {
@@ -163,6 +167,7 @@ fn empty_and_missing_launches_close_the_log_after_the_settings_bundle() {
     let generation = missing.workspace.prepare_initial_list();
     missing.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary("gone", "missing")]) });
     missing.reduce(bundle(Vec::new()));
+    missing.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(Vec::new())));
     let tail = &logs(&missing)[4..];
     assert_eq!(
         tail,
@@ -172,5 +177,44 @@ fn empty_and_missing_launches_close_the_log_after_the_settings_bundle() {
             entry("info", "首屏启动应用配置与插件设置加载完成。", "step: 4 · repoId: gone"),
             entry("info", "首屏启动流程完成。", "activeRepoId: gone · assetCount: 0 · playlistCount: 0"),
         ]
+    );
+}
+
+/// 「首屏启动流程失败。」照 Vue 带 `activeRepoId`：读完摘要以前还是这一轮开始时的值（冷启动是空的，只写
+/// `targetRepoId`），读完摘要以后是这次的仓库；重试时「流程开始」和这一轮的失败都带着上一轮已经换上的仓库。
+#[test]
+fn a_failed_launch_logs_the_active_repository_once_the_summary_is_read() {
+    let last = |model: &ShellViewModel| logs(model).last().cloned().expect("有日志");
+    let retry = |model: &mut ShellViewModel| -> u64 {
+        model.reduce(ShellMessage::StartupRetry);
+        model.workspace.list_generation
+    };
+    let mut model = ShellViewModel::default();
+    let generation = model.workspace.prepare_initial_list();
+    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(REPO, "ready")]) });
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Err("磁盘不可读".into()) });
+    assert_eq!(last(&model), entry("error", "首屏启动流程失败。", "step: 2 · stepLabel: 加载失败 · error: 磁盘不可读 · targetRepoId: repo-a"));
+
+    let generation = retry(&mut model);
+    assert_eq!(logs(&model)[0], entry("info", "首屏启动流程开始。", "totalSteps: 4"), "上一轮没读到摘要，还没有活动仓库");
+    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(REPO, "ready")]) });
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(SyncCounts::default()) });
+    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(REPO)) });
+    model.reduce(ShellMessage::FileBrowserLoaded(Err("拒绝访问".into())));
+    assert_eq!(model.workspace.startup.status, StartupStatus::Error);
+    assert_eq!(
+        last(&model),
+        entry("error", "首屏启动流程失败。", "step: 4 · stepLabel: 加载失败 · error: 拒绝访问 · activeRepoId: repo-a · targetRepoId: repo-a"),
+        "读完摘要以后带上活动仓库"
+    );
+
+    let generation = retry(&mut model);
+    assert_eq!(logs(&model)[0], entry("info", "首屏启动流程开始。", "totalSteps: 4 · activeRepoId: repo-a · rememberedRepoId: repo-a"));
+    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(REPO, "ready")]) });
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Err("磁盘不可读".into()) });
+    assert_eq!(
+        last(&model),
+        entry("error", "首屏启动流程失败。", "step: 2 · stepLabel: 加载失败 · error: 磁盘不可读 · activeRepoId: repo-a · targetRepoId: repo-a"),
+        "Vue 的 activeRepoId 还是上一轮换上的仓库"
     );
 }

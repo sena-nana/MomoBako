@@ -26,7 +26,7 @@ use nana_ui::runtime::{
 };
 use nana_ui::RegionId;
 
-use super::hot::{self, HotSignals, ModelField, MotionFrame, PlaybackView, TitleBarView, TitleSignals};
+use super::hot::{self, HotSignals, ModelField, MotionFrame, PlaybackView, TaskFills, TitleBarView, TitleSignals};
 use super::view_part::{body_mode, BodyMode, PartCx, PartId, ShellPart, Swap};
 use super::view_part_overlay::OverlayPart;
 use super::view_part_primary::PrimaryPart;
@@ -76,11 +76,12 @@ impl ShellView {
         let document_id = document.document();
         let marker_text = format!("{MARKER_PREFIX}{}", NEXT_MARKER.fetch_add(1, Ordering::Relaxed));
         let motion = MotionFrame::project(model);
+        let fills = TaskFills::project(model);
         let playback = PlaybackView::project(model);
         let title_view = TitleBarView::project(model);
         let mut made = None;
         let (_skeleton, (shell, workspace, marker)) = document.context_mut().mount_view_root(document_id, || {
-            let hot = HotSignals::new(motion, &playback);
+            let hot = HotSignals::new(motion, fills.clone(), &playback);
             let title = TitleSignals::new(&title_view);
             let query = ModelField::new(&title_view.query);
             let parts = (SidebarPart::signals(model), PrimaryPart::signals(model), OverlayPart::signals(model));
@@ -266,7 +267,7 @@ impl ShellView {
     fn write_signals(&mut self, document: &mut RuntimeDocument, model: &ShellViewModel) -> Result<(), FrameworkError> {
         let motion = MotionFrame::project(model);
         let title = TitleBarView::project(model);
-        self.hot.write(motion, &PlaybackView::project(model));
+        self.hot.write(motion, TaskFills::project(model), &PlaybackView::project(model));
         self.title.write(&title);
         self.query.sync(&title.query);
         self.sync_sidebar_width(document.context_mut(), motion.sidebar_width)

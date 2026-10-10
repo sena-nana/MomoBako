@@ -65,7 +65,7 @@ pub use sidebar::{
 };
 pub(crate) use sidebar::escape_layer;
 pub use workspace::{
-    sidebar_prefs_path, DeleteMode, LibraryCategory, MainRegion, StartupStatus, SyncCounts, WorkspaceEffect,
+    last_repository_path, sidebar_prefs_path, DeleteMode, LibraryCategory, MainRegion, StartupStatus, SyncCounts, WorkspaceEffect,
     WorkspacePanel, WorkspaceRepository, WorkspaceState,
 };
 
@@ -347,16 +347,18 @@ impl ShellViewModel {
         self.revision = self.revision.wrapping_add(1);
         let (before, seq, started) = (status::Activity::of(self), self.status.seq(), status::starts_operation(&message));
         let startup_before = self.workspace.startup.status;
+        let settings_before = self.workspace.startup.settings;
         let active_before = self.workspace.active_repo_id.clone();
         self.reduce_inner(message);
+        if settings_before != workspace::SettingsWait::Bundle && self.workspace.startup.settings == workspace::SettingsWait::Bundle {
+            // Vue 首屏启动在离开启动页之前 `await loadSettingsData()`：插件、钩子记录、缓存、API 设计和外部连接。
+            // 没有仓库、仓库丢失的启动也读，添加资源库的来源列表要用插件清单。换仓库不读（Vue `selectRepository`）。
+            // 设置包和随后的播放器类型都回来才结束启动（`admin_reduce::apply_bundle`、`PlaylistPlayersLoaded`）。
+            self.admin.begin_settings_load();
+        }
         let launch = self.workspace.startup.mode == workspace::StartupMode::Launch;
         if startup_before != StartupStatus::Ready && self.workspace.startup.status == StartupStatus::Ready && launch {
-            // Vue 启动流程在结束前 `loadSettingsData`：插件、钩子记录、缓存、API 设计和外部连接。
-            // 没有仓库、仓库丢失的启动也读，添加资源库的来源列表要用插件清单。换仓库不读（Vue `selectRepository`）。
-            // 加载日志照 Vue 记「开始加载应用配置与插件设置」，设置包回来再记后两条（`admin_reduce::apply_bundle`）。
-            let repo_id = self.workspace.active_repo_id.clone();
-            self.workspace.startup.note_settings_started(repo_id.as_deref());
-            self.admin.begin_settings_load();
+            self.settle_launch();
         }
         self.settle_workspace(&active_before, startup_before);
         self.flush_folder_mutations();
@@ -395,7 +397,6 @@ impl ShellViewModel {
     fn follow_motion(&mut self) {
         let panel_open = self.sidebar.popover != sidebar::PopoverMode::Closed || self.admin.popover_open;
         let startup = f32::from(self.workspace.startup.percent);
-        let operation = self.operation.shown();
         let spinner = self.sidebar.tree_loading
             || self.sidebar.submitting
             || self.sidebar.smart_draft.busy
@@ -406,12 +407,19 @@ impl ShellViewModel {
             self.surface_dirty = true;
         }
         self.motion.set_startup_percent(startup);
-        self.motion.set_operation_percent(operation.map(|progress| progress.value as f32));
+        self.follow_task_fills();
         self.motion.set_spinner(spinner);
         // 任务弹层开着、里面有不确定进度的行时，进度条按 `progress-pulse` 呼吸；弹层关着不画，也不要帧。
         let pulse = self.admin.popover_open && self.task_rows().iter().any(|row| row.indeterminate);
         self.motion.set_pulse(pulse);
         self.motion.set_sidebar_collapsed(self.workspace.sidebar_collapsed, self.workspace.sidebar_width);
+    }
+
+    /// 任务弹层各行进度条的目标宽度交给动效时钟（`.progress-bar__fill` 的宽度过渡）。归约以后、准备帧里仓库操作行
+    /// 往上爬或收起以后都要调。
+    pub(crate) fn follow_task_fills(&mut self) {
+        let targets = admin::task_fill_targets(self);
+        self.motion.set_task_fills(&targets);
     }
 
     fn reduce_inner(&mut self, message: ShellMessage) {
@@ -514,9 +522,11 @@ impl ShellViewModel {
                         .first()
                         .map(|player| player.player_type_id.clone());
                 }
+                self.workspace.note_players_loaded();
             }
             ShellMessage::PlaylistPlayersLoaded(Err(error)) => {
                 self.status.fail(status::FailureSource::Playlist, format!("无法读取播放器类型：{error}"));
+                self.workspace.note_players_loaded();
             }
             ShellMessage::NewPlaylistNameChanged(value) => {
                 self.new_playlist_name = value;

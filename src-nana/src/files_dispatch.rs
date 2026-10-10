@@ -46,9 +46,9 @@ pub fn dispatch_files_effects(app: &mut MomoBakoApplication, context: &RuntimePr
             }
             FilesEffect::Delete { repo_id, paths, mode } => dispatch_delete(app, context, repo_id, paths, mode),
             FilesEffect::MutateTrash { repo_id, action, paths } => dispatch_trash(app, context, repo_id, action, paths),
-            FilesEffect::LoadHardlinks { repo_id } => dispatch_hardlinks(app, context, repo_id, HardlinkRead::Load),
-            FilesEffect::RefreshHardlinks { repo_id } => dispatch_hardlinks(app, context, repo_id, HardlinkRead::Refresh),
-            FilesEffect::CheckHardlinks { repo_id } => dispatch_hardlinks(app, context, repo_id, HardlinkRead::Check),
+            FilesEffect::LoadHardlinks { repo_id, epoch } => dispatch_hardlinks(app, context, repo_id, HardlinkRead::Load, epoch),
+            FilesEffect::RefreshHardlinks { repo_id, epoch } => dispatch_hardlinks(app, context, repo_id, HardlinkRead::Refresh, epoch),
+            FilesEffect::CheckHardlinks { repo_id, epoch } => dispatch_hardlinks(app, context, repo_id, HardlinkRead::Check, epoch),
             FilesEffect::ConfirmHardlink { repo_id, candidate_id } => {
                 dispatch_confirm_hardlink(app, context, repo_id, candidate_id);
             }
@@ -441,16 +441,17 @@ enum HardlinkRead {
     Check,
 }
 
-/// 拉取硬链接候选，结果按 `read` 交回。
+/// 拉取硬链接候选，结果按 `read` 交回，带着请求时候选列表的版本 `epoch`。
 fn dispatch_hardlinks(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
     repo_id: String,
     read: HardlinkRead,
+    epoch: u64,
 ) {
     let Some(services) = app.services.as_ref() else {
         eprintln!("Nana 硬链接候选需要领域服务，当前服务未启动");
-        app.shell.reduce(hardlinks_message(read, Err("领域服务未启动".into())));
+        app.shell.reduce(hardlinks_message(read, epoch, Err("领域服务未启动".into())));
         return;
     };
     let interaction = services.repository_interaction.clone();
@@ -464,18 +465,18 @@ fn dispatch_hardlinks(
                 size_label: candidate.size_label,
             }).collect()
         });
-        hardlinks_message(read, result)
+        hardlinks_message(read, epoch, result)
     })) {
         eprintln!("Nana 硬链接候选任务提交失败：{error}");
-        app.shell.reduce(hardlinks_message(read, Err(format!("硬链接候选任务提交失败：{error}"))));
+        app.shell.reduce(hardlinks_message(read, epoch, Err(format!("硬链接候选任务提交失败：{error}"))));
     }
 }
 
-fn hardlinks_message(read: HardlinkRead, result: Result<Vec<HardlinkPrompt>, String>) -> ShellMessage {
+fn hardlinks_message(read: HardlinkRead, epoch: u64, result: Result<Vec<HardlinkPrompt>, String>) -> ShellMessage {
     files_message(match read {
-        HardlinkRead::Load => FilesMessage::HardlinksLoaded(result),
-        HardlinkRead::Refresh => FilesMessage::HardlinksRefreshed(result),
-        HardlinkRead::Check => FilesMessage::HardlinksChecked(result),
+        HardlinkRead::Load => FilesMessage::HardlinksLoaded { epoch, result },
+        HardlinkRead::Refresh => FilesMessage::HardlinksRefreshed { epoch, result },
+        HardlinkRead::Check => FilesMessage::HardlinksChecked { epoch, result },
     })
 }
 

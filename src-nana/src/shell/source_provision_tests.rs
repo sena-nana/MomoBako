@@ -98,6 +98,9 @@ fn with_repository(model: &mut ShellViewModel) {
         capabilities: Vec::new(),
         cache_required: true,
         cache_status: "ready".into(),
+        cache_path: None,
+        login_expired: false,
+        logged_out: false,
     });
     model.admin.note_backends(&[RepositorySummary {
         repo_id: REPO.into(),

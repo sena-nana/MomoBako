@@ -82,13 +82,14 @@ enum Stage {
 }
 
 /// 进行中的一轮刷新。`token` 认出这一轮的结果，`repo_id` 是发起时的仓库，`operation` 是这一轮在
-/// 任务弹层里的仓库操作行。
+/// 任务弹层里的仓库操作行，`hardlink_epoch` 是排下重读时候选列表的版本（重读回来时按它认过期）。
 #[derive(Clone, Debug)]
 struct Run {
     token: u64,
     repo_id: String,
     stage: Stage,
     operation: OperationId,
+    hardlink_epoch: u64,
 }
 
 /// 文件夹树刷新的状态。
@@ -171,7 +172,7 @@ pub(super) fn begin(model: &mut ShellViewModel) {
     let state = &mut model.tree_sync;
     state.issued += 1;
     let token = state.issued;
-    state.run = Some(Run { token, repo_id: repo_id.clone(), stage: Stage::Syncing, operation });
+    state.run = Some(Run { token, repo_id: repo_id.clone(), stage: Stage::Syncing, operation, hardlink_epoch: 0 });
     state.progress.set(SyncPhase::Scanning, "扫描文件夹结构", 1);
     state.effects.push(TreeSyncEffect::Sync { token, repo_id });
 }
@@ -213,11 +214,13 @@ fn synced(model: &mut ShellViewModel, token: u64, result: Result<u64, String>) {
         model.operation.update(operation, OperationPatch::step(format!("已扫描 {scanned} 个文件"), 58.0));
     }
     let tree = model.workspace.panel != WorkspacePanel::Trash;
+    let hardlink_epoch = model.files.hardlink_epoch();
     let state = &mut model.tree_sync;
     state.progress.set(SyncPhase::Writing, "写入索引结果", 2);
     state.progress.set(SyncPhase::Refreshing, "刷新文件夹树", 3);
     if let Some(run) = state.run.as_mut() {
         run.stage = Stage::Refreshing;
+        run.hardlink_epoch = hardlink_epoch;
     }
     state.effects.push(TreeSyncEffect::Refresh { token, repo_id, tree });
 }
@@ -231,13 +234,14 @@ fn refreshed(model: &mut ShellViewModel, token: u64, result: TreeSyncRefresh) {
     let Some(repo_id) = current_repo(model) else {
         return;
     };
+    let hardlink_epoch = model.tree_sync.run.as_ref().map_or(0, |run| run.hardlink_epoch);
     let mut first_error: Option<String> = None;
     match result.snapshot {
         Ok(snapshot) => super::workspace_refresh::apply_snapshot(model, Ok(snapshot)),
         Err(error) => _ = first_error.get_or_insert(error),
     }
     match result.hardlinks {
-        Ok(prompts) => model.files.note_hardlinks_synced(prompts),
+        Ok(prompts) => model.files.note_hardlinks_synced(hardlink_epoch, prompts),
         Err(error) => _ = first_error.get_or_insert(error),
     }
     match result.tree {

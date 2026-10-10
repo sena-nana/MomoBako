@@ -55,6 +55,10 @@ pub(crate) mod api;
 mod source_page;
 #[path = "source_provision.rs"]
 pub(crate) mod source_provision;
+#[path = "source_target.rs"]
+pub(crate) mod source_target;
+#[path = "source_target_view.rs"]
+mod source_target_view;
 
 pub(crate) use actions_view::{actions_panel, ActionsSignals, ActionsView};
 pub(crate) use logs_state::{LogsSignals, LogsView};
@@ -67,9 +71,10 @@ pub(crate) use reduce::{open_settings_page, reduce_message};
 pub(crate) use settings_state::{SettingsSignals, SettingsView};
 pub(crate) use settings_view::settings_page;
 pub(crate) use source_provision::SourceAuthState;
+pub(crate) use source_target_view::target_dialog as download_target_dialog;
 pub use source_provision::SourceStep;
 pub(crate) use tools::{extensions_page, ToolsSignals};
-pub(crate) use view::task_popover;
+pub(crate) use view::{task_fill_targets, task_popover};
 
 #[cfg(test)]
 #[path = "admin_tests.rs"]
@@ -147,6 +152,12 @@ pub enum AdminMessage {
     },
     /// 文件插件动作结束。成功写到文件活动，失败写到文件错误。
     FilePluginFinished { method: String, result: Result<serde_json::Value, String> },
+    /// 文件右键里的「下载到其他资源库」：一个候选直接下载，几个候选弹出「选择目标资源库」（`source_target.rs`）。
+    BeginRepositoryDownload(source_target::RepositoryDownload),
+    /// 「选择目标资源库」里点了一个资源库。
+    ChooseDownloadRepository(String),
+    /// 「选择目标资源库」的取消、点外面和 Escape。
+    CancelDownloadRepository,
     /// 文件右键里的「创建播放列表」：在本地建来源歌单对应的播放集，再把目录加进去（Vue `runPlaylistAction`）。
     CreateSourcePlaylist { playlist: super::entry_actions::SourcePlaylist, repository_id: Option<String> },
     /// 来源播放集建好、目录加进去了，或者哪一步失败了。
@@ -228,6 +239,17 @@ pub enum AdminEffect {
     },
     /// 建来源歌单对应的播放集（已经有就不建），再把目录加进去。
     CreateSourcePlaylist { repo_id: String, playlist_id: String, name: String, player_type_id: String, path: String },
+    /// 来源下载到其他资源库：调用插件（载荷里已经写好目标），把下载回来的文件导入目标资源库的 `parent_path`
+    /// （没有这个文件夹时先在 `target_path` 下建）并同步它。结果回 [`AdminMessage::FilePluginFinished`]。
+    DownloadToRepository {
+        plugin_id: String,
+        method: String,
+        payload: serde_json::Value,
+        repository_id: Option<String>,
+        target_repo_id: String,
+        target_path: String,
+        parent_path: Option<String>,
+    },
     /// 来源登录成功后更新已有仓库的后端配置。
     UpdateBackendConfig { repo_id: String, backend_config: serde_json::Value, step: SourceStep },
     /// 需要本地缓存的来源仓库写入缓存目录，并迁移旧缓存。
@@ -287,6 +309,8 @@ pub struct AdminState {
     pub popover_open: bool,
     /// 在途的来源下载：插件方法和它在任务弹层里的仓库操作行。
     download_operation: Option<(String, super::repo_operation::OperationId)>,
+    /// 开着的「选择目标资源库」：等着的下载和候选。
+    pub(crate) download_target: Option<source_target::TargetPick>,
     pub actions: Vec<RepositoryAction>,
     pub active_action_id: Option<String>,
     pub actions_loading: bool,
@@ -341,6 +365,7 @@ impl Default for AdminState {
             log_context_open: std::collections::BTreeSet::new(),
             popover_open: false,
             download_operation: None,
+            download_target: None,
             actions: Vec::new(),
             active_action_id: None,
             actions_loading: false,
