@@ -1,48 +1,16 @@
-//! 文件路由和检视面共用的绑定小件：整份样式字段、可复制的受控草稿、值绑定的事实行，
-//! 以及结构块容器的整列排版。
+//! 文件路由和检视面共用的绑定小件：可复制的受控草稿、值绑定的事实行、校验提示的文字，以及结构块容器的
+//! 整列排版。
 //!
-//! 常驻视图按投影绑定字段。样式里有好几处要一起变（放置态的底和边、展开排法、圆角半径），
-//! 这些地方按投影现算整份样式，和旧视图用同一个构造函数，保证画面和整块重挂时一样。
+//! 常驻视图按投影绑定字段。样式里有好几处要一起变（放置态的底和边、展开排法、圆角半径），这些地方按投影
+//! 现算整份样式绑各页共用的 [`StyleField`]（`field_bind.rs`），和旧视图用同一个构造函数，保证画面和整块
+//! 重挂时一样。
 
-use nana_ui::runtime::view::{css, fields, signal, untrack, widget, AnyView, FieldWrite, InlineStyle, IntoView, Signal, StyledComponent};
-use nana_ui::runtime::{IconGlyph, NodeStyle, ValidationMessage};
-use nana_ui_core::Icon;
+use nana_ui::runtime::view::{css, fields, signal, untrack, widget, AnyView, FieldWrite, InlineStyle, IntoView, Signal};
+use nana_ui::runtime::ValidationMessage;
 
+pub(crate) use super::super::field_bind::StyleField;
 use super::super::hot::ModelField;
 use super::style;
-
-/// 整份节点样式。绑定闭包按投影现算样式，值不同才写。
-///
-/// `layout.hidden` 归 `.visible` 管：同一个节点不要同时绑 `.visible` 和整份样式，
-/// 要两样都有时外面包一层。
-pub(crate) struct StyleField;
-
-impl<C: StyledComponent> FieldWrite<C, NodeStyle> for StyleField {
-    const FIELD: &'static str = "style";
-
-    fn write(target: &mut C, value: NodeStyle) {
-        *target.node_style_mut() = value;
-    }
-
-    fn differs(target: &C, value: &NodeStyle) -> bool {
-        target.node_style() != value
-    }
-}
-
-/// 独立图标节点的图标。图标按几何指针比较。
-pub(crate) struct GlyphIconField;
-
-impl FieldWrite<IconGlyph, Icon> for GlyphIconField {
-    const FIELD: &'static str = "IconGlyph.icon";
-
-    fn write(target: &mut IconGlyph, value: Icon) {
-        target.icon = value;
-    }
-
-    fn differs(target: &IconGlyph, value: &Icon) -> bool {
-        target.icon.as_ptr() != value.as_ptr()
-    }
-}
 
 /// 校验提示的文字。
 pub(crate) struct ValidationTextField;
