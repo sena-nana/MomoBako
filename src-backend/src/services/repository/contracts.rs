@@ -1143,6 +1143,22 @@ pub struct FileImportRequest {
     pub repo_id: String,
     pub parent_path: Option<String>,
     pub source_paths: Vec<String>,
+    /// 目标文件夹里已有同名条目（或同一批里名字重复）时跳过它、照常导入其余的，已有的文件不覆盖。
+    /// 不传或为假时照旧整批拒绝（`entry already exists`），一个都不导入。
+    #[serde(default)]
+    pub skip_existing: bool,
+}
+
+/// 导入的结果：导入以后目标文件夹的目录快照，加上因为同名跳过的条目。快照的字段摊平在同一层，只认目录快照的
+/// 调用方照旧能读。
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FileImportResponse {
+    #[serde(flatten)]
+    pub snapshot: FileBrowserSnapshot,
+    /// `skipExisting` 时跳过的条目，写成它们在目标资源库里的相对路径；没有跳过时不写这个键。
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub skipped_entries: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -1165,6 +1165,13 @@ export type FileImportRequest = {
   repoId: string;
   parentPath?: string;
   sourcePaths: string[];
+  /** 目标文件夹里已有同名条目时跳过它、照常导入其余的；不传时整批拒绝。已有的文件都不覆盖。 */
+  skipExisting?: boolean;
+};
+
+/** 导入结果：导入后目标文件夹的目录快照；`skipExisting` 时跳过的条目按目标资源库里的相对路径列出。 */
+export type FileImportResponse = FileBrowserSnapshot & {
+  skippedEntries?: string[];
 };
 
 export type FileArchiveImportRequest = {

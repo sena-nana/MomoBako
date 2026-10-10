@@ -14,11 +14,13 @@ use crate::backend::services::repository::{
     BinaryFileWriteRequest, FileCreateRequest, FileImportRequest, NeteaseRepositoryCacheConfigureRequest, PluginCallRequest,
     PluginConfigDeleteRequest,
     PluginConfigSetRequest, PluginConfigSnapshot, PluginEnabledRequest, PluginHookExecutionListRequest, PluginInstallRequest,
-    PlaylistItemsByPathsAddRequest, PlaylistMutationRequest, PluginManifest, RepositoryAction, RepositoryActionRunRequest,
-    RepositoryBackendConfigUpdateRequest, RepositoryMutationRequest, SyncRequest, SystemLogQuery,
+    PlaylistItemsByPathsAddRequest, PlaylistMutationRequest, PlaylistPlayerContribution, PluginManifest, RepositoryAction,
+    RepositoryActionRunRequest,
+    RepositoryBackendConfigUpdateRequest, RepositoryMutationRequest, SyncRequest, SystemLogQuery, SystemLogWriteRequest,
 };
 use crate::backend::viewmodels::PluginViewModel;
 use crate::shell::admin::api::{self, ApiMessage, HttpRequest};
+use crate::shell::admin::source_download::{DownloadOutcome, DownloadRun};
 use crate::shell::admin::{AdminEffect, AdminMessage, PluginCallOrigin, SourceStep};
 use crate::shell::ShellMessage;
 use crate::MomoBakoApplication;
@@ -91,10 +93,8 @@ fn dispatch_one(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<S
         AdminEffect::CreateSourcePlaylist { repo_id, playlist_id, name, player_type_id, path } => {
             create_source_playlist(app, context, repo_id, playlist_id, name, player_type_id, path);
         }
-        AdminEffect::DownloadToRepository { plugin_id, method, payload, repository_id, target_repo_id, target_path, parent_path } => {
-            let request = RepositoryDownloadRequest { plugin_id, method, payload, repository_id, target_repo_id, target_path, parent_path };
-            download_to_repository(app, context, request);
-        }
+        AdminEffect::DownloadToRepository { run, payload, parent_path } => download_to_repository(app, context, run, payload, parent_path),
+        AdminEffect::WriteLogs(requests) => write_logs(app, context, requests),
         AdminEffect::UpdateBackendConfig { repo_id, backend_config, step } => {
             let Some(services) = app.services.as_ref() else {
                 eprintln!("Nana 更新仓库后端配置需要领域服务");
@@ -267,41 +267,43 @@ fn create_source_playlist(
     }
 }
 
-/// 来源下载到其他资源库要的东西，见 [`download_to_repository`]。
-struct RepositoryDownloadRequest {
-    plugin_id: String,
-    method: String,
-    payload: serde_json::Value,
-    repository_id: Option<String>,
-    target_repo_id: String,
-    target_path: String,
-    parent_path: Option<String>,
-}
-
 /// 来源下载到其他资源库（Vue `runDownloadAction` 的 `writable-repository`）：调用插件（载荷里写好了目标），把下载
 /// 回来的文件（`paths` 和 `completed[].paths`）导入目标资源库，再同步目标资源库。下载歌单时导入到以歌单命名的
 /// 文件夹，目标资源库里还没有这个文件夹就先建（导入要求文件夹已经在；Vue 不建，导入报「directory not found」）。
-/// 哪一步失败都把原因交回，不留在进行中；成功交回插件的结果，失败条数在里面。
-fn download_to_repository(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, request: RepositoryDownloadRequest) {
-    let RepositoryDownloadRequest { plugin_id, method, payload, repository_id, target_repo_id, target_path, parent_path } = request;
+/// 导入带 `skipExisting`：目标里已有同名文件的保留原文件、不导入，其余照常导入（Vue 的导入遇到一个同名就整批
+/// 失败）。哪一步失败都把原因交回，不留在进行中；成功交回插件的结果（失败的条目在里面）和跳过的同名文件。
+fn download_to_repository(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    run: DownloadRun,
+    payload: serde_json::Value,
+    parent_path: Option<String>,
+) {
+    let Some(target) = run.target.clone() else {
+        eprintln!("Nana 下载到其他资源库没有目标资源库：{}", run.method);
+        app.shell.reduce(admin(AdminMessage::DownloadFinished { run, result: Err("没有选定目标资源库。".into()) }));
+        return;
+    };
     let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 来源下载需要领域服务，当前服务未启动：{method}");
-        app.shell.reduce(admin(AdminMessage::FilePluginFinished { method, result: Err(NO_SERVICES.into()) }));
+        eprintln!("Nana 来源下载需要领域服务，当前服务未启动：{}", run.method);
+        app.shell.reduce(admin(AdminMessage::DownloadFinished { run, result: Err(NO_SERVICES.into()) }));
         return;
     };
     let plugin = services.plugin.clone();
     let browser = services.file_browser.clone();
     let tasks = services.tasks.clone();
     let executor = services.executor.clone();
-    let failed_method = method.clone();
+    let failed_run = run.clone();
+    let (target_repo_id, target_path) = (target.repo_id, target.path);
     if let Err(error) = context.run_task(Task::new(async move {
-        let call = PluginCallRequest { plugin_id, method: method.clone(), repository_id, payload };
+        let method = run.method.clone();
+        let call = PluginCallRequest { plugin_id: run.plugin_id.clone(), method: method.clone(), repository_id: run.repository_id.clone(), payload };
         let result = (|| {
             let response = executor.block_on(plugin.call_plugin(call))?;
             let paths = crate::shell::admin::source_target::result_paths(&response.payload);
             if paths.is_empty() {
                 eprintln!("Nana 来源下载没有交回文件，不导入：{method}");
-                return Ok(response.payload);
+                return Ok(DownloadOutcome::plugin(response.payload));
             }
             if let Some(folder) = parent_path.as_deref() {
                 if !std::path::Path::new(&target_path).join(folder).is_dir() {
@@ -312,21 +314,47 @@ fn download_to_repository(app: &mut MomoBakoApplication, context: &RuntimeProgra
                     })?;
                 }
             }
-            let import = FileImportRequest { repo_id: target_repo_id.clone(), parent_path, source_paths: paths };
-            executor.block_on(tasks.execute(PROTOCOL_ENTRY_IMPORT, import)).map_err(|error| {
+            let import = FileImportRequest { repo_id: target_repo_id.clone(), parent_path, source_paths: paths, skip_existing: true };
+            let (imported, _) = executor.block_on(tasks.execute(PROTOCOL_ENTRY_IMPORT, import)).map_err(|error| {
                 eprintln!("Nana 下载的文件导入目标资源库失败：{target_repo_id}：{error}");
                 format!("导入目标资源库失败：{error}")
             })?;
+            let outcome = DownloadOutcome::imported(response.payload, &imported);
+            if !outcome.skipped.is_empty() {
+                eprintln!("Nana 目标资源库已有同名文件，跳过 {} 个：{target_repo_id}", outcome.skipped.len());
+            }
             executor.block_on(tasks.execute(PROTOCOL_REPOSITORY_SYNC, SyncRequest { repo_id: target_repo_id.clone() })).map_err(|error| {
                 eprintln!("Nana 同步目标资源库失败：{target_repo_id}：{error}");
                 format!("同步目标资源库失败：{error}")
             })?;
-            Ok(response.payload)
+            Ok(outcome)
         })();
-        admin(AdminMessage::FilePluginFinished { method, result })
+        admin(AdminMessage::DownloadFinished { run, result })
     })) {
         eprintln!("Nana 来源下载任务提交失败：{error}");
-        app.shell.reduce(admin(AdminMessage::FilePluginFinished { method: failed_method, result: Err(format!("来源下载任务提交失败：{error}")) }));
+        app.shell.reduce(admin(AdminMessage::DownloadFinished { run: failed_run, result: Err(format!("来源下载任务提交失败：{error}")) }));
+    }
+}
+
+/// 写系统日志：在任务里逐条写，写不进去的记下原因一起交回。
+fn write_logs(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, requests: Vec<SystemLogWriteRequest>) {
+    let Some(services) = app.services.as_ref() else {
+        eprintln!("Nana 写系统日志需要领域服务，当前服务未启动：{} 条", requests.len());
+        return;
+    };
+    let system = services.system.clone();
+    let executor = services.executor.clone();
+    if let Err(error) = context.run_task(Task::new(async move {
+        let failures: Vec<String> = requests
+            .into_iter()
+            .filter_map(|request| {
+                let action = request.action.clone();
+                executor.block_on(system.write_system_log(request)).err().map(|error| format!("{action}：{error}"))
+            })
+            .collect();
+        admin(AdminMessage::LogsWritten(if failures.is_empty() { Ok(()) } else { Err(failures.join("；")) }))
+    })) {
+        eprintln!("Nana 写系统日志的任务提交失败：{error}");
     }
 }
 
@@ -334,6 +362,7 @@ fn download_to_repository(app: &mut MomoBakoApplication, context: &RuntimeProgra
 fn plugin_result(origin: PluginCallOrigin, method: String, result: Result<serde_json::Value, String>) -> ShellMessage {
     match origin {
         PluginCallOrigin::FileMenu => admin(AdminMessage::FilePluginFinished { method, result }),
+        PluginCallOrigin::Download(run) => admin(AdminMessage::DownloadFinished { run, result: result.map(DownloadOutcome::plugin) }),
         PluginCallOrigin::SourceAuth(step) => source_step(step, result),
         PluginCallOrigin::Playground => admin(AdminMessage::Api(ApiMessage::PluginFinished(result))),
     }
@@ -353,7 +382,8 @@ fn http_request(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<S
     }
 }
 
-/// 设置页一次读五份数据：插件、钩子记录、缓存、API 设计和外部连接。
+/// 设置页一次读五份数据：插件、钩子记录、缓存、API 设计和外部连接。首屏启动第 4 步等着它，任务 panic 也按失败
+/// 交回（[`bundle_message`]）。
 fn load_bundle(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
     let Some(services) = app.services.as_ref() else {
         eprintln!("Nana 设置页数据需要领域服务，当前服务未启动");
@@ -364,16 +394,29 @@ fn load_bundle(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<Sh
     let system = services.system.clone();
     let executor = services.executor.clone();
     if let Err(error) = context.run_task(Task::new(async move {
-        let plugins = executor.block_on(plugin.list_plugins());
-        let hooks = executor.block_on(plugin.list_plugin_hook_executions(Some(PluginHookExecutionListRequest { plugin_id: None, limit: Some(200) })));
-        let cache = executor.block_on(plugin.get_cache_snapshot());
-        let api = executor.block_on(plugin.get_api_design_snapshot());
-        let external = executor.block_on(system.get_external_api_connection_status());
-        admin(AdminMessage::SettingsBundleLoaded { plugins, hooks: hooks.map(|response| response.records), cache, api, external })
+        bundle_message(move || {
+            let plugins = executor.block_on(plugin.list_plugins());
+            let hooks = executor.block_on(plugin.list_plugin_hook_executions(Some(PluginHookExecutionListRequest { plugin_id: None, limit: Some(200) })));
+            let cache = executor.block_on(plugin.get_cache_snapshot());
+            let api = executor.block_on(plugin.get_api_design_snapshot());
+            let external = executor.block_on(system.get_external_api_connection_status());
+            AdminMessage::SettingsBundleLoaded { plugins, hooks: hooks.map(|response| response.records), cache, api, external }
+        })
     })) {
         eprintln!("Nana 设置页数据任务提交失败：{error}");
         app.shell.reduce(admin(failed_bundle(&format!("设置页数据任务提交失败：{error}"))));
     }
+}
+
+/// 设置包任务交回的消息：`read` 在任务线程里读五份数据；panic 时记日志，按五份都失败交回，首屏启动照常结束。
+pub(crate) fn bundle_message(read: impl FnOnce() -> AdminMessage) -> ShellMessage {
+    admin(crate::task_guard::settle("设置页数据", read, |error| failed_bundle(&error)))
+}
+
+/// 播放器类型任务交回的消息：`read` 在任务线程里读插件登记的播放器类型；panic 时记日志并按失败交回，首屏启动照常
+/// 结束。
+pub(crate) fn players_message(read: impl FnOnce() -> Result<Vec<PlaylistPlayerContribution>, String>) -> ShellMessage {
+    ShellMessage::PlaylistPlayersLoaded(crate::task_guard::settle("播放器类型", read, Err))
 }
 
 /// 历史日志一次读的条数，和 Vue `loadSystemLogsInWorkspace(limit = 200)` 一致。
@@ -428,7 +471,8 @@ fn load_app_settings(app: &mut MomoBakoApplication, context: &RuntimeProgramCont
     }
 }
 
-/// 读插件登记的播放器类型。结果回 `PlaylistPlayersLoaded`，播放集侧栏、播放器和新建对话框共用。
+/// 读插件登记的播放器类型。结果回 `PlaylistPlayersLoaded`，播放集侧栏、播放器和新建对话框共用；首屏启动第 4 步
+/// 也等着它，任务 panic 也按失败交回（[`players_message`]）。
 fn load_players(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
     let Some(services) = app.services.as_ref() else {
         eprintln!("Nana 播放器类型需要领域服务，当前服务未启动");
@@ -438,7 +482,7 @@ fn load_players(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<S
     let plugin = services.plugin.clone();
     let executor = services.executor.clone();
     if let Err(error) = context.run_task(Task::new(async move {
-        ShellMessage::PlaylistPlayersLoaded(executor.block_on(plugin.list_playlist_players()))
+        players_message(move || executor.block_on(plugin.list_playlist_players()))
     })) {
         eprintln!("Nana 播放器类型任务提交失败：{error}");
         app.shell.reduce(ShellMessage::PlaylistPlayersLoaded(Err(format!("播放器类型任务提交失败：{error}"))));

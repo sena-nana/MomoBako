@@ -98,6 +98,7 @@ pub(super) fn add_external_assets(
             repo_id: request.repo_id.clone(),
             parent_path: Some(context.parent_path.clone()),
             source_paths,
+            skip_existing: false,
         });
         match import_result {
             Ok(_) => {

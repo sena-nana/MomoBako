@@ -82,7 +82,8 @@ pub struct FileRow {
     pub tags: Vec<String>,
     pub thumbnail_custom: bool,
     pub provider_id: Option<String>,
-    /// 来源里的条目标识。来源载荷没有歌单标识时，「创建播放列表」用它拼播放集标识。
+    /// 条目在来源里的标识（单曲是歌曲标识，歌单目录是歌单标识）。来源载荷和元数据里没有条目自己那一种标识时，
+    /// 来源条目动作退回用它（`entry_actions::source_number`）。
     pub provider_item_id: Option<String>,
     pub source_payload: Option<serde_json::Value>,
     pub metadata: std::collections::BTreeMap<String, serde_json::Value>,

@@ -18,6 +18,7 @@ mod player_dispatch;
 mod admin_dispatch;
 mod sidebar_dispatch;
 mod sync_dispatch;
+mod task_guard;
 mod task_watch;
 mod window_host;
 pub(crate) mod frame_clock;
@@ -177,10 +178,8 @@ impl ApplicationState for MomoBakoApplication {
                 let executor = services.executor.clone();
                 let generation = self.shell.workspace.list_generation;
                 if let Err(error) = context.run_task(Task::new(async move {
-                    ShellMessage::WorkspaceListLoaded {
-                        generation,
-                        result: executor.block_on(query.list_repositories()),
-                    }
+                    let result = task_guard::settle("资源库列表", || executor.block_on(query.list_repositories()), Err);
+                    ShellMessage::WorkspaceListLoaded { generation, result }
                 })) {
                     eprintln!("Nana 资源库加载任务提交失败：{error}");
                 }
@@ -294,7 +293,8 @@ impl ApplicationState for MomoBakoApplication {
     }
 }
 
-/// 执行工作台归约留下的副作用。服务未启动或任务提交失败时把错误写回状态机，避免步骤停在进行中。
+/// 执行工作台归约留下的副作用。服务未启动、任务提交失败或启动要等的读取（列表、同步、摘要）panic 时把错误写回
+/// 状态机，避免步骤停在进行中（`task_guard.rs`）。
 fn dispatch_workspace_effects(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
@@ -327,10 +327,8 @@ fn dispatch_workspace_effects(
                     continue;
                 };
                 if let Err(error) = context.run_task(Task::new(async move {
-                    ShellMessage::WorkspaceListLoaded {
-                        generation,
-                        result: executor.block_on(query.list_repositories()),
-                    }
+                    let result = task_guard::settle("资源库列表", || executor.block_on(query.list_repositories()), Err);
+                    ShellMessage::WorkspaceListLoaded { generation, result }
                 })) {
                     eprintln!("Nana 资源库刷新任务提交失败：{error}");
                     app.shell.reduce(ShellMessage::WorkspaceListLoaded {
@@ -353,9 +351,12 @@ fn dispatch_workspace_effects(
                     continue;
                 };
                 if let Err(error) = context.run_task(Task::new(async move {
-                    let result = executor
-                        .block_on(tasks.execute(PROTOCOL_REPOSITORY_SYNC, SyncRequest { repo_id }))
-                        .map(|(output, _)| shell::SyncCounts::from_output(&output));
+                    let sync = || {
+                        executor
+                            .block_on(tasks.execute(PROTOCOL_REPOSITORY_SYNC, SyncRequest { repo_id }))
+                            .map(|(output, _)| shell::SyncCounts::from_output(&output))
+                    };
+                    let result = task_guard::settle("资源库同步", sync, Err);
                     ShellMessage::RepositorySynced { generation, result }
                 })) {
                     eprintln!("Nana 资源库同步任务提交失败：{error}");
@@ -375,7 +376,8 @@ fn dispatch_workspace_effects(
                     continue;
                 };
                 if let Err(error) = context.run_task(Task::new(async move {
-                    ShellMessage::RepositorySnapshotLoaded { generation, result: executor.block_on(query.get_repository_snapshot(repo_id)) }
+                    let result = task_guard::settle("资源库摘要", || executor.block_on(query.get_repository_snapshot(repo_id)), Err);
+                    ShellMessage::RepositorySnapshotLoaded { generation, result }
                 })) {
                     eprintln!("Nana 资源库摘要任务提交失败：{error}");
                     app.shell.reduce(ShellMessage::RepositorySnapshotLoaded {

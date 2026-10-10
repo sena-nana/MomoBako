@@ -720,11 +720,7 @@ fn attach_folder_dialog_submits_a_chosen_path_and_ignores_cancel() {
 
 /// 下载单曲在任务弹层里的进度行：动作名，「准备下载 夜曲」→「正在下载 夜曲」。
 fn download_progress() -> crate::shell::entry_actions::DownloadProgress {
-    crate::shell::entry_actions::DownloadProgress {
-        label: "下载单曲".into(),
-        preparing: "准备下载 夜曲".into(),
-        running: Some("正在下载 夜曲".into()),
-    }
+    crate::shell::entry_actions::DownloadProgress { label: "下载单曲".into(), subject: "夜曲".into() }
 }
 
 #[test]
@@ -772,25 +768,27 @@ fn download_folder_calls_plugin_only_after_a_directory_is_chosen() {
         &mut model,
         InputMessage::FileDialogCompleted { request_id: DIALOG_DOWNLOAD_ID, paths: vec!["D:/downloads".into()], failed: None },
     );
-    match model.admin.take_effects().as_slice() {
+    let run = match model.admin.take_effects().as_slice() {
         [crate::shell::admin::AdminEffect::CallPlugin { method, payload, repository_id, origin, .. }] => {
             assert_eq!(method, "media.downloadTrackPackage");
             assert_eq!(payload["songId"], 9);
             assert_eq!(payload["destination"]["kind"], "localFolder");
             assert_eq!(payload["destination"]["path"], "D:/downloads");
             assert_eq!(repository_id.as_deref(), Some("repo"));
-            assert_eq!(*origin, crate::shell::admin::PluginCallOrigin::FileMenu);
+            match origin {
+                crate::shell::admin::PluginCallOrigin::Download(run) => run.clone(),
+                other => panic!("下载到本地的结果要回到下载的收尾：{other:?}"),
+            }
         }
         other => panic!("unexpected {other:?}"),
-    }
+    };
+    assert_eq!((run.progress.subject.as_str(), run.target.as_ref()), ("夜曲", None));
     // Vue `runDownloadAction`：选好目录以后任务弹层出「下载单曲 · 正在下载 夜曲」36%，不确定进度。
     let row = model.operation.shown().cloned().expect("下载的进度行");
     assert_eq!((row.label.as_str(), row.detail.as_str(), row.value, row.indeterminate), ("下载单曲", "正在下载 夜曲", 36.0, true));
-    send_admin(&mut model, crate::shell::admin::AdminMessage::FilePluginFinished {
-        method: "media.downloadTrackPackage".into(),
-        result: Err("网络断开".into()),
-    });
+    send_admin(&mut model, crate::shell::admin::AdminMessage::DownloadFinished { run, result: Err("网络断开".into()) });
     assert!(model.operation.shown().is_none(), "下载失败时这一行取消");
+    assert_eq!(model.files.error, "网络断开", "失败的原因写进文件列");
 }
 
 fn send_admin(model: &mut ShellViewModel, message: crate::shell::admin::AdminMessage) {

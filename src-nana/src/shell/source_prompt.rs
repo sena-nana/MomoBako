@@ -1,12 +1,12 @@
 //! 来源插件下载还缺的目录。
 //!
-//! 下载先排队系统文件夹对话框，选中后再 `call_plugin`。取消不调用。
+//! 下载先排队系统文件夹对话框，选中后再 `call_plugin`。取消不调用。结果回来以后的收尾在 `source_download.rs`。
 
 use serde_json::Value;
 
-use super::super::admin::AdminMessage;
-use super::super::repo_operation::{OperationPatch, OperationStart};
-use super::super::{ShellMessage, ShellViewModel};
+use super::super::admin::source_download::DownloadRun;
+use super::super::admin::{AdminEffect, PluginCallOrigin};
+use super::super::ShellViewModel;
 
 /// 已经点过下载、还在等目录的插件动作。
 #[derive(Clone, Debug)]
@@ -19,7 +19,7 @@ pub struct PendingDownload {
     pub progress: super::super::entry_actions::DownloadProgress,
 }
 
-/// 把选中的目录写进 `destination` 再调用。没有待下载动作时只记日志。
+/// 把选中的目录写进 `destination` 再调用（任务弹层的进度行见 [`DownloadRun::begin`]）。没有待下载动作时只记日志。
 pub(super) fn submit_download(model: &mut ShellViewModel, path: String) {
     let Some(mut pending) = model.input.pending_download.take() else {
         eprintln!("Nana 下载目录没有对应的插件动作");
@@ -36,17 +36,12 @@ pub(super) fn submit_download(model: &mut ShellViewModel, path: String) {
             serde_json::json!({ "kind": "localFolder", "path": trimmed }),
         );
     }
-    // Vue `runDownloadAction`：「{动作名} · 准备下载 …」10%，调用插件时「正在下载 …」36% 不确定进度。
-    let progress = &pending.progress;
-    let operation = model.operation.start(OperationStart::new(progress.label.clone(), progress.preparing.clone(), 10.0));
-    if let Some(running) = &progress.running {
-        model.operation.update(operation, OperationPatch::step(running.clone(), 36.0).with_indeterminate(true));
-    }
-    model.admin.note_download_operation(pending.method.clone(), operation);
-    model.reduce(ShellMessage::Admin(AdminMessage::CallFilePlugin {
+    let run = DownloadRun::begin(model, pending.progress, pending.plugin_id.clone(), pending.method.clone(), pending.repository_id.clone(), None);
+    model.admin.push_effect(AdminEffect::CallPlugin {
         plugin_id: pending.plugin_id,
         method: pending.method,
         payload: pending.payload,
         repository_id: pending.repository_id,
-    }));
+        origin: PluginCallOrigin::Download(run),
+    });
 }

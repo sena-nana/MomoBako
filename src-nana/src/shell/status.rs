@@ -4,7 +4,7 @@
 //! **记什么。** 只有一个槽位，后记的失败顶替先记的。记的是没有就近显示的失败：
 //! - 各领域在失败处直接 [`StatusState::fail`]：宿主打开、定位、拖出，最小化到托盘，资源库列表和摘要，
 //!   文件区以外发起的目录读取，素材详情，元数据保存，播放集读写，设置和系统日志，
-//!   智能文件夹删除，添加资源库时的文件夹选择；
+//!   智能文件夹删除，添加资源库时的文件夹选择，来源下载里失败的条目；
 //! - 播放控制和播放集成员这类写在播放器内部的失败，由播放器排进待取的失败，归约结束时取走；
 //! - 文件操作（`files.error`）、文件夹树（`sidebar.tree_error`）、智能文件夹（`sidebar.smart_error`）
 //!   和设置数据（`admin.load_error`：插件、钩子、缓存、API 契约和外部连接的读取）四个领域字段：新写了一次
@@ -13,19 +13,23 @@
 //!   位置，状态区显示，和 Vue 一样。
 //!
 //! 对话框里的错误行、搜索面板、缺失仓库页、空库页、启动页、插件操作、导出对话框、预览和播放条这些已经
-//! 就近显示的失败不进这里。
+//! 就近显示的失败不进这里。要提醒、但不算失败的结果（来源下载一项也没有下载到）用 [`StatusState::warn`] 记进
+//! 同一个槽位，清除的时机一样，状态区用警告色。
 //!
 //! **什么时候清。** 照 Vue `error.value = null` 的时机：用户开始一个会写全局错误的操作时清掉上一次失败，
 //! 成功不专门清。开始的迹象有两种（[`starts_operation`]、[`Activity`]）：打开、定位、拖出，选仓库、
 //! 重试启动、打开智能文件夹这几条消息；以及读目录、文件变更、刷新文件夹树、选中别的文件、
 //! 保存元数据、搜索、导出、智能文件夹增改删、插件操作、执行仓库动作、刷新资源库和选仓库这些操作的忙碌
-//! 标志由假变真。后台的静默刷新不算。同一次归约里新记的失败不会被这次清掉。
+//! 标志由假变真。后台的静默刷新不算。同一次归约里新记的失败不会被这次清掉。来源下载记下失败条目以后
+//! 接着刷新资源库（Vue `context.refreshRepo()`），这一轮刷新是下载的收尾、不是用户开始的新操作
+//! （[`RefreshRun::keeps_status`](super::workspace::RefreshRun)），它读列表、同步和重读目录也不清。
 //!
 //! 没有失败时依次是忙碌行和同步进度（文件夹树刷新时的扫描、写入、刷新三档）。
 
 use super::input::InputMessage;
 use super::sidebar::SidebarMessage;
 use super::view_part_primary::RouteKey;
+use super::workspace::RefreshStage;
 use super::{ShellMessage, ShellViewModel};
 
 /// 失败来源：哪一类操作失败。状态区只显示文案，来源决定就近显示时让不让位，日志和测试据此认出是谁。
@@ -61,14 +65,18 @@ pub enum FailureSource {
     SettingsData,
     /// 系统日志。
     Logs,
+    /// 来源下载收尾：插件报告失败的条目（每一条的原因写进系统日志），或者一项也没有下载到（提醒）。
+    Download,
 }
 
-/// 记下的一次失败。
+/// 记下的一次失败，或者一条要提醒的结果。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Failure {
     pub source: FailureSource,
     /// 状态区显示的文案：说明失败的对象，后面接系统返回的原因。
     pub message: String,
+    /// 提醒而不是失败（例如来源下载一项也没有下载到）：状态区用警告色，DESIGN.md 8.1 的 Warning。
+    pub warning: bool,
     /// 第几次记的失败，判断是不是这次归约里新记的。
     seq: u64,
 }
@@ -100,14 +108,23 @@ impl StatusState {
 
     /// 记下一次失败，顶替上一次。空文案不记。
     pub(crate) fn fail(&mut self, source: FailureSource, message: impl Into<String>) {
-        let message = message.into();
+        self.record(source, message.into(), false);
+    }
+
+    /// 记下一条要提醒的结果（不是失败），和失败共用一个槽位、同样的清除时机，状态区用警告色。空文案不记。
+    pub(crate) fn warn(&mut self, source: FailureSource, message: impl Into<String>) {
+        self.record(source, message.into(), true);
+    }
+
+    fn record(&mut self, source: FailureSource, message: String, warning: bool) {
         if message.trim().is_empty() {
             eprintln!("Nana 状态区收到空的失败文案，来源 {source:?}");
             return;
         }
-        eprintln!("Nana 状态区记下失败（{source:?}）：{message}");
+        let kind = if warning { "提醒" } else { "失败" };
+        eprintln!("Nana 状态区记下{kind}（{source:?}）：{message}");
         self.seq += 1;
-        self.failure = Some(Failure { source, message, seq: self.seq });
+        self.failure = Some(Failure { source, message, warning, seq: self.seq });
     }
 
     /// 清掉第 `seq` 次及以前记的失败；之后新记的留着。
@@ -141,10 +158,13 @@ pub(super) struct Activity {
 
 impl Activity {
     pub(super) fn of(model: &ShellViewModel) -> Self {
+        // 来源下载收尾的那一轮刷新属于下载本身：它读列表、选仓库和重读目录时的忙碌不算用户开始了新操作。
+        let follow_up = model.workspace.refresh.as_ref().is_some_and(|run| run.keeps_status);
+        let follow_up_directory = follow_up && model.workspace.refresh_stage() == Some(RefreshStage::Directory);
         Self {
             busy: [
                 // 读目录（非静默）、文件变更、刷新文件夹树（同步仓库）。
-                model.files.loading,
+                model.files.loading && !follow_up_directory,
                 model.files.mutating,
                 model.tree_sync.running(),
                 // 保存元数据、搜索、导出。
@@ -159,8 +179,8 @@ impl Activity {
                 model.admin.actions_running,
                 // 刷新资源库（Vue `loadRepositories`）和选仓库（`selectRepository`）开始时都清错误：附加、
                 // 新建、删除以后切过去，来源动作完成以后的刷新都从这里开始。
-                model.workspace.list_loading,
-                model.workspace.snapshot_loading,
+                model.workspace.list_loading && !follow_up,
+                model.workspace.snapshot_loading && !follow_up,
             ],
             selection: model.inspect.target_path.clone(),
         }
@@ -228,13 +248,15 @@ impl ShellViewModel {
     }
 }
 
-/// 状态区显示什么。顺序照 Vue：失败 > 忙碌 > 同步进度。同步进度来自文件夹树的「刷新」（`tree_sync.rs`），
+/// 状态区显示什么。顺序照 Vue：失败（或提醒）> 忙碌 > 同步进度。同步进度来自文件夹树的「刷新」（`tree_sync.rs`），
 /// 启动时的同步进度在启动页上。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum StatusLine {
     Hidden,
     /// 红色错误条：最近一次失败的文案。
     Failure(String),
+    /// 警告色的提醒条：最近一次要提醒的结果，例如来源下载一项也没有下载到。
+    Warning(String),
     /// 「正在同步仓库状态」：读资源库列表、读仓库摘要或读素材详情时。
     Busy,
     /// 同步进度：这一步的文案和百分比（扫描、写入、刷新三档）。
@@ -247,7 +269,8 @@ impl StatusLine {
         if let Some(failure) = model.status.failure()
             && !shown_in_place(model, failure.source)
         {
-            return Self::Failure(failure.message.clone());
+            let message = failure.message.clone();
+            return if failure.warning { Self::Warning(message) } else { Self::Failure(message) };
         }
         if busy(model) {
             return Self::Busy;

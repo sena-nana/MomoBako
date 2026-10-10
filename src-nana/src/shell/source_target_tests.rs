@@ -3,6 +3,7 @@
 
 use serde_json::json;
 
+use crate::shell::admin::source_download::DownloadOutcome;
 use crate::shell::admin::{AdminEffect, AdminMessage, PluginCallOrigin};
 use crate::shell::entry_actions::{NO_TARGET_REPOSITORY, SOURCE_UNAVAILABLE};
 use crate::shell::files::FilesMessage;
@@ -128,30 +129,67 @@ fn downloading_to_another_repository_asks_for_the_target_first() {
     let row = model.operation.shown().expect("进度行");
     assert_eq!((row.label.as_str(), row.detail.as_str(), row.value, row.indeterminate), ("下载单曲", "正在下载 晴天.mp3", 36.0, true));
     let effects = model.admin.take_effects();
-    let (method, payload) = effects
+    let (run, payload) = effects
         .iter()
         .find_map(|effect| match effect {
-            AdminEffect::DownloadToRepository { method, payload, repository_id, target_repo_id, target_path, parent_path, .. } => {
-                assert_eq!(repository_id.as_deref(), Some("acceptance-repo"), "插件按当前资源库取来源凭据");
-                assert_eq!((target_repo_id.as_str(), target_path.as_str(), parent_path), ("third-repo", "D:/third", &None));
-                Some((method.clone(), payload.clone()))
+            AdminEffect::DownloadToRepository { run, payload, parent_path } => {
+                assert_eq!(run.repository_id.as_deref(), Some("acceptance-repo"), "插件按当前资源库取来源凭据");
+                let target = run.target.as_ref().expect("目标资源库");
+                assert_eq!((target.repo_id.as_str(), target.path.as_str(), parent_path), ("third-repo", "D:/third", &None));
+                Some((run.clone(), payload.clone()))
             }
             _ => None,
         })
         .unwrap_or_else(|| panic!("没有下载到其他资源库：{effects:?}"));
-    assert_eq!(method, "media.downloadTrackPackage");
+    assert_eq!(run.method, "media.downloadTrackPackage");
     assert_eq!(payload["destination"], json!({ "kind": "repository", "repoId": "third-repo", "path": "D:/third" }));
     assert_eq!(payload["managedCacheRoot"], "D:/MomoCache/netease");
 
     model.workspace.take_effects();
-    let result = json!({ "completed": [{ "paths": ["D:/stage/晴天.mp3"] }], "failed": [{ "songId": 1, "error": "版权" }] });
-    model.reduce(ShellMessage::Admin(AdminMessage::FilePluginFinished { method, result: Ok(result) }));
+    let result = json!({ "paths": ["D:/stage/晴天.mp3", "D:/stage/晴天.lrc"] });
+    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Ok(DownloadOutcome::plugin(result)) }));
     let row = model.operation.shown().expect("进度行");
     assert_eq!((row.label.as_str(), row.detail.as_str()), ("加载资源库", "读取已注册资源库"), "刷新接手进度行");
     assert!(
         model.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::RefreshRepositories { .. })),
         "照 Vue context.refreshRepo() 刷新当前资源库"
     );
+}
+
+/// 第三方来源的单曲：来源载荷里只有条目种类、没有歌曲标识。右键清理播放缓存、下载到其他资源库时，`songId` 退回条目
+/// 的来源标识（`providerItemId`），`playlistId` 不退回（Vue 把歌曲的标识也填成歌单标识）。
+#[test]
+fn a_track_without_a_song_id_is_identified_by_its_provider_item_id() {
+    let mut model = menu_open();
+    let row = model.files.rows.iter_mut().find(|row| row.path == TRACK).expect("晴天.mp3");
+    row.source_payload = Some(json!({ "entryKind": "track", "songName": "晴天" }));
+    assert_eq!(row.provider_item_id.as_deref(), Some("186016"));
+
+    click(&mut model, "清理播放缓存");
+    let effects = model.admin.take_effects();
+    let payload = effects
+        .iter()
+        .find_map(|effect| match effect {
+            AdminEffect::CallPlugin { payload, origin: PluginCallOrigin::FileMenu, .. } => Some(payload.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("清理播放缓存没有调用插件：{effects:?}"));
+    assert_eq!(payload["songId"], 186016);
+    assert!(payload.get("playlistId").is_none(), "单曲不拿自己的标识去填歌单标识");
+
+    model.reduce(ShellMessage::Files(FilesMessage::OpenEntryMenu { path: TRACK.into(), x: 400.0, y: 470.0 }));
+    click(&mut model, "下载单曲到其他资源库");
+    model.reduce(ShellMessage::Admin(AdminMessage::ChooseDownloadRepository("third-repo".into())));
+    let effects = model.admin.take_effects();
+    let payload = effects
+        .iter()
+        .find_map(|effect| match effect {
+            AdminEffect::DownloadToRepository { payload, .. } => Some(payload.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("没有下载到其他资源库：{effects:?}"));
+    assert_eq!(payload["songId"], 186016);
+    assert!(payload.get("playlistId").is_none());
 }
 
 /// 取消、Escape 都不下载；导入或同步目标资源库失败时进度行收起，原因写进文件列。
@@ -168,10 +206,19 @@ fn cancelling_or_failing_downloads_nothing_more() {
 
     let mut failed = scene("source-download-target");
     failed.reduce(ShellMessage::Admin(AdminMessage::ChooseDownloadRepository("second-repo".into())));
-    let method = "media.downloadTrackPackage".to_string();
-    failed.reduce(ShellMessage::Admin(AdminMessage::FilePluginFinished { method, result: Err("导入目标资源库失败：磁盘已满".into()) }));
+    let run = failed
+        .admin
+        .take_effects()
+        .into_iter()
+        .find_map(|effect| match effect {
+            AdminEffect::DownloadToRepository { run, .. } => Some(run),
+            _ => None,
+        })
+        .expect("开始下载到第二资源库");
+    failed.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Err("导入目标资源库失败：磁盘已满".into()) }));
     assert!(failed.operation.shown().is_none(), "失败时进度行收起");
     assert_eq!(failed.files.error, "导入目标资源库失败：磁盘已满");
+    assert_eq!(crate::shell::status::StatusLine::project(&failed), crate::shell::status::StatusLine::Hidden, "文件列已经写着，状态区不重复");
 }
 
 /// 只有一个候选时照 Vue 直接用它，不弹选择；一个都没有时菜单里「下载单曲到其他资源库」禁用，写出原因，别的照常。
@@ -185,7 +232,8 @@ fn the_number_of_targets_decides_whether_to_ask() {
         .admin
         .take_effects()
         .iter()
-        .any(|effect| matches!(effect, AdminEffect::DownloadToRepository { target_repo_id, .. } if target_repo_id == "second-repo")));
+        .any(|effect| matches!(effect, AdminEffect::DownloadToRepository { run, .. }
+            if run.target.as_ref().is_some_and(|target| target.repo_id == "second-repo"))));
 
     let mut alone = menu_open();
     alone.workspace.repositories.retain(|repository| repository.repo_id == "acceptance-repo");
