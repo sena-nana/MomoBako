@@ -566,8 +566,9 @@ impl PlayerState {
             return;
         }
         let volume = volume.clamp(0.0, 1.0);
-        if !self.item_loaded() {
-            // 还没有装好的条目：只记下音量，下一项装好时沿用。
+        if !self.item_loaded() || !self.audible() {
+            // 还没有装好的条目，或者装好的条目没有声音（只有画面的视频）：只记下音量，下一项有声音时沿用。没有声音
+            // 时不经控制器，它会按「不支持音量控制」把正在放的画面改成 failed；Vue 的播放条照样收下音量。
             self.session.volume = volume;
             self.persist_if_needed();
             self.publish(inspect);

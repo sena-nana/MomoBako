@@ -589,6 +589,28 @@ fn avi_preview_plays_pauses_and_seeks_on_the_shared_session() {
     assert_eq!(model.inspect.media_session().expect("会话").status, "paused");
 }
 
+/// 没有音轨的视频只走播放时钟：播放条上拖音量只记下音量，画面照样播放，不会因为「不支持音量控制」变成失败。
+#[test]
+fn volume_on_a_silent_video_is_remembered_without_failing_playback() {
+    let parts = super::support::preview_media_parts("repo", &super::support::sample_uncompressed()).expect("avi");
+    let mut session = parts.session;
+    session.can_volume = false;
+    let mut model = ShellViewModel::default();
+    model.workspace.active_repo_id = Some("repo".into());
+    model.player.contributions = vec![video_player()];
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("clips/silent.avi", "avi", 1, false, Vec::new()))));
+    let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().unwrap() else {
+        panic!("没有音视频请求");
+    };
+    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(session), pcm: None, frames: parts.frames }));
+    model.reduce(ShellMessage::Player(PlayerMessage::SetPlaying(true)));
+    assert_eq!(model.player.session.status, "playing");
+    model.reduce(ShellMessage::Player(PlayerMessage::SetVolume(0.3)));
+    assert_eq!(model.player.session.status, "playing", "调音量不该让没有声音的视频失败");
+    assert_eq!(model.player.session.error, None);
+    assert_eq!(model.player.session.volume, 0.3, "音量记下，下一项有声音时沿用");
+}
+
 fn video_player() -> crate::backend::services::repository::PlaylistPlayerContribution {
     crate::backend::services::repository::PlaylistPlayerContribution {
         player_type_id: "momobako.playlist.video-sequence".into(),
