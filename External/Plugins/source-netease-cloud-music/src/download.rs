@@ -10,8 +10,6 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use momobako_mutsuki_plugin_sdk::write_host_log_silently;
-
 use crate::{
     auth, client,
     files::{remove_written, write_file, WritePolicy},
@@ -102,18 +100,10 @@ pub(crate) fn download_playlist_package(
             });
         match downloaded {
             Ok((song, saved)) => completed.push(track_result(&song, &saved)),
-            Err(error) => {
-                write_host_log_silently(
-                    &runtime.host_runtime,
-                    "error",
-                    "playlistTrackDownloadFailed",
-                    "网易云歌单中的单曲下载失败。",
-                    serde_json::json!({ "songId": track.song_id, "error": error }),
-                );
-                failed.push(serde_json::json!({
-                    "songId": track.song_id, "songName": track.song_name, "error": error
-                }));
-            }
+            // 失败的一首只放进结果的 `failed`，不另写日志：宿主收尾时按结果逐条写（带动作名、歌单名和来源资源库）。
+            Err(error) => failed.push(serde_json::json!({
+                "songId": track.song_id, "songName": track.song_name, "error": error
+            })),
         }
     }
     Ok(serde_json::json!({
