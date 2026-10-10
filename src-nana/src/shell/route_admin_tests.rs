@@ -470,3 +470,28 @@ fn the_logs_panel_shows_loading_until_history_arrives() {
     assert!(harness.find("第 1 条后台日志").is_some(), "读回的历史日志要画出来");
     harness.assert_same_as_fresh_mount();
 }
+
+/// 插件卡片的「权限」段是 `56px minmax(0, 1fr)` 的网格：芯片在内容列里折成几行，这一段就是几行芯片
+/// 那么高，不按芯片最窄时排成一列的高度量（NanaUI 网格先定列宽再量行高）。
+#[test]
+fn plugin_grid_sections_are_as_tall_as_their_wrapped_chips() {
+    let mut harness = ShellHarness::mount_at(ShellViewModel::for_page(ShellPage::PluginSettings), 960.0, 600.0);
+    let permissions = (0..12).map(|index| format!("filesystem:permission-{index}")).collect::<Vec<_>>();
+    let plugin = harness.model.admin.plugins.first_mut().expect("场景里有插件");
+    plugin.permissions = permissions.clone();
+    let key = format!("admin-plugin-permissions-{}", crate::shell::admin::style::key_part(&plugin.plugin_id));
+    harness.model.mark_surface_dirty();
+    harness.sync();
+    harness.flush();
+    let section = bounds(&harness, &key);
+    let world = harness.document().context().world();
+    let chips = permissions
+        .iter()
+        .map(|label| world.layout_box(harness.node(label)).unwrap_or_else(|| panic!("{label} 没有布局盒")))
+        .collect::<Vec<_>>();
+    let rows = chips.iter().map(|chip| chip.y.round() as i32).collect::<std::collections::BTreeSet<_>>();
+    assert!(rows.len() >= 2, "960 宽下十二个权限芯片要折行：{rows:?}");
+    let bottom = chips.iter().map(|chip| chip.y + chip.height).fold(f32::MIN, f32::max);
+    assert!(bottom <= section.y + section.height + 0.5, "芯片超出了这一段：{section:?}，芯片底边 {bottom}");
+    assert!(section.y + section.height - bottom < 6.0, "这一段比折行的芯片高出一截：{section:?}，芯片底边 {bottom}");
+}

@@ -122,7 +122,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 | --- | --- |
 | Select、滑杆等没有可见标签的控件，没有声明式的无障碍名称 | 已补：控件写 `.labelled_by(标题节点)`；没有可见标题时写控件自己的 `label`，见 [壳层绑定式视图](./nana-shell-view.md) 的「不再扫描文档补登」 |
 | 固定定位盒自动高度时，百分比 `max-height` 被当成 0 | 上游已修；用到它的文件页自建对话框卡片改成 NanaUI `Dialog`，这处 `vh` 绕行随卡片删掉 |
-| 网格自动行高按最窄内容测量，可折行的芯片把行撑高 | 插件区块改用横排；上游是否已修还没核实 |
+| 网格自动行高按最窄内容测量，可折行的芯片把行撑高 | 上游 `1f37b9c79` 已修（`c6dc1086b` 起就带着）：网格先定列宽，再按列宽量行高。插件卡片的依赖、权限、Hook 和执行记录段已改回 Vue 的 `56px minmax(0, 1fr)` 网格（`admin_plugin_card.rs`），测试 `plugin_grid_sections_are_as_tall_as_their_wrapped_chips` 看折行芯片的那一段不多出高度 |
 | IconButton 的默认方形尺寸盖掉显式布局 | 上游已修；任务弹层关闭钮删掉了 `square = None`，别的区域各自清理 |
 | 框架自己关掉 Dialog 时不通知应用 | 上游已修：`DialogCloseRequested` 加 `DialogClosePolicy::requests_only()`，对话框框架只听请求、发关闭消息 |
 | `DialogSize` 只有 420 / 520 / 600 / 680 / 1080 几档，不能给像素宽，也不能按窗口比例收 | 已补：`DialogSize::Width(长度)` 和 `capped(px, vw)`。各对话框照 Vue 的宽度类给 CSS 宽度 |
@@ -135,7 +135,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 | 对话框卡面圆角固定 `Md` 档 | 已补：`DialogRecipe::radius` |
 | 对话框开场只有淡入，没有卡片位移和缩放；表面开合动效不看「减少动态效果」 | 已补：`DialogRecipe::motion`（`DialogMotion`），减少动态效果时直接开合 |
 | `activate_overlay` 要求宿主已在树里；视图层没有「挂进树时」的钩子，也没有声明式的打开状态 | 已补：`.open` / `.model` 声明开合，宿主做的开合发 `DialogToggled`。对话框常驻在宿主下靠 `open` 开合，换下的放完退场才卸 |
-| `ReorderList` 按下行就抓走指针，行里的按钮收不到点击；一行只能用 `.tools(节点)` 标一块不开始拖动的区域 | 播放集条目把扩展名方块、标题、播放和移除包成一段登记成 `tools`，从拖动柄和行的留白拖动。需要一行标多块，或者按下按钮时不开始拖动 |
+| `ReorderList` 按下行就抓走指针，行里的按钮收不到点击；一行只能用 `.tools(节点)` 标一块不开始拖动的区域 | 播放集条目把扩展名方块、标题、播放和移除包成一段登记成 `tools`，从拖动柄和行的留白拖动。需要一行标多块，或者按下按钮时不开始拖动；`941df646d` 还是这样 |
 | 应用层没有悬停事件 | 已补：上游 `150bd172e` 的 `PointerHoverChanged { hovered }` 和 `b57ccd92d` 的 `FocusWithinChanged { focused }`，节点挂处理函数，指针或焦点进出它的子树时收到。右键子菜单从点击展开改回悬停和聚焦展开（`files_menu.rs`） |
 | 滚动范围按全部后代的盒子合并，不在里层的滚动区或裁剪盒处停下 | 上游 `941df646d` 已修：范围只算到最近的裁剪盒，里层滚动区只贡献自己的盒子。日志页主体恢复成滚动区（`route_admin.rs` 走 `home_scroll`），不滚的裁剪盒 `route_home::home_fixed` 和撑满它的 `fill_panel` 已删，矮窗口里日志页也能滚 |
 | `RadiusTier` 没有 2xl 档 | 已补：上游 `8541a2f8d` 的 `RadiusTier::Xxl` / `ThemeMetrics::radius_xxl`。`corner_metrics` 按两倍基数给，原来按像素给的 `theme_map::radius_2xl` 已删，插件、日志和搜索页的面板也从 Xl 改回 2xl，见上文「圆角」 |
