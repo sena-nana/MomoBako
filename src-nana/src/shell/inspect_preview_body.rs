@@ -77,7 +77,8 @@ enum LoadingRef<'a> {
     /// 压缩包：居中的两行。
     Archive { detail: String },
     /// 音视频：居中的准备卡，写文件名。
-    Media { name: &'a str },
+    /// 音视频的准备卡。`video` 时写「准备媒体」（Vue `media-preview`），否则写「准备音频」（`audioPreview.js`）。
+    Media { name: &'a str, video: bool },
 }
 
 /// 预览框内容，借用 ViewModel 里的大块数据。身份和自有副本都由它算出，判断只写一遍。
@@ -126,7 +127,7 @@ enum Body {
     Failed { title: &'static str, message: String, toolbar: Option<DocumentBar>, document: bool },
     Pill { title: &'static str, detail: String, progress: bool, toolbar: Option<DocumentBar> },
     ArchiveLoading { detail: String },
-    MediaLoading { name: String },
+    MediaLoading { name: String, video: bool },
     FallbackTexture(String),
     FallbackIcon(Icon),
     Pending,
@@ -248,13 +249,22 @@ fn media_failed_ref<'a>(model: &'a ShellViewModel, error: Option<&'a str>) -> Co
     ContentRef::Failed { title, message, toolbar: None, document: false }
 }
 
-/// 播放器挂载：视频是画面，音频是唱片舞台。
+/// 播放器挂载：视频文件画当前这一帧；还没有画面（离屏没有宿主纹理、解码只得到音轨）时画缩略图或视频图标，
+/// 是明确的占位，不当成音频画唱片舞台。音频文件是唱片舞台。按文件的扩展名分，不按有没有画面分。
 fn media_ref(model: &ShellViewModel) -> ContentRef<'_> {
-    let video = model.preview_token.as_deref().is_some_and(|token| token.starts_with("video:"));
-    if video && model.preview_pixels.is_some() {
+    let frame = model.preview_token.as_deref().is_some_and(|token| token.starts_with("video:")) && model.preview_pixels.is_some();
+    if frame {
         return ContentRef::Video { cover: model.player.settings.object_fit_cover };
     }
+    if is_video_file(model) {
+        return ContentRef::Fallback(fallback_ref(model));
+    }
     ContentRef::Audio { name: target_name(model), viewport: model.viewport_width }
+}
+
+/// 预览的是视频文件（mp4、mov、mkv、webm、avi、m4v）。
+fn is_video_file(model: &ShellViewModel) -> bool {
+    super::super::inspect::support::is_video_extension(&model.inspect.facts.extension)
 }
 
 /// PDF 和 Office：顶栏、翻页和整页；压缩包是目录；模型是画面和尺寸标签。
@@ -302,7 +312,7 @@ fn loading_ref<'a>(model: &'a ShellViewModel, kind: &'a PreviewKind) -> ContentR
     match kind {
         PreviewKind::Markdown | PreviewKind::Text => pill("读取文本", sized("准备文本内容"), false, None),
         PreviewKind::Image => pill("准备播放", "准备媒体".to_string(), true, None),
-        PreviewKind::Media => ContentRef::Loading(LoadingRef::Media { name: target_name(model) }),
+        PreviewKind::Media => ContentRef::Loading(LoadingRef::Media { name: target_name(model), video: is_video_file(model) }),
         PreviewKind::Native { view_id, .. } if inspect_library::is_archive(view_id) => {
             ContentRef::Loading(LoadingRef::Archive { detail: sized("准备内部目录") })
         }
@@ -383,7 +393,7 @@ impl ContentRef<'_> {
             Self::Loading(loading) => match loading {
                 LoadingRef::Pill { title, detail, progress, toolbar } => (0u8, title, detail, progress, toolbar).hash(hasher),
                 LoadingRef::Archive { detail } => (1u8, detail).hash(hasher),
-                LoadingRef::Media { name } => (2u8, name).hash(hasher),
+                LoadingRef::Media { name, video } => (2u8, name, video).hash(hasher),
             },
             Self::Fallback(fallback) => match fallback {
                 FallbackRef::Texture(slot) => slot.hash(hasher),
@@ -416,7 +426,7 @@ impl ContentRef<'_> {
             Self::Failed { title, message, toolbar, document } => Body::Failed { title, message: message.to_string(), toolbar, document },
             Self::Loading(LoadingRef::Pill { title, detail, progress, toolbar }) => Body::Pill { title, detail, progress, toolbar },
             Self::Loading(LoadingRef::Archive { detail }) => Body::ArchiveLoading { detail },
-            Self::Loading(LoadingRef::Media { name }) => Body::MediaLoading { name: name.to_string() },
+            Self::Loading(LoadingRef::Media { name, video }) => Body::MediaLoading { name: name.to_string(), video },
             Self::Fallback(FallbackRef::Texture(slot)) => Body::FallbackTexture(slot.to_string()),
             Self::Fallback(FallbackRef::Icon(icon)) => Body::FallbackIcon(icon),
             Self::Pending => Body::Pending,
@@ -462,7 +472,7 @@ pub(super) fn content_view(content: &PreviewContent) -> AnyView {
             status_layer(status_pill(title, detail, *progress), toolbar.as_ref().map(inspect_library::document_toolbar_view))
         }
         Body::ArchiveLoading { detail } => centered_status("读取压缩包", detail),
-        Body::MediaLoading { name } => super::audio_stage::loading_card(name),
+        Body::MediaLoading { name, video } => super::audio_stage::loading_card(name, *video),
         Body::FallbackTexture(slot) => {
             let mut thumb = Thumbnail::new(super::super::thumbs::thumbnail_slot(slot)).fit(ContentFit::Contain);
             {
