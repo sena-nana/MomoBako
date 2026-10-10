@@ -132,7 +132,7 @@ describe("nana parity sidebar", () => {
     expect(SB_MENU_EDGE_PADDING).toBe(4);
     expect(placed.x).toBe(4);
     expect(placed.y).toBe(196);
-    expect(rustConst(read("src-nana/src/shell/sidebar_gap.rs"), "POPOVER_PADDING")).toBe("4.0");
+    expect(rustConst(read("src-nana/src/shell/files_menu.rs"), "EDGE")).toBe("4.0");
   });
 });
 
