@@ -295,3 +295,108 @@ fn only_local_folders_keep_existing_files() {
     let blank = DownloadDestination { path: Some("  ".into()), ..local };
     assert!(resolve_download_target(&runtime, &blank, None).is_err(), "本地目录没有路径时不下载");
 }
+
+fn playlist_payload(tracks: serde_json::Value, name: Option<&str>) -> crate::models::DownloadPlaylistPackagePayload {
+    serde_json::from_value(serde_json::json!({
+        "playlistId": 9001,
+        "playlistName": name,
+        "tracks": tracks,
+        "destination": { "kind": "localFolder", "path": "D:/Music" }
+    }))
+    .expect("歌单载荷")
+}
+
+fn detail(tracks: serde_json::Value, track_ids: &[i64]) -> crate::models::PlaylistDetailItem {
+    let ids: Vec<serde_json::Value> = track_ids.iter().map(|id| serde_json::json!({ "id": id })).collect();
+    serde_json::from_value(serde_json::json!({
+        "id": 9001, "name": "夜曲", "trackCount": track_ids.len(), "tracks": tracks, "trackIds": ids
+    }))
+    .expect("歌单详情")
+}
+
+/// 载荷没带曲目时曲目只能从歌单详情来：取不到就把原因交回去，整个下载报错，不再什么也不下却交回成功。
+#[test]
+fn a_playlist_without_tracks_fails_with_the_reason_its_detail_could_not_be_read() {
+    let payload = playlist_payload(serde_json::json!([]), Some("夜曲"));
+    let warned = Cell::new(false);
+    let result = super::playlist_detail(
+        &payload,
+        || Err("网易云上没有歌单 9001，可能已被删除或设为私密".to_string()),
+        |_| warned.set(true),
+    );
+    assert_eq!(result.expect_err("取不到曲目"), "网易云上没有歌单 9001，可能已被删除或设为私密");
+    assert!(!warned.get());
+
+    let read = super::playlist_detail(&payload, || Ok(detail(serde_json::json!([]), &[1, 2])), |_| {});
+    assert_eq!(read.expect("取到详情").map(|detail| detail.track_ids.len()), Some(2));
+}
+
+/// 载荷带了曲目（Vue 列出来的）时详情只用来补歌单名：带了名字就不取；没名字又取不到时记一条警告、照常下载。
+#[test]
+fn a_playlist_with_tracks_only_needs_its_detail_for_the_name() {
+    let tracks = serde_json::json!([{ "songId": 1, "songName": "晴天" }]);
+    let named = playlist_payload(tracks.clone(), Some("夜曲"));
+    let fetched = Cell::new(false);
+    let result = super::playlist_detail(
+        &named,
+        || {
+            fetched.set(true);
+            Err("不该取".to_string())
+        },
+        |_| {},
+    );
+    assert!(result.expect("不取详情").is_none());
+    assert!(!fetched.get(), "带了曲目和名字就不取详情");
+
+    let unnamed = playlist_payload(tracks, None);
+    let warning = std::cell::RefCell::new(String::new());
+    let result = super::playlist_detail(
+        &unnamed,
+        || Err("网易云接口请求超时（>30 秒），请检查网络后重试".to_string()),
+        |error| *warning.borrow_mut() = error.to_string(),
+    );
+    assert!(result.expect("照常下载").is_none());
+    assert_eq!(warning.into_inner(), "网易云接口请求超时（>30 秒），请检查网络后重试");
+}
+
+/// 每首歌的详情先用歌单详情里带的，没带到的一次批量取；批量取不到时记一条警告，留给逐首下载时再取。
+#[test]
+fn song_details_come_from_the_playlist_first_then_one_batch() {
+    let tracks: Vec<crate::models::DownloadPlaylistTrackPayload> = serde_json::from_value(serde_json::json!([
+        { "songId": 1 }, { "songId": 2 }, { "songId": 3 }
+    ]))
+    .expect("曲目");
+    let detail = detail(serde_json::json!([{ "id": 1, "name": "晴天" }, { "id": 99, "name": "不在下载里" }]), &[1, 2, 3]);
+    let asked = std::cell::RefCell::new(Vec::new());
+    let songs = super::known_songs(
+        Some(&detail),
+        &tracks,
+        |ids| {
+            asked.borrow_mut().push(ids.to_vec());
+            Ok(vec![serde_json::from_value(serde_json::json!({ "id": 2, "name": "七里香" })).expect("歌曲")])
+        },
+        |_| panic!("批量取到了"),
+    );
+    assert_eq!(asked.into_inner(), [vec![2, 3]], "只批量取一次，只取歌单详情里没带的");
+    let mut names: Vec<(i64, String)> = songs.into_iter().map(|(id, song)| (id, song.name)).collect();
+    names.sort();
+    assert_eq!(names, [(1, "晴天".to_string()), (2, "七里香".into())]);
+
+    let warned = Cell::new(false);
+    let songs = super::known_songs(Some(&detail), &tracks, |_| Err("限流".to_string()), |_| warned.set(true));
+    assert!(warned.get());
+    assert_eq!(songs.keys().copied().collect::<Vec<_>>(), [1], "取不到的留给逐首下载");
+}
+
+/// 失败的一首写上歌名：先用载荷带来的，再用取到的歌曲详情里的。
+#[test]
+fn a_failed_track_names_the_song_when_it_can() {
+    let bare: crate::models::DownloadPlaylistTrackPayload =
+        serde_json::from_value(serde_json::json!({ "songId": 7 })).expect("曲目");
+    let entry = super::failed_track(&bare, Some("七里香".into()), "未获取到可下载音频地址");
+    assert_eq!(entry, serde_json::json!({ "songId": 7, "songName": "七里香", "error": "未获取到可下载音频地址" }));
+    let named: crate::models::DownloadPlaylistTrackPayload =
+        serde_json::from_value(serde_json::json!({ "songId": 7, "songName": "载荷里的名字" })).expect("曲目");
+    assert_eq!(super::failed_track(&named, Some("七里香".into()), "x")["songName"], "载荷里的名字");
+    assert!(super::failed_track(&bare, None, "x")["songName"].is_null());
+}

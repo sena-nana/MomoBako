@@ -3,12 +3,17 @@
 //! 下载到用户选的本地目录（`localFolder`）时只新建文件：目录里已有的同名文件保留原样、不写入（音频已经在就不再
 //! 下载），结果的 `skippedEntries` 列出这些文件，`paths` 只列这次写下的。下载到其他资源库（`repository`）时先
 //! 放进插件管理的暂存目录，由宿主导入目标资源库。
+//!
+//! 下载以前先查一次登录状态：登录失效时网易云只给试听片段或者不给地址，不先查就会每首都说取不到地址。歌单的曲目
+//! 取不到（网络、登录失效、歌单不存在）时整个调用报错、写明原因，不再什么也不下却交回成功。
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeSet, HashMap},
     fs,
     path::{Path, PathBuf},
 };
+
+use momobako_mutsuki_plugin_sdk::write_host_log_silently;
 
 use crate::{
     auth, client,
@@ -16,7 +21,7 @@ use crate::{
     media::normalized_level,
     models::{
         DownloadDestination, DownloadPlaylistPackagePayload, DownloadPlaylistTrackPayload,
-        DownloadTrackPackagePayload, RuntimeContext, SongItem,
+        DownloadTrackPackagePayload, PlaylistDetailItem, RuntimeContext, SongItem,
     },
     util::{io_error, sanitize_name},
 };
@@ -42,11 +47,9 @@ pub(crate) fn download_track_package(
     payload: DownloadTrackPackagePayload,
 ) -> Result<serde_json::Value, String> {
     let (_, cookie) = auth::resolve_repository_credential(runtime)?;
+    auth::ensure_login_valid(runtime, &cookie)?;
     let level = normalized_level(payload.level.as_deref(), &runtime.default_level).to_string();
-    let song = client::fetch_song_details(runtime, &cookie, &[payload.song_id])?
-        .into_iter()
-        .next()
-        .ok_or_else(|| "歌曲详情接口未返回数据".to_string())?;
+    let song = fetch_song(runtime, &cookie, payload.song_id)?;
     let target = resolve_download_target(
         runtime,
         &payload.destination,
@@ -65,7 +68,20 @@ pub(crate) fn download_playlist_package(
     mut payload: DownloadPlaylistPackagePayload,
 ) -> Result<serde_json::Value, String> {
     let (_, cookie) = auth::resolve_repository_credential(runtime)?;
-    let detail = client::fetch_playlist_detail(runtime, &cookie, payload.playlist_id).ok();
+    auth::ensure_login_valid(runtime, &cookie)?;
+    let detail = playlist_detail(
+        &payload,
+        || client::fetch_playlist_detail(runtime, &cookie, payload.playlist_id),
+        |error| {
+            write_host_log_silently(
+                &runtime.host_runtime,
+                "warn",
+                "playlistDetailUnavailable",
+                "网易云歌单详情取不到，下载目录按歌单标识命名。",
+                serde_json::json!({ "playlistId": payload.playlist_id, "error": error }),
+            )
+        },
+    )?;
     let playlist_name = payload
         .playlist_name
         .take()
@@ -79,31 +95,42 @@ pub(crate) fn download_playlist_package(
     let playlist_dir = target.root.join(sanitize_name(&playlist_name));
     fs::create_dir_all(&playlist_dir).map_err(io_error)?;
     let tracks = playlist_tracks(&payload, detail.as_ref());
+    let mut songs = known_songs(
+        detail.as_ref(),
+        &tracks,
+        |ids| client::fetch_song_details(runtime, &cookie, ids),
+        |error| {
+            write_host_log_silently(
+                &runtime.host_runtime,
+                "warn",
+                "songDetailsUnavailable",
+                "网易云歌曲详情批量取不到，逐首下载时再取。",
+                serde_json::json!({ "playlistId": payload.playlist_id, "error": error }),
+            )
+        },
+    );
     let level = normalized_level(payload.level.as_deref(), &runtime.default_level).to_string();
     let mut claimed = BTreeSet::new();
     let mut completed = Vec::new();
     let mut failed = Vec::new();
     for track in tracks {
-        let downloaded = client::fetch_song_details(runtime, &cookie, &[track.song_id])
-            .and_then(|songs| {
-                songs
-                    .into_iter()
-                    .next()
-                    .ok_or_else(|| "歌曲详情接口未返回数据".to_string())
-            })
-            .and_then(|song| {
-                let rendered =
-                    render_filename(&runtime.filename_template, &artist_label(&song), &song.name);
-                let base = claim_file_name(&rendered, song.id, &mut claimed);
-                download_song(runtime, &cookie, &song, &level, &playlist_dir, target.policy, &base)
-                    .map(|saved| (song, saved))
-            });
+        let song = match songs.remove(&track.song_id) {
+            Some(song) => Ok(song),
+            None => fetch_song(runtime, &cookie, track.song_id),
+        };
+        let downloaded = song.map_err(|error| (None, error)).and_then(|song| {
+            let rendered =
+                render_filename(&runtime.filename_template, &artist_label(&song), &song.name);
+            let base = claim_file_name(&rendered, song.id, &mut claimed);
+            match download_song(runtime, &cookie, &song, &level, &playlist_dir, target.policy, &base) {
+                Ok(saved) => Ok((song, saved)),
+                Err(error) => Err((Some(song.name), error)),
+            }
+        });
         match downloaded {
             Ok((song, saved)) => completed.push(track_result(&song, &saved)),
             // 失败的一首只放进结果的 `failed`，不另写日志：宿主收尾时按结果逐条写（带动作名、歌单名和来源资源库）。
-            Err(error) => failed.push(serde_json::json!({
-                "songId": track.song_id, "songName": track.song_name, "error": error
-            })),
+            Err((name, error)) => failed.push(failed_track(&track, name, &error)),
         }
     }
     Ok(serde_json::json!({
@@ -117,6 +144,82 @@ pub(crate) fn download_playlist_package(
             "failed": failed.len()
         }
     }))
+}
+
+/// 取一首歌的详情（文件名要歌手和歌名）。
+fn fetch_song(runtime: &RuntimeContext, cookie: &str, song_id: i64) -> Result<SongItem, String> {
+    client::fetch_song_details(runtime, cookie, &[song_id])?
+        .into_iter()
+        .next()
+        .ok_or_else(|| format!("网易云没有返回歌曲 {song_id} 的详情，可能已下架"))
+}
+
+/// 下载歌单要的歌单详情。载荷没带曲目（`tracks`、`trackIds`）时曲目只能从详情里来：取不到就交回原因，整个下载报错、
+/// 什么也不下。载荷带了曲目时详情只用来补歌单名：带了名字就不取，取不到时 `warn` 记一条、照常下载。
+fn playlist_detail(
+    payload: &DownloadPlaylistPackagePayload,
+    fetch: impl FnOnce() -> Result<PlaylistDetailItem, String>,
+    warn: impl FnOnce(&str),
+) -> Result<Option<PlaylistDetailItem>, String> {
+    let has_tracks = !payload.tracks.is_empty() || !payload.track_ids.is_empty();
+    if has_tracks && payload.playlist_name.is_some() {
+        return Ok(None);
+    }
+    match fetch() {
+        Ok(detail) => Ok(Some(detail)),
+        Err(error) if has_tracks => {
+            warn(&error);
+            Ok(None)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// 歌单里每首歌的详情：先用歌单详情里带的 `tracks`，没带到的按标识一次批量取（`fetch` 内部每 200 首一批）。批量取
+/// 失败时 `warn` 记一条，这些歌下载时再逐首取。
+fn known_songs(
+    detail: Option<&PlaylistDetailItem>,
+    tracks: &[DownloadPlaylistTrackPayload],
+    fetch: impl FnOnce(&[i64]) -> Result<Vec<SongItem>, String>,
+    warn: impl FnOnce(&str),
+) -> HashMap<i64, SongItem> {
+    let wanted: BTreeSet<i64> = tracks.iter().map(|track| track.song_id).collect();
+    let mut songs: HashMap<i64, SongItem> = detail
+        .map(|detail| {
+            detail
+                .tracks
+                .iter()
+                .filter(|song| wanted.contains(&song.id))
+                .map(|song| (song.id, song.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let missing: Vec<i64> = wanted
+        .iter()
+        .copied()
+        .filter(|id| !songs.contains_key(id))
+        .collect();
+    if missing.is_empty() {
+        return songs;
+    }
+    match fetch(&missing) {
+        Ok(found) => songs.extend(found.into_iter().map(|song| (song.id, song))),
+        Err(error) => warn(&error),
+    }
+    songs
+}
+
+/// 失败的一首：歌名先用载荷带来的，再用取到的歌曲详情里的，都没有时不写。
+fn failed_track(
+    track: &DownloadPlaylistTrackPayload,
+    fetched_name: Option<String>,
+    error: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "songId": track.song_id,
+        "songName": track.song_name.clone().or(fetched_name),
+        "error": error,
+    })
 }
 
 /// 下载一首歌到 `root`：取播放地址和音频、取歌词，交给 [`save_track`] 落盘。
