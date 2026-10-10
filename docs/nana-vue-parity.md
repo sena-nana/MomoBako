@@ -11,7 +11,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 ## 对照方法
 
 - Vue 侧在本机的 `tmp/vue-mock`（`tmp/` 被 git 忽略，不在仓库里）：用 `@tauri-apps/api/mocks` 模拟 IPC，渲染 `src/` 的真实页面，在无头 Edge（与 WebView2 同内核）里截图。先在仓库根目录用 `yarn vite --config tmp/vue-mock/vite.config.ts` 起 Vite（端口 1420），再用 `bash tmp/vue-mock/shoot.sh <场景> [light|dark] [宽] [高]` 截一张，`shoot_all.sh` 批量截浅色、深色和 1200×800、960×600，图在 `tmp/vue-mock/shots/`。场景登记在 `tmp/vue-mock/scenes/*.ts`，夹具在 `fixtures.ts`，命令应答在 `ipc.ts`。
-- 截图要经 DevTools 协议在导航前定好视口（`shoot.sh` 调 `shoot_cdp.mjs`），等满 8 秒再截。只给 `--window-size` 时，无头 Edge 在加载期间的视口是 1170×705，截图前一刻才改成 1200×800：CSS 布局会跟着重排，可打开时按视口算一次位置的右键菜单、任务弹层会按 705 高夹住，看起来像 Nana 的位置不对。
+- 截图要经 DevTools 协议在导航前定好视口（`shoot.sh` 调 `shoot_cdp.mjs`），等满 12 秒再截（任务进度要爬到 88）。只给 `--window-size` 时，无头 Edge 在加载期间的视口是 1170×705，截图前一刻才改成 1200×800：CSS 布局会跟着重排，可打开时按视口算一次位置的右键菜单、任务弹层会按 705 高夹住，看起来像 Nana 的位置不对。
 - Nana 侧用 `scene_shots` 按场景名出图和节点清单，命令和输出位置见 [离屏验收证据](./nana-offscreen-evidence.md)。场景定义在 `src-nana/src/shell/acceptance_*.rs`，和 Vue 场景同名。截图前先把视图量到尺寸后发回的消息（播放条宽、文件列表宽）归约几轮，截到的是稳定后的画面。
 - 有仓库的场景从 `acceptance_base.rs` 的共用底子起步，对应 Vue 夹具 `base()`：照产品启动依次送回资源库列表、同步、仓库摘要、首屏目录和侧栏的读取结果，侧栏计数、目录树和文件列表都由这些结果算出。场景要别的条目、目录树、播放集、播放器或仓库时改底子的字段，和 Vue 场景改 `scene.entries`、`scene.playlists` 一样。缺失仓库的 `missing` 场景不用底子，直接送一条缺失的资源库。
 - `python tmp/vue-mock/compare.py <场景>` 出单个场景的并排图、差异热图和差异像素比例，`report.py` 对两边同名的截图批量出对照页。比例只用来发现问题，不作为通过标准。
