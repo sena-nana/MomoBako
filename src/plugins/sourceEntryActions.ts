@@ -12,6 +12,8 @@ import type {
   FileBrowserEntry,
   PluginManifest,
   RepositorySummary,
+  SourceDownloadDestination,
+  SourceDownloadResult,
   SourceEntryActionContribution,
 } from "../types/repository";
 import {
@@ -111,7 +113,7 @@ async function chooseTarget(
   });
 }
 
-function destinationPayload(target: string | RepositorySummary, parentPath?: string) {
+function destinationPayload(target: string | RepositorySummary, parentPath?: string): SourceDownloadDestination {
   if (typeof target === "string") return { kind: "localFolder", path: target };
   return {
     kind: "repository",
@@ -187,7 +189,7 @@ async function runDownloadAction(
       value: 36,
       indeterminate: true,
     });
-    const response = await callPlugin<Record<string, unknown>>({
+    const response = await callPlugin<SourceDownloadResult>({
       pluginId: manifest.pluginId,
       method,
       repositoryId: context.repoId,

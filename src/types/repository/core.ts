@@ -1545,6 +1545,38 @@ export type SourceEntryActionContribution = {
   playerTypeId?: string;
 };
 
+/** 来源下载（`download-entry` / `download-directory`）载荷里的去处：用户选的本地目录，或者目标资源库。 */
+export type SourceDownloadDestination =
+  | { kind: "localFolder"; path: string }
+  | { kind: "repository"; repoId: string; path?: string; parentPath?: string };
+
+/**
+ * 来源下载里一项的结果。`paths` 只列这次写下的文件；下载到本地目录时，目录里已有的同名文件保留原样、不写入，
+ * 列在 `skippedEntries`（绝对路径，没有时不写这个键）。
+ */
+export type SourceDownloadEntryResult = {
+  songId?: number;
+  songName?: string | null;
+  paths: string[];
+  skippedEntries?: string[];
+};
+
+/** 来源下载里失败的一项。 */
+export type SourceDownloadFailure = {
+  songId?: number;
+  songName?: string | null;
+  error: string;
+};
+
+/** 来源下载的结果：单曲是一项（`paths`、`skippedEntries`），歌单是一批（`completed`、`failed`）。部分失败时调用照样成功。 */
+export type SourceDownloadResult = Partial<SourceDownloadEntryResult> & {
+  playlistId?: number;
+  playlistName?: string;
+  completed?: SourceDownloadEntryResult[];
+  failed?: SourceDownloadFailure[];
+  summary?: { total: number; succeeded: number; failed: number };
+};
+
 export type SourceContribution = {
   operations?: string[];
   metadataMirrorKeys?: string[];
