@@ -154,8 +154,9 @@ pub enum AdminMessage {
     },
     /// 文件插件动作（清理缓存、重新获取播放资源）结束。成功刷新资源库，失败写到文件错误。
     FilePluginFinished { method: String, result: Result<serde_json::Value, String> },
-    /// 来源下载结束（到本地或到其他资源库）：插件交回的结果，带着开始时的下载回来（`source_download.rs`）。
-    DownloadFinished { run: source_download::DownloadRun, result: Result<serde_json::Value, String> },
+    /// 来源下载结束（到本地或到其他资源库）：插件交回的结果和导入时跳过的同名文件，带着开始时的下载回来
+    /// （`source_download.rs`）。
+    DownloadFinished { run: source_download::DownloadRun, result: Result<source_download::DownloadOutcome, String> },
     /// 宿主写系统日志的结果。写不进去时只记标准错误。
     LogsWritten(Result<(), String>),
     /// 文件右键里的「下载到其他资源库」：一个候选直接下载，几个候选弹出「选择目标资源库」（`source_target.rs`）。

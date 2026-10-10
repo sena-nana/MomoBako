@@ -3,6 +3,7 @@
 
 use serde_json::json;
 
+use crate::shell::admin::source_download::DownloadOutcome;
 use crate::shell::admin::{AdminEffect, AdminMessage, PluginCallOrigin};
 use crate::shell::entry_actions::{NO_TARGET_REPOSITORY, SOURCE_UNAVAILABLE};
 use crate::shell::files::FilesMessage;
@@ -146,7 +147,7 @@ fn downloading_to_another_repository_asks_for_the_target_first() {
 
     model.workspace.take_effects();
     let result = json!({ "paths": ["D:/stage/晴天.mp3", "D:/stage/晴天.lrc"] });
-    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Ok(result) }));
+    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Ok(DownloadOutcome::plugin(result)) }));
     let row = model.operation.shown().expect("进度行");
     assert_eq!((row.label.as_str(), row.detail.as_str()), ("加载资源库", "读取已注册资源库"), "刷新接手进度行");
     assert!(

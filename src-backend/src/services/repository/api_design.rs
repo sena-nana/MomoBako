@@ -575,12 +575,13 @@ pub(super) fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
         tauri_api_definition(
             "File API",
             "import_entries",
-            "导入外部文件或目录。",
+            "导入外部文件或目录。目标里已有同名条目时默认整批拒绝；skipExisting 为真时跳过它们，结果的 skippedEntries 列出跳过的。",
             serde_json::json!({
                 "request": {
                     "repoId": "<repoId>",
                     "parentPath": "",
-                    "sourcePaths": ["<absolutePath>"]
+                    "sourcePaths": ["<absolutePath>"],
+                    "skipExisting": false
                 }
             }),
         ),

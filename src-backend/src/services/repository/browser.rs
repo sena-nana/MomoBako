@@ -695,11 +695,13 @@ pub(super) fn create_file(
     )
 }
 
+/// 把外部文件或目录导入资源库的一个文件夹。目标里已有同名条目时按 `skip_existing` 整批拒绝或跳过它，
+/// 跳过的写进结果的 `skipped_entries`；已有的文件都不覆盖。
 pub(super) fn import_entries_cancellable(
     state: &RepositoryState,
     request: FileImportRequest,
     cancellation: &dyn CancellationCheck,
-) -> Result<FileBrowserSnapshot, String> {
+) -> Result<FileImportResponse, String> {
     cancellation.checkpoint()?;
     state.ensure_initialized()?;
     let repo = state.load_repository_record(&request.repo_id)?;
@@ -712,8 +714,15 @@ pub(super) fn import_entries_cancellable(
         &request.source_paths,
     )?;
 
-    let import_plan =
-        validate_external_import_entries(&request.source_paths, &repo_root, &target_dir)?;
+    let ExternalImportPlan {
+        entries: import_plan,
+        skipped,
+    } = validate_external_import_entries(
+        &request.source_paths,
+        &repo_root,
+        &target_dir,
+        request.skip_existing,
+    )?;
     let include_tree = import_plan.iter().any(|entry| entry.is_directory);
     let outcomes = match copy_external_entries_parallel(import_plan, true, cancellation) {
         Ok(outcomes) => outcomes,
@@ -727,7 +736,10 @@ pub(super) fn import_entries_cancellable(
     let snapshot =
         state.finish_file_copy_operation(&request.repo_id, parent_path, include_tree, outcomes)?;
     cancellation.checkpoint()?;
-    Ok(snapshot)
+    Ok(FileImportResponse {
+        snapshot,
+        skipped_entries: skipped,
+    })
 }
 
 pub(super) fn copy_entries_cancellable(

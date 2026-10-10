@@ -20,7 +20,7 @@ use crate::backend::services::repository::{
 };
 use crate::backend::viewmodels::PluginViewModel;
 use crate::shell::admin::api::{self, ApiMessage, HttpRequest};
-use crate::shell::admin::source_download::DownloadRun;
+use crate::shell::admin::source_download::{DownloadOutcome, DownloadRun};
 use crate::shell::admin::{AdminEffect, AdminMessage, PluginCallOrigin, SourceStep};
 use crate::shell::ShellMessage;
 use crate::MomoBakoApplication;
@@ -270,7 +270,8 @@ fn create_source_playlist(
 /// 来源下载到其他资源库（Vue `runDownloadAction` 的 `writable-repository`）：调用插件（载荷里写好了目标），把下载
 /// 回来的文件（`paths` 和 `completed[].paths`）导入目标资源库，再同步目标资源库。下载歌单时导入到以歌单命名的
 /// 文件夹，目标资源库里还没有这个文件夹就先建（导入要求文件夹已经在；Vue 不建，导入报「directory not found」）。
-/// 哪一步失败都把原因交回，不留在进行中；成功交回插件的结果，失败的条目在里面。
+/// 导入带 `skipExisting`：目标里已有同名文件的保留原文件、不导入，其余照常导入（Vue 的导入遇到一个同名就整批
+/// 失败）。哪一步失败都把原因交回，不留在进行中；成功交回插件的结果（失败的条目在里面）和跳过的同名文件。
 fn download_to_repository(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
@@ -302,7 +303,7 @@ fn download_to_repository(
             let paths = crate::shell::admin::source_target::result_paths(&response.payload);
             if paths.is_empty() {
                 eprintln!("Nana 来源下载没有交回文件，不导入：{method}");
-                return Ok(response.payload);
+                return Ok(DownloadOutcome::plugin(response.payload));
             }
             if let Some(folder) = parent_path.as_deref() {
                 if !std::path::Path::new(&target_path).join(folder).is_dir() {
@@ -313,16 +314,20 @@ fn download_to_repository(
                     })?;
                 }
             }
-            let import = FileImportRequest { repo_id: target_repo_id.clone(), parent_path, source_paths: paths };
-            executor.block_on(tasks.execute(PROTOCOL_ENTRY_IMPORT, import)).map_err(|error| {
+            let import = FileImportRequest { repo_id: target_repo_id.clone(), parent_path, source_paths: paths, skip_existing: true };
+            let (imported, _) = executor.block_on(tasks.execute(PROTOCOL_ENTRY_IMPORT, import)).map_err(|error| {
                 eprintln!("Nana 下载的文件导入目标资源库失败：{target_repo_id}：{error}");
                 format!("导入目标资源库失败：{error}")
             })?;
+            let outcome = DownloadOutcome::imported(response.payload, &imported);
+            if !outcome.skipped.is_empty() {
+                eprintln!("Nana 目标资源库已有同名文件，跳过 {} 个：{target_repo_id}", outcome.skipped.len());
+            }
             executor.block_on(tasks.execute(PROTOCOL_REPOSITORY_SYNC, SyncRequest { repo_id: target_repo_id.clone() })).map_err(|error| {
                 eprintln!("Nana 同步目标资源库失败：{target_repo_id}：{error}");
                 format!("同步目标资源库失败：{error}")
             })?;
-            Ok(response.payload)
+            Ok(outcome)
         })();
         admin(AdminMessage::DownloadFinished { run, result })
     })) {
@@ -357,7 +362,7 @@ fn write_logs(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<She
 fn plugin_result(origin: PluginCallOrigin, method: String, result: Result<serde_json::Value, String>) -> ShellMessage {
     match origin {
         PluginCallOrigin::FileMenu => admin(AdminMessage::FilePluginFinished { method, result }),
-        PluginCallOrigin::Download(run) => admin(AdminMessage::DownloadFinished { run, result }),
+        PluginCallOrigin::Download(run) => admin(AdminMessage::DownloadFinished { run, result: result.map(DownloadOutcome::plugin) }),
         PluginCallOrigin::SourceAuth(step) => source_step(step, result),
         PluginCallOrigin::Playground => admin(AdminMessage::Api(ApiMessage::PluginFinished(result))),
     }
