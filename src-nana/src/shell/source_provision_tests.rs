@@ -79,8 +79,10 @@ fn finish(model: &mut ShellViewModel, step: SourceStep, result: Result<Value, St
     send(model, AdminMessage::SourceStepFinished { step, result });
 }
 
+/// 启动已经走完的壳层（来源登录在设置页上，启动早就结束了），插件只有网易云来源。
 fn model() -> ShellViewModel {
     let mut model = ShellViewModel::default();
+    model.workspace.startup.finish();
     model.admin.plugins = vec![manifest()];
     model
 }
@@ -240,7 +242,13 @@ fn new_account_creates_the_repository_without_secrets_then_syncs() {
     assert!(model.admin.source_auth.session.is_none());
     assert!(!model.admin.source_auth.busy);
     assert!(model.workspace.repositories.iter().any(|item| item.repo_id == REPO && item.cache_required));
-    assert!(model.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::RefreshRepositories { .. })));
+    // Vue `createNewRepository` 建完就 `selectRepository` 切过去：回到启动页同步新仓库，不先读列表。
+    assert!(
+        model.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::SyncRepository { repo_id, .. } if repo_id == REPO)),
+        "建完切到新仓库并同步"
+    );
+    assert_eq!(model.workspace.startup.mode, crate::shell::workspace::StartupMode::Switch);
+    assert_eq!(model.operation.shown().map(|row| row.label.as_str()), Some("加载资源库"), "换仓库接手任务弹层这一行");
     assert_synced_and_switched(&mut model);
 
     finish(&mut model, SourceStep::Sync { repo_id: REPO.into() }, Err("网络断开".into()));

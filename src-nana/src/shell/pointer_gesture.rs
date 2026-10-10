@@ -776,8 +776,7 @@ mod tests {
 
     fn files_model() -> ShellViewModel {
         let mut model = ShellViewModel::default();
-        model.workspace.startup.finish();
-        model.workspace.apply_repository_list(None, Ok(vec![WorkspaceRepository {
+        model.workspace.present_repository(WorkspaceRepository {
             repo_id: "repo".into(),
             name: "动画素材".into(),
             path: "D:/Libraries/Anime".into(),
@@ -786,7 +785,7 @@ mod tests {
             capabilities: vec!["write".into()],
             cache_required: false,
             cache_status: String::new(),
-        }]));
+        });
         model.reduce(ShellMessage::FileBrowserLoaded(Ok(snapshot())));
         model
     }

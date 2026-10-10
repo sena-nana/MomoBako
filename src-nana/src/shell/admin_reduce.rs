@@ -5,6 +5,7 @@
 
 use crate::backend::services::repository::{PluginConfigSnapshot, PluginManifest, RepositoryAction};
 
+use super::super::repo_operation::OperationPatch;
 use super::super::status::FailureSource;
 use super::super::workspace_refresh::SilentMessage;
 use super::super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
@@ -562,17 +563,43 @@ fn note_logs_cleared(model: &mut ShellViewModel, result: Result<(), String>) {
 }
 
 fn finish_file_plugin(model: &mut ShellViewModel, method: &str, result: Result<serde_json::Value, String>) {
+    let download = model.admin.take_download_operation(method);
     match result {
-        // 和 Vue 来源动作完成后的 `context.refreshRepo()` 一样重读资源库列表，再按当前仓库重读摘要和目录。
+        // 和 Vue 来源动作完成后的 `context.refreshRepo()` 一样重读资源库列表，再按当前仓库同步、重读摘要和目录。
+        // 下载的进度行照 Vue 写「下载完成」再完成；刷新开始的「加载资源库」会接着顶掉它。
         Ok(_) => {
             model.files.error.clear();
+            if let Some(operation) = download {
+                model.operation.update(operation, OperationPatch::step("下载完成", 100.0).with_indeterminate(false));
+                model.operation.finish(operation);
+            }
             model.workspace.request_repository_refresh();
         }
         Err(error) => {
             eprintln!("Nana 文件插件动作失败：{method}：{error}");
+            if let Some(operation) = download {
+                model.operation.cancel(operation);
+            }
             model.files.error = if error.is_empty() { format!("{method} 调用失败。") } else { error };
         }
     }
+}
+
+/// 仓库动作执行完（Vue `runActiveRepositoryAction` 的 `refreshWorkspaceAfterMutation`）：重读仓库摘要；
+/// 当前不在回收站、也不是智能文件夹时非静默地重读当前目录，任务弹层出「读取目录」。换了仓库就不读。
+fn reload_after_action(model: &mut ShellViewModel, repo_id: String) {
+    if model.workspace.active_repo_id.as_deref() != Some(repo_id.as_str()) {
+        eprintln!("Nana 仓库动作完成时已经换了仓库，不重读：{repo_id}");
+        return;
+    }
+    let context = super::super::files::FileContext::from_model(model);
+    if !context.trash && !context.smart_folder {
+        let path = model.files.current_path.clone();
+        if !model.files.request_refresh_read(&context, &path) {
+            eprintln!("Nana 仓库动作完成后没能重读目录：{path}");
+        }
+    }
+    model.workspace.effects.push(super::super::WorkspaceEffect::LoadSnapshotSilent { repo_id });
 }
 
 fn selected_action<'a>(model: &'a ShellViewModel, action_id: &Option<String>) -> Option<&'a RepositoryAction> {
@@ -633,7 +660,7 @@ fn finish_action(model: &mut ShellViewModel, result: Result<RepositoryAction, St
             if let Some(current) = model.admin.actions.iter_mut().find(|item| item.action_id == action.action_id) {
                 *current = action;
             }
-            model.admin.push_effect(AdminEffect::ReloadBrowser { repo_id });
+            reload_after_action(model, repo_id);
         }
         Err(error) => {
             eprintln!("Nana 仓库动作执行失败：{error}");

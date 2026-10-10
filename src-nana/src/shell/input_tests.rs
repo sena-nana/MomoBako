@@ -698,6 +698,15 @@ fn attach_folder_dialog_submits_a_chosen_path_and_ignores_cancel() {
     ));
 }
 
+/// 下载单曲在任务弹层里的进度行：动作名，「准备下载 夜曲」→「正在下载 夜曲」。
+fn download_progress() -> crate::shell::entry_actions::DownloadProgress {
+    crate::shell::entry_actions::DownloadProgress {
+        label: "下载单曲".into(),
+        preparing: "准备下载 夜曲".into(),
+        running: Some("正在下载 夜曲".into()),
+    }
+}
+
 #[test]
 fn download_folder_calls_plugin_only_after_a_directory_is_chosen() {
     let mut model = ShellViewModel::default();
@@ -706,6 +715,7 @@ fn download_folder_calls_plugin_only_after_a_directory_is_chosen() {
         method: "media.downloadTrackPackage".into(),
         payload: serde_json::json!({"songId": 9}),
         repository_id: Some("repo".into()),
+        progress: download_progress(),
     };
     send(&mut model, begin.clone());
     assert!(model.admin.take_effects().is_empty());
@@ -730,11 +740,13 @@ fn download_folder_calls_plugin_only_after_a_directory_is_chosen() {
     assert!(model.admin.take_effects().is_empty());
     assert!(model.input.pending_download.is_none());
 
+    assert!(model.operation.shown().is_none(), "没选目录不出进度行");
     send(&mut model, InputMessage::BeginDownloadFolder {
         plugin_id: "momobako.netease.source".into(),
         method: "media.downloadTrackPackage".into(),
         payload: serde_json::json!({"songId": 9}),
         repository_id: Some("repo".into()),
+        progress: download_progress(),
     });
     send(
         &mut model,
@@ -751,6 +763,18 @@ fn download_folder_calls_plugin_only_after_a_directory_is_chosen() {
         }
         other => panic!("unexpected {other:?}"),
     }
+    // Vue `runDownloadAction`：选好目录以后任务弹层出「下载单曲 · 正在下载 夜曲」36%，不确定进度。
+    let row = model.operation.shown().cloned().expect("下载的进度行");
+    assert_eq!((row.label.as_str(), row.detail.as_str(), row.value, row.indeterminate), ("下载单曲", "正在下载 夜曲", 36.0, true));
+    send_admin(&mut model, crate::shell::admin::AdminMessage::FilePluginFinished {
+        method: "media.downloadTrackPackage".into(),
+        result: Err("网络断开".into()),
+    });
+    assert!(model.operation.shown().is_none(), "下载失败时这一行取消");
+}
+
+fn send_admin(model: &mut ShellViewModel, message: crate::shell::admin::AdminMessage) {
+    model.reduce(crate::shell::ShellMessage::Admin(message));
 }
 
 #[test]

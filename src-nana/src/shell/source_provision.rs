@@ -9,7 +9,8 @@ use std::collections::BTreeMap;
 
 use serde_json::{json, Map, Value};
 
-use super::super::{ShellMessage, ShellViewModel, WorkspaceRepository};
+use super::super::repo_operation::{OperationId, OperationPatch, OperationStart};
+use super::super::{ShellViewModel, WorkspaceRepository};
 use super::{AdminEffect, PluginCallOrigin};
 use crate::backend::services::repository::{PluginManifest, RepositorySummary};
 
@@ -55,6 +56,8 @@ pub struct SourceAuthState {
     pub status_by_repo: BTreeMap<String, Value>,
     /// 退出时先读到的登录状态，退出调用回来后再用。
     pending_clear_status: Option<Value>,
+    /// 建仓在任务弹层里的「创建资源库」行（Vue `createNewRepository`）。
+    create_operation: Option<OperationId>,
 }
 
 impl SourceAuthState {
@@ -164,6 +167,9 @@ fn call(model: &mut ShellViewModel, plugin_id: &str, method: String, payload: Va
 /// 失败收尾：写错误、放开按钮、记日志。
 fn fail(model: &mut ShellViewModel, error: String) {
     eprintln!("Nana 来源登录失败：{error}");
+    if let Some(operation) = model.admin.source_auth.create_operation.take() {
+        model.operation.cancel(operation);
+    }
     model.admin.source_auth.error = error;
     model.admin.source_auth.busy = false;
 }
@@ -364,14 +370,21 @@ pub(crate) fn finish(model: &mut ShellViewModel, step: SourceStep, result: Resul
                     step: SourceStep::ProvisionCache { repo_id, name },
                 });
             } else {
+                // Vue：先 `refreshRepositoryWorkspace()` 再 `selectRepository(repoId)`，这里合成一次读列表、读完切过去。
+                model.workspace.refresh_repositories(Some(repo_id.clone()));
                 complete(model, &repo_id, format!("已更新 {name} 的登录状态，正在同步。"));
             }
         }
         SourceStep::ProvisionCache { repo_id, name } => {
+            model.workspace.refresh_repositories(Some(repo_id.clone()));
             complete(model, &repo_id, format!("已更新 {name} 的登录状态，正在同步。"));
         }
         SourceStep::ProvisionCreate { repo_id, name } => {
+            if let Some(operation) = model.admin.source_auth.create_operation.take() {
+                model.operation.update(operation, OperationPatch::step("切换到新资源库", 72.0));
+            }
             adopt_created(model, &payload);
+            model.select_workspace_repository(&repo_id);
             complete(model, &repo_id, format!("已创建 {name}，正在同步。"));
         }
         SourceStep::Sync { .. } => {}
@@ -425,6 +438,9 @@ fn provision(model: &mut ShellViewModel, plugin: &PluginManifest, result: Value)
             let name = repository_name(plugin, &result, &account);
             let scheme = provisioning(plugin, "sourceUriScheme").unwrap_or_else(|| plugin.kind.clone());
             let path = if cache.is_empty() { format!("{scheme}://account/{account}") } else { cache };
+            // Vue `createNewRepository(.., { skipInitialSync: true })`：「创建资源库 · 初始化资源库」8%。
+            let operation = model.operation.start(OperationStart::new("创建资源库", "初始化资源库", 8.0));
+            model.admin.source_auth.create_operation = Some(operation);
             model.admin.push_effect(AdminEffect::CreateSourceRepository {
                 repo_id,
                 name,
@@ -436,10 +452,8 @@ fn provision(model: &mut ShellViewModel, plugin: &PluginManifest, result: Value)
     }
 }
 
-/// 建仓或更新完成：切到这个仓库，收起会话，排后台同步。
+/// 建仓或更新完成（已经在切到这个仓库）：收起会话，排后台同步。
 fn complete(model: &mut ShellViewModel, repo_id: &str, message: String) {
-    model.workspace.request_repository_refresh();
-    model.reduce(ShellMessage::SelectWorkspaceRepository(repo_id.to_string()));
     let state = &mut model.admin.source_auth;
     state.message = message;
     state.session = None;

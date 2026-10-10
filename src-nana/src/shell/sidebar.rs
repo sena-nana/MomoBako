@@ -162,7 +162,8 @@ pub enum SidebarMessage {
     DeleteRepositoryFromSwitcher,
     RepositoryAttachPathChanged(String),
     SubmitRepositoryAttach,
-    RepositoryAttachFinished(Result<(), String>),
+    /// 附加或新建资源库的结果：成功时是新仓库的摘要，照 Vue 放进列表并切过去。
+    RepositoryAttachFinished(Result<crate::backend::services::repository::RepositorySummary, String>),
     SidebarTreeLoaded { repo_id: String, result: Result<SidebarTree, String> },
     SidebarSmartFoldersLoaded { repo_id: String, result: Result<Vec<SidebarSmartFolder>, String> },
     SidebarSmartFolderQueried { repo_id: String, smart_folder_id: String, result: Result<super::files::VirtualQuery, String> },
@@ -182,7 +183,9 @@ pub enum SidebarEffect {
     CreateSmartFolder { repo_id: String },
     LoadPlaylists { repo_id: String },
     LoadPlaylistDetail { repo_id: String, playlist_id: String },
-    Browse { repo_id: String, path: String, trash: bool },
+    /// 读一个目录。`progress` 是 Vue 的非静默读取（回收站、快捷访问、从回收站回到全部），任务弹层出
+    /// 「读取目录」（「读取回收站」）这一行；点文件夹是静默读取，不出。
+    Browse { repo_id: String, path: String, trash: bool, progress: bool },
     AttachRepository { path: String },
     UpdateSmartFolder { repo_id: String },
     DeleteSmartFolder { repo_id: String, smart_folder_id: String },
@@ -245,6 +248,11 @@ pub struct SidebarState {
     pub backend_plugin_id: String,
     /// 下一次系统文件夹对话框的结果按 Eagle Library 建仓，而不是附加本地文件夹。
     pub(crate) attach_eagle: bool,
+    /// 在途的提交是新建资源库（Vue `createNewRepository`），不是附加本地文件夹：成功以后进度行多一步
+    /// 「切换到新资源库」。
+    pub(crate) creating: bool,
+    /// 对任务弹层「仓库操作」行的请求（挂载、创建资源库），归约结束时交给壳层的槽位。
+    pub(crate) operation: super::repo_operation::OperationRequests,
     pending_folder_create: Option<(String, String, String)>,
     pending_folder_rename: Option<(String, String, String)>,
     pending_folder_delete: Option<(String, String, FolderDeleteMode)>,
@@ -299,6 +307,8 @@ impl Default for SidebarState {
             backend_root: String::new(),
             backend_plugin_id: String::new(),
             attach_eagle: false,
+            creating: false,
+            operation: super::repo_operation::OperationRequests::default(),
             pending_folder_create: None,
             pending_folder_rename: None,
             pending_folder_delete: None,
@@ -370,7 +380,7 @@ impl SidebarState {
         if id == ShortcutId::Trash {
             workspace.panel = WorkspacePanel::Trash;
             self.browsing_trash = true;
-            self.effects.push(SidebarEffect::Browse { repo_id, path: String::new(), trash: true });
+            self.effects.push(SidebarEffect::Browse { repo_id, path: String::new(), trash: true, progress: true });
             return true;
         }
         workspace.library_category = match id {
@@ -382,7 +392,7 @@ impl SidebarState {
         workspace.panel = WorkspacePanel::Files;
         if self.browsing_trash {
             self.browsing_trash = false;
-            self.effects.push(SidebarEffect::Browse { repo_id, path: String::new(), trash: false });
+            self.effects.push(SidebarEffect::Browse { repo_id, path: String::new(), trash: false, progress: true });
         }
         true
     }
@@ -406,7 +416,7 @@ impl SidebarState {
             };
             let path = normalize_workspace_path(&path);
             let parent = parent_path(&path);
-            if !self.open_folder(workspace, &parent, locked) {
+            if !self.browse_folder(workspace, &parent, locked, true) {
                 return false;
             }
             self.selected_path = Some(path);
@@ -415,14 +425,21 @@ impl SidebarState {
         let Some(path) = shortcut.target_path else {
             return false;
         };
-        self.open_folder(workspace, &normalize_workspace_path(&path), locked)
+        // 快捷访问在 Vue 里是非静默读取（`loadFileBrowserForDirectory` 不带 `silent`），任务弹层出「读取目录」。
+        self.browse_folder(workspace, &normalize_workspace_path(&path), locked, true)
     }
 
     pub fn toggle_folder(&mut self, path: &str) {
         toggle_id(&mut self.expanded_folders, path);
     }
 
+    /// 点文件夹（Vue `openFolder`，静默读取）：回到全部文件，展开到这一层并读它。
     pub fn open_folder(&mut self, workspace: &mut WorkspaceState, path: &str, locked: bool) -> bool {
+        self.browse_folder(workspace, path, locked, false)
+    }
+
+    /// 打开一个文件夹；`progress` 时任务弹层出「读取目录」这一行。
+    fn browse_folder(&mut self, workspace: &mut WorkspaceState, path: &str, locked: bool, progress: bool) -> bool {
         if locked || workspace.active_repo_id.is_none() {
             return false;
         }
@@ -432,7 +449,7 @@ impl SidebarState {
         self.browsing_trash = false;
         self.current_directory = path.to_string();
         self.expand_directory(path);
-        self.effects.push(SidebarEffect::Browse { repo_id, path: path.to_string(), trash: false });
+        self.effects.push(SidebarEffect::Browse { repo_id, path: path.to_string(), trash: false, progress });
         true
     }
 
@@ -860,11 +877,13 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
         SidebarMessage::SubmitRepositoryAttach => {
             model.sidebar.submit_attach();
         }
+        // Vue `attachRepository` / `createNewRepository`：成功以后把新仓库放进列表，再 `selectRepository` 切过去。
         SidebarMessage::RepositoryAttachFinished(result) => {
-            let succeeded = result.is_ok();
-            model.sidebar.note_attach_finished(result);
-            if succeeded {
-                model.workspace.request_repository_refresh();
+            let created = result.as_ref().ok().cloned();
+            model.sidebar.note_attach_finished(result.map(|_| ()));
+            if let Some(summary) = created {
+                model.workspace.upsert_repository(&summary);
+                model.select_workspace_repository(&summary.repo_id);
             }
         }
         SidebarMessage::SidebarTreeLoaded { repo_id, result } => model.sidebar.apply_tree(&repo_id, result),

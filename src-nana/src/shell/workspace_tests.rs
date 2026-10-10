@@ -81,7 +81,9 @@ fn repository_regions_are_mutually_exclusive() {
     assert_eq!(ready.main_region(), MainRegion::Startup);
     let generation = ready.list_generation;
     ready.note_sync_finished(generation, Ok(()));
-    ready.note_index_finished("live", Ok(()));
+    assert!(ready.awaits_snapshot(generation));
+    ready.note_index_finished(Ok(()));
+    assert!(ready.take_effects().contains(&WorkspaceEffect::LoadFirstScreen { repo_id: "live".into() }), "读完摘要接着读首屏目录");
     ready.note_first_screen_finished(Ok(()));
     assert_eq!(ready.main_region(), MainRegion::HasRepository);
 

@@ -458,14 +458,10 @@ impl FilesState {
             Ok(()) => {
                 self.finish_dialog_success();
                 let path = self.current_path.clone();
-                let (refresh, read) = match self.operation_kind {
-                    Some(FilesOperation::Mutation { refresh_value: Some(value) }) => (Some(value), ReadProgress::Silent),
-                    Some(FilesOperation::Mutation { refresh_value: None }) => (None, ReadProgress::Directory),
-                    _ => (None, ReadProgress::Silent),
-                };
+                let (refresh, read) = self.reload_progress();
                 if reload && self.queue_browse(ctx, &path, true, true, read) {
                     if let Some(value) = refresh {
-                        self.operation.update(OperationPatch::step("刷新文件索引", value));
+                        self.operation.update(super::repo_operation::OperationPatch::step("刷新文件索引", value));
                     }
                 } else {
                     self.settle_mutation(true);
@@ -571,8 +567,7 @@ impl FilesState {
         self.mutating = true;
         self.error.clear();
         if let Some(operation) = operation {
-            self.operation.start(operation.start);
-            self.operation_kind = Some(FilesOperation::Mutation { refresh_value: operation.refresh_value });
+            self.report_mutation(operation);
         }
     }
 

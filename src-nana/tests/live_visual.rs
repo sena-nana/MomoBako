@@ -540,10 +540,7 @@ fn intersects(a: &BoundsDump, b: &BoundsDump) -> bool {
 
 fn live_files() -> ShellViewModel {
     let mut model = ShellViewModel::default();
-    model.workspace.startup.finish();
-    model
-        .workspace
-        .apply_repository_list(None, Ok(vec![repository("ready")]));
+    model.workspace.present_repository(repository("ready"));
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(snapshot())));
     model.reduce(ShellMessage::TaskProgressLoaded(vec![running_task("task-1"), running_task("task-2")]));
     model

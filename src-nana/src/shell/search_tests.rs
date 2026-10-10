@@ -369,6 +369,8 @@ fn opening_a_hit_browses_its_folder_then_loads_the_asset() {
     ));
 }
 
+/// Vue `openSearchHit`：命中在别的仓库时先 `await selectRepository`，换仓库走完（启动页三步）以后才读
+/// 命中所在的目录（带目录树，任务弹层是「读取文件树」），读到了选中命中并读详情。搜索在换仓库时清空。
 #[test]
 fn opening_a_hit_in_another_repository_switches_first_and_resets_search() {
     let mut model = shell();
@@ -376,16 +378,61 @@ fn opening_a_hit_in_another_repository_switches_first_and_resets_search() {
     model.workspace.panel = WorkspacePanel::Search;
     model.inspect.filter_bar_open = true;
     model.inspect.query = "封面".into();
-    model.inspect.results = vec![row("other", "asset-9", "cover.png")];
+    model.inspect.results = vec![row("other", "asset-9", "pics/cover.png")];
     send(&mut model, InspectMessage::OpenHit { repo_id: "other".into(), asset_id: "asset-9".into() });
     assert_eq!(model.workspace.active_repo_id.as_deref(), Some("other"));
     assert!(model.inspect.query.is_empty(), "切换资源库清空查询");
     assert!(!model.inspect.filter_bar_open, "切换资源库收起筛选栏");
+    assert_eq!(model.workspace.startup.status, super::super::super::StartupStatus::Loading, "回到启动页");
+    assert_eq!(model.workspace.startup.step_label, "扫描资源库文件");
+    assert!(
+        !model.files.take_effects().iter().any(|effect| matches!(effect, FilesEffect::Browse { .. })),
+        "换仓库走完以前不读命中所在目录"
+    );
+
+    let generation = model.workspace.list_generation;
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(()) });
+    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot("other", &[("pics/cover.png", "png", &[])])) });
+    model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser("other", "", &[]))));
+    assert_eq!(model.workspace.startup.status, super::super::super::StartupStatus::Ready);
+    assert_eq!(model.workspace.panel, WorkspacePanel::Files);
     let browse = model.files.take_effects().into_iter().find_map(|effect| match effect {
         FilesEffect::Browse { repo_id, path, .. } => Some((repo_id, path)),
         _ => None,
     });
-    assert_eq!(browse, Some(("other".into(), String::new())), "根目录文件的父目录是根");
+    assert_eq!(browse, Some(("other".into(), "pics".into())), "换完仓库再读命中所在目录");
+    assert_eq!(model.operation.shown().map(|row| (row.label.as_str(), row.detail.as_str())), Some(("读取文件树", "正在读取 pics")));
+
+    model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser("other", "pics", &["pics/cover.png"]))));
+    assert_eq!(model.files.selected, ["pics/cover.png"], "目录到达后选中命中");
+    assert!(matches!(
+        model.inspect.effects.last(),
+        Some(InspectEffect::LoadAsset { repo_id, asset_id }) if repo_id == "other" && asset_id == "asset-9"
+    ));
+}
+
+/// 换仓库失败停在启动页：等着的命中不再打开，重试成功以后也不会突然跳过去。
+#[test]
+fn a_failed_switch_drops_the_pending_hit() {
+    let mut model = shell();
+    model.workspace.repositories.push(repository("other", true));
+    model.inspect.results = vec![row("other", "asset-9", "pics/cover.png")];
+    send(&mut model, InspectMessage::OpenHit { repo_id: "other".into(), asset_id: "asset-9".into() });
+    let generation = model.workspace.list_generation;
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Err("拒绝访问。".into()) });
+    assert_eq!(model.workspace.startup.status, super::super::super::StartupStatus::Error);
+    model.files.take_effects();
+    model.reduce(ShellMessage::StartupRetry);
+    let generation = model.workspace.list_generation;
+    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![snapshot("repo", &[]).repository, snapshot("other", &[]).repository]) });
+    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(()) });
+    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot("other", &[])) });
+    model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser("other", "", &[]))));
+    assert_eq!(model.workspace.startup.status, super::super::super::StartupStatus::Ready);
+    assert!(
+        !model.files.take_effects().iter().any(|effect| matches!(effect, FilesEffect::Browse { path, .. } if path == "pics")),
+        "失败时放弃的命中不再打开"
+    );
 }
 
 #[test]
@@ -428,7 +475,8 @@ fn a_failed_folder_read_still_opens_the_asset() {
 fn snapshots_feed_facets_and_switching_repository_resets_search() {
     let mut model = shell();
     model.workspace.repositories.push(repository("other", true));
-    model.reduce(ShellMessage::RepositorySnapshotLoaded(Ok(snapshot("repo", &[("cover.png", "png", &["封面"])]))));
+    let generation = model.workspace.list_generation;
+    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot("repo", &[("cover.png", "png", &["封面"])])) });
     assert_eq!(model.inspect.search_ui.facets_repo.as_deref(), Some("repo"));
     assert_eq!(model.inspect.search_ui.facets.len(), 1);
     assert_eq!(model.inspect.search_ui.facets[0].tags, ["封面"]);

@@ -91,8 +91,8 @@ pub(super) fn start(model: &mut ShellViewModel, repo_id: &str) {
     let generation = model.workspace.prepare_initial_list();
     let steps = [
         ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(repo_id, "ready")]) },
-        ShellMessage::StartupSyncFinished { generation, result: Ok(()) },
-        ShellMessage::RepositorySnapshotLoaded(Ok(snapshot(repo_id))),
+        ShellMessage::RepositorySynced { generation, result: Ok(()) },
+        ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(repo_id)) },
     ];
     let mut early = Vec::new();
     for message in steps {
@@ -549,6 +549,7 @@ fn binding_a_repository_reads_actions_and_hardlinks() {
     model.reduce(ShellMessage::Files(FilesMessage::HardlinksChecked(Ok(vec![prompt]))));
     assert_eq!(model.files.dialog, FileDialog::Hardlink, "有候选就弹出确认");
 
-    model.reduce(ShellMessage::RepositorySnapshotLoaded(Ok(snapshot(REPO))));
+    let generation = model.workspace.list_generation;
+    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(REPO)) });
     assert!(!admin_effects(&mut model).iter().any(|effect| matches!(effect, AdminEffect::LoadActions { .. })), "同一个仓库的摘要不重读动作");
 }

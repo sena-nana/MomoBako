@@ -89,8 +89,8 @@ impl Base {
         let mut repositories = vec![summary(self.name, "ready")];
         repositories.extend(self.others.iter().cloned());
         model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(repositories) });
-        model.reduce(ShellMessage::StartupSyncFinished { generation, result: Ok(()) });
-        model.reduce(ShellMessage::RepositorySnapshotLoaded(Ok(self.snapshot())));
+        model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(()) });
+        model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(self.snapshot()) });
         model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser(self.entries.clone()))));
         answer_admin_reads(model, &self.players, self.plugins_error);
         let repo_id = REPO_ID.to_string();

@@ -89,6 +89,36 @@ fn waiting_operations_climb_like_vue() {
     assert_eq!(operation_row(&model).map(|row| row.2), Some(40.0));
 }
 
+/// 侧栏的回收站快捷方式和快捷访问是 Vue 的非静默读取，任务弹层出「读取回收站」「读取目录」，读完走到
+/// 「整理目录条目」再完成；点文件夹是静默读取（Vue `openFolder` 带 `silent`），不出这一行。
+#[test]
+fn sidebar_reads_report_like_vue() {
+    use super::sidebar::{ShortcutId, SidebarMessage};
+    // 宿主的准备帧：交出侧栏排下的目录读取，记下文件列在读，再提交。
+    fn prepare(model: &mut ShellViewModel) {
+        model.stage_browses();
+        crate::sidebar_dispatch::dispatch_prepared_browses(model);
+    }
+    let mut model = files_page();
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::SelectShortcut(ShortcutId::Trash)));
+    prepare(&mut model);
+    assert_eq!(operation_row(&model), Some(("读取回收站".into(), "正在读取回收站".into(), 14.0)));
+    let mut trash = match reloaded(&model) {
+        ShellMessage::FileBrowserLoaded(Ok(snapshot)) => snapshot,
+        _ => unreachable!(),
+    };
+    trash.special_location = Some("trash".into());
+    model.reduce(ShellMessage::FileBrowserLoaded(Ok(trash)));
+    assert_eq!(operation_row(&model), Some(("读取回收站".into(), "整理目录条目".into(), 100.0)));
+    model.operation.tick(FINISH_LINGER_MS);
+
+    assert!(operation_row(&model).is_none(), "停留以后收起");
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::OpenFolder("assets".into())));
+    prepare(&mut model);
+    assert!(model.files.loading, "文件列在读 assets");
+    assert!(operation_row(&model).is_none(), "点文件夹是静默读取");
+}
+
 /// 多选删除（和移动）在 Vue 里成功以后非静默地重读目录：进度行换成「读取目录」，读回来走到「整理目录条目」再完成。
 #[test]
 fn multi_deletes_hand_the_row_to_the_directory_read() {

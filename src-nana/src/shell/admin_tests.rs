@@ -630,9 +630,22 @@ fn repository_actions_follow_selection_and_refuse_when_not_runnable() {
         model.admin.take_effects().pop(),
         Some(AdminEffect::RunAction { action_id, paths, .. }) if action_id == "copy" && paths == ["a.txt"]
     ));
+    // Vue `refreshWorkspaceAfterMutation`：执行完重读摘要和当前目录，任务弹层出「读取目录」。
+    model.workspace.present_repository(WorkspaceRepository {
+        repo_id: "repo".into(),
+        name: "库".into(),
+        path: "C:/repo".into(),
+        status: "ready".into(),
+        backend_plugin_id: "local".into(),
+        capabilities: vec!["write".into()],
+        cache_required: false,
+        cache_status: String::new(),
+    });
     send(&mut model, AdminMessage::ActionRunFinished { result: Ok(action("copy", "ready", true)) });
     assert!(!model.admin.actions_running);
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::ReloadBrowser { repo_id }) if repo_id == "repo"));
+    assert!(model.files.take_effects().iter().any(|effect| matches!(effect, crate::shell::FilesEffect::Browse { repo_id, .. } if repo_id == "repo")));
+    assert!(model.workspace.take_effects().iter().any(|effect| matches!(effect, crate::shell::WorkspaceEffect::LoadSnapshotSilent { repo_id } if repo_id == "repo")));
+    assert_eq!(model.operation.shown().map(|row| row.label.as_str()), Some("读取目录"));
 }
 
 #[test]

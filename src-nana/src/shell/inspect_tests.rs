@@ -492,8 +492,8 @@ fn search_route_appears_only_after_startup_with_a_repository() {
         local_cache: None,
         authentication: None,
     }])));
-    model.reduce(ShellMessage::StartupSyncFinished { generation: 0, result: Ok(()) });
-    model.reduce(ShellMessage::RepositorySnapshotLoaded(Ok(RepositorySnapshot {
+    model.reduce(ShellMessage::RepositorySynced { generation: 0, result: Ok(()) });
+    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation: 0, result: Ok(RepositorySnapshot {
         repository: RepositorySummary {
             repo_id: "repo".into(),
             name: "库".into(),
@@ -526,7 +526,7 @@ fn search_route_appears_only_after_startup_with_a_repository() {
             trash_count: 0,
             readme_content: None,
         },
-    })));
+    }) });
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(FileBrowserSnapshot {
         repo_id: "repo".into(),
         root_path: "C:/repo".into(),

@@ -12,8 +12,13 @@ use std::path::{Path, PathBuf};
 use crate::backend::services::repository::{FileBrowserEntry, FileBrowserSnapshot};
 use crate::settings;
 
-use super::repo_operation::{OperationPatch, OperationRequests, OperationStart};
+use super::repo_operation::OperationRequests;
 use super::workspace::{LibraryCategory, WorkspacePanel};
+
+#[path = "files_operation.rs"]
+mod operation;
+use operation::FilesOperation;
+pub(super) use operation::{FileOperation, ReadProgress};
 
 /// 首屏分页，对应 `FILE_BROWSER_INITIAL_PAGE_SIZE`。
 pub const INITIAL_PAGE_SIZE: usize = 80;
@@ -361,46 +366,6 @@ pub enum FilesMessage {
     HostDrop(nana_ui::runtime::FileDropEvent),
 }
 
-/// 文件变更在任务弹层里的进度行，照 Vue `startOperationProgress` / `updateOperationProgress`：
-/// 开始时的种类、阶段和百分比，以及协议完成以后那一步。
-#[derive(Clone, Debug, PartialEq)]
-pub(super) struct FileOperation {
-    pub start: OperationStart,
-    /// 协议完成、等着目录读回来时 Vue「刷新文件索引」那一步的百分比（复制、导入）。没有这一步的变更
-    /// （删除、还原、移动）重读目录时进度行换成「读取目录」，和 Vue 刷新目录时的非静默读取一样。
-    pub refresh_value: Option<f64>,
-}
-
-impl FileOperation {
-    /// Vue 文件变更开始以后的第一步：种类、阶段说明和百分比。
-    pub(super) fn step(label: impl Into<String>, detail: impl Into<String>, value: f64, refresh_value: Option<f64>) -> Self {
-        Self { start: OperationStart::new(label, detail, value), refresh_value }
-    }
-
-    /// 从文件夹导入，对话框和拖入都是（Vue `importEntriesToWorkspace`）。
-    pub(super) fn import() -> Self {
-        Self::step("导入文件", "导入文件到当前资源库", 24.0, Some(84.0))
-    }
-}
-
-/// 文件表面这次占着仓库操作行的是什么：一次变更，或者一次非静默的读目录。
-#[derive(Clone, Copy, Debug, PartialEq)]
-enum FilesOperation {
-    Mutation { refresh_value: Option<f64> },
-    Read,
-}
-
-/// 读目录时任务弹层出不出进度行：Vue `loadFileBrowserForDirectory` 只有非静默、非追加的读取才出，
-/// 标题看读的是回收站、带不带目录树（「读取回收站」「读取文件树」「读取目录」）。
-/// 侧栏点文件夹、双击进入目录和面包屑在 Vue 里都是静默读取，不出这一行。
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(super) enum ReadProgress {
-    #[default]
-    Silent,
-    Directory,
-    Tree,
-}
-
 /// 目录条目、选择、对话框和进行中的变更。
 #[derive(Clone, Debug, Default)]
 pub struct FilesState {
@@ -461,49 +426,6 @@ pub struct FilesState {
 }
 
 impl FilesState {
-    /// 非静默地读目录，任务弹层出「读取目录」这一行（Vue `loadFileBrowserForDirectory`）：
-    /// 读回收站是「读取回收站」，带目录树是「读取文件树」；说明写正在读的目录，根目录写「正在读取根目录」。
-    pub(super) fn report_read(&mut self, path: &str, trash: bool, read: ReadProgress) {
-        let label = match read {
-            ReadProgress::Silent => return,
-            _ if trash => "读取回收站",
-            ReadProgress::Tree => "读取文件树",
-            ReadProgress::Directory => "读取目录",
-        };
-        let detail = if !path.is_empty() {
-            format!("正在读取 {path}")
-        } else if trash {
-            "正在读取回收站".into()
-        } else {
-            "正在读取根目录".into()
-        };
-        self.operation.start(OperationStart::new(label, detail, 14.0).indeterminate());
-        self.operation_kind = Some(FilesOperation::Read);
-    }
-
-    /// 文件表面占着的进度行到头了：成功时读目录先走到「整理目录条目」92% 再完成，变更直接完成；
-    /// 失败时取消。没有占着进度行时什么也不做。
-    fn settle_operation(&mut self, succeeded: bool) {
-        let Some(kind) = self.operation_kind.take() else {
-            return;
-        };
-        if !succeeded {
-            self.operation.cancel();
-            return;
-        }
-        if kind == FilesOperation::Read {
-            self.operation.update(OperationPatch::step("整理目录条目", 92.0));
-        }
-        self.operation.finish();
-    }
-
-    /// 变更的结果到了：只收尾变更自己的进度行，在读的目录留给读目录收尾。
-    fn settle_mutation(&mut self, succeeded: bool) {
-        if matches!(self.operation_kind, Some(FilesOperation::Mutation { .. })) {
-            self.settle_operation(succeeded);
-        }
-    }
-
     /// 虚拟列表还有下一页时，空闲 `PREFETCH_IDLE_MS` 后再解码缩略图。
     pub fn schedule_thumbnail_prefetch(&mut self, has_more: bool, now_ms: u64) {
         self.prefetch_due_ms = has_more.then_some(now_ms.saturating_add(super::motion::PREFETCH_IDLE_MS));

@@ -53,7 +53,10 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 
 下文的「Windows 非测试构建」指 `cfg(all(windows, not(test)))`：只有单元测试构建（`cfg(test)`）不开声卡、不注册系统媒体会话。代码路径都在 `src-nana/src/shell/` 下，另有说明的除外。
 
-- **启动**：四步依次读资源库列表、同步仓库（`PROTOCOL_REPOSITORY_SYNC`）、读仓库摘要、读首屏目录；缺失仓库和空列表不进同步。失败停在当前步，保留已完成的步骤，给「重试」；启动页显示最近 8 条加载日志。见 `workspace.rs`、`workspace_startup.rs`、`route_startup.rs`。
+- **启动**：四步依次读资源库列表、同步仓库（`PROTOCOL_REPOSITORY_SYNC`）、读仓库摘要、读首屏目录；缺失仓库和空列表不进同步。失败停在当前步，保留已完成的步骤，给「重试」；启动页显示最近 8 条加载日志。侧栏在同步以后（读到摘要时）才绑定仓库、读目录树。见 `workspace.rs`、`workspace_startup.rs`、`route_startup.rs`。
+- **换仓库和刷新**：照 Vue `selectRepository` / `loadRepositories`（`workspace_switch.rs`、`workspace_flow.rs`）。
+  - 换到别的仓库（切换列表、附加或新建资源库成功、删除当前仓库后选下一个、搜索命中在别的仓库、刷新后当前仓库已不在列表里）：回到启动页、收起侧栏，从「切换资源库」走「扫描资源库文件 → 读取仓库摘要 → 读取首屏目录」；不写首屏启动日志、不重读设置包；目标缺失时直接进缺失页。失败停在启动页给「重试」，重试是完整的首屏启动。上一个仓库的条目、选择、预览、搜索和侧栏内容在活动仓库变了的那次归约里清掉。
+  - 同一个仓库（来源动作完成后的刷新、缺失页「刷新」、切换列表选当前仓库、重定向成功）：先同步，再读摘要、重读当前目录（读失败退回根目录），侧栏在后台重读；整轮状态区写「正在同步仓库状态」，失败写进状态区，不回启动页。从刷新进来时先重读资源库列表。
 - **侧栏**：仓库切换弹层（切换、添加资源库、删除当前资源库）；快捷方式（全部、未分类、未标签、最近使用、回收站）带计数，以及快捷访问；文件夹树和智能文件夹树是按显示顺序展开的扁平行，文件夹悬停 450 ms 打开；文件夹新建、重命名、删除，智能文件夹新建、编辑、删除，播放集新建、打开、播放、删除（新建对话框的类型和「播放」能不能点看读回的播放器类型）；「刷新文件夹树」同步整个仓库再重读（`tree_sync.rs`、`src-nana/src/sync_dispatch.rs`）；顶部的全局状态区显示没有就近显示的失败、读取中和同步进度（`status.rs`）；折叠和宽度（220–480，默认 276）写进 `sidebar.json`；启动和换仓库绑定侧栏时照 Vue 在后台读仓库动作和硬链接候选，有仓库动作时多一个「动作」入口，有没确认的硬链接候选时弹出确认。见 `sidebar*.rs`、`view_part_sidebar.rs`。
 - **文件**：文件页用 `each_virtual` 按视口建行，列表、网格、自适应、瀑布流四种展示写进 `file-display.json`。单击选中，Shift 单击从锚点选一段，Ctrl / Meta 单击切换（Vue `selectionModeFromEvent`；修饰键由宿主在输入路由完以后记下，`window_host::note_modifiers`），右侧详情跟着主选中项看元数据；双击或右键「预览」进预览页。工具栏有「建文件」和导入（文件夹、ZIP、Eagle 复制或剪切），回收站里有「还原所有项目」「清空回收站」；右键菜单有预览、打开、定位、还原、复制到、加入播放列表、缩略图（刷新、自定义）、重命名、删除和来源插件的条目动作（`entry_actions.rs`）；条目可以拖进文件夹移动，可以框选（按下时按着 Ctrl / Meta 并进原来的选择）；有硬链接候选时弹出确认。仓库导出对话框能提交压缩包和 Git 导出，和 Vue 一样首页没有入口。见 `route_files.rs`、`files_*.rs`。
 - **预览**：预览页按扩展名分派（`inspect_support.rs`）。图片在产品窗口里经宿主纹理槽 `file-preview` 用 `GpuTextureView` 显示；文本和 Markdown 都按等宽原文显示前 768 KiB；WAV 用自有解析，MP3、FLAC、Ogg 用 symphonia，Windows 上 M4A、AAC、Opus 和其余视频容器用媒体基础（`video_mf.rs`），未压缩和 MJPEG 的 AVI 用纯 Rust（`video_avi.rs`），视频画面进同一个纹理槽；压缩包（zip、cbz、7z、rar、cbr）最多列 200 条；PDF 按内容流画页、可翻页；Office 的 Open XML 和 OLE 文件抽文本；OBJ、glTF、GLB、STL、3MF、VRM 能取出三角形时软件光栅、可旋转缩放，FBX、BLEND 只报文件头（`native_preview*.rs`）。PDF 页、模型光栅和图片幻灯片的帧编码成 PNG 画进预览框（`inspect_preview_page.rs`、`inspect_preview_body.rs`）。读不出、解不开时预览框里写失败标题和原因。
@@ -63,7 +66,9 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 - **设置**：侧栏「设置」和缺失仓库的「打开来源设置」都进设置页（`ShellMessage::OpenSettings`、`admin::open_settings_page`），后者照 Vue `?plugin=` 展开来源插件的设置。设置页有音频播放、外观（主题、圆角，改了立即生效）、仓库服务、外部素材接入（复制连接信息、导出 `external-api.json`）、插件管理、缓存和 API 设计。主题写进 `settings.json`，圆角写进 `corners.json`。见 `route_settings.rs`、`admin_settings_view.rs`。
 - **插件**：启动结束时照 Vue `loadSettingsData` 读一次设置包（插件、钩子记录、缓存、API 设计和外部连接），打开设置页、插件面板「刷新」时再读；插件列表换新以后重读播放器类型（`list_playlist_players`），新建播放集的类型、播放器贡献和插件类型的播放集能不能播都从这里来。插件管理面板（设置页和拓展页都有）分组和搜索，能启停、从压缩包安装（编号 2 的文件对话框）、确认后删除、编辑和重置清单声明的设置字段、打开插件目录；来源插件的扫码登录画二维码（`source_auth_page.rs`）。拓展页的 API Playground、文件导入、Eagle 导入是原生页面。见 `admin_plugin*.rs`、`admin_gap.rs`、`tool_native.rs`、`api_playground*.rs`。
 - **日志**：日志页按级别、来源和关键字筛选，可以暂停追踪、清空；页面主体和日志列表都能滚，列表在筛选下面分走面板剩下的高度、最低 360，窗口放得下时只有列表滚（`route_admin.rs`、`admin_logs_view.rs`）。每次切到日志面板照 Vue 读最近 200 条历史日志（读的时候手上没有日志就写「正在加载系统日志」），之后经宿主事件合并新记录。
-- **任务**：侧栏底部的「任务」打开任务弹层（`admin_view.rs`），列出当前的仓库操作（刷新文件夹树，或复制、移动、导入、多选删除和还原这些文件变更，`operation_row_tests.rs`）和宿主观察到的运行中任务（排队、运行和取消中，结束就拿掉）；「任务」右上角的计数是弹层的行数，和 Vue 的 `activeTaskCount` 一样。弹层里没有取消按钮，Vue 的 `TaskPopover.vue` 也没有；点弹层外面、头部的关闭按钮和 Escape 都关掉它。
+- **任务**：侧栏底部的「任务」打开任务弹层（`admin_view.rs`），列出当前的仓库操作和宿主观察到的运行中任务（排队、运行和取消中，结束就拿掉）；「任务」右上角的计数是弹层的行数，和 Vue 的 `activeTaskCount` 一样。弹层里没有取消按钮，Vue 的 `TaskPopover.vue` 也没有；点弹层外面、头部的关闭按钮和 Escape 都关掉它。
+  - 仓库操作只有一个槽位（`repo_operation.rs`，Vue `operationProgress`）：最后开始的操作占着它，旧操作的更新和完成不再生效；等待时每 220 ms 往上爬到 88，完成停在 100% 再过 180 ms 收起，失败立即收起。
+  - 出这一行的操作：加载资源库（换仓库、刷新）、挂载资源库、创建资源库、重定向资源库、刷新文件树、来源下载，复制、移动、导入、ZIP 和 Eagle 导入、多选删除和还原，以及非静默的读目录（「读取目录」「读取回收站」「读取文件树」：回收站和快捷访问、刷新时重读目录、仓库动作完成后的重读、搜索命中所在目录）。点文件夹、双击进入和面包屑在 Vue 里是静默读取，不出。见 `operation_row_tests.rs`、`workspace_switch_tests.rs`。
 - **宿主操作**：标题栏的最小化、最大化、关闭；关闭行为按设置确认、退出或最小化到托盘（`src-nana/src/window_host.rs`）；托盘在 Windows 上用 `tray-icon`（`src-nana/src/tray.rs`）；主窗口几何下次启动恢复；打开和定位启动系统程序；拖出文件在 Windows 上用 `drag` crate（`src-nana/src/drag_out.rs`）；剪贴板读写系统剪贴板（`src-nana/src/host_bridge.rs`）；文件区和空库页接收系统文件拖入（`input::accept_file_drops`）；Escape 由运行时交给激活的对话框，其余按 `escape_layer` 关最上面一层。
 
 ## 还没做或要靠设备验证的部分
@@ -72,8 +77,6 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 
 归约和服务派发已经写好、但产品界面触发不到的路径，以及 Vue 有、Nana 还没接上的反馈：
 
-- 换仓库和刷新资源库不先同步。Vue 同一个仓库刷新（`refreshRepo`）先同步资源库，再读摘要、重读当前目录（读失败退回根目录），进度在任务弹层的「加载资源库」行和状态区；真正换仓库时（切换列表、附加或新建资源库成功、删除后选下一个、搜索命中别的仓库）回到启动页、收起侧栏，走「扫描资源库文件 → 读取仓库摘要 → 读取首屏目录」，失败停在启动页给「重试」。Nana 启动完成后换仓库只读摘要（`workspace::select_repository`），刷新只重读；附加或新建资源库成功后也不切到新仓库。
-- 任务弹层的仓库操作行只接了刷新文件夹树和文件变更。Vue 读目录（`读取目录 / 读取回收站 / 读取文件树`）、加载资源库、同步资源库、导入和挂载资源库、重定向资源库、来源下载时也在这一行出进度，Nana 这些路径不出。
 - `ShellMessage::Refresh`（重读资源库列表）有归约和派发，没有发送方，只有测试在用。
 - `InspectMessage::RegisterPreview`（登记插件的预览贡献）没有发送方：预览贡献只有内置的那几项（`native_preview::builtin_bindings`），插件声明的预览贡献不会登记，「原生预览 · 名称 · 视图 id」在产品里出不来。
 - `ShellMessage::SetSidebarWidth`、`CommitSidebarWidth` 和 `SetLibraryCategory` 没有发送方：侧栏宽度由宿主在准备帧里直接写进工作台（`window_host::sync_sidebar_resize`），分类视图由侧栏快捷方式直接切换。
