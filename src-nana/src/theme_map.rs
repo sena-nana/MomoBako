@@ -139,6 +139,11 @@ pub const TYPE_ROLES: &[TypeRole] = &[
     },
 ];
 
+/// Vue 禁用控件的整体不透明度：Lilia `button:disabled { opacity: 0.45 }`，右键菜单项和滑杆也是这个值。
+/// 有的控件直接写节点透明度，有的在 sRGB 里和所在底色混成不透明色（渲染器按线性空间合成会更亮），
+/// 都用这一个值。遮罩的 0.45（`appearance.rs` 的 `SCRIM_CSS_ALPHA`）是另一个意思，不用它。
+pub const DISABLED_OPACITY: f32 = 0.45;
+
 /// Vue `--app-corner-radius` 的默认值（`src/ui/core/useCornerStyle.ts`）。
 pub const DEFAULT_CORNER_RADIUS_PX: f32 = 8.0;
 /// 圆角半径设置的上下限，和 Lilia `CORNER_RADIUS_MIN` / `CORNER_RADIUS_MAX` 一致。

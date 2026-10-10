@@ -188,9 +188,6 @@ pub(crate) fn clock_parts(current_ms: u64, duration_ms: u64) -> (f32, String, f6
     (ratio, time, current_ms.min(duration_ms.max(1)) as f64)
 }
 
-/// Vue 禁用按钮的整体不透明度。
-pub(crate) const DISABLED_OPACITY: f32 = 0.45;
-
 /// 宽排版放得下的最窄卡片：内边距 32、传输 188、两道栏距 36、时间音量至少 170、
 /// 媒体至少 134（58 封面 + 12 间距 + 约四个字），再加两侧 1px 边。
 const WIDE_MIN_WIDTH: f32 = 562.0;
@@ -331,7 +328,7 @@ fn body(props: &BarProps, narrow: bool) -> AnyView {
 fn media(props: &BarProps) -> AnyView {
     let title = props.title();
     // 没有条目时整块按 Vue 的 0.45 淡化，在卡片底色上混出来。
-    let dim = (!props.has_item()).then_some((SemanticColorRole::Surface, DISABLED_OPACITY));
+    let dim = (!props.has_item()).then_some((SemanticColorRole::Surface, crate::theme_map::DISABLED_OPACITY));
     let hit = widget(parts::hit_area(&title, !props.has_item(), 0.0, 6.0))
         .key("player-media")
         .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(player_message(PlayerMessage::OpenPreview { item_id: None })));
