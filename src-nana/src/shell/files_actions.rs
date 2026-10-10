@@ -405,6 +405,7 @@ impl FilesState {
     /// 变更成功的快照。`created_name` 只有工具栏建文件带：建成了清空输入框，选择里有东西时选中新文件。
     pub(super) fn apply_mutation_snapshot(&mut self, ctx: &FileContext, snapshot: FileBrowserSnapshot, created_name: Option<String>) {
         self.mutating = false;
+        self.settle_mutation(true);
         if created_name.is_some() {
             self.create_name.clear();
         }
@@ -445,27 +446,29 @@ impl FilesState {
     pub(super) fn note_mutation_failed(&mut self, error: String) {
         eprintln!("Nana 文件变更失败：{error}");
         self.mutating = false;
-        self.operation = None;
+        self.settle_mutation(false);
         self.error = error;
     }
 
-    /// 协议变更的结果。成功且要重读目录时进度行走到 Vue「刷新文件索引」那一步，目录读回来才收起。
+    /// 协议变更的结果。成功且要重读目录时：复制和导入的进度行走到 Vue「刷新文件索引」那一步，目录读回来
+    /// 才完成；多选删除和移动在 Vue 里重读目录是一次非静默读取，进度行换成「读取目录」。
     pub(super) fn note_protocol_finished(&mut self, ctx: &FileContext, result: Result<(), String>, reload: bool, hardlinks: bool) {
         self.mutating = false;
         match result {
             Ok(()) => {
                 self.finish_dialog_success();
                 let path = self.current_path.clone();
-                if reload && self.queue_browse(ctx, &path, false, true, true) {
-                    if let Some(operation) = self.operation.as_mut()
-                        && let Some(value) = operation.refresh_value
-                    {
-                        operation.detail = "刷新文件索引".into();
-                        operation.value = value;
-                        operation.updated_at_ms = super::tree_sync::now_ms();
+                let (refresh, read) = match self.operation_kind {
+                    Some(FilesOperation::Mutation { refresh_value: Some(value) }) => (Some(value), ReadProgress::Silent),
+                    Some(FilesOperation::Mutation { refresh_value: None }) => (None, ReadProgress::Directory),
+                    _ => (None, ReadProgress::Silent),
+                };
+                if reload && self.queue_browse(ctx, &path, true, true, read) {
+                    if let Some(value) = refresh {
+                        self.operation.update(OperationPatch::step("刷新文件索引", value));
                     }
                 } else {
-                    self.operation = None;
+                    self.settle_mutation(true);
                 }
                 if hardlinks {
                     if let Some(repo_id) = ctx.repo_id.clone() {
@@ -476,7 +479,7 @@ impl FilesState {
             Err(error) => {
                 eprintln!("Nana 文件变更失败：{error}");
                 self.error = error;
-                self.operation = None;
+                self.settle_mutation(false);
             }
         }
     }
@@ -522,11 +525,12 @@ impl FilesState {
         }
     }
 
-    /// 非静默地重读当前目录（回收站面板读回收站），选择留着、读完按新列表修剪。返回是否排下了读取：
-    /// 文件正在变更、虚拟视图或没有仓库时不读。刷新文件夹树同步以后用，对应 Vue `loadFileBrowserForDirectory`。
+    /// 非静默地重读当前目录（回收站面板读回收站），选择留着、读完按新列表修剪，任务弹层出「读取目录」
+    /// 这一行。返回是否排下了读取：文件正在变更、虚拟视图或没有仓库时不读。刷新文件夹树同步以后用，
+    /// 对应 Vue `loadFileBrowserForDirectory`。
     pub(super) fn reload_current(&mut self, ctx: &FileContext) -> bool {
         let path = self.current_path.clone();
-        self.queue_browse(ctx, &path, false, true, false)
+        self.queue_browse(ctx, &path, true, false, ReadProgress::Directory)
     }
 
     /// 静默替换硬链接候选。成功只换列表；失败只记日志。
@@ -566,7 +570,10 @@ impl FilesState {
     fn begin(&mut self, operation: Option<FileOperation>) {
         self.mutating = true;
         self.error.clear();
-        self.operation = operation;
+        if let Some(operation) = operation {
+            self.operation.start(operation.start);
+            self.operation_kind = Some(FilesOperation::Mutation { refresh_value: operation.refresh_value });
+        }
     }
 
     fn finish_dialog_success(&mut self) {

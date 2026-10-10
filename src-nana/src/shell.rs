@@ -45,6 +45,7 @@ mod sidebar_view;
 mod workspace;
 pub(crate) mod workspace_refresh;
 pub(crate) mod tree_sync;
+pub(crate) mod repo_operation;
 pub use files::{display_mode_path, FileRow, FilesEffect, FilesMessage, HardlinkPrompt, VirtualQuery};
 pub(crate) use thumbs::{decode_preview_pixels, decode_thumbnail_file, thumbnail_slot, ThumbnailFrame};
 pub(crate) use inspect::poll_timers;
@@ -243,6 +244,8 @@ pub struct ShellViewModel {
     pub status: status::StatusState,
     /// 文件夹树的「刷新」：同步仓库再刷新工作区，见 `tree_sync.rs`。
     pub tree_sync: tree_sync::TreeSyncState,
+    /// 任务弹层的「仓库操作」行（Vue `operationProgress`），见 `repo_operation.rs`。
+    pub operation: repo_operation::RepositoryOperation,
     /// 窗口逻辑宽。Vue 唯一按窗口宽度切换的断点在播放条，见 [`NARROW_VIEWPORT_PX`]。
     pub viewport_width: f32,
     /// 对话框、弹层或打开文件夹之后，手势松开时要重建树。
@@ -289,6 +292,7 @@ impl Default for ShellViewModel {
             motion: motion::MotionState::default(),
             status: status::StatusState::default(),
             tree_sync: tree_sync::TreeSyncState::default(),
+            operation: repo_operation::RepositoryOperation::default(),
             viewport_width: DEFAULT_VIEWPORT_PX,
             surface_dirty: false,
             revision: 0,
@@ -353,6 +357,7 @@ impl ShellViewModel {
         self.flush_folder_mutations();
         self.settle_sidebar_dialogs();
         tree_sync::settle(self);
+        self.operation.apply(&mut self.files.operation);
         self.settle_status(&before, seq, started);
         self.follow_motion();
     }
@@ -382,7 +387,7 @@ impl ShellViewModel {
     fn follow_motion(&mut self) {
         let panel_open = self.sidebar.popover != sidebar::PopoverMode::Closed || self.admin.popover_open;
         let startup = f32::from(self.workspace.startup.percent);
-        let operation = self.files.operation_percent();
+        let operation = self.operation.shown();
         let spinner = self.sidebar.tree_loading
             || self.sidebar.submitting
             || self.sidebar.smart_draft.busy
@@ -393,9 +398,9 @@ impl ShellViewModel {
             self.surface_dirty = true;
         }
         self.motion.set_startup_percent(startup);
-        self.motion.set_operation_percent(operation);
+        self.motion.set_operation_percent(operation.map(|progress| progress.value as f32));
         self.motion.set_spinner(spinner);
-        self.motion.set_pulse(self.files.operation_indeterminate());
+        self.motion.set_pulse(operation.is_some_and(|progress| progress.indeterminate));
         self.motion.set_sidebar_collapsed(self.workspace.sidebar_collapsed, self.workspace.sidebar_width);
     }
 

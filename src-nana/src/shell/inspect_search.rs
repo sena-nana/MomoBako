@@ -575,7 +575,8 @@ fn open_hit(model: &mut ShellViewModel, row: SearchRow) {
     }
     let parent = parent_path(&row.path);
     let context = super::super::files::FileContext::from_model(model);
-    if model.files.request_browse(&context, &parent) {
+    // Vue 读命中所在目录时带上目录树（`includeTree: true`），任务弹层是「读取文件树」。
+    if model.files.request_browse_reporting(&context, &parent, super::super::files::ReadProgress::Tree) {
         model.files.set_drag_selection(vec![row.path.clone()], Some(row.path.clone()), Some(row.path.clone()));
         model.inspect.search_ui.reveal_hit = Some(HitReveal { row, parent });
     } else {

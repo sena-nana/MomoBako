@@ -544,8 +544,10 @@ fn copy_submits_the_stored_sources() {
     assert!(reduce_open(&mut state, &ctx, FileDialog::Copy));
     state.reduce(&ctx, FilesMessage::DraftChanged("album\\nested".into()));
     assert!(submit_for(&mut state, &ctx));
-    assert_eq!(state.operation.as_ref().map(|item| item.value), Some(32.0));
-    assert_eq!(state.operation.as_ref().map(|item| item.detail.as_str()), Some("创建硬链接或复制文件"));
+    let mut slot = super::super::repo_operation::RepositoryOperation::default();
+    slot.apply(&mut state.operation);
+    let shown = slot.shown().map(|progress| (progress.label.as_str(), progress.detail.as_str(), progress.value));
+    assert_eq!(shown, Some(("复制文件", "创建硬链接或复制文件", 32.0)));
     assert!(matches!(
         state.take_effects().as_slice(),
         [FilesEffect::Copy { sources, parent: Some(parent), .. }]
