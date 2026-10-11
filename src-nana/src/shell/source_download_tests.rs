@@ -375,8 +375,8 @@ fn downloading_a_playlist_asks_the_source_for_the_whole_playlist() {
     assert!(payload.get("tracks").is_none(), "不列目录、不带曲目");
 }
 
-/// 插件交回的是一批、却一项也没有（网易云取不到歌单详情时什么也不下）：状态区用警告色提醒没有下载到任何条目，写一条
-/// 警告日志，收尾的刷新不清它。单曲交回文件、批量结果有完成的条目时都不提醒。
+/// 插件交回的是一批、却一项也没有（真的没有曲目的歌单，或者别的来源插件；网易云取不到曲目时整个调用报错）：状态区
+/// 用警告色提醒没有下载到任何条目，写一条警告日志，收尾的刷新不清它。单曲交回文件、批量结果有完成的条目时都不提醒。
 #[test]
 fn an_empty_batch_is_called_out_as_a_warning() {
     let mut model = netease();
