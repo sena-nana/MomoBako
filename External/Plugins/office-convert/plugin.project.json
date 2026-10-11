@@ -5,12 +5,6 @@
     "sourceDir": "src",
     "manifestPath": "Cargo.toml",
     "outputDir": ".dist/office-convert",
-    "excludePaths": [
-      "helper",
-      "Cargo.toml",
-      "Cargo.lock",
-      "src/lib.rs"
-    ],
     "companionArtifacts": [
       {
         "manifestPath": "helper/Cargo.toml",
