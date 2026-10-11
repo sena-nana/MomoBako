@@ -1,6 +1,6 @@
 //! 元数据编辑区里结构会变的两块：可折叠的标签组，以及 ASMR 条目的「补全候选」。
 //!
-//! 两块都常驻：展开、菜单、导入框按 `.visible` 显隐；标签片、已有标签和候选是带键的 `each`，
+//! 两块都常驻：展开、菜单、导入框按 `.visible` 显隐；标签片、标签分组、已有标签和候选是带键的 `each`，
 //! 只有变了的那一片重建；输入框受控，处理器只发消息，要用到当前值时现读信号。
 
 use std::sync::Arc;
@@ -21,7 +21,7 @@ use super::super::files_view::style::{self, ButtonLook};
 use super::super::inspect::InspectMessage;
 use super::super::inspect_asmr::{self, AsmrMessage, CandidateCard};
 use super::super::ShellMessage;
-use super::{inspect_message, MetadataSignals};
+use super::{inspect_message, MetadataSignals, TagGroupOption};
 
 /// 标签区一行里的一片：标签，或者末尾的「+」。
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -179,13 +179,24 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
     .on_cx(move |_, _: &Activate, cx| {
         cx.dispatch_program_all(ShellMessage::Files(FilesMessage::SubmitTagDraft(draft.current().trim().to_string())));
     });
+    let groups = computed(move || tags.with(|view| view.groups.clone()));
+    let group_locked = locked.clone();
+    let grouped = widget(Stack::column(8.0).width(LengthSpec::Fill))
+        .visible(move || tags.with(|view| !view.groups.is_empty()))
+        .children((
+            widget(style::row_label("标签分组")).key("inspect-tag-groups-label"),
+            each(groups, TagGroupOption::clone, move |group| tag_group(group, group_locked.clone())).gap(8.0).key("inspect-tag-groups-list"),
+        ))
+        .key("inspect-tag-groups");
     let options = computed(move || tags.with(|view| view.options.iter().cloned().enumerate().collect::<Vec<_>>()));
     let option_locked = locked.clone();
     let existing = widget(Stack::column(8.0).width(LengthSpec::Fill))
         .visible(move || tags.with(|view| !view.options.is_empty()))
         .children((
             widget(style::row_label("已有标签")).key("inspect-tag-existing-label"),
-            each(options, |option: &(usize, String)| option.clone(), move |(index, tag)| option_chip(index, &tag, option_locked.clone()))
+            each(options, |option: &(usize, String)| option.clone(), move |(index, tag)| {
+                option_chip(&format!("inspect-tag-choice-{index}"), &tag, option_locked.clone())
+            })
                 .horizontal(8.0)
                 .css(css! { flex-wrap: wrap; row-gap: 8px; })
                 .key("inspect-tag-existing-chips"),
@@ -213,14 +224,36 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
             .radius(RadiusTier::Xl),
     )
     .visible(move || tags.with(|view| view.menu_open))
-    .children((draft_group, create, existing))
+    .children((draft_group, create, grouped, existing))
     .key("inspect-tag-menu-panel")
     .into_any()
 }
 
-/// `workspace-filter-chip`：26 高的描边药丸，12px 弱化色，点一下加进草稿。
+/// 一个仓库标签分组（Vue `file-metadata-card__tag-group`）：11px 半粗的分组名，下面是可加的标签片，行距 5。
+fn tag_group(group: TagGroupOption, locked: impl Fn() -> bool + Send + Clone + 'static) -> AnyView {
+    let key = format!("inspect-tag-group-{}", style::key_part(&group.id));
+    let chips = group
+        .tags
+        .iter()
+        .enumerate()
+        .map(|(index, tag)| option_chip(&format!("{key}-{index}"), tag, locked.clone()))
+        .collect::<Vec<_>>();
+    widget(Stack::column(5.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
+        .children((
+            widget(style::text(group.name.clone(), 11.0, 600, SemanticColorRole::Muted, 11.0 * 1.55)).key(format!("{key}-name")),
+            widget(Stack::row(8.0).wrap(true).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)).with_layout(|layout| {
+                layout.row_gap = Some(LengthSpec::Px(8.0));
+            }))
+            .children(chips)
+            .key(format!("{key}-chips")),
+        ))
+        .key(key)
+        .into_any()
+}
+
+/// `workspace-filter-chip`：26 高的描边药丸，12px 弱化色，点一下加进草稿。键是 `{prefix}-{标签}`。
 /// Vue 的全局 `button { height: 32px }` 会把它顶到 32，这里按组件声明的 26 画。
-fn option_chip(index: usize, tag: &str, locked: impl Fn() -> bool + Send + Clone + 'static) -> AnyView {
+fn option_chip(prefix: &str, tag: &str, locked: impl Fn() -> bool + Send + Clone + 'static) -> AnyView {
     let look = ButtonLook {
         height: 26.0,
         padding_x: 9.0,
@@ -236,7 +269,7 @@ fn option_chip(index: usize, tag: &str, locked: impl Fn() -> bool + Send + Clone
     let add = tag.to_string();
     widget(button.style(outlined))
         .prop::<bool, fields::button::disabled>(locked)
-        .key(format!("inspect-tag-choice-{index}-{}", style::key_part(tag)))
+        .key(format!("{prefix}-{}", style::key_part(tag)))
         .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(inspect_message(InspectMessage::AddTag(add.clone()))))
         .into_any()
 }

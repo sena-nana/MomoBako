@@ -55,7 +55,10 @@ struct TagsView {
     tags: Vec<String>,
     expanded: bool,
     menu_open: bool,
-    /// 当前目录里已经用过、还没加进草稿的标签，按输入过滤，最多 18 个。
+    /// 仓库的标签分组里还没加进草稿的标签，空的分组不列（Vue `groupedTagOptions`，不按输入过滤）。
+    groups: Vec<TagGroupOption>,
+    /// 整个资源库（仓库摘要）和搜索结果里用过、还没加进草稿的标签，按 zh-CN 排序、按输入过滤，最多 18 个
+    /// （Vue `availableTags` 即筛选栏的标签候选）。
     options: Vec<String>,
     /// 输入的新标签不空、也不重复时才能添加。
     can_create: bool,
@@ -526,7 +529,15 @@ fn source_action(icon: Icon, key: &str) -> El<nana_ui::runtime::Button> {
     widget(button).key(key.to_string())
 }
 
-/// 标签组的投影：展开状态按用户点过的来，菜单里的已有标签按输入过滤。
+/// 标签菜单里的一个仓库标签分组：分组 id、名称和可加的标签。
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct TagGroupOption {
+    id: String,
+    name: String,
+    tags: Vec<String>,
+}
+
+/// 标签组的投影：展开状态按用户点过的来；菜单里先列仓库的标签分组，再列已有标签（按输入过滤）。
 fn tags_view(model: &ShellViewModel) -> TagsView {
     let inspect = &model.inspect;
     let tags = inspect.draft_tags().to_vec();
@@ -534,18 +545,50 @@ fn tags_view(model: &ShellViewModel) -> TagsView {
     let expanded = model.files.tags_expanded(&path, !tags.is_empty());
     let trimmed = model.files.tag_draft.trim().to_string();
     let keyword = trimmed.to_lowercase();
-    let mut options: Vec<String> = Vec::new();
-    for row in &model.files.rows {
-        for tag in &row.tags {
-            if !tags.contains(tag) && !options.contains(tag) && (keyword.is_empty() || tag.to_lowercase().contains(&keyword)) {
-                options.push(tag.clone());
-            }
-        }
-    }
-    options.truncate(18);
+    let menu_open = inspect.tag_menu_open();
+    // 候选要扫整个资源库的标签，只在菜单开着时算；菜单收着时画面上没有它们。
+    let (groups, options) = if menu_open {
+        let options = available_tags(model)
+            .into_iter()
+            .filter(|tag| !tags.contains(tag) && (keyword.is_empty() || tag.to_lowercase().contains(&keyword)))
+            .take(18)
+            .collect();
+        let groups = repository_tag_groups(model)
+            .iter()
+            .map(|group| TagGroupOption {
+                id: group.tag_group_id.clone(),
+                name: group.name.clone(),
+                tags: group.tags.iter().filter(|tag| !tag.trim().is_empty() && !tags.contains(tag)).cloned().collect(),
+            })
+            .filter(|group| !group.tags.is_empty())
+            .collect();
+        (groups, options)
+    } else {
+        (Vec::new(), Vec::new())
+    };
     let can_create = !trimmed.is_empty() && !tags.iter().any(|tag| tag == &trimmed);
     let add_label = format!("添加“{}”", if trimmed.is_empty() { "新标签" } else { trimmed.as_str() });
-    TagsView { path, expanded, menu_open: inspect.tag_menu_open(), options, can_create, add_label, tags }
+    TagsView { path, expanded, menu_open, groups, options, can_create, add_label, tags }
+}
+
+/// 当前资源库的摘要已经读到时，它的标签分组；还是别的仓库的摘要时没有。
+fn repository_tag_groups(model: &ShellViewModel) -> &[crate::backend::services::repository::RepositoryTagGroup] {
+    let search = &model.inspect.search_ui;
+    let active = model.workspace.active_repo_id.as_deref();
+    if active.is_some() && search.facets_repo.as_deref() == active { &search.tag_groups } else { &[] }
+}
+
+/// 整个资源库用过的标签（仓库摘要里每项素材的索引标签）加上搜索结果的标签，去空白、去重，按 zh-CN 排序。
+/// 和筛选栏的标签候选同一来源（Vue `rebuildFilterOptions` 的 `tagFilterOptions`），不只看当前目录读到的那一批。
+fn available_tags(model: &ShellViewModel) -> Vec<String> {
+    let search = &model.inspect.search_ui;
+    let active = model.workspace.active_repo_id.as_deref();
+    let summary = (active.is_some() && search.facets_repo.as_deref() == active).then_some(&search.facets).into_iter().flatten().flat_map(|facet| &facet.tags);
+    let results = model.inspect.results.iter().flat_map(|row| &row.tags);
+    let unique = summary.chain(results).map(|tag| tag.trim()).filter(|tag| !tag.is_empty()).collect::<std::collections::BTreeSet<_>>();
+    let mut tags = unique.into_iter().map(str::to_string).collect::<Vec<_>>();
+    tags.sort_by(|left, right| super::search_collate::compare_zh(left, right));
+    tags
 }
 
 fn number(metadata: &BTreeMap<String, Value>, key: &str) -> Option<f64> {
@@ -582,6 +625,38 @@ mod tests {
         let shown = |claimed| custom_fields(&custom, claimed).map(|(key, _)| key.as_str()).collect::<Vec<_>>();
         assert_eq!(shown(false), ["artist", "workTitle"]);
         assert_eq!(shown(true), ["artist"]);
+    }
+
+    /// F7：标签菜单先列仓库的标签分组（去掉草稿里已有的，空了的分组不列，不按输入过滤），再列整个资源库用过的标签：
+    /// 仓库摘要里每项素材的标签，不只是当前目录读到的那几行，按 zh-CN 排序、按输入过滤。菜单收着时不算候选。
+    #[test]
+    fn tag_menu_offers_repository_groups_and_library_wide_tags() {
+        use crate::backend::services::repository::RepositoryTagGroup;
+        use crate::shell::{FilesMessage, ShellMessage};
+        let mut model = crate::shell::acceptance_gap_models()
+            .into_iter()
+            .find(|(name, _)| *name == "files-selected-metadata")
+            .map(|(_, model)| model)
+            .expect("files-selected-metadata 场景");
+        assert_eq!(model.inspect.draft_tags(), ["封面", "参考"]);
+        model.inspect.search_ui.facets.push(super::super::inspect::AssetFacet { tags: vec!["远处的标签".into(), "动画".into()], extension: "png".into() });
+        let group = |id: &str, name: &str, tags: &[&str]| RepositoryTagGroup {
+            tag_group_id: id.into(),
+            name: name.into(),
+            tags: tags.iter().map(|tag| tag.to_string()).collect(),
+        };
+        model.inspect.search_ui.tag_groups = vec![group("g1", "角色", &["主角", "封面"]), group("g2", "已用完", &["参考"])];
+        assert!(super::tags_view(&model).options.is_empty(), "菜单收着时不算候选");
+
+        model.reduce(ShellMessage::Files(FilesMessage::ToggleTagMenu));
+        let view = super::tags_view(&model);
+        assert_eq!(view.groups, [super::TagGroupOption { id: "g1".into(), name: "角色".into(), tags: vec!["主角".into()] }]);
+        assert_eq!(view.options, ["动画", "远处的标签"], "整库的标签，不在当前目录也列出");
+
+        model.reduce(ShellMessage::Files(FilesMessage::SetTagDraft("远".into())));
+        let view = super::tags_view(&model);
+        assert_eq!(view.options, ["远处的标签"]);
+        assert_eq!(view.groups.len(), 1, "标签分组不按输入过滤");
     }
 
     /// 选中带完整元数据的 cover.png：评分、注释、尺寸这些只在各自的行里出现一次，不再按原始键名重复；
