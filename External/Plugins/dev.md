@@ -10,7 +10,9 @@
 - 插件运行时目录固定为 `<serviceRoot>/plugins`
 - 默认开发 staging 目录为 `src-tauri/.service-data/plugins`
 - `<serviceRoot>/plugins` 只保存 `.momoplug` 文件，不做持久解压安装
-- 宿主直接读取 `.momoplug` 内部的 `manifest.json`、前端 bundle、原生库和资源
+- 宿主直接读取 `.momoplug` 内部的 `manifest.json`、`plugin.toml`、原生库和资源
+- 插件只有后端形态：`native-dylib`（进程内加载的 Mutsuki ABI 动态库，只给随附插件用）、`process`（独立进程里的 Mutsuki runner）、`manifest-only`（只有声明，不执行任何代码）
+- 插件不带界面代码。预览、播放器、工具页、设置表单和库类型面板都由宿主原生绘制，插件只提供清单里的声明；合同见 `docs/api-design.md` 的 Plugin API
 
 ## 2. 目录规范
 
@@ -31,27 +33,28 @@ External/Plugins/
   scripts/
     build.mjs
     package.ts
+    plugin-package-manifest.ts
     stage-dev.mjs
   _sdk/
-    backend-rust/
+    mutsuki-rust/
   template/
-    plugin.project.json
     backend-rust/
   example/
-    plugin.project.json
     backend-rust/
   <plugin-slug>/
     manifest.json
     plugin.project.json
+    plugin.toml          # 执行型后端（native-dylib、process）才有
+    Cargo.toml           # Rust 插件才有
     src/
-      register.js
+      lib.rs
 ```
 
 打包后产物：
 
 ```text
 External/Plugins/.dist/<plugin-slug>/
-External/Plugins/.packages/<plugin-slug>-<version>.momoplug
+External/Plugins/.packages/<plugin-slug>-<version>-<目标三元组或 any>.momoplug
 ```
 
 ## 3. Manifest v2
@@ -60,28 +63,22 @@ External/Plugins/.packages/<plugin-slug>-<version>.momoplug
 
 ```json
 {
-  "pluginId": "momobako.example.text-preview",
-  "name": "Example Text Preview",
+  "pluginId": "momobako.example.backend-ping",
+  "name": "Example Backend Ping",
   "version": "0.1.0",
   "type": {
-    "layer": "library-kind",
-    "kind": "preview"
+    "layer": "provider-service",
+    "kind": "service"
   },
-  "kind": "preview",
-  "description": "Example preview plugin for text files.",
-  "capabilities": ["preview", "text"],
+  "kind": "service",
+  "description": "Example backend plugin for ping-style service calls.",
+  "capabilities": ["service", "ping"],
   "enabled": true,
-  "sdk": "frontend",
-  "runtime": "vue-module",
+  "sdk": "backend",
+  "runtime": "native-dylib",
   "entry": {
-    "frontend": {
-      "module": "dist/register.js",
-      "export": "register"
-    }
-  },
-  "contributes": {
-    "preview": {
-      "extensions": ["txt", "md"]
+    "backend": {
+      "library": "momobako_example_backend_ping"
     }
   },
   "permissions": [],
@@ -98,7 +95,8 @@ External/Plugins/.packages/<plugin-slug>-<version>.momoplug
 
 - `type.layer` 是新真相源
 - 顶层 `kind` 保留为兼容字段
-- `entry.frontend` / `entry.backend` / `entry.manifestOnly` 用于描述入口
+- `sdk` 只能是 `backend`；`runtime` 只能是 `native-dylib`、`process` 或 `manifest-only`。别的形态（包括原来的前端插件 `sdk: "frontend"`、`runtime: "vue-module"`）宿主读包时拒绝，插件管理里显示为读取失败的插件
+- 入口：`native-dylib` 写 `entry.backend.library`，`process` 写 `entry.backend.executable`，`manifest-only` 的 `entry` 是 `{}`
 - 宿主优先读取 `type`，兼容层再回落到 `kind`
 
 ## 4. 五层职责
@@ -119,81 +117,27 @@ External/Plugins/.packages/<plugin-slug>-<version>.momoplug
   - 负责把能力挂进核心体验
   - 例如播放列表、PiP、继续观看、下载队列、批量整理
 
-## 5. 前端插件接口
+## 5. 宿主读取的声明
 
-前端插件 bundle 默认导出 `register(ctx)`：
+插件通过 manifest 的 `contributes` 把能力交给宿主，宿主按声明原生绘制和调用。各字段的完整合同在 `docs/api-design.md` 的 Plugin API：
 
-```js
-export function register(ctx) {
-  ctx.registerPreview({
-    supportedExtensions: ["txt"],
-    component: {
-      name: "ExamplePreview",
-      template: "<section>Example</section>"
-    }
-  });
-}
-```
-
-`ctx` 当前提供：
-
-- `manifest`
-- `registerPreview(definition)`
-- `registerPlaylistPlayer(definition)`
-- `registerLibraryExtension(definition)`
-- `registerToolPage(definition)`
-- `registerSettingsPage(definition)`
-- `defineLazyComponent(loader)`
-- `loadModule(path)`
-- `getApiDesignSnapshot()`
-- `getExternalApiConnectionStatus()`
-- `getPluginDataDirectory()`
-- `getPluginConfig()`
-- `setPluginConfigValue(key, value)`
-- `deletePluginConfigValue(key)`
-- `invokeCommand(command, args?)`
-- `callPlugin(request)`
-- `logger.debug/info/warn/error(message, options)`
-
-`ctx.logger.*` 会自动补齐：
-
-- `pluginId`
-- `sourceKind: "frontend-plugin"`
-- 插件名称作为 `sourceLabel`
-- 当前前端模块路径作为 `location.modulePath` / `location.file`
-
-`options` 推荐字段：
-
-- `category`
-- `action`
-- `repoId`
-- `context`
-- 可选 `location`
-
-后端插件可以通过 manifest 的 `contributes.apiTests[]` 声明可调试 API；每项使用 `method`、可选 `summary`、`payload` 或 `requestTemplate`。API Playground 会把这些声明和内置 provider / metadataDefaults 贡献点一起合并到宿主 API 快照中。
-
-插件可以通过 manifest 的 `contributes.settings.fields[]` 声明配置 schema，并通过 `settingsPage` 声明设置页元信息。前端插件如需完全自定义 UI，可调用 `registerSettingsPage`；宿主会把它和 schema 表单放在同一个插件设置入口内。配置值由宿主写入插件自有数据目录下的 `config.json`，前端 SDK 的 key-value API 与插件管理面板共享同一份数据。
-
-宿主加载流程：
-
-1. `GET /plugins`
-2. 读取插件 manifest
-3. 对 `runtime: "vue-module"` 的插件，从 `.momoplug` 直接读取 `entry.frontend.module`
-4. 把 bundle 文本转成可加载 URL
-5. 动态 `import()` 模块
-6. 执行 `register(ctx)`
-
-前端 bundle 不进入主前端构建产物。
+- `settings`：`fields[]` 声明配置 schema，`settingsPage` 给出插件设置区的标题和说明。插件管理面板按字段画表单，配置值由宿主写入插件自有数据目录下的 `config.json`，后端调用时作为 `runtime.pluginConfig` 交给插件。插件不能自带设置界面
+- `apiTests[]`：后端插件声明可调试的方法，每项使用 `method`、可选 `summary`、`payload` 或 `requestTemplate`。API Playground 会把这些声明和 provider / metadataDefaults 贡献点一起合并到宿主 API 快照中
+- `toolPages[]`：把宿主内置的工具页（文件导入、Eagle 导入、API Playground）放到拓展页上。插件不能自带页面，宿主没有的 `toolPageId` 只画页头和说明
+- `playlistPlayers[]`：登记播放集的播放类型，宿主用自己的解码器播放
+- `libraryKind`、`libraryExtension`：库类型的字段、视图、整理规则和筛选栏快捷方式
+- `source`：来源插件的操作、元数据镜像、认证、媒体和条目动作
+- `metadataDefaults`、`provider.lookup`：同步时补默认元数据、手动查询元数据候选
 
 ## 6. 后端插件 ABI
 
-执行型后端插件只支持 Mutsuki ABI v2。`.momoplug` 必须同时包含 `manifest.json` 与 `plugin.toml`，两份清单的插件 ID 和版本必须一致；纯前端和 manifest-only 插件不需要 `plugin.toml`。
+执行型后端插件只支持 Mutsuki ABI v2。`.momoplug` 必须同时包含 `manifest.json` 与 `plugin.toml`，两份清单的插件 ID 和版本必须一致；`manifest-only` 插件不需要 `plugin.toml`。
 
-原生动态库及 companion artifacts 不会持久解压安装。MutsukiTauriHost 只会在运行期将通过路径与 SHA-256 校验的执行文件提取到按包内容哈希隔离的缓存目录。
+原生动态库及 companion artifacts 不会持久解压安装。宿主（`momobako_backend::services::mutsuki_host`）只会在运行期将通过路径与 SHA-256 校验的执行文件提取到按包内容哈希隔离的缓存目录。
 
 后端调用 envelope 会带上插件数据目录、运行缓存目录和宿主从 `config.json` 读取的当前 key-value 配置快照。
 
-后端插件日志通过 Mutsuki `DomainEvent` 进入观察协议，不再同步回调宿主。
+后端插件日志作为 Mutsuki `DomainEvent` 随这次调用的结果交回，不再同步回调宿主。
 
 `External/Plugins/_sdk/mutsuki-rust` 已提供：
 
@@ -209,7 +153,7 @@ write_host_log_silently(runtime, "info", "taskStarted", "开始处理任务。",
 - `kind = "momobako.plugin.log"`
 - 日志上下文序列化到领域事件 payload
 
-宿主可通过 Mutsuki 观察协议把事件适配到日志中心。
+宿主收下调用结果时把这些事件写进系统日志（`src-backend/src/services/plugin_events.rs`），日志页按插件筛选。
 
 ## 7. `.momoplug` 包结构
 
@@ -218,20 +162,22 @@ write_host_log_silently(runtime, "info", "taskStarted", "开始处理任务。",
 包内要求：
 
 - 必须包含单插件根目录
-- 根目录下必须包含 `manifest.json`
-- 执行型后端必须同时包含 Mutsuki `plugin.toml`；纯前端与 `manifest-only` 插件不需要伪造该文件
+- 根目录下必须包含 `manifest.json` 和包信封 `momobako.package.json`
+- 执行型后端必须同时包含 Mutsuki `plugin.toml`；`manifest-only` 插件不需要伪造该文件
 - 双清单的插件 ID 与版本必须一致
-- 前端入口、后端入口、资源路径都使用包内相对路径
+- 后端入口和资源路径都使用包内相对路径
 - `plugin.toml` 的主 artifact 与 companion artifacts 必须存在于包内，并携带匹配内容的规范小写 SHA-256
+- 包信封的 `deployment` 跟 `runtime` 对应：`native-dylib` 是 `abi`，`process` 是 `process`，`manifest-only` 是 `manifest`
 
 典型结构：
 
 ```text
-example-text-preview-0.1.0.momoplug
-  example-text-preview/
+parser-asmr-folder-0.1.0-x86_64-pc-windows-msvc.momoplug
+  parser-asmr-folder/
     manifest.json
-    dist/register.js
-    _sdk/README.md
+    momobako.package.json
+    plugin.toml
+    momobako_parser_asmr_folder.dll
 ```
 
 执行型后端的产物由 `plugin.toml` 声明：
@@ -279,8 +225,7 @@ role = "office-convert-helper"
 ## 8. 压缩包直读与临时执行策略
 
 - manifest: 直接从 zip 读取
-- 前端 bundle: 直接读取文本并在内存中动态加载；宿主会自动处理包内根目录前缀
-- 后端动态库: 提取到宿主临时目录，按内容哈希缓存
+- 后端动态库和进程 runner: 提取到宿主临时目录，按内容哈希缓存
 - 插件更新后，缓存 key 会变化，旧缓存自动失效
 - 宿主退出后，临时文件允许被清理
 
@@ -288,6 +233,7 @@ role = "office-convert-helper"
 
 - 包损坏
 - 缺失 `manifest.json`
+- 不支持的插件形态（不是后端的 `native-dylib`、`process`、`manifest-only`）
 - 缺失声明入口
 - 非法相对路径或路径越界
 - 动态库加载失败
@@ -305,27 +251,21 @@ role = "office-convert-helper"
 推荐流程：
 
 1. 进入 `External/Plugins/` 并执行 `yarn install`
-2. 复制 `template/` 创建新插件工程
-3. 编写 `manifest.json` 与 `src/register.js`
+2. 复制 `template/backend-rust/` 创建新插件工程，补上 `plugin.project.json` 和 `plugin.toml`（照现有原生插件，例如 `parser-asmr-folder/`），并把目录加进根 `Cargo.toml` 的 `workspace.members`；只有声明的插件只要 `manifest.json`，`plugin.project.json` 写 `build.type` 为 `manifest-only`（不写这个文件时也按它构建）
+3. 编写 `manifest.json` 与 `src/lib.rs`
 4. 回到主仓库根目录执行 `yarn tauri:dev`
 
 `yarn tauri:dev` 会依次执行完整插件构建、打包、暂存和桌面端启动；`yarn tauri:dev:with-plugins` 保留为兼容别名。主仓库根的 `plugins:build`、`plugins:package`、`plugins:stage:dev` 只是对 `External/Plugins/package.json` 脚本的转发，方便单独排查构建阶段，不再承载插件工具链本体。
 不传 `<serviceRoot>` 时，`stage:dev` 会把 `.momoplug` 复制到 `src-tauri/.service-data/plugins`；传入 `<serviceRoot>` 时仍复制到 `<serviceRoot>/plugins`。
 
-`example/` 与 `template/` 也包含 `plugin.project.json`，可通过 `cd External/Plugins && yarn build example` 或 `yarn build template` 做定向构建验证；默认批量打包不会把它们产出到 `.packages/`。
-如需验证完整链路，可继续执行 `yarn package example` 生成 `example-<version>.momoplug`，再用 `yarn stage:dev <serviceRoot>` 定向复制到某个运行时目录下的 `plugins/`。
+`template/backend-rust/` 与 `example/backend-rust/` 不在根 workspace 里，也不经 `yarn build` 构建；它们没有 `plugin.toml` 和 `plugin.project.json`，要打成可安装的 v2 包，照上面第 2 步补齐并加进 workspace。
 双清单与 artifact 规则可用 `yarn test:package` 做定向验证。
 
 ## 10. 模板与示例
 
-- `template/`
-  - 复制即用
-  - 包含最小前端预览插件骨架
 - `template/backend-rust/`
   - 后端原生插件模板
   - 演示如何使用 `External/Plugins/_sdk/mutsuki-rust`
-- `example/`
-  - 演示从源码到 `.momoplug` 再到宿主发现和运行时加载的完整链路
 - `example/backend-rust/`
   - 演示后端 `.momoplug` 的最小 Mutsuki ABI v2 插件工程
 
@@ -340,18 +280,17 @@ role = "office-convert-helper"
 
 ```json
 {
-  "pluginId": "momobako.preview.media",
+  "pluginId": "momobako.parser.asmr-folder",
   "build": {
-    "type": "frontend-module",
+    "type": "cargo-native",
     "sourceDir": "src",
-    "entry": "dist/register.js",
-    "outputDir": ".dist/media-preview"
+    "outputDir": ".dist/parser-asmr-folder"
   }
 }
 ```
 
 常见 `build.type`：
 
-- `frontend-module`
 - `cargo-native`
+- `cargo-process`
 - `manifest-only`

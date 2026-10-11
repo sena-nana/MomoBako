@@ -94,7 +94,8 @@ describe("MomoBako 工具链", () => {
     expect(devGuide).toContain("External/Plugins/package.json");
     expect(devGuide).toContain("<serviceRoot>/plugins");
     expect(devGuide).toContain(".momoplug");
-    expect(devGuide).toContain("register(ctx)");
+    expect(devGuide).toContain("manifest-only");
+    expect(devGuide).not.toContain("register(ctx)");
     expect(devGuide).toContain("Mutsuki ABI v2");
     expect(pluginsPkg.scripts).toMatchObject({
       build: "node scripts/build.mjs",

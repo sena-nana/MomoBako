@@ -211,18 +211,16 @@
 - `POST /repositories/{repoId}/thumbnails:ensure`
   - Request body includes repository-relative `path`
   - Reuse an existing valid thumbnail cache entry or generate one for supported local image/video files
-  - Optional `action`: `ensure`, `refresh`, `save`, `saveGenerated`, `clear`
+  - Optional `action`: `ensure`, `refresh`, `save`, `clear`
   - `save` accepts local `sourcePath`, remote HTTP(S) `sourceUrl`, or `imageBytes` for custom file/folder thumbnails; `sourceUrl` is downloaded by the backend so provider cover candidates do not depend on frontend CORS
   - 网易云歌曲条目会优先使用 `sourcePayload.coverUrl` 通过 `save + sourceUrl` 预取封面；当前页优先，下一页在空闲时预热
-  - `saveGenerated` accepts frontend-generated image bytes, used by 3D and text previews
   - Thumbnail cache files live under repository `.momo/thumbnails/` and use sha256 hex filenames
   - File thumbnails also backfill derived metadata such as `thumbnailPalette`
   - Response fields: `repoId`, `path`, `assetId`, `kind`, `thumbnailPath`, `thumbnailCustom`, optional `metadata`
 - `POST /repositories/{repoId}/files:preparePreviewSource`
   - Request body includes repository-relative `path`
-  - Response returns a session-scoped local preview `sourceUrl` backed by the in-process repository runtime and may include `localPath` for frontend plugins that delegate local-file processing to a native service plugin.
+  - Response returns a session-scoped local preview `sourceUrl` backed by the in-process repository runtime, the `mediaType`, and may include `localPath`.
   - A successful preview-source preparation updates `assets.last_accessed_at` without creating a revision entry.
-  - 3D and text previews use this source instead of returning full file bytes through the desktop command bridge
 - `POST /repositories/{repoId}/entries:preparePlayback`
   - Request body includes repository-relative `path`.
   - Real local assets reuse the existing local preview preparation path and may return a direct `localPath`.
@@ -230,7 +228,7 @@
   - 网易云 virtual playback is rejected until `localCache.status === "ready"`. When ready, the core passes `managedCacheRoot` to `momobako.netease.source`, and all managed playback files are written under `{cacheRoot}/.momo/cache/netease-playback`.
   - Response `sourceUrl` is the preferred browser-consumable playback URL. Temporary audio files and lyric files are registered with the in-process preview runtime; lyric files may also return `lyricSourceUrl` or `wordLyricSourceUrl`.
   - A successful playback-source preparation updates `assets.last_accessed_at` without creating a revision entry.
-  - Frontend playlist players and virtual-source preview flows should prefer this endpoint over `files:preparePreviewSource` when a file may not exist locally.
+  - Playback and virtual-source preview flows should prefer this endpoint over `files:preparePreviewSource` when a file may not exist locally.
 - `POST /repositories/{repoId}/files:recordAccess`
   - Tauri command: `record_entry_access`
   - Request body includes repository-relative `path`
@@ -415,7 +413,7 @@
   - 新日志写入后立即广播，供日志中心面板实时追加
 - 标准日志字段：
   - `level`: `debug | info | warn | error`
-  - `source.kind`: `host | frontend-host | frontend-plugin | backend-plugin | helper`
+  - `source.kind`: `host | backend-plugin | helper`. Records written before the Vue host and the frontend plugins were removed may also carry `frontend-host` or `frontend-plugin`; the log page still labels and filters them.
   - `record`: `id, timestamp, level, category, action, message, source, location, context`
 
 ## Plugin API
@@ -424,36 +422,38 @@
   - List runtime-discovered plugin manifests and capabilities
   - Runtime discovery scans bundled packages under `<serviceRoot>/plugins/builtin` and user packages under `<serviceRoot>/plugins/user`; root-level packages remain a legacy compatibility input.
   - Manifest fields include host-owned `packageFormatVersion`, `packageHash`, `provenance`, `trustLevel`, `deployment`, `targetTriple`, and the existing `pluginId`, `legacyPluginIds`, `name`, `version`, `type`, `kind`, `category`, `description`, `capabilities`, `enabled`, `sdk`, `entry`, `source`, `runtime`, `permissions`, `requires`, `optional`, `hooks`, `contributes`, `compat`, `status`, `dependencyStatus`, `disableReason`, `degraded`, and `degradationReason`.
+  - Plugins only come in backend forms. `sdk` is always `backend`, and `runtime` is one of:
+    - `native-dylib`: a Mutsuki ABI v2 library loaded in-process (bundled plugins only), package `deployment: "abi"`, entry `entry.backend.library`.
+    - `process`: a Mutsuki runner started as an isolated process, package `deployment: "process"`, entry `entry.backend.executable`.
+    - `manifest-only`: declarations only (taxonomy, contributions, hooks, settings); nothing executes, package `deployment: "manifest"`, `entry` is `{}`.
+  - Plugins never ship UI code. The host draws previews, players, tool pages, settings forms and library panels natively; plugins only contribute the declarations below. A manifest with another form, including the removed frontend modules (`sdk: "frontend"`, `runtime: "vue-module"`, `entry.frontend`), is rejected when the package is read; the package is listed as a plugin that failed to load and never runs.
   - `category` is one of `source`, `library-kind`, `parser`, `preview`, or `service`; legacy manifests without `category` are inferred from `kind`.
   - `source` plugins are attachable repository IO backends. Existing `filesystem`, `webdav`, and `cloud` kinds remain accepted as source plugins for compatibility.
   - `momobako.source.eagle-library` is a source plugin with `type.layer="source"`, `kind="eagle-library"`, `sdk="backend"`, `runtime="native-dylib"`, `capabilities=["browse","read","write","sync"]`, and `contributes.source.operations=["list","read","write","move","delete","sync"]`. It does not declare `localRootPath`, so repository creation must select it explicitly.
 - `contributes.source.metadataMirrorKeys[]` lets a source plugin declare which `sourcePayload` keys the host should mirror into system metadata during sync and virtual-entry cache hydration. The host applies the list generically and keeps overwrite rules identical to other metadata writes.
-- `contributes.source.authentication` declares a host-rendered source authentication flow. QR providers name their create, poll, status, and clear methods plus repository provisioning rules; the plugin settings page creates or updates the repository after authentication without exposing backend credentials to frontend state.
+- `contributes.source.authentication` declares a host-rendered source authentication flow. QR providers name their create, poll, status, and clear methods plus repository provisioning rules; the plugin settings section creates or updates the repository after authentication without exposing backend credentials to the UI.
 - `contributes.source.media` declares source-owned playback preparation, lyrics, download, and cache methods. Provider-specific network protocols and credentials stay inside the source plugin, while previews and players consume normalized playback-source responses.
 - `contributes.source.entryActions[]` declares fixed `download-entry`, `download-directory`, `refresh-playback`, `clear-cache`, or `playlist-from-directory` operations for matching provider entries. The host owns destination selection, progress, import, and sync; declarations cannot execute scripts or arbitrary host commands.
   - Host payloads carry `songId` / `playlistId` from the entry's `sourcePayload` or metadata; when both lack them, only the entry's own identifier falls back to its `providerItemId` (a file's `songId`, a directory's `playlistId`). Downloads also carry `playlistName`, `level`, `managedCacheRoot`, the public `sourcePayload`, and `destination` (`{ kind: "localFolder", path }` or `{ kind: "repository", repoId, path }`).
-  - For `download-directory` the Nana host does not list the directory and sends no `tracks`: the source plugin resolves the playlist's current tracks from `playlistId` (the Vue host additionally sends the files it listed as `tracks`). Results report downloaded files in `paths` / `completed[].paths` and per-entry failures in `failed[]` (`{ songId?, songName?, error }`); the call itself still succeeds when some entries fail. Failed entries carry `songName` from the payload's `tracks`, the playlist detail or the song detail whenever one of them has it. When the entries themselves cannot be resolved (no `tracks` / `trackIds` and the playlist detail cannot be read), or the login has expired, the call fails with the reason (network, timeout, expired login, missing playlist, rate limit, rejected request) instead of returning an empty batch.
+  - For `download-directory` the host does not list the directory and sends no `tracks`: the source plugin resolves the playlist's current tracks from `playlistId` (it still accepts `tracks`, which the removed Vue host sent with the files it had listed). Results report downloaded files in `paths` / `completed[].paths` and per-entry failures in `failed[]` (`{ songId?, songName?, error }`); the call itself still succeeds when some entries fail. Failed entries carry `songName` from the payload's `tracks`, the playlist detail or the song detail whenever one of them has it. When the entries themselves cannot be resolved (no `tracks` / `trackIds` and the playlist detail cannot be read), or the login has expired, the call fails with the reason (network, timeout, expired login, missing playlist, rate limit, rejected request) instead of returning an empty batch.
   - Downloads never overwrite a file at a `localFolder` destination. A file whose name already exists there is kept as it is and not written again (an existing audio file is not even downloaded). The kept files are reported as absolute paths in `skippedEntries`, next to `paths` on a single-entry result and per entry in `completed[].skippedEntries` for directory downloads; the key is omitted when nothing was kept. `paths` lists only the files this call wrote, and an entry whose files were all kept still counts as completed. Within one directory download, entries whose file names collide (ignoring case) get a ` [songId]` suffix like the virtual directory names, so a download never skips its own files. Hosts report kept files the way `files:import` with `skipExisting` reports `skippedEntries`.
   - Downloads to another repository are staged, then imported by the host. The host owns the staging directory and its cleanup: for each download it creates a fresh, empty directory and sends it as `destination.stagingPath` (`{ kind: "repository", repoId, path, stagingPath }`; below `{managedCacheRoot}/.momo/cache/download-staging/{targetRepoId}/` when the source has a managed cache root, otherwise below `{serviceRoot}/download-staging/{targetRepoId}/`). The source plugin writes everything for this download inside `stagingPath` (never overwriting, like a local folder) and reports the files in `paths` / `completed[].paths`. Once the import into the target repository has finished, including files it skipped as already existing, the host deletes exactly the reported files that lie inside `stagingPath`, then the folders under it that became empty and `stagingPath` itself; it never deletes anything outside `stagingPath`, and leaves alone files there it was not told about. When the import fails the staged files are kept and the host logs their location so they can be recovered. Without `stagingPath` (older hosts) the plugin stages below its own legacy directory and replaces what it staged there before; nothing cleans that directory.
-  - `library-kind` plugins declare content fields, facets, view presets, organization rules and declarative core-host hooks for content types. Manifest-only library kinds can describe static taxonomy; richer library kinds can ship frontend modules that call `registerLibraryExtension` to contribute metadata panels, file summaries, preview sidebars, search shortcuts and playlist actions.
-  - Frontend library extensions expose `libraryKind`, `matchEntry(entry)`, optional `metadataPanel`, optional `previewPanel`, optional `fileSummary(entry)`, optional `searchShortcuts`, and optional `playlist` behavior. The desktop workspace renders registered contributions generically and does not branch on content-specific plugin IDs.
+  - `library-kind` plugins are `manifest-only` declarations of content fields, facets, view presets, organization rules and declarative core-host hooks for content types (`contributes.libraryKind`).
+  - `contributes.libraryExtension` declares `libraryKind` and `searchShortcuts[]` for that kind. The host adds the shortcuts to the search filter bar while the current files or search results contain an entry of that kind (metadata `libraryKind` equal to it; for `asmr` also a `workId` or `rjCode`). A shortcut is either an object `{ id, label?, metadataFilters, sort?: { field, direction? } }` (`metadata` is accepted for `metadataFilters`; filters are `key=value` lines) or, for `asmr` only, one of the host-defined ids `works`, `lyrics`, `continue`, `random`; other entries are skipped and logged. Panels for a library kind (such as the ASMR work queue and candidate lookup) are host features, not plugin contributions.
   - `parser` plugins declare extraction targets and normalized candidate outputs for concrete file/container types; parser output enters the candidate queue rather than directly writing metadata.
   - Backend parser or library-support plugins may contribute `metadataDefaults` with action `metadata.defaults.batch`. During full, incremental, or paged source sync, the host passes `{ entries: [{ path, name, extension, kind, metadata?, providerId?, providerItemId?, sourceMetadata? }] }`; `sourceMetadata` contains only keys allowed by the active Source manifest's `contributes.source.metadataMirrorKeys`. The plugin returns `{ defaultsByPath }`. Parser defaults take precedence over generic filename defaults, but the host inserts every returned key only when it is missing, so neither path can overwrite user or provider metadata.
-  - `preview` plugins render file previews and thumbnails independently of library-kind semantics.
-  - `momobako.preview.archive` previews `.zip`, `.cbz`, `.7z`, `.rar`, and `.cbr` files as read-only containers inside the file preview pane. It calls `momobako.service.archive-preview` through `POST /plugins:call` to prepare a session cache, list internal directories, and expose internal files for preview without indexing them as repository assets.
+  - `preview` plugins declare preview and playback capabilities for file types, independently of library-kind semantics. They render nothing: the host draws previews natively by file extension and plays the playlist types they declare in `contributes.playlistPlayers`. The frontend preview registration `contributes.preview` (extensions drawn by a plugin's Vue component) is no longer part of the contract and the host ignores it.
   - `service` plugins expose shared capabilities such as metadata providers, network search, download queues, filesystem watching and vector search. External/network services are manual-trigger and candidate-only unless a future runtime implementation changes the contract.
-  - Metadata provider plugins expose `provider.lookupMetadataCandidate` through `POST /plugins:call`. The input is `{ id, sourceUrl? }`; the output is `{ source, confidence?, fields }`. Provider results are candidate-only unless a frontend library extension or another user-confirmed flow applies selected fields through the normal metadata API.
+  - Metadata provider plugins expose `provider.lookupMetadataCandidate` through `POST /plugins:call`. The input is `{ id, sourceUrl? }`; the output is `{ source, confidence?, fields }`. Provider results are candidate-only unless a user-confirmed host flow (such as the ASMR candidate lookup in the file details) applies selected fields through the normal metadata API.
   - `hooks` declare how plugins attach to core-hosted capabilities such as playlist, PiP, progress, candidate queue, batch organize, download queue, metadata merge, rename/move execution, audit log and unified search.
-  - Frontend plugins may declare `contributes.toolPages[]` and call `registerToolPage` to add a workspace extension page. Each page includes `toolPageId`, `label`, optional `description`, optional `order`, and a Vue component. Tool pages are host-rendered utility surfaces for plugin-provided workflows such as API debugging; the host lists enabled pages generically and does not branch on specific plugin IDs.
+  - Plugins may declare `contributes.toolPages[]` to put a page on the extension page. Each page includes `toolPageId`, `label`, optional `description` and optional `order` (default 100). Plugins don't ship the page itself: the host draws its built-in pages natively for `momobako.tool.file-manager` (folder and ZIP import), `momobako.tool.eagle-importer` (Eagle import) and `momobako.tool.api-playground` (API Playground), and for any other `toolPageId` shows only the page header with a notice that it has no such page. The host lists the pages of enabled plugins whose status is not `disabled`, `unavailable` or `error`, ordered by `order`, `label`, then `toolPageId`, and does not branch on plugin IDs; the bundled `momobako.tool.*` plugins are `manifest-only` and exist to put the built-in pages there.
   - Backend plugins may declare `contributes.apiTests[]` so API Playground can discover plugin-provided API tests automatically. Each item includes `method`, optional `summary`, and either `payload` or `requestTemplate`; the host calls it through `POST /plugins:call` with the current plugin ID. The host also derives plugin-call tests from provider `lookup.action` and `metadataDefaults.action` contributions.
-  - Frontend plugins may declare `contributes.playlistPlayers[]` to register playlist playback types. Each item includes `playerTypeId`, optional stable `capabilityId`, `label`, `fileClass`, `supportedExtensions`, `supportsSeek`, `supportsVolume`, `supportsPreviewNavigation`, and optional `description`. Multiple plugins may implement one capability; the frontend stores an explicit global preferred plugin ID, falls back to the official implementation when that selection is unavailable, and exposes the fallback state for settings UI feedback.
-  - Plugins may declare `contributes.settings` with `fields[]` and optional `settingsPage`. Each field includes `key`, `label`, `type` (`string`, `number`, `boolean`, `select`, or `json`), optional `description`, `default`, `placeholder`, numeric bounds, and select `options`. Frontend plugins can also call `registerSettingsPage` to provide a custom Vue settings surface for the same plugin manager entry.
-  - Playlist player runtimes implement `load`, `play`, `pause`, optional `seek`, optional `setVolume`, optional `dispose`, and optional `configure(settings)`. Current settings are `{ imageDurationMs?: number, objectFit?: "contain" | "cover" }` for slideshow timing and image/video fitting.
+  - Plugins may declare `contributes.playlistPlayers[]` to register playlist playback types. Each item includes `playerTypeId`, optional stable `capabilityId`, `label`, `fileClass`, `supportedExtensions`, `supportsSeek`, `supportsVolume`, `supportsPreviewNavigation`, and optional `description`. Plugins don't ship player code: the host plays the declared types with its own decoders and owns the session (see `PlaybackSessionState`), including slideshow timing and image/video fitting. Multiple plugins may implement one capability; the host stores an explicit global preferred plugin ID per capability, falls back to the official implementation when that selection is unavailable, and shows the fallback state in the settings page.
+  - Plugins may declare `contributes.settings` with `fields[]` and optional `settingsPage`. Each field includes `key`, `label`, `type` (`string`, `number`, `boolean`, `select`, or `json`), optional `description`, `default`, `placeholder`, numeric bounds, and select `options`. `settingsPage` gives the `label` and `description` of the plugin's settings section; the plugin manager renders the fields as a form, and plugins cannot supply their own settings UI.
   - `dependencyStatus` resolves manifest `requires` and `optional` against current runtime-discovered plugins, including legacy plugin IDs. Missing or disabled required dependencies mark the plugin unavailable/disabled with `disableReason`; missing or disabled optional dependencies keep the plugin usable but set `degraded` with `degradationReason`.
   - `permissions` are host-visible permission claims. The plugin manager displays them for review; runtime authorization enforcement is still tracked as plugin-orchestration follow-up work.
   - Backend plugin IDs are normalized to the `momobako.*` namespace; legacy `builtin.*` IDs remain accepted when reading existing repositories
-  - Each plugin has a host-owned data directory under `<serviceRoot>/plugin-data/<pluginSlug>` for plugin settings files and plugin-owned cache. The host creates it on demand and exposes it to frontend plugins through the SDK. Plugin key-value config is stored in that directory as `config.json` and accessed through the same normalized plugin ID path used by data-directory APIs and backend call runtime context.
-  - Frontend plugins receive `ctx.logger.debug/info/warn/error(message, options)` from the SDK. The host auto-fills `pluginId`, `sourceKind: "frontend-plugin"`, plugin label, and the current frontend module path before forwarding to `write_system_log`.
+  - Each plugin has a host-owned data directory under `<serviceRoot>/plugin-data/<pluginSlug>` for plugin settings files and plugin-owned cache. The host creates it on demand: before every native backend call and when the plugin manager opens it. Plugin key-value config is stored in that directory as `config.json` and accessed through the same normalized plugin ID path used by data-directory APIs and backend call runtime context.
   - Disabled or manifest-only source backends are displayed but not offered as usable repository backends until enabled with an available runtime
   - Filesystem backend `listFiles` responses include `absolutePath`, `relativePath`, `filename`, `extension`, `sizeBytes`, and `modifiedAt`; the runtime tolerates legacy responses without `absolutePath` by resolving `relativePath` under `repoRoot`
   - Source `listFiles` and `listDirectory` payloads may additionally include `status: "synced" | "deleted"`, `sharedAssetId`, `tags`, and `thumbnailLocalAbsolutePath`.
@@ -464,7 +464,7 @@
   - User-installed in-process ABI packages are rejected; native user plugins must declare `process` deployment.
 - `POST /plugins:call`
   - Request body includes `pluginId`, `method`, optional `repositoryId`, and arbitrary JSON `payload`. When `repositoryId` is present, the host verifies that the repository uses the requested source plugin and injects its backend config only into the native call envelope.
-  - Used by frontend preview or codec plugins to invoke ABI or isolated process plugin capabilities without adding file-format-specific commands to the core runtime
+  - Used by host flows (source authentication, source entry actions, ASMR candidate lookup, API Playground) to invoke ABI or isolated process plugin capabilities without adding file-format-specific commands to the core runtime
   - Native plugin call envelopes include `runtime.pluginId`, `runtime.pluginDataDir`, `runtime.serviceRootDir`, and `runtime.pluginConfig`; `pluginDataDir` points to the plugin's own persistent directory and is created before dispatch, `serviceRootDir` points to the host service storage root, and `pluginConfig` is the current host-managed key-value config from `config.json`.
   - A plugin handler's own error reaches the caller verbatim as the call's error, so hosts can show the plugin's reason as is; runtime or host failures read `插件调用失败（{code}）：{route}`.
   - Source directory listings (`filesystem.listDirectory`, `filesystem.listDirectoryPage`) fail with the reason when a playlist's detail cannot be read, instead of returning an empty page that hosts would take for an empty playlist.
@@ -541,17 +541,7 @@
 - `GET /plugins/{pluginId}:data-directory`
   - Tauri command: `get_plugin_data_directory`
   - Creates and returns the plugin data directory as `{ pluginId, path }`
-  - The frontend plugin manager exposes this from the plugin settings entry and opens the returned directory in the system file manager.
-- `POST /plugins/{pluginId}:data-file-preview-source`
-  - Tauri command: `prepare_plugin_data_file_preview_source`
-  - Request body includes `{ pluginId, path, mediaType }`, where `path` must be an absolute file path inside that plugin's host-owned data directory.
-  - Registers the file with the host preview source server and returns `{ pluginId, path, token, sourceUrl, mediaType, sizeBytes, modifiedAt }`.
-  - Used by frontend plugins when a backend service has prepared plugin-owned cache files that need text/media preview without widening the Tauri asset protocol scope.
-- `POST /repositories/{repoId}:cache-file-preview-source`
-  - Tauri command: `prepare_repository_cache_file_preview_source`
-  - Request body includes `{ repoId, path, mediaType }`, where `path` must be an absolute file path inside `{repoRoot}/.momo/cache`.
-  - Registers the file with the host preview source server and returns `{ repoId, path, token, sourceUrl, mediaType, sizeBytes, modifiedAt }`.
-  - Used by PDF-based preview flows such as Office-to-PDF caching while keeping host-side boundary checks on repository cache exposure.
+  - The plugin manager exposes this from the plugin settings entry and shows the returned directory in the system file manager.
 - `GET /plugins/{pluginId}:config`
   - Tauri command: `get_plugin_config`
   - Creates the plugin data directory if needed and returns `{ pluginId, dataDirectory, schema, values }`
@@ -563,7 +553,7 @@
 - `DELETE /plugins/{pluginId}:config/{key}`
   - Tauri command: `delete_plugin_config_value`
   - Request body includes `{ pluginId, key }`
-  - Removes the stored value from `config.json`; manifest defaults remain available to the frontend schema form.
+  - Removes the stored value from `config.json`; manifest defaults remain available to the plugin manager's schema form.
 - `GET /api-design:snapshot`
   - Returns the host API test contract consumed by API Playground
   - Each endpoint includes `group`, `transport`, `method`, `path`, `summary`, and optional `command`, `pluginId`, `pluginMethod`, `requiresAuth`, and `requestTemplate`
@@ -571,7 +561,7 @@
   - Core command coverage is checked against the Tauri `generate_handler!` list so newly added commands are detected during tests
 - `POST /files:writeBinary`
   - Request body includes absolute `path` and raw `bytes`
-  - Used by plugins for export flows such as writing decoded media chosen through a save dialog
+  - Used by host export flows such as saving `external-api.json` to a path chosen in a save dialog
 
 ## Cache API
 
