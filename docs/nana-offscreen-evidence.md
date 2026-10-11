@@ -74,7 +74,7 @@ NANA_SCENES=live-files,settings NANA_SIZES=1200x800,960x600 NANA_THEMES=light,da
 
 ## Vue 对照
 
-逐场景和 Vue 对照用本机的 `tmp/vue-mock`（`tmp/` 被 git 忽略，不在仓库里）。Vue 侧用同名场景、同一份夹具在无头 Edge 里截图，Nana 侧用上面的 `scene_shots`，两边出差异热图和差异像素比例。比例只用来发现问题，不作为通过标准。做法见 [Nana 与 Vue 对照](./nana-vue-parity.md#对照方法)。
+Vue 界面已经删掉，Vue/Tauri 源码最后一次出现在提交 `7bc847c`。逐场景和 Vue 对照时在那次提交的检出里用本机的 `tmp/vue-mock`（`tmp/` 被 git 忽略，不在仓库里）。Vue 侧用同名场景、同一份夹具在无头 Edge 里截图，Nana 侧用上面的 `scene_shots`，两边出差异热图和差异像素比例。比例只用来发现问题，不作为通过标准。做法见 [Nana 与 Vue 对照](./nana-vue-parity.md#对照方法)。
 
 ## 不替代的验收
 

@@ -1,34 +1,30 @@
 # MomoBako 样式标准
 
+视觉语言见 `DESIGN.md`。本文写 Nana 原生界面里样式落在哪里、按什么规矩写。原来 Vue 界面的 CSS 分层（`src/styles/*.css` 和 `.ui-*` 标准类）随 Vue 源码一起删了，Vue/Tauri 源码最后一次出现在提交 `7bc847c`。
+
 ## 入口分层
 
-- `src/styles/index.css`:字体、主题令牌、reset、全局排版、滚动条和低层工具类。
-- `src/styles/components.css`:标准组件类,包含 `.ui-button`、`.ui-input`、`.ui-segmented`、`.ui-tabs`、`.ui-list`、`.ui-badge`、`.ui-pill`、`.ui-card` 等。
-- `src/styles/shell.css`:首屏应用壳层、标题栏、侧栏、全局浮层、弹窗和上下文菜单。
-- `src/styles/pages/*.css`:路由级页面样式,用于资源库、文件浏览、搜索、插件、预览和设置等工作台界面。
+- `src-nana/src/theme_map.rs`：`DESIGN.md` 的令牌（`--bg`、`--text`、`--accent` 等）到 Nana `SemanticPalette` 角色的对应，以及字号角色、侧栏宽度和圆角刻度。颜色的具体数值由 NanaUI 主题持有，这里不复制。
+- `src-nana/src/appearance.rs`：设置里的主题和圆角落到 Nana 主题；对话框的站位、分区、开合动效和遮罩写成主题配方（`DialogRecipe`、`EffectTokens`），深浅两套相同。
+- `src-nana/src/shell/admin_style.rs`、`files_style.rs`、`palette.rs`、`motion.rs`：各区域共用的布局辅助、调色和动效时长。
+- `src-nana/src/capability.rs`：本构建编译的 Nana 组件目录。组件和旧界面的对应见 [Nana 组件对应](../nana-component-map.md)。
 
-## 标准类
+## 标准组件
 
-- 按钮使用 `.ui-button`,主操作加 `.ui-button--primary`,普通操作加 `.ui-button--ghost`,危险操作加 `.ui-button--danger`,纯图标按钮加 `.ui-icon-button`;按钮不使用边框区分类型,普通按钮常态透明背景,主按钮使用低饱和蓝色,危险按钮使用低饱和红色。
-- 输入使用 `.ui-input`,多行输入再加 `.ui-textarea`。
-- 分段控制使用 `.ui-segmented`,直接子 `button` 由标准样式接管。
-- Tab 使用 `.ui-tabs` 和 `.ui-tabs__tab`。
-- 列表容器使用 `.ui-list`,可点击或可选行使用 `.ui-list-item`。
-- 紧凑状态使用 `.ui-badge`,数量或短状态可用 `.ui-pill`;语义色使用标准 modifier。
-- 页面 BEM 类只负责布局、区域命名和少量页面专属尺寸,不重新定义按钮、输入、tab、badge、列表项的基础外观;页面按钮扩展不得用边框作为类型或状态区分。
+- 按钮用 NanaUI `Button`：主操作 `ButtonKind::Primary`，普通操作 `ButtonKind::Ghost`，危险操作 `ButtonKind::Danger`；纯图标按钮用 `IconButton`。按钮不用边框区分类型，底色、字色和边线都取主题角色。
+- 对话框用 `Dialog` / `ConfirmDialog`（`src-nana/src/shell/overlay_dialog.rs`），常驻在浮层层下，站位、分区和动效来自主题配方。
+- 列表、分段控制、选择框、输入框等优先用 `capability.rs` 里已编译的组件，没有现成组件时再在壳层组合，并记进组件对应文档。
 
 ## 扩展规则
 
-- 新界面先组合标准类;标准类无法表达时,才在页面 CSS 中扩展。
-- 扩展必须从 `DESIGN.md` 的令牌派生,不硬编码页面专属颜色。
-- 圆角使用 `--radius-*` 令牌;不要直接写固定 px 值。全局 `corner-shape` 已提供超椭圆圆角,不需要局部重复声明。
-- 不在 SFC 内新增 scoped 组件样式,除非样式确实只属于单个组件且无法成为标准类或页面样式。
-- 页面样式放在 `src/styles/pages/` 中,避免回到单一全局 CSS。
+- 颜色只取主题角色。画按钮的壳层文件里不写颜色字面量，也不用 `ButtonPaintOverride`；`src-nana/src/theme_map_button_tests.rs` 扫源码检查，确实要写死、两套主题共用的颜色列进它的允许清单并写清出处。
+- 圆角用 `RadiusTier` 刻度，不写固定像素；刻度随设置里的圆角半径变（`theme_map::corner_metrics`）。
+- 字号用 `theme_map.rs` 的字号角色，不随窗口宽度缩放。
+- 页面级的布局辅助放进对应区域的样式模块，不在视图里重复同一组尺寸。
 
 ## 评审清单
 
-- 控件是否使用 `.ui-*` 标准类作为基础。
-- 深浅主题是否只依赖共享令牌。
-- 页面样式是否只承担布局和页面语义。
-- 新增 CSS 是否放在正确入口。
-- 按钮、输入、tab、badge、列表项、菜单和弹层的 hover、active、disabled、focus 状态是否与现有标准一致。
+- 控件是否用了标准组件和按钮种类。
+- 深浅主题是否只依赖主题角色。
+- 新加的颜色、圆角和字号是否来自 `theme_map.rs` 的对应。
+- 按钮、输入、列表项、菜单和弹层的 hover、active、disabled、focus 状态是否与现有组件一致。

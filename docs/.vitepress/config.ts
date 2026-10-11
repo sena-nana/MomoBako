@@ -6,7 +6,7 @@ const base = process.env.GITHUB_ACTIONS && isProjectPages ? `/${repository}/` : 
 
 export default defineConfig({
   title: "MomoBako",
-  description: "Tauri 2 + Vue 3 desktop resource library workspace.",
+  description: "NanaUI native desktop resource library workspace.",
   base,
   themeConfig: {
     nav: [

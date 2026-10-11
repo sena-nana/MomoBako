@@ -1,6 +1,6 @@
 # Nana 逻辑迁移矩阵
 
-静态截图不能当作迁移完成。每一行从 Vue 或 composable 的分支读出，不从现有离屏场景反推。尚未读过的来源保持“未读”，不预填分支。
+静态截图不能当作迁移完成。每一行从 Vue 或 composable 的分支读出，不从现有离屏场景反推。尚未读过的来源保持“未读”，不预填分支。Vue/Tauri 源码已经删掉，表里的来源（`src/...`、`*.vue`、`*.ts`）指提交 `7bc847c` 的检出。
 
 记账列是：来源、触发、服务、结果、可见性、状态。状态依次为未读、已记账、已测试、已离屏。服务行要有真实调用测试；不改变控件树的分支也要有 ViewModel 测试；改变控件树的分支才增加离屏场景。「已离屏」指有验收场景直接走过这一行的分支、结果画在场景里，括号里写场景名；场景定义在 `src-nana/src/shell/acceptance*.rs`，命令和断言见 [离屏验收证据](./nana-offscreen-evidence.md)。可见性列写画面上看得到的文字。
 
@@ -150,7 +150,7 @@
 
 播放条在启动就绪、主区有仓库，且面板是文件或播放列表时出现；预览页底部的播放条在预览打开时就出现。会话写到设置目录的 `playback-sessions.json`，只保存非临时条目。生产环境的原生播放候选只有内置解码器：WAV、MP3 / FLAC / Ogg，Windows 上还有交给媒体基础的 M4A / AAC / Opus；插件登记的播放器贡献在插件列表换新以后读回（见阶段 6）。播放器的播放集列表和侧栏是同一份：侧栏绑定仓库时读，新建、删除以后换上返回的整份列表。Windows 非测试构建注册系统媒体传输控件；单元测试构建不注册，也不打开真系统会话。
 
-播放集下载（`momobako.playlist.download`）在 Vue 里只经前端插件 SDK 的 `downloadPlaylistWithProgress` 发起，宿主界面没有入口；Nana 不运行前端插件，不做。设置页播放器选择在阶段 6。
+播放集下载（`momobako.playlist.download`）在 Vue 里只经前端插件 SDK 的 `downloadPlaylistWithProgress` 发起，宿主界面没有入口；插件前端已经删掉，Nana 也不做。设置页播放器选择在阶段 6。
 
 | 来源 | 触发 | 服务 | 结果 | 可见性 | 状态 |
 | --- | --- | --- | --- | --- | --- |
@@ -259,4 +259,4 @@
 | `refresh.ts` `refreshRepositorySnapshot` | 就绪且仓库匹配 | `get_repository_snapshot`，没有替身 | 更新名称、详情和快捷计数；不重新绑定目录树；失败、仓库不一致或缺失时不改页面 | 仓库名称和侧栏快捷计数 | 已测试（未离屏） |
 | `refresh.ts` `refreshHardlinkCandidates` | 就绪后的结构更新 | `list_hardlink_candidates`，没有替身 | 替换候选；不打开对话框，不清已跳过项；失败不写页面错误 | 页面不变 | 已测试（未离屏） |
 
-原生窗口用 `cargo run -p momobako-nana` 启动，Vue/Tauri 对照窗口用 `yarn tauri:dev`。离屏通过不勾掉拖放、IME、托盘和真窗口行；那些行留在 [设备矩阵](./nana-device-matrix.md)。
+原生窗口用 `cargo run -p momobako-nana` 启动。Vue/Tauri 界面已经删掉，要开对照窗口得在提交 `7bc847c` 的检出里跑 `yarn tauri:dev`。离屏通过不勾掉拖放、IME、托盘和真窗口行；那些行留在 [设备矩阵](./nana-device-matrix.md)。

@@ -90,7 +90,7 @@ corepack yarn nana:package                             # 打包、校验、压 z
 5. 用 `gh release create --draft` 建草稿 Release 并上传两个 zip（同名草稿已经在时用 `gh release upload --clobber` 覆盖），说明里写两个 zip 的区别，后面接自动生成的更新记录；
 6. 照旧把 `.momoplug` 作为工作流产物上传。
 
-发布流程不再调用 tauri-action，也不读 `src-tauri`。CI（`ci.yml`）这一轮没有改，仍跑 `yarn verify` 和 `yarn test:backend`。
+CI（`ci.yml`）跑 `yarn verify`（Node 脚本类型检查、vitest 和 `momobako-backend`、`momobako-nana` 的编译检查）和 `yarn test:backend`，另外构建并打包插件，不打主程序的发布包。
 
 ## 校验
 
