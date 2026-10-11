@@ -94,7 +94,8 @@ enum ContentRef<'a> {
     Audio { name: &'a str, viewport: f32 },
     Archive(&'a str),
     Model { extension: &'a str, raster: Option<PixelsRef<'a>>, content: &'a str, mesh: bool },
-    Document { toolbar: Option<DocumentBar>, page: Option<(PixelsRef<'a>, Option<(usize, usize)>)>, error: Option<&'a str>, text: &'a str },
+    /// PDF 和 Office：`nav` 是当前页和总页，有就画翻页（失败的页也画，才翻得过去）；`page` 是这一页的位图。
+    Document { toolbar: Option<DocumentBar>, nav: Option<(usize, usize)>, page: Option<PixelsRef<'a>>, error: Option<&'a str>, text: &'a str },
     /// 失败浮层。`document` 是 PDF / Office：外面多包一层整列，顶栏可有可无。
     Failed { title: &'static str, message: &'a str, toolbar: Option<DocumentBar>, document: bool },
     Loading(LoadingRef<'a>),
@@ -123,7 +124,7 @@ enum Body {
     Audio { name: String, viewport: f32 },
     Archive(String),
     Model { extension: String, raster: Option<Pixels>, content: String, mesh: bool },
-    Document { toolbar: Option<DocumentBar>, page: Option<(Pixels, Option<(usize, usize)>)>, error: Option<String>, text: String },
+    Document { toolbar: Option<DocumentBar>, nav: Option<(usize, usize)>, page: Option<Pixels>, error: Option<String>, text: String },
     Failed { title: &'static str, message: String, toolbar: Option<DocumentBar>, document: bool },
     Pill { title: &'static str, detail: String, progress: bool, toolbar: Option<DocumentBar> },
     ArchiveLoading { detail: String },
@@ -278,9 +279,8 @@ fn native_ref<'a>(model: &'a ShellViewModel, view_id: &str, label: &'a str, cont
         return ContentRef::Model { extension: &inspect.facts.extension, raster, content, mesh: inspect.has_mesh() };
     }
     let toolbar = document_toolbar(model, view_id, label);
-    let page = raster.map(|raster| (raster, inspect.page_nav()));
     let text = if content.is_empty() { label } else { content };
-    ContentRef::Document { toolbar, page, error: inspect.raster_error(), text }
+    ContentRef::Document { toolbar, nav: inspect.page_nav(), page: raster, error: inspect.raster_error(), text }
 }
 
 /// PDF 和 Office 才有种类、扩展名和页数这条顶栏；别的插件视图没有。
@@ -382,12 +382,9 @@ impl ContentRef<'_> {
                 (extension, content, mesh).hash(hasher);
                 raster.iter().for_each(|raster| raster.identity(hasher));
             }
-            Self::Document { toolbar, page, error, text } => {
-                (toolbar, error, text).hash(hasher);
-                if let Some((raster, nav)) = page {
-                    raster.identity(hasher);
-                    nav.hash(hasher);
-                }
+            Self::Document { toolbar, nav, page, error, text } => {
+                (toolbar, nav, error, text).hash(hasher);
+                page.iter().for_each(|raster| raster.identity(hasher));
             }
             Self::Failed { title, message, toolbar, document } => (title, message, toolbar, document).hash(hasher),
             Self::Loading(loading) => match loading {
@@ -417,9 +414,10 @@ impl ContentRef<'_> {
             Self::Model { extension, raster, content, mesh } => {
                 Body::Model { extension: extension.to_string(), raster: raster.map(PixelsRef::to_owned), content: content.to_string(), mesh }
             }
-            Self::Document { toolbar, page, error, text } => Body::Document {
+            Self::Document { toolbar, nav, page, error, text } => Body::Document {
                 toolbar,
-                page: page.map(|(raster, nav)| (raster.to_owned(), nav)),
+                nav,
+                page: page.map(PixelsRef::to_owned),
                 error: error.map(str::to_string),
                 text: text.to_string(),
             },
@@ -458,7 +456,7 @@ pub(super) fn content_view(content: &PreviewContent) -> AnyView {
         Body::Audio { name, viewport } => super::audio_stage::audio_stage(name, *viewport),
         Body::Archive(content) => inspect_library::archive_list(content),
         Body::Model { extension, raster, content, mesh } => model_view(extension, raster.as_ref(), content, *mesh),
-        Body::Document { toolbar, page, error, text } => document_view(toolbar.as_ref(), page.as_ref(), error.as_deref(), text, scope),
+        Body::Document { toolbar, nav, page, error, text } => document_view(toolbar.as_ref(), *nav, page.as_ref(), error.as_deref(), text, scope),
         Body::Failed { title, message, toolbar, document } => {
             let overlay = overlay(title, message, "inspect-failed");
             if !document {
@@ -615,16 +613,33 @@ fn pixel_image(pixels: &Pixels, cover: bool, key: &'static str) -> AnyView {
 }
 
 /// PDF 和 Office：顶栏、翻页和整页；读不出页面时是失败浮层或抽出的文字。
-fn document_view(toolbar: Option<&DocumentBar>, page: Option<&(Pixels, Option<(usize, usize)>)>, error: Option<&str>, body: &str, scope: &str) -> AnyView {
+///
+/// 画不出来的页也带翻页（`nav`）：翻页一行留在原来的位置，下面是这一页的失败原因，前后的页照样翻得到。
+fn document_view(
+    toolbar: Option<&DocumentBar>,
+    nav: Option<(usize, usize)>,
+    page: Option<&Pixels>,
+    error: Option<&str>,
+    body: &str,
+    scope: &str,
+) -> AnyView {
     let mut rows = Vec::new();
     if let Some(bar) = toolbar {
         rows.push(inspect_library::document_toolbar_view(bar));
     }
-    if let Some((raster, nav)) = page {
+    if let Some(raster) = page {
         let index = nav.map(|(index, _)| index).unwrap_or(0);
         let key = format!("preview-page-{scope}-{index}");
-        rows.push(super::page::page_scroller(super::page::page_bitmap(raster), *nav, key));
+        rows.push(super::page::page_scroller(super::page::page_bitmap(raster), nav, key));
     } else if let Some(error) = error {
+        if let Some((index, total)) = nav {
+            rows.push(
+                widget(Stack::column(0.0).padding(18.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
+                    .children((super::page::page_nav(index, total),))
+                    .key(format!("inspect-page-failed-{scope}-{index}"))
+                    .into_any(),
+            );
+        }
         rows.push(overlay("无法预览该文档", error, "inspect-native-error"));
     } else {
         rows.push(
@@ -789,3 +804,7 @@ pub(super) fn format_byte_count(value: u64) -> String {
     }
     format!("{:.1} MB", value as f64 / 1024.0 / 1024.0)
 }
+
+#[cfg(test)]
+#[path = "inspect_preview_body_tests.rs"]
+mod tests;

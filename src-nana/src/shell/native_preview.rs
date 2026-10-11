@@ -2,7 +2,7 @@
 //!
 //! 扩展名到预览视图的对应在 [`builtin_view`]：原来由 `preview-archive`、`office-preview`、
 //! `three-model-preview` 插件前端绘制的扩展名都在这里。插件不带预览，清单里的预览声明宿主不读。
-//! PDF 按内容流翻页。解不开的滤镜记成该页失败，不假装成空白成功。
+//! PDF 按页树数页、翻页（`native_preview_pdf*.rs`）。解不开的滤镜记成该页失败，不假装成空白成功。
 //! Open XML 仍走 zip。二进制 Office 只刮取连续的 UTF-16LE 文本，不还原版式。
 //! OBJ、STL、glTF/GLB、3MF、VRM 能取出三角形就软件光栅成页图，编码成 PNG 画进预览框。
 //! FBX 与 BLEND 只看文件头。不嵌入 Three.js。
@@ -592,11 +592,12 @@ mod tests {
 
     #[test]
     fn pdf_extracts_uncompressed_text_and_three_mf_counts_meshes() {
-        let pdf = b"%PDF-1.4\n1 0 obj\n<< /Length 14 >>\nstream\n(MomoBako) Tj\nendstream\nendobj\n%%EOF\n";
-        assert!(read(PDF_VIEW, pdf).expect("pdf").contains("MomoBako"));
-        let tj = b"%PDF-1.4\n<< /Length 22 >>\nstream\n[(Mo) 20 (moBako)] TJ\nendstream\n%%EOF\n";
-        assert!(read(PDF_VIEW, tj).expect("tj").contains("MomoBako"));
+        let pdf = pdf::sample(&[("", b"(MomoBako) Tj")]);
+        assert!(read(PDF_VIEW, &pdf).expect("pdf").contains("MomoBako"));
+        let tj = pdf::sample(&[("", b"[(Mo) 20 (moBako)] TJ")]);
+        assert!(read(PDF_VIEW, &tj).expect("tj").contains("MomoBako"));
         assert!(read(PDF_VIEW, b"not-a-pdf").is_err());
+        // 只有流、没有页树的文件不算有页面。
         assert!(read(PDF_VIEW, b"%PDF-1.4\n<< /Filter /FlateDecode >>\nstream\nxxxx\nendstream\n").is_err());
 
         let xml = br#"<?xml version="1.0"?>
@@ -717,8 +718,8 @@ mod tests {
 
     #[test]
     fn pdf_pages_turn_and_unreadable_filters_fail() {
-        let pdf = b"%PDF-1.4\n<< /Length 12 >>\nstream\n(One) Tj\nendstream\n<< /Length 12 >>\nstream\n(Two) Tj\nendstream\n";
-        let loaded = super::load(PDF_VIEW, pdf).expect("pdf");
+        let pdf = pdf::sample(&[("", b"(One) Tj"), ("", b"(Two) Tj")]);
+        let loaded = super::load(PDF_VIEW, &pdf).expect("pdf");
         assert!(loaded.text.contains("1 / 2"), "{}", loaded.text);
         assert!(loaded.text.contains("One"), "{}", loaded.text);
         assert_eq!(loaded.frames.len(), 2);
@@ -732,13 +733,14 @@ mod tests {
         state.reduce(true, Some("repo"), super::super::InspectMessage::TurnPage(1));
         assert!(matches!(state.body, PreviewBody::Native { ref content, .. } if content.contains("2 / 2") && content.contains("Two")));
 
-        let ascii85 = b"%PDF-1.4\n<< /Filter /ASCII85Decode >>\nstream\n-qJ&$+B3(_~>\nendstream\n";
-        let text = read(PDF_VIEW, ascii85).expect("ascii85");
+        let ascii85 = pdf::sample(&[("/Filter /ASCII85Decode", b"-qJ&$+B3(_~>")]);
+        let text = read(PDF_VIEW, &ascii85).expect("ascii85");
         assert!(text.contains("Hi"), "{text}");
 
-        let jpx = b"%PDF-1.4\n<< /Filter /JPXDecode /Length 4 >>\nstream\nxxxx\nendstream\n";
-        let error = read(PDF_VIEW, jpx).expect_err("jpx");
-        assert!(error.contains("无法解码 JPXDecode"), "{error}");
+        // 解不开的滤镜是这一页失败、写明原因，整份照样打开，页数和翻页都在。
+        let jpx = pdf::sample(&[("/Filter /JPXDecode", b"xxxx")]);
+        let text = read(PDF_VIEW, &jpx).expect("jpx");
+        assert!(text.contains("1 / 1") && text.contains("无法解码 JPXDecode"), "{text}");
     }
 
     #[test]
