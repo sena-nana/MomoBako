@@ -24,6 +24,7 @@ const ALLOWED_LITERALS: &[(&str, &str, &str)] = &[
     ("player_bar.rs", "[0.0, 0.0, 0.0, 0.45]", "播放条卡片投影，shell.css `.workspace-player`"),
     ("player_bar_parts.rs", "[0.0, 0.0, 0.0, 0.6]", "播放队列弹层投影，shell.css `.workspace-player__queue`"),
     ("sidebar_popover_view.rs", "[0.0, 0.0, 0.0, 0.62]", "侧栏弹层投影，shell.css `.task-popover`、`.repository-add-popover`"),
+    ("source_auth_page.rs", "[1.0, 1.0, 1.0, 1.0]", "扫码登录二维码图片的白底，`.source-auth-settings__qr` 的 `background: white`"),
 ];
 
 /// 别的文件拿来建按钮的壳层函数。调用它们的文件也算画按钮。

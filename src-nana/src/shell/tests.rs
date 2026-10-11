@@ -32,8 +32,8 @@
         assert!(model.playlist_dialog_open && model.playlist_creating, "等创建结果回来才关");
     }
 
-    /// 设置页只有主题会写设置文件。读回和保存结果整份替换设置，缓存上限和关闭行为照旧留给缓存和关窗流程；
-    /// 校验失败进状态区，不切页面。
+    /// 设置页只有主题会写设置文件。读回的设置整份替换（读的这段时间没改过时），保存结果不回写内存，缓存上限
+    /// 和关闭行为照旧留给缓存和关窗流程；校验失败进状态区，不切页面。
     #[test]
     fn settings_results_keep_the_fields_without_a_settings_card() {
         let mut model = ShellViewModel::for_page(ShellPage::Settings);

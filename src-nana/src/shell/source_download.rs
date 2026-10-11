@@ -89,7 +89,11 @@ impl DownloadRun {
         repository_id: Option<String>,
         destination: DownloadDestination,
     ) -> Self {
-        let operation = model.operation.start(OperationStart::new(progress.label.clone(), progress.preparing(), 10.0));
+        // 下载到其他资源库时宿主把文件导入目标资源库、再同步它，这两个任务都是这一行表示的下载。
+        let operation = model.operation.start(OperationStart::new(progress.label.clone(), progress.preparing(), 10.0).runs(&[
+            crate::backend::services::mutsuki_runner::PROTOCOL_ENTRY_IMPORT,
+            crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_SYNC,
+        ]));
         model.operation.update(operation, OperationPatch::step(progress.running(), 36.0).with_indeterminate(true));
         Self { operation, progress, plugin_id, method, repository_id, destination }
     }

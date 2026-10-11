@@ -6,8 +6,8 @@ use nana_ui::RuntimeProgramContext;
 use crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_ATTACH;
 use crate::backend::services::repository::{FileBrowserRequest, RecentAccessHistoryClearRequest, RepositoryFolderRequest};
 use crate::shell::{
-    FileRow, ShellMessage, SidebarEffect, SidebarMessage, SidebarSmartFolder, SidebarTree,
-    VirtualQuery,
+    FileRow, ShellMessage, SidebarEffect, SidebarMessage, SidebarSmartFolder, SidebarTree, SmartFolderChange, SmartFolderOutcome,
+    SmartFolderResult, VirtualQuery,
 };
 use crate::task_guard::spawn_service;
 use crate::MomoBakoApplication;
@@ -23,20 +23,25 @@ pub fn dispatch_sidebar_effects(app: &mut MomoBakoApplication, context: &Runtime
             }
             SidebarEffect::CreateSmartFolder { repo_id } => {
                 let request = app.shell.sidebar.smart_create_request(&repo_id);
-                dispatch_save_smart(app, context, "智能文件夹", repo_id, move |interaction, executor| {
-                    executor.block_on(interaction.create_smart_folder(request)).map(|response| response.smart_folders)
+                dispatch_save_smart(app, context, "新建智能文件夹", repo_id, move |interaction, executor| {
+                    let response = executor.block_on(interaction.create_smart_folder(request))?;
+                    let created = response.smart_folder.map(|folder| folder.smart_folder_id);
+                    Ok((response.smart_folders, SmartFolderChange::Created(created)))
                 });
             }
             SidebarEffect::UpdateSmartFolder { repo_id } => {
                 let request = app.shell.sidebar.smart_update_request(&repo_id);
-                dispatch_save_smart(app, context, "智能文件夹", repo_id, move |interaction, executor| {
-                    executor.block_on(interaction.update_smart_folder(request)).map(|response| response.smart_folders)
+                let edited = request.smart_folder_id.clone();
+                dispatch_save_smart(app, context, "保存智能文件夹", repo_id, move |interaction, executor| {
+                    let response = executor.block_on(interaction.update_smart_folder(request))?;
+                    Ok((response.smart_folders, SmartFolderChange::Updated(edited)))
                 });
             }
             SidebarEffect::DeleteSmartFolder { repo_id, smart_folder_id } => {
                 let task_repo = repo_id.clone();
-                dispatch_save_smart(app, context, "智能文件夹", repo_id, move |interaction, executor| {
-                    executor.block_on(interaction.delete_smart_folder(task_repo, smart_folder_id)).map(|response| response.smart_folders)
+                dispatch_save_smart(app, context, "删除智能文件夹", repo_id, move |interaction, executor| {
+                    let response = executor.block_on(interaction.delete_smart_folder(task_repo, smart_folder_id.clone()))?;
+                    Ok((response.smart_folders, SmartFolderChange::Deleted(smart_folder_id)))
                 });
             }
             SidebarEffect::DeletePlaylist { repo_id, playlist_id } => dispatch_delete_playlist(app, context, repo_id, playlist_id),
@@ -106,7 +111,8 @@ fn dispatch_smart_folders(app: &MomoBakoApplication, context: &RuntimeProgramCon
     });
 }
 
-/// 新建、编辑、删除智能文件夹：在任务里调 `save`，结果（整份智能文件夹树）回 `SmartFolderSaved`。
+/// 新建、编辑、删除智能文件夹：在任务里调 `save`，结果（整份智能文件夹树和这次改的是哪个）回
+/// `SmartFolderSaved`，归约据此打开新建的、重查或退出被删的（`sidebar_smart_flow.rs`）。
 fn dispatch_save_smart(
     app: &MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
@@ -115,7 +121,7 @@ fn dispatch_save_smart(
     save: impl FnOnce(
             crate::backend::viewmodels::RepositoryInteractionViewModel,
             std::sync::Arc<tokio::runtime::Runtime>,
-        ) -> Result<Vec<crate::backend::services::repository::SmartFolderTreeNode>, String>
+        ) -> Result<(Vec<crate::backend::services::repository::SmartFolderTreeNode>, SmartFolderChange), String>
         + Send
         + 'static,
 ) {
@@ -125,7 +131,10 @@ fn dispatch_save_smart(
         let interaction = services.repository_interaction.clone();
         let executor = services.executor.clone();
         move || {
-            let result = save(interaction, executor).map(|folders| folders.iter().map(SidebarSmartFolder::from_tree_node).collect());
+            let result = save(interaction, executor).map(|(folders, change)| SmartFolderOutcome {
+                folders: folders.iter().map(SidebarSmartFolder::from_tree_node).collect(),
+                change,
+            });
             sidebar_message(SidebarMessage::SmartFolderSaved { repo_id, result })
         }
     });
@@ -223,11 +232,16 @@ fn dispatch_smart_query(
         let interaction = services.repository_interaction.clone();
         let executor = services.executor.clone();
         move || {
+            // 文件夹名和与祖先合并以后的筛选也带回去，文件页头写标题和摘要行（Vue `smartFolderSummary`）。
             let result = executor
                 .block_on(interaction.query_smart_folder(repo_id.clone(), smart_folder_id.clone()))
-                .map(|snapshot| VirtualQuery {
-                    count: snapshot.results.len(),
-                    rows: snapshot.results.iter().map(FileRow::from_entry).collect(),
+                .map(|snapshot| SmartFolderResult {
+                    name: snapshot.smart_folder.name.clone(),
+                    filter: snapshot.inherited_filter.clone(),
+                    query: VirtualQuery {
+                        count: snapshot.results.len(),
+                        rows: snapshot.results.iter().map(FileRow::from_entry).collect(),
+                    },
                 });
             sidebar_message(SidebarMessage::SidebarSmartFolderQueried { repo_id, smart_folder_id, result })
         }

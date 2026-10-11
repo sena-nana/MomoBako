@@ -15,6 +15,9 @@
 use crate::backend::services::repository::RepositorySummary;
 
 use super::super::repo_operation::{OperationPatch, OperationStart};
+
+/// 换仓库和刷新资源库在后台跑的同步任务，就是「加载资源库」这一行表示的事。
+const SYNC: &[&str] = &[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_SYNC];
 use super::super::search_collate::compare_zh;
 use super::startup::{StartupMode, StartupStatus};
 use super::{RepositoryPresence, WorkspaceEffect, WorkspacePanel, WorkspaceRepository, WorkspaceState};
@@ -55,7 +58,7 @@ impl WorkspaceState {
         self.list_generation = self.list_generation.saturating_add(1);
         self.list_loading = true;
         if self.startup.status == StartupStatus::Ready {
-            self.operation.start(OperationStart::new("加载资源库", "读取已注册资源库", 12.0).indeterminate());
+            self.operation.start(OperationStart::new("加载资源库", "读取已注册资源库", 12.0).indeterminate().runs(SYNC));
             self.refresh = Some(RefreshRun {
                 generation: self.list_generation,
                 stage: RefreshStage::Listing,
@@ -151,7 +154,7 @@ impl WorkspaceState {
             self.panel = WorkspacePanel::Files;
         }
         self.snapshot_loading = true;
-        self.operation.start(OperationStart::new("加载资源库", "读取资源库快照", 10.0).indeterminate());
+        self.operation.start(OperationStart::new("加载资源库", "读取资源库快照", 10.0).indeterminate().runs(SYNC));
         if repository.status == "missing" {
             self.presence = RepositoryPresence::Missing;
             self.remember_repository(Some(repository.repo_id));

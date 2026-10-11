@@ -2,7 +2,7 @@
 //!
 //! 照 `PluginManagerPanel.vue` 的 `.plugin-manager__settings-fields`：每个字段一行三列网格，
 //! 左边粗体字段名和弱色说明，中间控件，右边「重置」。布尔字段是勾选框；选项字段是下拉框，
-//! 第一项是空值；JSON 字段是等宽文本域；其余是单行输入，回车提交。
+//! 第一项是空值；JSON 字段是等宽文本域，失焦提交；其余是单行输入，回车或失焦提交。
 //!
 //! 字段行按「字段键 + 控件类型」做键，只在展开设置的那张插件卡片里建一次；勾选、选项、禁用和
 //! 文字都是绑定。单行输入和 JSON 文本域的草稿在行里建 `ModelField`，ViewModel 的草稿或配置值
@@ -12,8 +12,8 @@ use std::sync::Arc;
 
 use nana_ui::runtime::view::{fields, widget, AnyView, IntoView, Item, Store, StoreList, StorePath};
 use nana_ui::runtime::{
-    Activate, AlignSpec, Checkbox, LengthSpec, Select, SelectChanged, SelectOption, Stack, TextArea, TextChanged, TextInput,
-    TextSubmitted, ToggleChanged,
+    Activate, AlignSpec, Checkbox, FocusWithinChanged, LengthSpec, Select, SelectChanged, SelectOption, Stack, TextArea, TextChanged,
+    TextInput, TextSubmitted, ToggleChanged,
 };
 use nana_ui_core::{GridTrack, SemanticColorRole as Role};
 use serde_json::Value;
@@ -62,7 +62,7 @@ impl FieldRowView {
 
     fn project(model: &ShellViewModel, plugin: &PluginManifest, field: &ConfigField) -> Self {
         let plugin_id = plugin.plugin_id.as_str();
-        let current = current_value(model, plugin_id, field);
+        let current = support::config_value(&model.admin.config_snapshots, plugin_id, field);
         let kind = match field.field_type.as_str() {
             "boolean" => FieldKind::Boolean,
             "select" => FieldKind::Select,
@@ -75,7 +75,7 @@ impl FieldRowView {
         };
         let text = drafts.and_then(|drafts| drafts.get(&field.key)).cloned().unwrap_or_else(|| match kind {
             FieldKind::Json => current.map(support::json_draft_text).unwrap_or_default(),
-            _ => value_text(current),
+            _ => support::field_text(current),
         });
         let mut options = vec![(String::new(), String::new())];
         options.extend(field.options.iter().map(|option| (support::option_wire(&option.value), option.label.clone())));
@@ -159,16 +159,6 @@ fn field_row(item: FieldItem) -> AnyView {
         .into_any()
 }
 
-/// 当前值：配置快照里有就用快照，否则用声明的默认值。
-fn current_value<'a>(model: &'a ShellViewModel, plugin_id: &str, field: &'a ConfigField) -> Option<&'a Value> {
-    model
-        .admin
-        .config_snapshots
-        .get(plugin_id)
-        .and_then(|snapshot| snapshot.values.get(&field.key))
-        .or(field.default_value.as_ref())
-}
-
 /// 字段的控件。勾选框、下拉框和文本域没有自己的名字，用左边的字段名当读屏名称。
 fn control(item: FieldItem, row: &FieldRowView, fkey: &str, caption: nana_ui::runtime::view::NodeRef) -> AnyView {
     let id = row.plugin_id.clone();
@@ -232,7 +222,8 @@ fn control(item: FieldItem, row: &FieldRowView, fkey: &str, caption: nana_ui::ru
                 layout.padding_bottom = Some(LengthSpec::Px(10.0));
             }
             area.style.text_vertical_alignment = nana_ui::runtime::TextVerticalAlignment::Top;
-            let (submit_id, submit_key) = (id.clone(), key.clone());
+            // 多行框按回车只换行，不发提交事件：照 Vue `@blur` 在焦点离开时提交。
+            let (blur_id, blur_key) = (id.clone(), key.clone());
             widget(area)
                 .model(draft.signal())
                 .prop::<Arc<str>, fields::text_area::placeholder>(move || Arc::from(item.try_with(|row| row.placeholder.clone()).unwrap_or_default()))
@@ -246,8 +237,10 @@ fn control(item: FieldItem, row: &FieldRowView, fkey: &str, caption: nana_ui::ru
                         value: event.value.to_string(),
                     }));
                 })
-                .on_cx(move |_, _: &TextSubmitted, cx| {
-                    cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SaveJson { plugin_id: submit_id.clone(), key: submit_key.clone() }));
+                .on_cx(move |_, event: &FocusWithinChanged, cx| {
+                    if !event.focused {
+                        cx.dispatch_program_all(commit_draft(&blur_id, &blur_key));
+                    }
                 })
                 .into_any()
         }
@@ -256,7 +249,9 @@ fn control(item: FieldItem, row: &FieldRowView, fkey: &str, caption: nana_ui::ru
             let input = style::native_input(
                 TextInput::new(draft.signal().get_untracked()).label(row.label.clone()).placeholder(row.placeholder.clone()),
             );
+            // 回车和失焦都提交（Vue 文本框的 `@change`），改完点到别处、收起设置都不丢。
             let (submit_id, submit_key) = (id.clone(), key.clone());
+            let (blur_id, blur_key) = (id.clone(), key.clone());
             widget(input)
                 .model(draft.signal())
                 .prop::<Option<Arc<str>>, fields::text_input::label>(move || item.try_with(|row| Arc::from(row.label.as_str())))
@@ -270,13 +265,11 @@ fn control(item: FieldItem, row: &FieldRowView, fkey: &str, caption: nana_ui::ru
                         value: event.value.to_string(),
                     }));
                 })
-                .on_cx(move |_, event: &TextSubmitted, cx| {
-                    cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ConfigInput {
-                        plugin_id: submit_id.clone(),
-                        key: submit_key.clone(),
-                        text: event.value.clone(),
-                        checked: None,
-                    }));
+                .on_cx(move |_, _: &TextSubmitted, cx| cx.dispatch_program_all(commit_draft(&submit_id, &submit_key)))
+                .on_cx(move |_, event: &FocusWithinChanged, cx| {
+                    if !event.focused {
+                        cx.dispatch_program_all(commit_draft(&blur_id, &blur_key));
+                    }
                 })
                 .into_any()
         }
@@ -299,11 +292,11 @@ fn truthy(value: &Value) -> bool {
     }
 }
 
-/// 输入框里的文字：字符串原样，其它值写成 JSON 文本，空值为空。
-fn value_text(value: Option<&Value>) -> String {
-    match value {
-        Some(Value::String(text)) => text.clone(),
-        Some(Value::Null) | None => String::new(),
-        Some(other) => other.to_string(),
-    }
+/// 草稿提交（回车、失焦）：草稿和现在的值不同才保存，由归约判断。
+fn commit_draft(plugin_id: &str, key: &str) -> ShellMessage {
+    ShellMessage::Admin(AdminMessage::CommitDraft { plugin_id: plugin_id.to_string(), key: key.to_string() })
 }
+
+#[cfg(test)]
+#[path = "admin_fields_tests.rs"]
+mod tests;

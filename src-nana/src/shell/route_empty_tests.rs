@@ -46,7 +46,7 @@ fn projection_follows_the_drag_state() {
     assert_eq!(EmptyView::project(&model), view, "同一状态的投影相等");
     model.reduce(host_drag(HostDragPhase::Over));
     assert!(EmptyView::project(&model).dragging, "拖着文件夹经过");
-    model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs));
+    model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Playlist));
     assert_ne!(EmptyView::project(&model).drop, view.drop, "换面板改拖放条件");
 }
 
@@ -61,7 +61,7 @@ fn unrelated_updates_keep_every_empty_node() {
     let unrelated = [
         ShellMessage::ThumbnailPixels(vec![ThumbnailFrame { path: "a.png".into(), natural_width: 1, natural_height: 1, width: 1, height: 1, rgba: vec![0; 4] }]),
         ShellMessage::Player(crate::shell::player::PlayerMessage::SetVolume(0.3)),
-        ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs),
+        ShellMessage::SetWorkspacePanel(WorkspacePanel::Playlist),
     ];
     for message in unrelated {
         harness.apply(message);
@@ -104,7 +104,7 @@ fn drag_highlight_and_error_patch_in_place() {
 #[test]
 fn drops_carry_the_flags_at_drop_time() {
     let mut harness = ShellHarness::mount(empty());
-    harness.apply(ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs));
+    harness.apply(ShellMessage::SetWorkspacePanel(WorkspacePanel::Playlist));
     harness.flush();
     let target = harness.keyed("empty-repository-page").expect("拖放目标");
     let bounds = harness.document().context().world().layout_box(target).expect("拖放目标的布局");
@@ -130,7 +130,7 @@ fn drops_carry_the_flags_at_drop_time() {
             _ => None,
         })
         .expect("放下应该发出宿主拖放消息");
-    assert!(!drop, "拖放条件应是放下时的（日志面板），不是建视图时的（文件面板）");
+    assert!(!drop, "拖放条件应是放下时的（播放集面板），不是建视图时的（文件面板）");
     for message in messages {
         harness.apply(message);
     }

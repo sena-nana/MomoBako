@@ -140,13 +140,14 @@ fn smart_folder_query_ignores_stale_results_and_expands_ancestors() {
     assert!(sidebar.select_smart_folder(&mut workspace, "child", false));
     assert_eq!(sidebar.expanded_smart_folders, ["root"]);
     assert!(sidebar.smart_loading);
-    assert!(!sidebar.note_smart_query("repo", "other", Ok(3)));
+    let summary = |id: &str, count: usize| SmartResultSummary { smart_folder_id: id.into(), name: "子".into(), count, text: format!("{count} 条结果") };
+    assert!(!sidebar.note_smart_query("repo", "other", Ok(summary("other", 3))));
     assert!(sidebar.smart_loading);
     assert!(sidebar.note_smart_query("repo", "child", Err("查询失败".into())));
     assert!(!sidebar.smart_loading);
     assert_eq!(sidebar.smart_error, "查询失败");
-    assert!(sidebar.note_smart_query("repo", "child", Ok(2)));
-    assert_eq!(sidebar.smart_result_count, Some(2));
+    assert!(sidebar.note_smart_query("repo", "child", Ok(summary("child", 2))));
+    assert_eq!(sidebar.smart_result.as_ref().map(|summary| summary.count), Some(2));
     assert!(sidebar.smart_error.is_empty());
 }
 
@@ -259,7 +260,7 @@ fn smart_folder_create_requires_a_name_and_replaces_the_tree() {
 
     model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SmartFolderSaved {
         repo_id: "other".into(),
-        result: Ok(Vec::new()),
+        result: Ok(SmartFolderOutcome { folders: Vec::new(), change: SmartFolderChange::Created(None) }),
     }));
     assert_eq!(model.sidebar.smart_draft.error, "智能文件夹结果已过期");
     assert!(model.sidebar.smart_draft.open);
@@ -277,23 +278,27 @@ fn smart_folder_create_requires_a_name_and_replaces_the_tree() {
     model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SubmitSmartFolder));
     model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SmartFolderSaved {
         repo_id: "repo".into(),
-        result: Ok(vec![SidebarSmartFolder {
-            id: "parent".into(),
-            parent_id: None,
-            name: "父级".into(),
-            filter: Default::default(),
-            children: vec![SidebarSmartFolder {
-                id: "child".into(),
-                parent_id: Some("parent".into()),
-                name: "高评分".into(),
+        result: Ok(SmartFolderOutcome {
+            folders: vec![SidebarSmartFolder {
+                id: "parent".into(),
+                parent_id: None,
+                name: "父级".into(),
                 filter: Default::default(),
-                children: Vec::new(),
+                children: vec![SidebarSmartFolder {
+                    id: "child".into(),
+                    parent_id: Some("parent".into()),
+                    name: "高评分".into(),
+                    filter: Default::default(),
+                    children: Vec::new(),
+                }],
             }],
-        }]),
+            change: SmartFolderChange::Created(Some("child".into())),
+        }),
     }));
     assert!(!model.sidebar.smart_draft.open);
     assert_eq!(model.sidebar.smart_folders[0].children[0].name, "高评分");
     assert!(model.sidebar.expanded_smart_folders.iter().any(|id| id == "parent"));
+    assert_eq!(model.sidebar.active_smart_folder_id.as_deref(), Some("child"), "新建以后打开新建的那个");
 
     model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::OpenSmartFolderDialog));
     model.workspace.active_repo_id = Some("next".into());

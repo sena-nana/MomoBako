@@ -29,6 +29,9 @@ static DOWNLOAD_DATA: IconData = IconData { name: "lucide-download", shapes: EMP
 /// lucide `file-braces`（`FileJson`）。
 pub(crate) const FILE_JSON: Icon = lucide(&FILE_JSON_DATA);
 static FILE_JSON_DATA: IconData = IconData { name: "lucide-file-braces", shapes: EMPTY, svg: r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M10 12a1 1 0 0 0-1 1v1a1 1 0 0 1-1 1 1 1 0 0 1 1 1v1a1 1 0 0 0 1 1"/><path d="M14 18a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1 1 1 0 0 1-1-1v-1a1 1 0 0 0-1-1"/></svg>"# };
+/// lucide `monitor`（`Monitor`）：外观卡的「跟随系统」。
+pub(crate) const MONITOR: Icon = lucide(&MONITOR_DATA);
+static MONITOR_DATA: IconData = IconData { name: "lucide-monitor", shapes: EMPTY, svg: r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>"# };
 /// lucide `moon`（`Moon`）。
 pub(crate) const MOON: Icon = lucide(&MOON_DATA);
 static MOON_DATA: IconData = IconData { name: "lucide-moon", shapes: EMPTY, svg: r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>"# };

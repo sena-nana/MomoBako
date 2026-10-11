@@ -205,30 +205,22 @@ fn crumb(crumb: Crumb) -> AnyView {
     node.into_any()
 }
 
-/// 智能文件夹名或分类名。
+/// 智能文件夹名（子级也认得，见 `SidebarState::smart_title`）或分类名。
 fn virtual_title(model: &ShellViewModel) -> String {
     if model.workspace.panel == WorkspacePanel::SmartFolder {
-        let active = model.sidebar.active_smart_folder_id.as_deref();
-        return model
-            .sidebar
-            .smart_folders
-            .iter()
-            .find(|folder| Some(folder.id.as_str()) == active)
-            .map(|folder| folder.name.clone())
-            .unwrap_or_else(|| "智能文件夹".into());
+        return model.sidebar.smart_title();
     }
     category_label(model.workspace.library_category).unwrap_or("分类视图").to_string()
 }
 
-/// 分类视图的条目说明，和 Vue `libraryCategorySummary` 一致。智能文件夹没有可读的筛选摘要时不写。
+/// 虚拟视图的说明行：智能文件夹是查询结果的摘要（Vue `smartFolderSummary`，查回来以前为空），分类视图是
+/// 条目说明（Vue `libraryCategorySummary`）。
 fn virtual_subline(model: &ShellViewModel, ctx: &FileContext) -> String {
     if model.workspace.panel == WorkspacePanel::SmartFolder {
-        return String::new();
+        return model.sidebar.smart_summary();
     }
     let files = &model.files;
-    let count = if ctx.smart_folder {
-        files.virtual_rows.len()
-    } else if ctx.category_virtual {
+    let count = if ctx.category_virtual {
         files.rows.iter().filter(|row| row.kind != "directory").count()
     } else {
         files.rows.len()

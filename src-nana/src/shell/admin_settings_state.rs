@@ -12,6 +12,8 @@ use super::support;
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SettingsView {
     pub audio: AudioCard,
+    /// 主题设置：`dark`、`light` 或 `system`（跟随系统）。
+    pub theme: String,
     /// 圆角样式：`smooth` 或 `round`。
     pub corner_style: String,
     pub corner_radius: f64,
@@ -99,6 +101,7 @@ impl SettingsView {
                 selectable: audio.selectable,
                 notice: audio.notice,
             },
+            theme: model.settings.theme.clone(),
             corner_style: admin.corner_style.clone(),
             corner_radius: admin.corner_radius,
             repository: RepositoryCard {
@@ -157,6 +160,7 @@ impl SettingsView {
 #[derive(Clone, Copy)]
 pub(crate) struct SettingsSignals {
     pub(crate) audio: Signal<AudioCard>,
+    pub(crate) theme: Signal<String>,
     pub(crate) corner_style: Signal<String>,
     pub(crate) corner_radius: Signal<f64>,
     pub(crate) repository: Signal<RepositoryCard>,
@@ -170,6 +174,7 @@ impl SettingsSignals {
     pub(crate) fn new() -> Self {
         Self {
             audio: signal(AudioCard::default()),
+            theme: signal(String::new()),
             corner_style: signal(String::new()),
             corner_radius: signal(0.0),
             repository: signal(RepositoryCard::default()),
@@ -182,6 +187,7 @@ impl SettingsSignals {
     /// 写入投影，只写变了的卡片。
     pub(crate) fn write(&self, view: SettingsView) {
         self.audio.try_set_if_changed(view.audio);
+        self.theme.try_set_if_changed(view.theme);
         self.corner_style.try_set_if_changed(view.corner_style);
         self.corner_radius.try_set_if_changed(view.corner_radius);
         self.repository.try_set_if_changed(view.repository);

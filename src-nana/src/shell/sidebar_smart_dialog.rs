@@ -4,9 +4,11 @@
 //! 父级候选、两个下拉框的当前值、错误、主按钮文案和禁用放在一个投影信号里。正文是纵向滚动区，
 //! 高度由 NanaUI 对话框按窗口限定，底栏始终露在外面（Vue 在 800 高的窗口里会把底栏裁掉）。
 
+use std::sync::Arc;
+
 use crate::shell::sidebar::{SidebarSmartFolder, SmartFolderField};
 use crate::shell::view_part_overlay::dialog::{
-    action, action_button, error_line, footer, select_field, text_area_field, text_field, two_columns, Choices, DialogFrame,
+    action, action_button, error_line, footer, select_field, text_area_field, text_field, two_columns, Choices, DialogFrame, MessageFn,
 };
 use crate::shell::view_part_overlay::session::{Draft, Projected};
 use crate::shell::{ShellMessage, ShellViewModel, SidebarMessage};
@@ -81,12 +83,14 @@ fn draft(model: &ShellViewModel, field: SmartFolderField) -> Signal<String> {
 }
 
 /// 新建或编辑智能文件夹：名称、父级和全部筛选字段。名称为空或保存中时主按钮不可用。
+/// 名称框里按回车和点主按钮一样提交（Vue 名称输入框的 `@keydown.enter.prevent`），别的输入框不提交。
 pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let view = signal(SmartDialogView::project(model)?);
     Projected::register(view, SmartDialogView::project);
     let busy = move || view.with(|view| view.busy);
     let input = |field: SmartFolderField, label: &'static str, key: &'static str, placeholder: &'static str| -> AnyView {
-        text_field(label, key, draft(model, field), placeholder, false, busy, set_field(field), None)
+        let submit: Option<MessageFn> = (field == SmartFolderField::Name).then(|| Arc::new(submit_message) as MessageFn);
+        text_field(label, key, draft(model, field), placeholder, false, busy, set_field(field), submit)
     };
     let area = |field: SmartFolderField, label: &'static str, key: &'static str, placeholder: &'static str, rows: f32| -> AnyView {
         text_area_field(label, key, draft(model, field), placeholder, rows, busy, set_field(field))
@@ -182,6 +186,11 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
     )
 }
 
+/// 提交对话框：名称为空或保存中由归约拦下。
+fn submit_message() -> ShellMessage {
+    ShellMessage::Sidebar(SidebarMessage::SubmitSmartFolder)
+}
+
 /// 「创建 / 保存」：保存中转圈并标忙（Vue `primary` 按钮的 loading）。
 fn smart_submit(view: Signal<SmartDialogView>) -> AnyView {
     action_button(
@@ -189,7 +198,7 @@ fn smart_submit(view: Signal<SmartDialogView>) -> AnyView {
         ButtonKind::Primary,
         move || view.with(|view| view.blocked),
         "smart-create-submit",
-        || ShellMessage::Sidebar(SidebarMessage::SubmitSmartFolder),
+        submit_message,
     )
     .prop::<bool, fields::button::loading>(move || view.with(|view| view.busy))
     .into_any()

@@ -91,35 +91,49 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
             model.task_progress = progress;
             None
         }
+        // 读的这段时间里改过设置、或者有保存在写时，读到的可能是旧内容，不换上（`SettingsSync`）。
         ShellMessage::SettingsLoaded(Ok((settings, diagnostic))) => {
             if let Some(diagnostic) = diagnostic {
                 eprintln!("Nana {diagnostic}");
             }
-            model.settings = settings;
+            if model.admin.settings_sync.finish_load() {
+                model.settings = settings;
+            } else {
+                eprintln!("Nana 读设置文件的这段时间里改过设置，读到的旧内容不换上");
+            }
             None
         }
         ShellMessage::SettingsLoaded(Err(error)) => {
+            model.admin.settings_sync.finish_load();
             eprintln!("Nana 应用设置读取失败：{error}");
             model.status.fail(FailureSource::Settings, format!("无法读取应用设置：{error}"));
             None
         }
+        // 主题：暗色、浅色和跟随系统，改了立即生效并写进设置文件；和现在一样时不写。
         ShellMessage::SettingsThemeChanged(theme) => {
             if theme != "light" && theme != "dark" && theme != "system" {
                 eprintln!("Nana 忽略未知主题：{theme}");
                 return None;
             }
+            if model.settings.theme == theme {
+                return None;
+            }
             model.settings.theme = theme;
-            model.admin.push_effect(AdminEffect::SaveSettings);
+            if model.admin.settings_sync.note_change() {
+                model.admin.push_effect(AdminEffect::SaveSettings);
+            }
             None
         }
-        // 主题改动后宿主直接写设置文件，这里只收结果；结果不切页面。
-        ShellMessage::SettingsSaved(Ok(settings)) => {
-            model.settings = settings;
-            None
-        }
-        ShellMessage::SettingsSaved(Err(error)) => {
-            eprintln!("Nana 应用设置保存失败：{error}");
-            model.status.fail(FailureSource::Settings, format!("保存应用设置失败：{error}"));
+        // 写设置文件的结果。内存里的设置不跟着结果改（它总比这次写的新或者一样）；写的时候又改过，接着把
+        // 最新的写一次。结果不切页面。
+        ShellMessage::SettingsSaved(result) => {
+            if let Err(error) = &result {
+                eprintln!("Nana 应用设置保存失败：{error}");
+                model.status.fail(FailureSource::Settings, format!("保存应用设置失败：{error}"));
+            }
+            if model.admin.settings_sync.note_saved() {
+                model.admin.push_effect(AdminEffect::SaveSettings);
+            }
             None
         }
         other => Some(other),
@@ -147,7 +161,7 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
         AdminMessage::JsonDraft { plugin_id, key, value } => {
             model.admin.json_drafts.entry(plugin_id).or_default().insert(key, value);
         }
-        AdminMessage::SaveJson { plugin_id, key } => save_json(model, &plugin_id, &key),
+        AdminMessage::CommitDraft { plugin_id, key } => commit_draft(model, &plugin_id, &key),
         AdminMessage::ResetConfig { plugin_id, key } => reset_config(model, &plugin_id, &key),
         AdminMessage::RefreshPlugins => {
             model.admin.reset_action();
@@ -309,6 +323,7 @@ fn apply_config(model: &mut ShellViewModel, config: &PluginConfigSnapshot) {
 pub(crate) fn open_settings_page(model: &mut ShellViewModel, plugin_id: Option<&str>) {
     model.page = ShellPage::Settings;
     model.admin.begin_settings_load();
+    model.admin.settings_sync.begin_load();
     model.admin.push_effect(AdminEffect::LoadAppSettings);
     if let Some(plugin_id) = plugin_id {
         open_route(model, plugin_id);
@@ -378,7 +393,10 @@ fn apply_field(model: &mut ShellViewModel, plugin_id: &str, key: &str, text: &st
     model.admin.reset_action();
     match support::normalize_field_input(&field, text, checked) {
         FieldChange::Reset => reset_config(model, plugin_id, key),
-        FieldChange::Invalid(error) => model.admin.action_error = error,
+        FieldChange::Invalid(error) => {
+            eprintln!("Nana 插件 {plugin_id} 的字段 {key} 输入无效：{error}");
+            model.admin.action_error = error;
+        }
         FieldChange::Set(value) => {
             model.admin.managing = true;
             model.admin.remember_outcome("插件设置已保存。", "插件设置保存失败。");
@@ -394,24 +412,55 @@ fn reset_config(model: &mut ShellViewModel, plugin_id: &str, key: &str) {
     model.admin.push_effect(AdminEffect::DeleteConfig { plugin_id: plugin_id.to_string(), key: key.to_string() });
 }
 
-fn save_json(model: &mut ShellViewModel, plugin_id: &str, key: &str) {
+/// 单行字段回车，单行和 JSON 字段失焦（Vue 文本框的 `@change`、JSON 文本域的 `@blur`）：有没提交的草稿、
+/// 而且和字段现在的值（配置快照，没有时是清单默认值）不同才提交，没改过的不保存。单行字段比显示的文字；
+/// JSON 字段比解析出来的值，只改了空白和缩进不算改过，解析不了的算改过、提交时报错。
+/// 插件管理在途时控件禁用、焦点也会离开，这时不重复提交，草稿留着。
+fn commit_draft(model: &mut ShellViewModel, plugin_id: &str, key: &str) {
     let Some(field) = field_of(model, plugin_id, key) else {
         eprintln!("Nana 插件 {plugin_id} 没有配置字段 {key}");
         return;
     };
-    if field.field_type != "json" {
-        eprintln!("Nana 插件字段 {key} 不是 JSON");
+    let json = field.field_type == "json";
+    let drafts = if json { &model.admin.json_drafts } else { &model.admin.field_drafts };
+    let Some(draft) = drafts.get(plugin_id).and_then(|drafts| drafts.get(key)).cloned() else {
+        return;
+    };
+    let current = support::config_value(&model.admin.config_snapshots, plugin_id, &field);
+    let unchanged = if json {
+        let current = current.cloned().unwrap_or(serde_json::Value::Null);
+        support::parse_json_draft(&field.label, &draft).is_ok_and(|value| value == current)
+    } else {
+        draft == support::field_text(current)
+    };
+    if unchanged {
         return;
     }
-    let draft = model.admin.json_drafts.get(plugin_id).and_then(|drafts| drafts.get(key)).cloned().unwrap_or_default();
+    if model.admin.managing {
+        eprintln!("Nana 插件 {plugin_id} 正在处理，字段 {key} 的草稿先不提交");
+        return;
+    }
+    if json {
+        save_json(model, plugin_id, &field, &draft);
+    } else {
+        apply_field(model, plugin_id, key, &draft, None);
+    }
+}
+
+/// 保存 JSON 字段：草稿按 JSON 解析，空白按 null 保存；不是有效 JSON 时不保存，写错误。
+fn save_json(model: &mut ShellViewModel, plugin_id: &str, field: &support::ConfigField, draft: &str) {
+    let key = field.key.as_str();
     model.admin.reset_action();
-    match support::parse_json_draft(&field.label, &draft) {
+    match support::parse_json_draft(&field.label, draft) {
         Ok(value) => {
             model.admin.managing = true;
             model.admin.remember_outcome("插件设置已保存。", "插件设置保存失败。");
             model.admin.push_effect(AdminEffect::SetConfig { plugin_id: plugin_id.to_string(), key: key.to_string(), value });
         }
-        Err(error) => model.admin.action_error = error,
+        Err(error) => {
+            eprintln!("Nana 插件 {plugin_id} 的字段 {key} 不是有效 JSON，不保存");
+            model.admin.action_error = error;
+        }
     }
 }
 
@@ -442,21 +491,44 @@ fn replace_plugins(model: &mut ShellViewModel, result: Result<Vec<PluginManifest
     }
 }
 
+/// 查到了插件的设置目录：交给宿主打开，打开的结果回来（[`settle_directory_open`]）才写提示，和 Vue
+/// `openPluginDataDirectoryInWorkspace` 等 `openRepositoryPath` 完成一样。查不到时写错误。
 fn finish_directory(model: &mut ShellViewModel, name: &str, result: Result<String, String>) {
     model.admin.managing = false;
     match result {
         Ok(path) => {
+            model.admin.pending_directory = Some((path.clone(), name.to_string()));
             model.input.host_requests.push(crate::host_api::HostRequest::OpenExternal(
                 crate::host_api::ExternalOpenRequest { target: path, reveal: true },
             ));
             model.admin.action_error.clear();
-            model.admin.action_message = format!("已打开“{name}”设置目录。");
         }
         Err(error) => {
             eprintln!("Nana 插件设置目录读取失败：{error}");
             model.admin.action_error = if error.is_empty() { "插件设置目录打开失败。".into() } else { error };
         }
     }
+}
+
+/// 宿主执行完一次外部打开（`host_bridge::perform`）。是插件「打开目录」等着的那一次：结果写在插件面板上，
+/// 交回 `None`；别的打开把结果原样交回，失败由宿主写进状态区。
+pub(crate) fn settle_directory_open(model: &mut ShellViewModel, target: &str, result: Result<(), String>) -> Option<Result<(), String>> {
+    let Some((_, name)) = model.admin.pending_directory.take_if(|(path, _)| path == target) else {
+        return Some(result);
+    };
+    match result {
+        Ok(()) => {
+            model.admin.action_error.clear();
+            model.admin.action_message = format!("已打开“{name}”设置目录。");
+        }
+        Err(error) => {
+            eprintln!("Nana 插件“{name}”的设置目录打不开：{target}：{error}");
+            model.admin.action_message.clear();
+            model.admin.action_error = format!("插件设置目录打开失败：{error}");
+        }
+    }
+    model.mark_surface_dirty();
+    None
 }
 
 /// 设置页五份数据。任何一份失败整批不写，只记下错误，和 Vue 的 `Promise.all` 一致。

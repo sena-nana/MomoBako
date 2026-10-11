@@ -62,8 +62,12 @@ pub fn perform(
     for request in requests {
         match request {
             HostRequest::OpenExternal(ExternalOpenRequest { target, reveal }) => {
-                if let Err(error) = open(&target, reveal) {
+                let result = open(&target, reveal);
+                if let Err(error) = &result {
                     eprintln!("Nana 外部打开失败：{target}：{error}");
+                }
+                // 插件「打开目录」的结果写在插件面板上，别的打开失败写进状态区。
+                if let Some(Err(error)) = crate::shell::admin::settle_directory_open(shell, &target, result) {
                     let what = if reveal { "定位失败" } else { "打开失败" };
                     shell.status.fail(FailureSource::Host, format!("{what}：{error}"));
                 }

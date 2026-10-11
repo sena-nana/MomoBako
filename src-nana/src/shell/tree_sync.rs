@@ -168,7 +168,9 @@ pub(super) fn begin(model: &mut ShellViewModel) {
     let Some(repo_id) = model.workspace.active_repo_id.clone() else {
         return;
     };
-    let operation = model.operation.start(OperationStart::new("刷新文件树", "同步并读取目录结构", 12.0));
+    let operation = model.operation.start(
+        OperationStart::new("刷新文件树", "同步并读取目录结构", 12.0).runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_SYNC]),
+    );
     let state = &mut model.tree_sync;
     state.issued += 1;
     let token = state.issued;

@@ -25,7 +25,13 @@ impl FileOperation {
 
     /// 从文件夹导入，对话框和拖入都是（Vue `importEntriesToWorkspace`）。
     pub(in crate::shell) fn import() -> Self {
-        Self::step("导入文件", "导入文件到当前资源库", 24.0, Some(84.0))
+        Self::step("导入文件", "导入文件到当前资源库", 24.0, Some(84.0)).runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_ENTRY_IMPORT])
+    }
+
+    /// 这次变更在后台跑的任务协议：任务弹层不再把这些任务单列一行（`OperationStart::runs`）。
+    pub(in crate::shell) fn runs(mut self, protocols: &'static [&'static str]) -> Self {
+        self.start = self.start.runs(protocols);
+        self
     }
 }
 

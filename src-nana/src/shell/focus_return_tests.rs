@@ -7,7 +7,7 @@ use nana_ui::runtime::StableNodeId;
 
 use crate::backend::services::repository::{FileBrowserEntry, FileBrowserSnapshot, FileTreeNode, RepositoryStructureCacheState};
 use crate::shell::files::{FileDialog, FilesMessage};
-use crate::shell::sidebar::{PopoverMode, SidebarSmartFolder, SidebarTree};
+use crate::shell::sidebar::{PopoverMode, SidebarSmartFolder, SidebarTree, SmartFolderChange, SmartFolderOutcome};
 use crate::shell::sidebar_view::folder_row_key;
 use crate::shell::view_harness::ShellHarness;
 use crate::shell::{AdminMessage, ShellMessage, ShellViewModel, SidebarMessage};
@@ -337,7 +337,8 @@ fn a_deleted_smart_folder_hands_focus_to_its_tree() {
     let confirm = harness.keyed("smart-delete-confirm").expect("确认删除");
     harness.focus(confirm);
     harness.press_key("Enter");
-    harness.apply(ShellMessage::Sidebar(SidebarMessage::SmartFolderSaved { repo_id: REPO.into(), result: Ok(smart(&["待整理"])) }));
+    let outcome = SmartFolderOutcome { folders: smart(&["待整理"]), change: SmartFolderChange::Deleted("高评分".into()) };
+    harness.apply(ShellMessage::Sidebar(SidebarMessage::SmartFolderSaved { repo_id: REPO.into(), result: Ok(outcome) }));
     harness.finish_motion();
     assert!(!harness.model.sidebar.smart_delete_open(), "删完关掉确认");
     assert_eq!(harness.focused(), harness.keyed(&format!("smart-row-{}", "待整理")), "焦点落在还在的智能文件夹上");
