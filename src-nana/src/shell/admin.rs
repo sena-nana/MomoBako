@@ -550,10 +550,12 @@ impl ShellViewModel {
         self.admin_workspace_visible(WorkspacePanel::Logs) && self.admin.log_would_scroll && !self.admin.log_paused
     }
 
-    /// 工作台面板要求启动完成且主区有仓库。
+    /// 首页的日志、拓展和动作面板在显示：启动完成、不在设置页，主区有仓库或者还没有资源库（Vue 的这几个面板
+    /// 不要求仓库；资源库丢失时主区是缺失页）。和主区路由（`RouteKey::of`）同一口径。
     pub(super) fn admin_workspace_visible(&self, panel: WorkspacePanel) -> bool {
         self.workspace.startup.status == super::StartupStatus::Ready
-            && self.workspace.main_region() == super::MainRegion::HasRepository
+            && !matches!(self.page, super::ShellPage::Settings | super::ShellPage::SettingsError)
+            && matches!(self.workspace.main_region(), super::MainRegion::HasRepository | super::MainRegion::EmptyRepository)
             && self.workspace.panel == panel
     }
 

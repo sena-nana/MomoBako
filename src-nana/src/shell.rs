@@ -603,7 +603,12 @@ impl ShellViewModel {
                 }
             }
             ShellMessage::SelectWorkspaceRepository(repo_id) => self.select_workspace_repository(&repo_id),
-            ShellMessage::SetWorkspacePanel(panel) => self.workspace.panel = panel,
+            // 选面板就是去首页的这个面板：设置页上点「拓展」「日志」「动作」或在标题栏搜索都离开设置页
+            // （Vue `selectPanel`、`showSearchWorkspace` 在 `/settings` 时 `router.push("/")`）。
+            ShellMessage::SetWorkspacePanel(panel) => {
+                self.workspace.panel = panel;
+                self.leave_settings_page();
+            }
             ShellMessage::Sidebar(_) => {}
             ShellMessage::Files(_) => {}
             ShellMessage::Inspect(_) => {}

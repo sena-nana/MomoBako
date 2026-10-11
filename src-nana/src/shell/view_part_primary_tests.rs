@@ -133,3 +133,82 @@ fn a_layout_change_moves_the_frame_without_rebuilding() {
         harness.flush();
     }
 }
+
+/// 设置页上选面板（底栏「拓展」「日志」、侧栏「动作」、标题栏搜索和筛选开关）都离开设置页，主区换成
+/// 选的面板（Vue `selectPanel`、`showSearchWorkspace` 在 `/settings` 时 `router.push("/")`）。
+#[test]
+fn choosing_a_panel_leaves_the_settings_page() {
+    for (panel, route) in [
+        (WorkspacePanel::Extensions, RouteKey::Extensions),
+        (WorkspacePanel::Logs, RouteKey::Logs),
+        (WorkspacePanel::Actions, RouteKey::Actions),
+        (WorkspacePanel::Search, RouteKey::Search),
+    ] {
+        let mut model = ShellViewModel::for_page(ShellPage::Settings);
+        assert_eq!(RouteKey::of(&model), RouteKey::Settings);
+        model.reduce(ShellMessage::SetWorkspacePanel(panel));
+        assert_eq!(model.page, ShellPage::FileList, "{panel:?} 没有离开设置页");
+        assert_eq!(RouteKey::of(&model), route, "{panel:?}");
+    }
+}
+
+/// 设置页上点底栏「日志」、在标题栏输入：主区真的换成日志面板、搜索面板。
+#[test]
+fn footer_and_title_bar_leave_the_mounted_settings_page() {
+    let mut harness = ShellHarness::mount(ShellViewModel::for_page(ShellPage::Settings));
+    let logs = harness.keyed("footer-logs").expect("底栏「日志」");
+    let (x, y) = harness.center(logs);
+    let messages = harness.click_messages(x, y);
+    harness.settle(messages);
+    assert_eq!(RouteKey::of(&harness.model), RouteKey::Logs);
+    assert!(harness.keyed("admin-log-panel").is_some(), "日志面板没有出来");
+    assert!(harness.keyed("admin-settings").is_none(), "设置页还在");
+
+    harness.apply(ShellMessage::OpenSettings);
+    harness.flush();
+    assert_eq!(RouteKey::of(&harness.model), RouteKey::Settings);
+    let search = harness.input("全局搜索");
+    harness.focus(search);
+    harness.type_text("cover");
+    let messages = harness.take_messages();
+    harness.settle(messages);
+    assert_eq!(RouteKey::of(&harness.model), RouteKey::Search, "在标题栏输入应该切到搜索面板");
+    assert!(harness.keyed("admin-settings").is_none(), "设置页还在");
+}
+
+/// 没有资源库时也能进「拓展」「日志」和「动作」（Vue `Home.vue` 的这几个面板不要求仓库），没有筛选栏；
+/// 文件、回收站、智能文件夹和播放集面板照旧是空库页。
+#[test]
+fn admin_panels_open_without_a_repository() {
+    let mut model = ShellViewModel::for_page(ShellPage::EmptyRepository);
+    for (panel, route) in [
+        (WorkspacePanel::Logs, RouteKey::Logs),
+        (WorkspacePanel::Extensions, RouteKey::Extensions),
+        (WorkspacePanel::Actions, RouteKey::Actions),
+        (WorkspacePanel::Search, RouteKey::EmptySearch),
+        (WorkspacePanel::Files, RouteKey::Empty),
+        (WorkspacePanel::Trash, RouteKey::Empty),
+        (WorkspacePanel::SmartFolder, RouteKey::Empty),
+        (WorkspacePanel::Playlist, RouteKey::Empty),
+    ] {
+        model.workspace.panel = panel;
+        assert_eq!(RouteKey::of(&model), route, "{panel:?}");
+    }
+
+    let mut harness = ShellHarness::mount(ShellViewModel::for_page(ShellPage::EmptyRepository));
+    for (panel, key) in [(WorkspacePanel::Logs, "admin-log-panel"), (WorkspacePanel::Extensions, "admin-extensions")] {
+        harness.apply(ShellMessage::SetWorkspacePanel(panel));
+        harness.flush();
+        assert!(harness.keyed(key).is_some(), "{panel:?} 面板没有出来");
+        assert!(harness.keyed("empty-repository-page").is_none(), "空库页还在");
+        let world = harness.document().context().world();
+        let mut filter = harness.keyed("workspace-filter-groups");
+        let mut hidden = filter.is_none();
+        while let Some(node) = filter {
+            hidden |= world.node_style(node).is_some_and(|style| style.layout.hidden);
+            filter = world.parent_id(node);
+        }
+        assert!(hidden, "没有资源库时不该有筛选栏");
+        harness.assert_same_as_fresh_mount();
+    }
+}

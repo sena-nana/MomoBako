@@ -50,11 +50,11 @@ pub(crate) enum RouteKey {
     EmptySearch,
     /// 播放集。
     Playlists,
-    /// 系统日志。
+    /// 系统日志，有仓库和还没有资源库时都在。
     Logs,
-    /// 拓展。
+    /// 拓展，有仓库和还没有资源库时都在。
     Extensions,
-    /// 仓库动作。
+    /// 仓库动作，有仓库和还没有资源库时都在。
     Actions,
     /// 资源库丢失。
     Missing,
@@ -64,7 +64,9 @@ pub(crate) enum RouteKey {
 
 impl RouteKey {
     /// 按 ViewModel 取当前路由。有仓库时按面板分：文件、回收站和智能文件夹是文件路由，其余面板各是
-    /// 一条路由。页面身份只区分设置页，其余的（播放集页、插件设置页、任务页）只给验收场景起名用。
+    /// 一条路由。还没有资源库时搜索、日志、拓展和动作照样是各自的路由（Vue `Home.vue` 里只有文件和播放集
+    /// 面板要 `hasRepository`，筛选栏没有仓库时自己藏起来），其余面板是空库页。页面身份只区分设置页，其余的
+    /// （播放集页、插件设置页、任务页）只给验收场景起名用。
     pub(crate) fn of(model: &ShellViewModel) -> Self {
         let settings_page = matches!(model.page, ShellPage::Settings | ShellPage::SettingsError);
         let panel = model.workspace.panel;
@@ -72,8 +74,13 @@ impl RouteKey {
             MainRegion::Startup | MainRegion::LoadError => Self::Startup,
             _ if settings_page => Self::Settings,
             MainRegion::MissingRepository => Self::Missing,
-            MainRegion::EmptyRepository if panel == WorkspacePanel::Search => Self::EmptySearch,
-            MainRegion::EmptyRepository => Self::Empty,
+            MainRegion::EmptyRepository => match panel {
+                WorkspacePanel::Search => Self::EmptySearch,
+                WorkspacePanel::Logs => Self::Logs,
+                WorkspacePanel::Extensions => Self::Extensions,
+                WorkspacePanel::Actions => Self::Actions,
+                WorkspacePanel::Files | WorkspacePanel::Trash | WorkspacePanel::SmartFolder | WorkspacePanel::Playlist => Self::Empty,
+            },
             MainRegion::HasRepository => match panel {
                 WorkspacePanel::Files | WorkspacePanel::Trash | WorkspacePanel::SmartFolder => Self::Files,
                 WorkspacePanel::Playlist => Self::Playlists,
