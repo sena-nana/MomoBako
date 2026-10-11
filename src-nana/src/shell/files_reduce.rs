@@ -146,6 +146,15 @@ impl FilesState {
         }
     }
 
+    /// 元数据保存读回的素材：同一素材的文件行（当前目录和智能文件夹结果里的）换上读回的元数据和索引标签。
+    pub(in crate::shell) fn note_saved_asset(&mut self, detail: &crate::backend::services::repository::AssetDetail) {
+        let asset_id = detail.summary.asset_id.as_str();
+        for row in self.rows.iter_mut().chain(self.virtual_rows.iter_mut()).filter(|row| row.asset_id.as_deref() == Some(asset_id)) {
+            row.metadata = detail.metadata.iter().map(|entry| (entry.key.clone(), entry.value.clone())).collect();
+            row.tags = detail.summary.tags.clone();
+        }
+    }
+
     /// Escape 关掉文件页最上面的一层，顺序见 [`Self::escape_layer`]。没有可关的返回 false，交给壳层继续处理。
     pub(crate) fn dismiss_overlay(&mut self) -> bool {
         match self.escape_layer() {
@@ -175,6 +184,11 @@ impl FilesState {
 pub(in crate::shell) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) -> Option<ShellMessage> {
     if let ShellMessage::AssetDetailLoaded(Ok(detail)) = &message {
         model.files.note_detail_arrived(&detail.summary.path);
+    }
+    // 元数据保存读回了服务器上的素材（成功或冲突都是服务器现在的样子）：文件行换上它的元数据和索引标签，
+    // 详情导语、只读行和作品信息不再是保存前的旧值（Vue `applyAssetResponse`）。
+    if let ShellMessage::Inspect(InspectMessage::MetadataSaved(Ok((_, detail)))) = &message {
+        model.files.note_saved_asset(detail);
     }
     let ShellMessage::Files(message) = message else {
         return Some(message);

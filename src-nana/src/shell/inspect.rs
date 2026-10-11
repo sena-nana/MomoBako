@@ -87,6 +87,8 @@ struct SaveInFlight {
     asset_id: String,
     /// 发出时的草稿。结果回来时，发出以后才写进草稿的改动按它挑出来，留在新草稿里。
     sent: MetadataDraft,
+    /// 请求里写了标签组：后端会重排这个素材的索引标签，侧栏计数和标签候选要跟着重读摘要。
+    tags_written: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -514,7 +516,11 @@ impl InspectState {
         let metadata = self.draft.to_metadata_map(&self.baseline);
         self.saving = true;
         self.error.clear();
-        self.in_flight = Some(SaveInFlight { asset_id: asset_id.clone(), sent: self.draft.clone() });
+        self.in_flight = Some(SaveInFlight {
+            asset_id: asset_id.clone(),
+            sent: self.draft.clone(),
+            tags_written: metadata.contains_key("tagGroups"),
+        });
         self.effects.push(InspectEffect::SaveMetadata { repo_id, asset_id, expected_version: self.expected_version, metadata });
     }
 
@@ -624,6 +630,17 @@ impl InspectState {
         if self.dirty() && self.conflict.is_empty() {
             self.save_metadata();
         }
+    }
+
+    /// 这条保存结果回来以后要重读哪个仓库的摘要：成功写进了标签组的保存，后端重排了这个素材的索引标签，
+    /// 侧栏「未标签」计数、筛选栏和标签菜单的候选都要跟着变。要在归约这条结果之前问，归约会收掉 `in_flight`。
+    pub(super) fn retagged_repository(&self, message: &InspectMessage) -> Option<String> {
+        let InspectMessage::MetadataSaved(Ok((outcome, detail))) = message else {
+            return None;
+        };
+        let retagged = outcome == "success"
+            && self.in_flight.as_ref().is_some_and(|flight| flight.asset_id == detail.summary.asset_id && flight.tags_written);
+        retagged.then(|| detail.summary.repo_id.clone())
     }
 
     fn note_body(&mut self, path: String, markdown: bool, generation: u64, result: Result<support::PreviewText, String>) {
@@ -759,10 +776,16 @@ pub(super) fn reduce_message(model: &mut ShellViewModel, message: super::ShellMe
     let follow = bridge::follow(&message);
     // 元数据保存的失败没有就近显示，交给状态区。
     let saving = matches!(message, InspectMessage::MetadataSaved(_));
+    let retagged = model.inspect.retagged_repository(&message);
     model.inspect.reduce(writable, repo_id.as_deref(), message);
     if saving && !model.inspect.error.is_empty() {
         let failure = format!("保存元数据失败：{}", model.inspect.error);
         model.status.fail(super::status::FailureSource::Metadata, failure);
+    }
+    // 标签变了：静默重读仓库摘要，侧栏计数、筛选栏和标签菜单的候选跟着换（Vue `applyAssetResponse` 换掉摘要里这项素材）。
+    // 文件行上的元数据和索引标签由文件表面就地换（`files_reduce.rs`）。
+    if let Some(repo_id) = retagged.filter(|repo_id| model.workspace.active_repo_id.as_deref() == Some(repo_id.as_str())) {
+        model.workspace.effects.push(super::WorkspaceEffect::LoadSnapshotSilent { repo_id });
     }
     bridge::apply(model, follow);
     search::settle(model);

@@ -456,6 +456,49 @@ fn a_patch_made_while_saving_survives_the_result_and_saves_next() {
     assert_eq!(metadata, [("circle".to_string(), json!("社团"))].into_iter().collect());
 }
 
+/// F8：保存成功以后同一素材的文件行换上读回的元数据和索引标签，详情导语不再是旧值；
+/// 写了标签组的保存再静默重读仓库摘要，侧栏「未标签」计数、筛选栏和标签菜单的候选跟着变。只改注释不重读。
+#[test]
+fn saved_metadata_reaches_the_file_row_and_retagging_reloads_the_summary() {
+    let mut model = crate::shell::acceptance_gap_models()
+        .into_iter()
+        .find(|(name, _)| *name == "files-selected-metadata")
+        .map(|(_, model)| model)
+        .expect("files-selected-metadata 场景");
+    model.workspace.take_effects();
+    let saved_detail = |model: &ShellViewModel, version: i64, comment: &str, tags: &[&str]| {
+        let mut detail = asset("cover.png", "png", version, false, vec![meta("comment", json!(comment)), meta("tagGroups", json!(tags))]);
+        detail.summary.asset_id = model.inspect.current_asset_id().expect("cover.png 的素材").to_string();
+        detail.summary.repo_id = model.workspace.active_repo_id.clone().expect("活动仓库");
+        detail.summary.tags = tags.iter().map(|tag| tag.to_string()).collect();
+        detail
+    };
+
+    model.reduce(ShellMessage::Inspect(InspectMessage::SetComment("新注释".into())));
+    model.reduce(ShellMessage::Inspect(InspectMessage::SaveMetadata));
+    model.inspect.take_effects();
+    let detail = saved_detail(&model, 2, "新注释", &["封面", "参考"]);
+    model.reduce(ShellMessage::Inspect(InspectMessage::MetadataSaved(Ok(("success".into(), detail)))));
+    let row = model.files.rows.iter().find(|row| row.path == "cover.png").expect("cover.png 的行");
+    assert_eq!(row.metadata.get("comment"), Some(&json!("新注释")), "文件行换上读回的元数据");
+    assert!(
+        !model.workspace.effects.iter().any(|effect| matches!(effect, crate::shell::WorkspaceEffect::LoadSnapshotSilent { .. })),
+        "只改注释不重读摘要"
+    );
+
+    model.reduce(ShellMessage::Inspect(InspectMessage::AddTag("新标签".into())));
+    model.reduce(ShellMessage::Inspect(InspectMessage::SaveMetadata));
+    model.inspect.take_effects();
+    let detail = saved_detail(&model, 3, "新注释", &["封面", "参考", "新标签"]);
+    model.reduce(ShellMessage::Inspect(InspectMessage::MetadataSaved(Ok(("success".into(), detail)))));
+    let row = model.files.rows.iter().find(|row| row.path == "cover.png").expect("cover.png 的行");
+    assert_eq!(row.tags, ["封面", "参考", "新标签"], "索引标签跟着换");
+    assert!(
+        model.workspace.effects.iter().any(|effect| matches!(effect, crate::shell::WorkspaceEffect::LoadSnapshotSilent { repo_id } if repo_id == "acceptance-repo")),
+        "写了标签组，静默重读仓库摘要"
+    );
+}
+
 /// 回到目录（不再看文件）之前，等着自动保存的改动先写出去，不随预览一起丢掉。
 #[test]
 fn leaving_the_preview_flushes_the_pending_autosave() {
