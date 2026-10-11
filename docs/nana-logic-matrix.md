@@ -71,6 +71,7 @@
 | `useSmartFolderSidebarUi.ts` 选择 | 有仓库、id 非空、且未锁定 | `query_smart_folder` | 面板 smartFolder，展开祖先但不展开自己；空 id 返回 | “正在查询智能文件夹 …”只写进 `ShellViewModel::detail`，界面不显示 | 已测试（未离屏） |
 | `useSmartFolderSidebarUi.ts` 查询结果 | 仓库或当前 id 已变化 | 丢弃 | 返回 false，不改详情；匹配的错误只写入智能文件夹错误，不把整页改成 Error | 错误留在侧栏 | 已测试（未离屏） |
 | `useSmartFolderSidebarUi.ts` 树替换 | 列表到达 | `list_smart_folders` | 仓库不匹配则忽略；先剪掉无效展开，再展开当前项的祖先 | “还没有智能文件夹。”或树 | 已测试（未离屏） |
+| `useSmartFolderSidebarUi.ts` `submitSmartFolderDialog` | 对话框的「创建 / 保存」，名称框里按回车 | `create_smart_folder` / `update_smart_folder`，没有替身 | 名称为空不提交；保存中不能再提交、不能关；匹配方式只在选了「任一匹配」时写 `or`，「全部匹配」不写：子级继承父级的匹配方式（后端合并父子筛选时子级没写才用父级，Vue `normalizeSmartFolderFilter` 同样丢掉 `and`），原样保存不改写子级；成功换上整棵树、关掉对话框、展开父级；失败错误留在对话框里 | 主按钮“创建 / 保存”，处理中转圈；匹配方式“全部匹配 / 任一匹配” | 已测试（`sidebar_smart.rs`、`sidebar_smart_tests.rs`，未离屏） |
 | `usePlaylistSidebarUi.ts` 选择 | 有仓库 id 且 id 非空 | `get_playlist_detail` | 面板 playlist；播放集从列表消失时清空当前项，若面板仍是 playlist 则回到 files | 分组默认收起，只留标题“播放集”和个数；展开后每行是名称和「播放器 · N 项」，右侧是播放和删除 | 已测试（未离屏） |
 | `usePlaylistSidebarUi.ts` 可播放 | 播放器类型读回（插件列表换新以后读，见阶段 6） | `list_playlist_players` | 行上有「播放播放集」，播放器类型在内置候选或已读到的播放器贡献里才可点（`player_view::playlist_plugin_missing`）；读回之前「新建播放集」不可用，读回后对话框默认选第一个类型 | 展开后每行右侧的播放按钮，不可播放时禁用 | 已测试（`data_load_tests.rs`，未离屏） |
 | `usePlaylistSidebarUi.ts` `submitPlaylistDialog` | 新建播放集对话框的「创建」或回车 | `create_playlist`，没有替身 | 名称为空或没有类型时不建；请求在途时「创建」和「取消」禁用、遮罩和 Escape 不关、再提交不重复建；成功才关对话框，换上整份列表并点开新建的那个；失败对话框留着，原因写在对话框里，不进状态区（Vue 的失败没有界面反馈） | 左下角“处理中...”；失败时对话框里红字写原因 | 已测试（`data_load_tests.rs`、`tests.rs`，未离屏） |

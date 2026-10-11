@@ -445,6 +445,10 @@ fn format_number(value: f64) -> String {
 }
 
 #[cfg(test)]
+#[path = "sidebar_smart_tests.rs"]
+mod view_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
