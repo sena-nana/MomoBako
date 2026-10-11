@@ -21,6 +21,8 @@ momobako-backend = { path = "../src-backend" }
 nana-ui = { git = "https://github.com/sena-nana/NanaUI.git", rev = "5bd2104f14b1d03f24fd92c5e737ba8c287dfcf4", features = ["hosted", "bundled-fonts", "components", "icons-tabler", "view-macro", "packaged-resources"] }
 nana-ui-core = { git = "https://github.com/sena-nana/NanaUI.git", rev = "5bd2104f14b1d03f24fd92c5e737ba8c287dfcf4" }
 nana-ui-platform = { git = "https://github.com/sena-nana/NanaUI.git", rev = "5bd2104f14b1d03f24fd92c5e737ba8c287dfcf4", features = ["clipboard"] }
+# 预览里的 SVG 用 NanaUI 已经带着的 resvg 光栅（和 NanaUI 画 SVG 图片同一份），不另引第三方库。
+nana-svg-raster = { git = "https://github.com/sena-nana/NanaUI.git", rev = "5bd2104f14b1d03f24fd92c5e737ba8c287dfcf4" }
 
 [target.'cfg(windows)'.dependencies]
 # 与 Tauri `plugin:drag` 同一实现，把绝对路径拖出窗口。

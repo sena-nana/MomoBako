@@ -3611,6 +3611,7 @@ dependencies = [
  "flate2",
  "image",
  "momobako-backend",
+ "nana-svg-raster",
  "nana-ui",
  "nana-ui-core",
  "nana-ui-devtools",

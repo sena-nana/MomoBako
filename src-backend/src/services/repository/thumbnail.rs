@@ -198,7 +198,7 @@ fn save_thumbnail_bytes(
         kind,
         source,
     ));
-    let image = image::load_from_memory(bytes)
+    let image = decode_oriented_image(image::ImageReader::new(std::io::Cursor::new(bytes)))
         .map_err(|error| format!("thumbnail image error: {error}"))?;
     let thumbnail = image.thumbnail(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
     thumbnail
@@ -362,12 +362,39 @@ pub(super) fn generate_image_thumbnail(
     source_path: &Path,
     thumbnail_path: &Path,
 ) -> Result<(), String> {
-    let image =
-        image::open(source_path).map_err(|error| format!("image thumbnail error: {error}"))?;
+    let image = image::ImageReader::open(source_path)
+        .map_err(image::ImageError::IoError)
+        .and_then(decode_oriented_image)
+        .map_err(|error| format!("image thumbnail error: {error}"))?;
     let thumbnail = image.thumbnail(THUMBNAIL_SIZE, THUMBNAIL_SIZE);
     thumbnail
         .save_with_format(thumbnail_path, image::ImageFormat::Jpeg)
         .map_err(|error| format!("image thumbnail error: {error}"))
+}
+
+/// 解码图片并按 EXIF 方向摆正。格式按内容认（扩展名不对也能解）；照片的方向写在 EXIF 里，直接解码不会
+/// 应用它，缩略图会横躺或倒置。EXIF 读不出时照原样，不让整张图失败。
+fn decode_oriented_image<R: std::io::BufRead + std::io::Seek>(
+    reader: image::ImageReader<R>,
+) -> image::ImageResult<image::DynamicImage> {
+    use image::ImageDecoder;
+
+    let mut decoder = reader.with_guessed_format()?.into_decoder()?;
+    let orientation = decoder.orientation().unwrap_or_else(|error| {
+        crate::app_log!(
+            "warn",
+            "thumbnail",
+            "orientationUnreadable",
+            "图片的 EXIF 方向读不出，按原样生成缩略图。",
+            serde_json::json!({ "error": error.to_string() })
+        );
+        image::metadata::Orientation::NoTransforms
+    });
+    // 和 `image::open` 一样先按默认上限预留解码缓冲，过大的图报上限错误，不硬分配。
+    image::Limits::default().reserve(decoder.total_bytes())?;
+    let mut image = image::DynamicImage::from_decoder(decoder)?;
+    image.apply_orientation(orientation);
+    Ok(image)
 }
 
 pub(super) fn generate_video_thumbnail(

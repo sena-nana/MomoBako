@@ -213,6 +213,7 @@
   - Optional `action`: `ensure`, `refresh`, `save`, `clear`
   - `save` accepts local `sourcePath`, remote HTTP(S) `sourceUrl`, or `imageBytes` for custom file/folder thumbnails; `sourceUrl` is downloaded by the backend
   - `save + sourceUrl` 也能预取来源封面，例如网易云歌曲条目的 `sourcePayload.coverUrl`。删掉的 Vue 宿主这样预取过（当前页优先，下一页在空闲时预热），Nana 宿主现在不预取
+  - Image formats are recognized by content, and photos are turned upright by their EXIF orientation before generated or saved thumbnails are scaled
   - Thumbnail cache files live under repository `.momo/thumbnails/` and use sha256 hex filenames
   - File thumbnails also backfill derived metadata such as `thumbnailPalette`
   - Response fields: `repoId`, `path`, `assetId`, `kind`, `thumbnailPath`, `thumbnailCustom`, optional `metadata`

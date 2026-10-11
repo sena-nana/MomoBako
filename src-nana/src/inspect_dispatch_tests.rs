@@ -126,3 +126,13 @@ fn an_upper_case_extension_still_previews() {
     preview(&mut model, "pics/COVER.PNG", COVER_PNG);
     assert!(model.preview_pixels.is_some(), "大写扩展名的图片也要能预览");
 }
+
+/// SVG 经同一条路径预览：后端给 `image/svg+xml`，解码交给 resvg，不再报「图片解码失败」。
+#[test]
+fn an_svg_previews_through_the_real_dispatch_path() {
+    let mut model = shell();
+    let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="#3fa796"/></svg>"##;
+    preview(&mut model, "icons/badge.svg", svg);
+    let pixels = model.preview_pixels.as_ref().expect("SVG 预览有像素");
+    assert_eq!((pixels.width, pixels.height), (2048, 1024), "按原比例画到最长边 2048");
+}
