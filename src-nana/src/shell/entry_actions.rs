@@ -1,7 +1,7 @@
 //! 文件右键里的来源插件动作。
 //!
-//! 清单 `contributes.source.entryActions[]` 的 operation 只有插件 SDK 约定的五种（`SourceEntryActionOperation`，
-//! `docs/api-design.md`）：宿主负责每一种的目录选择、进度、导入和刷新，声明不能让宿主执行别的命令。
+//! 清单 `contributes.source.entryActions[]` 的 operation 只有 `docs/api-design.md` 约定的五种：
+//! 宿主负责每一种的目录选择、进度、导入和刷新，声明不能让宿主执行别的命令。
 //! 能直接调用的方法接到现有 `call_plugin`。下载照 Vue `downloadTargets` 分「到本地」和「到其他资源库」两项
 //! （声明了 `targets` 时只出声明的）：到本地先要系统目录对话框，到其他资源库先选目标资源库（`source_target.rs`），
 //! 选好才带上 `destination` 调用。清理缓存、重新获取播放资源和下载的载荷照 Vue 带上当前资源库的本地缓存目录

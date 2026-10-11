@@ -65,31 +65,22 @@ describe("MomoBako 工具链", () => {
       "plugins:build": "node scripts/build-external-plugins.mjs",
       "plugins:package": "node scripts/package-external-plugins.mjs",
       "plugins:stage:dev": "node scripts/stage-external-plugins.mjs",
-      dev: "vite",
       "tauri:dev": "yarn plugins:build && yarn plugins:package && yarn plugins:stage:dev && node scripts/tauri-dev.ts",
       "tauri:dev:with-plugins": "yarn tauri:dev",
       "tauri:build": "yarn plugins:build && yarn plugins:package && tauri build --config src-tauri/tauri.external-plugins.conf.json",
       "test:backend": "cargo test -p momobako-backend --locked",
       "nana:build": "cargo build -p momobako-nana --bin momobako-nana --profile dist --locked",
       "nana:package": "node scripts/nana-package.ts",
-      verify: "yarn typecheck:node-scripts && yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml",
+      verify: "yarn typecheck:node-scripts && yarn test && cargo check --manifest-path src-tauri/Cargo.toml",
     });
-    expect(deps.vitepress).toBeDefined();
-    expect(deps.jszip).toBeUndefined();
-    expect(pkg.dependencies.three).toBeDefined();
-    expect(pkg.dependencies["@pixiv/three-vrm"]).toBeDefined();
-    expect(pkg.dependencies["@lilia/ui"]).toMatch(
-      /^github:sena-nana\/LiliaUI#workspace=@lilia\/ui&commit=[0-9a-f]{40}$/,
-    );
-    const liliaCommit = pkg.dependencies["@lilia/ui"].match(/commit=([0-9a-f]{40})$/)?.[1];
-    for (const workspace of ["theme", "ui-contract", "ui-foundation"]) {
-      expect(pkg.dependencies[`@lilia/${workspace}`]).toBe(
-        `github:sena-nana/LiliaUI#workspace=@lilia/${workspace}&commit=${liliaCommit}`,
-      );
+    expect(pkg.dependencies).toBeUndefined();
+    expect(Object.keys(deps).sort()).toEqual(["@tauri-apps/cli", "@types/node", "typescript", "vitepress", "vitest"]);
+    for (const script of ["dev", "build", "preview"]) {
+      expect(pkg.scripts[script], script).toBeUndefined();
     }
-    expect(pkg.dependencies["@lucide/vue"]).toBeDefined();
-    expect(pkg.dependencies["lucide-vue-next"]).toBeUndefined();
-    expect(pkg.devDependencies["@types/three"]).toBeDefined();
+    for (const path of ["src", "public", "index.html", "vite.config.ts", "tsconfig.json", "tsconfig.node.json", "app.config.json"]) {
+      expect(existsSync(resolve(path)), `${path} 是 Vue 前端的文件，应删除`).toBe(false);
+    }
   });
 
   it("External/Plugins 提供标准开发入口并与主线源码隔离", () => {
@@ -97,7 +88,6 @@ describe("MomoBako 工具链", () => {
     const pluginsPkg = JSON.parse(read("External/Plugins/package.json"));
     const templateManifest = JSON.parse(read("External/Plugins/template/backend-rust/manifest.json"));
     const exampleManifest = JSON.parse(read("External/Plugins/example/backend-rust/manifest.json"));
-    const tsconfig = read("tsconfig.json");
 
     expect(devGuide).toContain("External/Plugins/");
     expect(devGuide).toContain("External/Plugins/package.json");
@@ -114,8 +104,6 @@ describe("MomoBako 工具链", () => {
     expect(templateManifest).toMatchObject({ sdk: "backend", runtime: "native-dylib" });
     expect(exampleManifest).toMatchObject({ sdk: "backend", runtime: "native-dylib" });
     expect(pluginsPkg.dependencies.esbuild).toBeUndefined();
-    expect(tsconfig).not.toContain("plugins/**/*.ts");
-    expect(tsconfig).not.toContain("plugins/**/*.json");
   });
 
   it("External/Plugins 的插件都是后端形态，不带前端代码", () => {
@@ -270,35 +258,5 @@ describe("MomoBako 工具链", () => {
     expect(index).toContain("[架构](./architecture.md)");
     expect(index).toContain("[API 设计](./api-design.md)");
     expect(index).toContain("[样式标准](./design/style-standard.md)");
-  });
-
-  it("全局滚动条使用隐藏原生条和 overlay 显隐样式", () => {
-    const styles = read("src/styles/index.css").replace(/\r\n/g, "\n");
-    const main = read("src/main.ts");
-    const facade = read("src/ui/index.ts");
-    const scrollbars = read("src/ui/core/index.ts");
-
-    expect(styles).toContain('@import "../ui/styles.css";');
-    expect(facade).toContain('export * from "@lilia/ui/layouts";');
-    expect(facade).toContain('export * from "./core";');
-    expect(main).toContain(
-      'installGlobalScrollbarVisibility',
-    );
-    expect(main).toContain('from "./ui"');
-    expect(scrollbars).toContain("installGlobalScrollbarVisibility");
-    expect(scrollbars).toContain("uninstallGlobalScrollbarVisibility");
-  });
-
-  it("LiliaUI 字体资源随样式入口一起提供", () => {
-    const fonts = [
-      "public/fonts/noto-sans-sc-chinese-simplified-400-normal.woff2",
-      "public/fonts/noto-sans-sc-chinese-simplified-500-normal.woff2",
-      "public/fonts/noto-sans-sc-chinese-simplified-600-normal.woff2",
-      "public/fonts/noto-sans-sc-chinese-simplified-700-normal.woff2",
-    ];
-
-    for (const fontPath of fonts) {
-      expect(readFileSync(resolve(fontPath))).toBeDefined();
-    }
   });
 });
