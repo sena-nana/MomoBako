@@ -272,13 +272,14 @@ impl SidebarState {
         }
     }
 
-    /// 创建和保存都返回整棵树。成功关闭对话框并展开父级，失败把错误留在对话框里。
-    pub fn note_smart_saved(&mut self, repo_id: &str, result: Result<Vec<SidebarSmartFolder>, String>) {
+    /// 新建、保存和删除都返回整棵树。成功换上树、关闭对话框并展开父级，返回真；失败和换了仓库以后才回来的
+    /// 结果把错误留在对话框里，返回假。打开新建的、重查和退出被删的在壳层上做（`sidebar_smart_flow.rs`）。
+    pub fn note_smart_saved(&mut self, repo_id: &str, result: Result<Vec<SidebarSmartFolder>, String>) -> bool {
         self.smart_draft.busy = false;
         if self.bound_repo_id.as_deref() != Some(repo_id) {
             eprintln!("Nana 忽略过期的智能文件夹创建结果：{repo_id}");
             self.smart_draft.error = "智能文件夹结果已过期".into();
-            return;
+            return false;
         }
         match result {
             Ok(folders) => {
@@ -290,10 +291,12 @@ impl SidebarState {
                 self.smart_draft = SmartFolderDraft::default();
                 self.smart_delete_id.clear();
                 self.smart_delete_label.clear();
+                true
             }
             Err(error) => {
                 eprintln!("Nana 保存智能文件夹失败：{error}");
                 self.smart_draft.error = error;
+                false
             }
         }
     }
@@ -440,7 +443,7 @@ fn format_dates(filters: Option<&[SearchDateFilter]>) -> String {
 }
 
 /// 整数不带小数点，和 JS `String(4)` 一样写成 `4`。
-fn format_number(value: f64) -> String {
+pub(super) fn format_number(value: f64) -> String {
     if value.fract() == 0.0 && value.abs() < 1e15 { format!("{}", value as i64) } else { value.to_string() }
 }
 

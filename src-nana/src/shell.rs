@@ -65,7 +65,7 @@ pub(crate) use inspect::NativeLoad;
 pub(crate) use inspect_view::wants_preview_texture;
 pub use sidebar::{
     FolderMutation, GapMessage, SidebarEffect, SidebarFolder, SidebarMessage, SidebarPlaylist, SidebarSmartFolder,
-    SidebarTree, ShortcutId,
+    SidebarTree, ShortcutId, SmartFolderChange, SmartFolderOutcome, SmartFolderResult,
 };
 pub(crate) use sidebar::escape_layer;
 pub use workspace::{

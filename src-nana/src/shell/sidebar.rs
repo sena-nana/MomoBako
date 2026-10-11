@@ -94,6 +94,8 @@ pub enum PopoverMode {
 
 #[path = "sidebar_smart.rs"]
 mod smart;
+#[path = "sidebar_smart_flow.rs"]
+mod smart_flow;
 #[path = "sidebar_gap.rs"]
 mod gap;
 #[path = "sidebar_bind.rs"]
@@ -102,6 +104,7 @@ mod bind;
 mod popover;
 
 pub use smart::{SmartFolderDraft, SmartFolderField};
+pub use smart_flow::{SmartFolderChange, SmartFolderOutcome, SmartFolderResult, SmartResultSummary};
 pub use gap::{escape_layer, FolderDeleteMode, FolderMenu, FolderMutation, GapMessage, FOLDER_DELETE_TITLE};
 pub use popover::{backend_options, BackendOption, BackendRoute};
 
@@ -148,7 +151,8 @@ pub enum SidebarMessage {
     CloseSmartFolderDialog,
     SetSmartFolderField { field: SmartFolderField, value: String },
     SubmitSmartFolder,
-    SmartFolderSaved { repo_id: String, result: Result<Vec<SidebarSmartFolder>, String> },
+    /// 新建、编辑或删除智能文件夹的结果：成功时是整棵树和这次改的是哪个。
+    SmartFolderSaved { repo_id: String, result: Result<SmartFolderOutcome, String> },
     TogglePlaylists,
     OpenSidebarPlaylist(String),
     OpenRepositorySwitcher,
@@ -166,7 +170,7 @@ pub enum SidebarMessage {
     RepositoryAttachFinished(Result<crate::backend::services::repository::RepositorySummary, String>),
     SidebarTreeLoaded { repo_id: String, result: Result<SidebarTree, String> },
     SidebarSmartFoldersLoaded { repo_id: String, result: Result<Vec<SidebarSmartFolder>, String> },
-    SidebarSmartFolderQueried { repo_id: String, smart_folder_id: String, result: Result<super::files::VirtualQuery, String> },
+    SidebarSmartFolderQueried { repo_id: String, smart_folder_id: String, result: Result<SmartFolderResult, String> },
     SidebarPlaylistsLoaded { repo_id: String, result: Result<Vec<crate::backend::services::repository::PlaylistSummary>, String> },
     /// 文件夹对话框、智能文件夹编辑、播放、弹层夹取和 Escape。
     Gap(gap::GapMessage),
@@ -217,7 +221,8 @@ pub struct SidebarState {
     pub smart_loading: bool,
     pub smart_error: String,
     pub smart_draft: SmartFolderDraft,
-    pub smart_result_count: Option<usize>,
+    /// 最近一次智能文件夹查询的结果摘要，文件页头的标题和摘要行读它。
+    pub smart_result: Option<SmartResultSummary>,
     pub playlists: Vec<SidebarPlaylist>,
     pub playlists_expanded: bool,
     pub active_playlist_id: Option<String>,
@@ -280,7 +285,7 @@ impl Default for SidebarState {
             smart_loading: false,
             smart_error: String::new(),
             smart_draft: SmartFolderDraft::default(),
-            smart_result_count: None,
+            smart_result: None,
             playlists: Vec::new(),
             playlists_expanded: false,
             active_playlist_id: None,
@@ -561,7 +566,7 @@ impl SidebarState {
     }
 
     /// 仓库或当前智能文件夹已经变化时，旧查询不能覆盖新的结果。
-    pub fn note_smart_query(&mut self, repo_id: &str, smart_folder_id: &str, result: Result<usize, String>) -> bool {
+    pub fn note_smart_query(&mut self, repo_id: &str, smart_folder_id: &str, result: Result<SmartResultSummary, String>) -> bool {
         if self.bound_repo_id.as_deref() != Some(repo_id)
             || self.active_smart_folder_id.as_deref() != Some(smart_folder_id)
         {
@@ -570,9 +575,9 @@ impl SidebarState {
         }
         self.smart_loading = false;
         match result {
-            Ok(count) => {
+            Ok(summary) => {
                 self.smart_error.clear();
-                self.smart_result_count = Some(count);
+                self.smart_result = Some(summary);
             }
             Err(error) => {
                 eprintln!("Nana 查询智能文件夹失败：{error}");
@@ -649,7 +654,7 @@ impl SidebarState {
         self.smart_loading = false;
         self.smart_error.clear();
         self.smart_draft = SmartFolderDraft::default();
-        self.smart_result_count = None;
+        self.smart_result = None;
         self.playlists.clear();
         self.active_playlist_id = None;
         self.selected_path = None;
@@ -837,14 +842,7 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
         SidebarMessage::SubmitSmartFolder => {
             model.sidebar.submit_smart_folder(model.workspace.active_repo_id.as_deref());
         }
-        SidebarMessage::SmartFolderSaved { repo_id, result } => {
-            model.sidebar.note_smart_saved(&repo_id, result);
-            let draft = &model.sidebar.smart_draft;
-            if !draft.open && !draft.error.is_empty() {
-                let failure = format!("智能文件夹操作失败：{}", draft.error);
-                model.status.fail(super::status::FailureSource::SmartFolder, failure);
-            }
-        }
+        SidebarMessage::SmartFolderSaved { repo_id, result } => model.apply_smart_saved(&repo_id, result),
         SidebarMessage::TogglePlaylists => model.sidebar.toggle_playlists(),
         SidebarMessage::OpenSidebarPlaylist(id) => model.apply_playlist(id),
         SidebarMessage::OpenRepositorySwitcher => model.sidebar.open_switcher(),
@@ -889,13 +887,7 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
         SidebarMessage::SidebarTreeLoaded { repo_id, result } => model.sidebar.apply_tree(&repo_id, result),
         SidebarMessage::SidebarSmartFoldersLoaded { repo_id, result } => model.sidebar.apply_smart_folders(&repo_id, result),
         SidebarMessage::SidebarSmartFolderQueried { repo_id, smart_folder_id, result } => {
-            let counted = match &result {
-                Ok(query) => Ok(query.count),
-                Err(error) => Err(error.clone()),
-            };
-            if model.sidebar.note_smart_query(&repo_id, &smart_folder_id, counted) {
-                model.files.set_virtual_rows(result.map(|query| query.rows).unwrap_or_default());
-            }
+            model.apply_smart_query(&repo_id, &smart_folder_id, result);
         }
         SidebarMessage::SidebarPlaylistsLoaded { repo_id, result: Ok(playlists) } => {
             model.apply_playlist_list(&repo_id, &playlists, None);
