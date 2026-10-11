@@ -112,6 +112,8 @@ pub enum PlayerMessage {
     ToggleMembership { playlist_id: String, kind: String, extension: String, asset_id: String, is_virtual: bool, path: String },
     MembershipsLoaded { repo_id: String, result: Result<BTreeMap<String, Vec<String>>, String> },
     MembershipSaved(Result<PlaylistMembershipSnapshot, String>),
+    /// 按路径加入（目录、虚拟条目）以后读回的那张播放集。不一定是页面上点开的那张，不能当成「点开了它」。
+    PathsAdded(Result<PlaylistDetail, String>),
     Reorder { source: String, before: Option<String> },
     OpenPreview { item_id: Option<String> },
     RestoreDetail(Result<PlaylistDetail, String>),

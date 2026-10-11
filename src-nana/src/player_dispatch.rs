@@ -64,11 +64,11 @@ fn dispatch_add_paths(
     context: &RuntimeProgramContext<ShellMessage>,
     request: crate::backend::services::repository::PlaylistItemsByPathsAddRequest,
 ) {
-    let failed = |error| ShellMessage::PlaylistDetailLoaded(Err(error));
+    let failed = |error| player(PlayerMessage::PathsAdded(Err(error)));
     spawn_service(app.services.as_ref(), context, "播放集添加条目", failed, |services| {
         let interaction = services.repository_interaction.clone();
         let executor = services.executor.clone();
-        move || ShellMessage::PlaylistDetailLoaded(executor.block_on(interaction.add_playlist_items_by_paths(request)))
+        move || player(PlayerMessage::PathsAdded(executor.block_on(interaction.add_playlist_items_by_paths(request))))
     });
 }
 

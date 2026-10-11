@@ -838,6 +838,8 @@ fn acceptance_pages_use_the_player_surface() {
 
 #[path = "player_wav_tests.rs"]
 mod wav;
+#[path = "player_membership_tests.rs"]
+mod membership;
 
 /// 新建播放集默认选的播放类型：照 Vue `listRegisteredPlaylistPlayers` 按名称的 zh-CN 顺序排
 /// （拼音：视频 < 图片 < 音频），取第一项。宿主给的顺序不算数。

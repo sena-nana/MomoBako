@@ -1,11 +1,12 @@
 //! 播放列表成员、按路径加入和排序。
 //!
-//! 这些只改播放器状态并留下副作用请求，真正的读写由 `player_dispatch` 交给仓库服务。
+//! 这些只改播放器状态并留下副作用请求，真正的读写由 `player_dispatch` 交给仓库服务。成员写回以后要重读哪些
+//! 播放集由 `player_reduce.rs` 交给侧栏。
 
 use std::collections::BTreeMap;
 
 use crate::backend::services::repository::{
-    PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest, PlaylistMembershipRequest, PlaylistMembershipSnapshot,
+    PlaylistDetail, PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest, PlaylistMembershipRequest, PlaylistMembershipSnapshot,
 };
 
 use super::support::{compatible_playlist_ids, membership_can_toggle, next_membership_ids, reorder_before};
@@ -86,16 +87,37 @@ impl PlayerState {
         }
     }
 
-    pub(super) fn note_membership_saved(&mut self, result: Result<PlaylistMembershipSnapshot, String>) {
+    /// 成员写回：换上这个素材的成员。返回成员前后有出入的播放集（加入的和移出的），失败时为空。
+    pub(super) fn note_membership_saved(&mut self, result: Result<PlaylistMembershipSnapshot, String>) -> Vec<String> {
         match result {
             Ok(snapshot) => {
+                let before = self.memberships.remove(&snapshot.asset_id).unwrap_or_default();
+                let mut changed: Vec<String> = before.iter().filter(|id| !snapshot.playlist_ids.contains(id)).cloned().collect();
+                changed.extend(snapshot.playlist_ids.iter().filter(|id| !before.contains(id)).cloned());
                 self.memberships.insert(snapshot.asset_id, snapshot.playlist_ids);
+                changed
             }
             Err(error) => {
                 eprintln!("Nana 更新播放列表成员失败：{error}");
                 self.note_failure(format!("更新播放集成员失败：{error}"));
+                Vec::new()
             }
         }
+    }
+
+    /// 按路径加入的结果。返回读回的那张；失败时记进状态区，返回空。
+    pub(super) fn note_paths_added(&mut self, result: Result<PlaylistDetail, String>) -> Option<PlaylistDetail> {
+        result
+            .map_err(|error| {
+                eprintln!("Nana 按路径加入播放集失败：{error}");
+                self.note_failure(format!("加入播放集失败：{error}"));
+            })
+            .ok()
+    }
+
+    /// 页面上点开的正是这一张。
+    pub(super) fn lists(&self, playlist_id: &str) -> bool {
+        self.listed.as_ref().is_some_and(|listed| listed.playlist.playlist_id == playlist_id)
     }
 
     pub(super) fn reorder(&mut self, source: &str, before: Option<&str>, playlist_id: Option<&str>, ids: &[String], writable: bool, repo_id: Option<&str>) {

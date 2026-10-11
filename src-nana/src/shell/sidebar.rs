@@ -600,6 +600,19 @@ impl SidebarState {
         true
     }
 
+    /// 播放集成员变了以后重读绑定仓库的播放集列表（侧栏项数，读回以后播放器跟着重读成员索引）；`detail` 有值时
+    /// 再读这一张的详情。没绑仓库或仓库缺失时不读。
+    pub(crate) fn reload_playlists(&mut self, detail: Option<String>) {
+        let Some(repo_id) = self.bound_repo_id.clone().filter(|_| !self.bound_missing) else {
+            eprintln!("Nana 侧栏没有可用的仓库，不重读播放集");
+            return;
+        };
+        self.effects.push(SidebarEffect::LoadPlaylists { repo_id: repo_id.clone() });
+        if let Some(playlist_id) = detail {
+            self.effects.push(SidebarEffect::LoadPlaylistDetail { repo_id, playlist_id });
+        }
+    }
+
     pub fn apply_playlists(&mut self, workspace: &mut WorkspaceState, repo_id: &str, result: Result<Vec<SidebarPlaylist>, String>) {
         if self.bound_repo_id.as_deref() != Some(repo_id) {
             eprintln!("Nana 忽略过期的播放集列表：{repo_id}");
