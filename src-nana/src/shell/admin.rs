@@ -197,6 +197,8 @@ pub enum PluginCallOrigin {
     Download(source_download::DownloadRun),
     /// API Playground 的插件调用。
     Playground,
+    /// ASMR「抓取候选」：结果交回 ASMR 候选区，按这里记的仓库和素材认是哪个文件的。
+    AsmrLookup { repo_id: String, asset_id: String },
 }
 
 pub use super::repo_operation::OperationProgress;

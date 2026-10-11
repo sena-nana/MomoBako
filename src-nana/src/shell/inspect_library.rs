@@ -1,12 +1,16 @@
 //! 压缩包列表和 ASMR 作品信息。
 //!
 //! 列表来自已经读出的压缩包条目，不另开解压预览。
-//! 作品信息只画元数据里已有的歌词状态和收听进度，没有歌词正文就不造一段歌词。
+//! 作品信息只画元数据里已有的歌词状态和收听进度，没有歌词正文就不造一段歌词。行的顺序和文案照 Vue
+//! `library-asmr` 的元数据面板；只有 ASMR 资源库扩展开着（[`asmr_enabled`]）、条目是 ASMR 条目时才有。
 
 use std::collections::BTreeMap;
 
 use nana_ui::runtime::view::{fields, text, untrack, widget, AnyView, IntoView, Signal};
 use nana_ui::runtime::{AlignSpec, EmptyState, LabeledValue, LengthSpec, List, ListItem, RadiusTier, SemanticColorRole, SettingsCard, Stack, Text};
+use serde_json::Value;
+
+use crate::backend::services::repository::PluginManifest;
 
 use super::ShellViewModel;
 
@@ -18,9 +22,9 @@ const MODEL_VIEW: &str = "momobako.preview.model";
 const PDF_VIEW: &str = "momobako.preview.pdf";
 const OFFICE_VIEW: &str = "momobako.preview.office";
 
-const WORK_FIELDS: &[(&str, &str)] = &[
+/// 作品信息的行：键和标签，顺序照 Vue。值由 [`work_value`] 按键取（有的键有后备键），取不到的行不画。
+const WORK_ROWS: &[(&str, &str)] = &[
     ("workId", "作品 ID"),
-    ("rjCode", "作品 ID"),
     ("workTitle", "标题"),
     ("workRoot", "作品目录"),
     ("trackTitle", "音轨"),
@@ -32,17 +36,27 @@ const WORK_FIELDS: &[(&str, &str)] = &[
     ("ageRating", "年龄分级"),
     ("lyricStatus", "歌词"),
     ("asmrEntryKind", "条目类型"),
+    ("listeningStatus", "收听状态"),
+    ("lastListenedAt", "最近收听"),
     ("trackDurationMs", "音轨时长"),
     ("price", "价格"),
     ("sales", "销量"),
-    ("dlCount", "销量"),
     ("rateAverage", "评分"),
-    ("ratingAverage", "评分"),
     ("reviewCount", "评论数"),
-    ("lastListenedAt", "最近收听"),
 ];
 
 const LYRIC_BODY_KEYS: &[&str] = &["lyrics", "lyric", "lyricText", "lyricBody"];
+
+/// ASMR 资源库扩展开着没有：有启用、状态可用、声明了 `libraryExtension.libraryKind = "asmr"` 的插件。
+/// Vue 里扩展由这个插件的前端注册，停用插件以后作品信息、补全候选、作品队列和文件列表摘要都不出现。
+pub(super) fn asmr_enabled(plugins: &[PluginManifest]) -> bool {
+    plugins.iter().any(|plugin| {
+        plugin.enabled
+            && !matches!(plugin.status.as_str(), "disabled" | "unavailable" | "error")
+            && plugin.contributes.get("libraryExtension").and_then(|extension| extension.get("libraryKind")).and_then(Value::as_str)
+                == Some("asmr")
+    })
+}
 
 /// 这些键已经画进作品信息或歌词区块，自定义字段里不再重复。
 pub(super) fn claimed_metadata_keys() -> &'static [&'static str] {
@@ -56,6 +70,7 @@ pub(super) fn claimed_metadata_keys() -> &'static [&'static str] {
         "voiceActors",
         "series",
         "scenarioTags",
+        "tags",
         "releaseDate",
         "ageRating",
         "lyricStatus",
@@ -315,49 +330,21 @@ pub(super) enum LibraryRow {
     Body(String),
 }
 
-/// 作品字段、歌词状态或收听进度都画出 Vue 同名区块。
-/// 匹配到 ASMR 但没有歌词状态时写「未检测」，不补歌词正文。
+/// ASMR 条目的作品信息，有歌词正文时再加一块歌词。不是 ASMR 条目（Vue `matchAsmrEntry` 不认）时没有：
+/// Vue 的这一块是 ASMR 扩展的元数据面板，只挂在 ASMR 条目上。歌词状态没有时写「未检测」，不补歌词正文。
+/// `custom` 是按 [`super::inspect::support::display_value`] 画成文字的元数据，数组已经连成「甲，乙」。
 pub(super) fn library_sections(custom: &BTreeMap<String, String>) -> Vec<LibrarySection> {
-    let asmr = matches_asmr(custom);
-    if !asmr && !has_lyric_or_progress(custom) && !has_work_field(custom) {
+    if !matches_asmr(custom) {
         return Vec::new();
     }
-    let mut sections = Vec::new();
-    let mut rows = Vec::new();
-    let mut seen_work_id = false;
-    let mut seen_sales = false;
-    let mut seen_rate = false;
-    for (key, label) in WORK_FIELDS {
-        if (*key == "rjCode" && seen_work_id) || (*key == "dlCount" && seen_sales) || (*key == "ratingAverage" && seen_rate) {
-            continue;
-        }
-        let Some(value) = present(custom, key) else {
-            continue;
-        };
-        if *key == "workId" || *key == "rjCode" {
-            seen_work_id = true;
-        }
-        if *key == "sales" || *key == "dlCount" {
-            seen_sales = true;
-        }
-        if *key == "rateAverage" || *key == "ratingAverage" {
-            seen_rate = true;
-        }
-        let shown = work_value(key, &value);
-        if shown.is_empty() {
-            continue;
-        }
-        rows.push(LibraryRow::Value { key: (*key).to_string(), label, value: shown });
-    }
-    if asmr && present(custom, "lyricStatus").is_none() {
-        rows.push(LibraryRow::Value { key: "lyricStatus".into(), label: "歌词", value: "未检测".into() });
-    }
-    if let Some(status) = listening_line(custom) {
-        rows.push(LibraryRow::Value { key: "listeningStatus".into(), label: "收听状态", value: status });
-    }
-    if !rows.is_empty() {
-        sections.push(LibrarySection { title: "作品信息", key: "inspect-asmr-works", rows });
-    }
+    let rows = WORK_ROWS
+        .iter()
+        .filter_map(|(key, label)| {
+            let value = work_value(custom, key)?;
+            Some(LibraryRow::Value { key: (*key).to_string(), label, value })
+        })
+        .collect::<Vec<_>>();
+    let mut sections = vec![LibrarySection { title: "作品信息", key: "inspect-asmr-works", rows }];
     if let Some(body) = lyric_body(custom) {
         sections.push(LibrarySection { title: "歌词", key: "inspect-asmr-lyric", rows: vec![LibraryRow::Body(body)] });
     }
@@ -383,62 +370,52 @@ pub(super) fn matches_asmr(custom: &BTreeMap<String, String>) -> bool {
     present(custom, "libraryKind").as_deref() == Some("asmr") || present(custom, "workId").is_some() || present(custom, "rjCode").is_some()
 }
 
-fn has_work_field(custom: &BTreeMap<String, String>) -> bool {
-    WORK_FIELDS.iter().any(|(key, _)| present(custom, key).is_some()) || lyric_body(custom).is_some()
-}
-
-/// 时长、价格和计数字段按 Vue 的格式化。解析失败留空，不把原文当成数字。
-fn work_value(key: &str, value: &str) -> String {
-    match key {
-        "trackDurationMs" => format_duration(value),
-        "price" => format_measure(value, " JPY"),
-        "sales" | "dlCount" | "rateAverage" | "ratingAverage" | "reviewCount" => format_measure(value, ""),
-        _ => value.to_string(),
-    }
-}
-
-/// 有限数字才显示。整数去掉小数，并按千分位分组。
-fn format_measure(value: &str, suffix: &str) -> String {
-    let Ok(number) = value.trim().parse::<f64>() else {
-        eprintln!("Nana 作品数字不是数值：{value}");
-        return String::new();
+/// 作品信息一行的值，照 Vue 元数据面板逐键取：作品 ID 没有时用 RJ 号，标签没有时用 `tags`，销量、评分各有后备键；
+/// 歌词状态没有时是「未检测」；时长、价格和计数按 Vue 的格式化，解析不出数字时这行不画，不把原文当成数字。
+fn work_value(custom: &BTreeMap<String, String>, key: &str) -> Option<String> {
+    let value = match key {
+        "workId" => present(custom, "workId").or_else(|| present(custom, "rjCode")),
+        "scenarioTags" => present(custom, "scenarioTags").or_else(|| present(custom, "tags")),
+        "lyricStatus" => Some(present(custom, "lyricStatus").unwrap_or_else(|| "未检测".into())),
+        "listeningStatus" => listening_line(custom),
+        "lastListenedAt" => present(custom, key).map(|time| super::files::local_time::format_or(&time, &time)),
+        "trackDurationMs" => number(custom, key).and_then(format_duration),
+        "price" => number(custom, key).map(|price| format!("{} JPY", format_measure(price))),
+        "sales" => number(custom, "sales").or_else(|| number(custom, "dlCount")).map(format_measure),
+        "rateAverage" => number(custom, "rateAverage").or_else(|| number(custom, "ratingAverage")).map(format_measure),
+        "reviewCount" => number(custom, key).map(format_measure),
+        _ => present(custom, key),
     };
-    if !number.is_finite() {
-        eprintln!("Nana 作品数字无效：{value}");
-        return String::new();
-    }
-    let text = if number.fract() == 0.0 {
-        group_integer(number.round() as i64)
-    } else {
-        let raw = format!("{number}");
-        raw
-    };
-    format!("{text}{suffix}")
+    value.filter(|value| !value.is_empty())
 }
 
-fn group_integer(value: i64) -> String {
-    let negative = value < 0;
-    let digits = value.unsigned_abs().to_string();
+/// Vue `toLocaleString("zh-CN")`：整数部分按千分位分组，小数最多三位、去掉末尾的 0。
+fn format_measure(number: f64) -> String {
+    let rounded = (number * 1000.0).round() / 1000.0;
+    let fixed = format!("{:.3}", rounded.abs());
+    let (whole, fraction) = fixed.split_once('.').unwrap_or((fixed.as_str(), ""));
     let mut grouped = String::new();
-    for (index, ch) in digits.chars().rev().enumerate() {
-        if index > 0 && index % 3 == 0 {
+    for (index, ch) in whole.chars().enumerate() {
+        if index > 0 && (whole.len() - index) % 3 == 0 {
             grouped.push(',');
         }
         grouped.push(ch);
     }
-    let mut text: String = grouped.chars().rev().collect();
-    if negative {
-        text.insert(0, '-');
-    }
-    text
+    let fraction = fraction.trim_end_matches('0');
+    let sign = if rounded < 0.0 { "-" } else { "" };
+    if fraction.is_empty() { format!("{sign}{grouped}") } else { format!("{sign}{grouped}.{fraction}") }
 }
 
-fn has_lyric_or_progress(custom: &BTreeMap<String, String>) -> bool {
-    present(custom, "lyricStatus").is_some()
-        || lyric_body(custom).is_some()
-        || present(custom, "listeningStatus").is_some()
-        || present(custom, "listeningProgress").is_some()
-        || present(custom, "lastListenedAt").is_some()
+/// 数字字段：数字或数字文字（Vue `metadataNumber`）。解析不出或不是有限数时记日志、当作没有。
+fn number(custom: &BTreeMap<String, String>, key: &str) -> Option<f64> {
+    let text = present(custom, key)?;
+    match text.parse::<f64>() {
+        Ok(number) if number.is_finite() => Some(number),
+        _ => {
+            eprintln!("Nana 作品字段 {key} 不是数字：{text}");
+            None
+        }
+    }
 }
 
 fn lyric_body(custom: &BTreeMap<String, String>) -> Option<String> {
@@ -449,78 +426,127 @@ fn present(custom: &BTreeMap<String, String>, key: &str) -> Option<String> {
     custom.get(key).map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
 }
 
-fn listening_line(custom: &BTreeMap<String, String>) -> Option<String> {
-    let status = present(custom, "listeningStatus");
-    let progress = present(custom, "listeningProgress");
-    if status.is_none() && progress.is_none() {
-        return None;
-    }
-    let label = match status.as_deref() {
-        Some("unlistened") => "未收听".to_string(),
-        Some("listening") => "收听中".to_string(),
-        Some("listened") => "已听完".to_string(),
-        Some(other) => other.to_string(),
-        None => String::new(),
-    };
-    let Some(progress) = progress.filter(|value| value != "0") else {
-        return (!label.is_empty()).then_some(label);
-    };
-    if label.is_empty() {
-        Some(format!("{progress}%"))
-    } else {
-        Some(format!("{label} · {progress}%"))
+/// 收听状态的标签（Vue `listeningStatusLabel`）：认得的三种翻成中文，别的原样。
+pub(super) fn listening_label(status: &str) -> String {
+    match status {
+        "unlistened" => "未收听".into(),
+        "listening" => "收听中".into(),
+        "listened" => "已听完".into(),
+        other => other.into(),
     }
 }
 
-/// 毫秒字段画成「分:秒」。解析失败只记日志并留空，不显示原始数字冒充时长。
-fn format_duration(value: &str) -> String {
-    let Ok(ms) = value.parse::<f64>() else {
-        eprintln!("Nana 音轨时长不是数字：{value}");
-        return String::new();
-    };
-    if !ms.is_finite() || ms <= 0.0 {
-        return String::new();
+/// 「收听状态」一行：标签，进度大于 0 时再接「· N%」（四舍五入到整数，Vue `formatListeningStatus`）。
+fn listening_line(custom: &BTreeMap<String, String>) -> Option<String> {
+    let label = present(custom, "listeningStatus").map(|status| listening_label(&status)).unwrap_or_default();
+    let progress = number(custom, "listeningProgress").filter(|progress| *progress > 0.0);
+    match progress {
+        None => (!label.is_empty()).then_some(label),
+        Some(progress) if label.is_empty() => Some(format!("{}%", progress.round())),
+        Some(progress) => Some(format!("{label} · {}%", progress.round())),
+    }
+}
+
+/// 毫秒画成「分:秒」。不大于 0 时没有这行。
+fn format_duration(ms: f64) -> Option<String> {
+    if ms <= 0.0 {
+        return None;
     }
     let seconds = (ms / 1000.0).round() as u64;
-    format!("{}:{:02}", seconds / 60, seconds % 60)
+    Some(format!("{}:{:02}", seconds / 60, seconds % 60))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn asmr_match_without_lyric_status_says_undetected() {
-        let mut custom = BTreeMap::new();
-        custom.insert("libraryKind".into(), "asmr".into());
-        assert!(matches_asmr(&custom));
-        assert_eq!(library_sections(&custom).len(), 1);
-        assert!(lyric_body(&custom).is_none());
-        assert_eq!(format_measure("1200", " JPY"), "1,200 JPY");
-        assert!(format_measure("nope", "").is_empty());
+    fn asmr(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        let mut custom = BTreeMap::from([("libraryKind".to_string(), "asmr".to_string())]);
+        custom.extend(pairs.iter().map(|(key, value)| (key.to_string(), value.to_string())));
+        custom
+    }
+
+    fn rows(sections: &[LibrarySection]) -> Vec<(String, String)> {
+        sections
+            .first()
+            .map(|section| {
+                section
+                    .rows
+                    .iter()
+                    .filter_map(|row| match row {
+                        LibraryRow::Value { label, value, .. } => Some((label.to_string(), value.clone())),
+                        LibraryRow::Body(_) => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     #[test]
-    fn lyric_status_opens_the_work_section_without_inventing_lyrics() {
-        let mut custom = BTreeMap::new();
-        custom.insert("lyricStatus".into(), "local".into());
-        custom.insert("workTitle".into(), "夜曲".into());
-        custom.insert("circle".into(), "".into());
-        let sections = library_sections(&custom);
-        assert_eq!(sections.len(), 1);
+    fn asmr_match_without_lyric_status_says_undetected() {
+        let custom = asmr(&[]);
+        assert!(matches_asmr(&custom));
+        assert_eq!(rows(&library_sections(&custom)), [("歌词".to_string(), "未检测".to_string())]);
         assert!(lyric_body(&custom).is_none());
+        assert_eq!(format_measure(1200.0), "1,200");
+        assert_eq!(format_measure(1234.5678), "1,234.568");
+        assert_eq!(format_measure(4.5), "4.5");
+    }
+
+    /// 作品字段、歌词状态和收听进度都不让非 ASMR 条目长出「作品信息」：Vue 的这一块只挂在 ASMR 条目上。
+    #[test]
+    fn non_asmr_entries_have_no_work_section() {
+        let mut custom = BTreeMap::new();
+        custom.insert("lyricStatus".to_string(), "local".to_string());
+        custom.insert("workTitle".to_string(), "夜曲".to_string());
+        custom.insert("price".to_string(), "1200".to_string());
+        custom.insert("lyrics".to_string(), "第一行".to_string());
+        assert!(library_sections(&custom).is_empty());
+    }
+
+    /// 行的顺序和文案照 Vue 元数据面板；数组连成「甲，乙」以后原样显示，数字字段解析不出时这行不画。
+    #[test]
+    fn work_rows_follow_vue_order_and_formats() {
+        let custom = asmr(&[
+            ("rjCode", "RJ01234567"),
+            ("workTitle", "夜曲"),
+            ("voiceActors", "甲，乙"),
+            ("tags", "治愈"),
+            ("asmrEntryKind", "audio"),
+            ("listeningStatus", "listening"),
+            ("listeningProgress", "40.6"),
+            ("trackDurationMs", "125000"),
+            ("price", "1320"),
+            ("dlCount", "2400"),
+            ("ratingAverage", "4.56"),
+            ("reviewCount", "多"),
+        ]);
+        let shown = rows(&library_sections(&custom));
+        let expected = [
+            ("作品 ID", "RJ01234567"),
+            ("标题", "夜曲"),
+            ("声优", "甲，乙"),
+            ("标签", "治愈"),
+            ("歌词", "未检测"),
+            ("条目类型", "audio"),
+            ("收听状态", "收听中 · 41%"),
+            ("音轨时长", "2:05"),
+            ("价格", "1,320 JPY"),
+            ("销量", "2,400"),
+            ("评分", "4.56"),
+        ]
+        .map(|(label, value)| (label.to_string(), value.to_string()));
+        assert_eq!(shown, expected);
     }
 
     #[test]
     fn lyric_body_is_its_own_section_and_progress_formats() {
-        let mut custom = BTreeMap::new();
-        custom.insert("listeningStatus".into(), "listening".into());
-        custom.insert("listeningProgress".into(), "40".into());
-        custom.insert("lyrics".into(), "第一行".into());
+        let custom = asmr(&[("listeningStatus", "listening"), ("listeningProgress", "40"), ("lyrics", "第一行")]);
         assert_eq!(listening_line(&custom).as_deref(), Some("收听中 · 40%"));
         assert_eq!(library_sections(&custom).len(), 2);
-        assert_eq!(format_duration("125000"), "2:05");
-        assert!(format_duration("nope").is_empty());
+        assert_eq!(format_duration(125000.0).as_deref(), Some("2:05"));
+        assert!(format_duration(0.0).is_none());
+        assert_eq!(listening_line(&asmr(&[("listeningStatus", "unlistened"), ("listeningProgress", "0")])).as_deref(), Some("未收听"));
     }
 
     #[test]

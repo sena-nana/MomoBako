@@ -144,6 +144,7 @@ impl ApplicationState for MomoBakoApplication {
         shell.workspace.load_prefs_file(&sidebar_prefs_path());
         shell.workspace.load_last_repository_file(&last_repository_path());
         shell.files.load_display_mode_file(&display_mode_path());
+        shell.asmr.load_playlist_file(&crate::shell::asmr_playlist_path());
         shell.player.load_default_files();
         shell.admin.load_default_file();
         let system_appearance = context.system_appearance();
@@ -254,6 +255,9 @@ impl ApplicationState for MomoBakoApplication {
         sync_dispatch::dispatch_tree_sync_effects(self, context);
         files_dispatch::dispatch_files_effects(self, context);
         inspect_dispatch::dispatch_inspect_effects(self, context);
+        if self.shell.asmr.take_playlist_dirty() {
+            self.shell.asmr.save_playlist_file(&crate::shell::asmr_playlist_path());
+        }
         window_host::after_update(self, context);
         let maximized = context.geometry().maximized;
         let window_commands = self.shell.input.take_platform_commands(*id, maximized);

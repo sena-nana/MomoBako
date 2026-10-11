@@ -272,32 +272,36 @@ pub(super) fn candidate_section(signals: MetadataSignals) -> AnyView {
 }
 
 /// 导入框：来源、作品 ID 和「抓取候选」，候选 JSON 和「导入候选」，出错时多一行原因。
+/// 抓取进行中，来源、作品 ID 和抓取按钮不能动，按钮写「抓取中」（Vue `lookup.isLoading`）。
 fn import_form(signals: MetadataSignals) -> AnyView {
     let view = signals.candidates;
     let locked = move || view.with(|view| view.locked);
+    let fetching = move || view.with(|view| view.locked || view.looking_up);
     let current = view.get_untracked();
     let select = Select::new(Some(current.provider.clone()))
         .options(inspect_asmr::provider_options())
         .placeholder("ASMR Provider")
         .size(ControlSize::Small)
-        .disabled(current.locked);
+        .disabled(current.locked || current.looking_up);
     let lookup = signals.lookup_id;
     let json = signals.import_json;
+    let lookup_label = move || view.with(|view| if view.looking_up { "抓取中" } else { "抓取候选" }.to_string());
     let body = (
         widget(select)
             .prop::<Option<Arc<str>>, fields::select::value>(move || Some(Arc::from(view.with(|view| view.provider.clone()))))
-            .prop::<bool, fields::select::disabled>(locked)
+            .prop::<bool, fields::select::disabled>(fetching)
             .key("inspect-asmr-provider")
             .on_cx(|_, event: &SelectChanged, cx| {
                 cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::SetProvider(event.value.to_string())));
             }),
-        widget(TextInput::new(lookup.current()).placeholder("RJ123456").size(ControlSize::Small).disabled(current.locked))
+        widget(TextInput::new(lookup.current()).placeholder("RJ123456").size(ControlSize::Small).disabled(current.locked || current.looking_up))
             .model(lookup.signal())
-            .prop::<bool, fields::text_input::disabled>(locked)
+            .prop::<bool, fields::text_input::disabled>(fetching)
             .key("inspect-asmr-work-id")
             .on_cx(|_, event: &TextChanged, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::SetLookupId(event.value.to_string())))),
-        widget(Button::new("抓取候选").kind(ButtonKind::Ghost).disabled(current.locked))
-            .prop::<bool, fields::button::disabled>(locked)
+        widget(Button::new(untrack(&lookup_label)).kind(ButtonKind::Ghost).disabled(current.locked || current.looking_up))
+            .prop::<String, fields::button::label>(lookup_label)
+            .prop::<bool, fields::button::disabled>(fetching)
             .key("inspect-asmr-lookup")
             .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::Lookup))),
         widget(TextInput::new(json.current()).placeholder("ASMR 候选 JSON").disabled(current.locked))

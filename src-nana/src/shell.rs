@@ -28,6 +28,7 @@ mod files_view;
 mod inspect;
 mod inspect_library;
 mod inspect_asmr;
+pub(crate) use inspect_asmr::{asmr_playlist_path, AsmrMessage};
 mod inspect_view;
 mod inspect_metadata_view;
 mod inspect_search_view;

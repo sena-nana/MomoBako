@@ -119,7 +119,8 @@ impl MetadataView {
         let inspect = &model.inspect;
         let row = target_row(model);
         let custom = super::inspect_asmr::display_custom(model);
-        let library = super::inspect_library::library_sections(&custom);
+        // 作品信息是 ASMR 扩展的面板：扩展插件停用时不画，ASMR 的键照普通自定义字段列出。
+        let library = if super::inspect_asmr::asmr_entry(model, &custom) { super::inspect_library::library_sections(&custom) } else { Vec::new() };
         let claimed = !library.is_empty();
         Self {
             head: HeadView { conflict: inspect.conflict.clone(), locked: !inspect.can_edit() },
@@ -133,7 +134,7 @@ impl MetadataView {
             link: inspect.draft_link().to_string(),
             tag_draft: model.files.tag_draft.clone(),
             lookup_id: super::inspect_asmr::lookup_id_shown(model, &custom),
-            import_json: super::inspect_asmr::import_draft(model).to_string(),
+            import_json: super::inspect_asmr::import_draft(model),
         }
     }
 }

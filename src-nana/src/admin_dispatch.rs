@@ -22,7 +22,7 @@ use crate::services::NativeServices;
 use crate::shell::admin::api::{self, ApiMessage, HttpRequest};
 use crate::shell::admin::source_download::DownloadOutcome;
 use crate::shell::admin::{AdminEffect, AdminMessage, PluginCallOrigin, SourceStep};
-use crate::shell::ShellMessage;
+use crate::shell::{AsmrMessage, ShellMessage};
 use crate::task_guard::{spawn, spawn_service};
 use crate::MomoBakoApplication;
 
@@ -256,6 +256,7 @@ fn plugin_result(origin: PluginCallOrigin, method: String, result: Result<serde_
         PluginCallOrigin::Download(run) => admin(AdminMessage::DownloadFinished { run, result: result.map(DownloadOutcome::plugin) }),
         PluginCallOrigin::SourceAuth(step) => source_step(step, result),
         PluginCallOrigin::Playground => admin(AdminMessage::Api(ApiMessage::PluginFinished(result))),
+        PluginCallOrigin::AsmrLookup { repo_id, asset_id } => ShellMessage::Asmr(AsmrMessage::LookupFinished { repo_id, asset_id, result }),
     }
 }
 
