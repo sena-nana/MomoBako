@@ -498,21 +498,23 @@ impl RepositoryState {
             }
 
             let metadata = load_metadata_map(&connection, &asset.asset_id).map_err(db_error)?;
-            record_entry_access_in_connection(&connection, &request.repo_id, &entry_path)
-                .map_err(db_error)?;
             let source_payload = asset
                 .source_payload
                 .clone()
                 .or_else(|| metadata.get("sourcePayload").cloned())
                 .unwrap_or_else(|| serde_json::json!({}));
-            return self.prepare_virtual_entry_playback_source(
+            let response = self.prepare_virtual_entry_playback_source(
                 &repo,
-                request.repo_id,
-                entry_path,
+                request.repo_id.clone(),
+                entry_path.clone(),
                 source_payload,
                 &metadata,
                 emit,
-            );
+            )?;
+            // 和本地预览源一样，播放源准备好了才记访问：来源下载失败（登录失效、网络错误）不进「最近使用」。
+            record_entry_access_in_connection(&connection, &request.repo_id, &entry_path)
+                .map_err(db_error)?;
+            return Ok(response);
         }
 
         emit_entry_playback_progress(

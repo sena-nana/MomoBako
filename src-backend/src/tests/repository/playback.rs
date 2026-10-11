@@ -228,3 +228,58 @@ fn prepare_entry_playback_source_strips_legacy_entry_credentials() {
 
     fs::remove_dir_all(root).expect("test temp root should be removed");
 }
+
+/// 虚拟条目的访问时间只在播放源准备好以后才写：来源交回失败（登录失效、网络错误）时不进「最近使用」，
+/// 准备好了才写，和本地预览源的约定一致（`docs/api-design.md`）。
+#[test]
+fn prepare_entry_playback_source_records_access_only_after_the_source_is_ready() {
+    let _lock = playback_test_lock();
+    let (state, root, repo_root, _thumbnail_root) =
+        create_test_state("prepare-entry-playback-access");
+    let repo_id = create_repository_without_initial_sync(&state, &repo_root);
+    let path = "Created/access-track.mp3";
+    insert_virtual_asset(
+        &state,
+        &repo_id,
+        path,
+        "access-track.mp3",
+        "5001",
+        serde_json::json!({ "provider": "netease-cloud-music", "songId": 5001 }),
+    );
+    let accessed = |state: &RepositoryState| {
+        state
+            .load_snapshot(&repo_id)
+            .expect("snapshot should load")
+            .assets
+            .into_iter()
+            .find(|asset| asset.path == path)
+            .and_then(|asset| asset.last_accessed_at)
+    };
+    let request = || EntryPlaybackRequest {
+        repo_id: repo_id.clone(),
+        path: path.to_string(),
+    };
+
+    fn failing_hook(_: serde_json::Value) -> Result<serde_json::Value, String> {
+        Err("网易云登录已失效，请重新登录".to_string())
+    }
+    set_test_downloader_playback_hook(Some(failing_hook));
+    let error = prepare_entry_playback_source(&state, request())
+        .expect_err("source failure should fail the preparation");
+    set_test_downloader_playback_hook(None);
+    assert_eq!(error, "网易云登录已失效，请重新登录");
+    assert_eq!(accessed(&state), None, "失败的准备不记访问");
+
+    fn ready_hook(_: serde_json::Value) -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!({
+            "localPath": "C:/Mock/Temp/access-track.mp3",
+            "mediaType": "audio/mpeg"
+        }))
+    }
+    set_test_downloader_playback_hook(Some(ready_hook));
+    prepare_entry_playback_source(&state, request()).expect("source should be ready");
+    set_test_downloader_playback_hook(None);
+    assert!(accessed(&state).is_some(), "准备好以后记访问");
+
+    fs::remove_dir_all(root).expect("test temp root should be removed");
+}

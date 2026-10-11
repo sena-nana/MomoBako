@@ -396,13 +396,7 @@ impl MomoTaskRuntime {
                         snapshot.error = Some(format!("{:?}", error));
                         snapshot.updated_at = progress_timestamp();
                     });
-                    (
-                        Err(format!(
-                            "{} [{}] {:?}",
-                            protocol_id, error.route, error.evidence
-                        )),
-                        cancelled,
-                    )
+                    (Err(failure_message(&protocol_id, &error)), cancelled)
                 }
             }
         }))
@@ -735,6 +729,15 @@ fn gateway_error(
     error.error.code = code.to_string();
     error.error.recovery = Some(recovery.to_string());
     error
+}
+
+/// 任务失败时交回调用方的原因：领域操作写进证据 `message` 的原话（插件交回的原因、校验失败的说明），
+/// 界面直接拿来显示；没有原话时退回协议、路由和全部证据，调试格式只留在任务快照里。
+fn failure_message(protocol_id: &str, error: &RuntimeError) -> String {
+    match error.evidence.get("message") {
+        Some(ScalarValue::String(message)) if !message.trim().is_empty() => message.clone(),
+        _ => format!("{} [{}] {:?}", protocol_id, error.route, error.evidence),
+    }
 }
 
 fn runtime_error_is_cancelled(error: &RuntimeError) -> bool {
