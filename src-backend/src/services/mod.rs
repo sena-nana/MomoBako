@@ -1,5 +1,7 @@
 //! Backend service modules.
 
+pub mod child_process;
+pub mod external_tools;
 pub mod host_events;
 pub mod logging;
 pub mod mutsuki_host;

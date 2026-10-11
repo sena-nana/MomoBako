@@ -30,6 +30,12 @@ const requestedPluginIds = new Set(
   )),
 );
 const cargoOutputProfile = buildProfile === "dev" ? "debug" : buildProfile;
+// cargo 按 CARGO_TARGET_DIR 放产物（相对路径以仓库根为准，cargo 在那里运行），没设时是仓库根的 target；
+// 编好的库和程序要到同一处找。
+const cargoTargetRoot = process.env.CARGO_TARGET_DIR?.trim()
+  ? resolve(repoRoot, process.env.CARGO_TARGET_DIR.trim())
+  : join(repoRoot, "target");
+const cargoOutputDir = join(cargoTargetRoot, cargoOutputProfile);
 
 function cargoBuildEnvironment() {
   const environment = { ...process.env };
@@ -132,7 +138,7 @@ function nativePluginArtifact(manifest) {
     throw new Error(`native plugin is missing entry.backend.library: ${manifest.pluginId}`);
   }
   const fileName = dynamicLibraryFileName(libraryName);
-  const builtLibraryPath = join(repoRoot, "target", cargoOutputProfile, fileName);
+  const builtLibraryPath = join(cargoOutputDir, fileName);
   if (!existsSync(builtLibraryPath)) {
     throw new Error(`missing built library: ${builtLibraryPath}`);
   }
@@ -152,7 +158,7 @@ function companionNativeArtifact(pluginDir, definition) {
     throw new Error(`companion native artifact is missing package path: ${pluginDir}`);
   }
   const fileName = definition.path;
-  const builtBinaryPath = join(repoRoot, "target", cargoOutputProfile, binaryFileName(definition.binaryName));
+  const builtBinaryPath = join(cargoOutputDir, binaryFileName(definition.binaryName));
   if (!existsSync(builtBinaryPath)) {
     throw new Error(`missing built binary: ${builtBinaryPath}`);
   }
@@ -175,7 +181,7 @@ function processPluginArtifact(record) {
   if (!binaryName || !artifactPath) {
     throw new Error(`process plugin requires build.binaryName and build.artifactPath: ${record.pluginDir}`);
   }
-  const builtBinaryPath = join(repoRoot, "target", cargoOutputProfile, binaryFileName(binaryName));
+  const builtBinaryPath = join(cargoOutputDir, binaryFileName(binaryName));
   if (!existsSync(builtBinaryPath)) throw new Error(`missing built process runner: ${builtBinaryPath}`);
   return { artifactPath, builtBinaryPath };
 }

@@ -59,6 +59,8 @@ describe("MomoBako 工具链", () => {
       "tauri:dev:with-plugins": "yarn tauri:dev",
       "tauri:build": "yarn plugins:build && yarn plugins:package && tauri build --config src-tauri/tauri.external-plugins.conf.json",
       "test:backend": "cargo test -p momobako-backend --locked",
+      "nana:build": "cargo build -p momobako-nana --bin momobako-nana --profile dist --locked",
+      "nana:package": "node scripts/nana-package.ts",
       verify: "yarn typecheck:node-scripts && yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml",
     });
     expect(deps.vitepress).toBeDefined();
@@ -183,19 +185,22 @@ describe("MomoBako 工具链", () => {
     expectNoSourceResidue(ci);
   });
 
-  it("GitHub release 发布 MomoBako Windows draft bundle", () => {
+  it("GitHub release 用 nana-packager 打 Windows 包并发布草稿", () => {
     const release = read(".github/workflows/release.yml");
 
     expect(release).toContain("Publish Windows Release");
-    expect(release).toContain("corepack yarn verify");
+    expect(release).not.toContain("tauri-action");
+    expect(release).not.toContain("src-tauri");
+    expect(release).not.toContain("corepack yarn verify");
+    expect(release).toContain("corepack yarn test:backend");
     expect(release).toContain("Install external plugin dependencies");
+    expect(release).toMatch(
+      /name: Package external plugins[\s\S]+run: corepack yarn nana:build[\s\S]+run: corepack yarn nana:package /,
+    );
+    expect(release).toContain('--expect-tag "${{ steps.release_ref.outputs.tag }}"');
+    expect(release).toMatch(/gh release create \$env:RELEASE_TAG @assets --draft --title "MomoBako \$env:RELEASE_TAG"/);
     expect(release).toContain("Upload external plugin packages");
-    expect(release).toContain("projectPath: .");
-    expect(release).toContain("tauriScript: corepack yarn tauri");
-    expect(release).toContain("args: --config src-tauri/tauri.external-plugins.conf.json");
-    expect(release).toMatch(/name: Package external plugins[\s\S]+uses: tauri-apps\/tauri-action@/);
-    expect(release).toContain("releaseName: MomoBako");
-    expect(release).toContain("releaseDraft: true");
+    expect(release).toContain("path: External/Plugins/.packages/*.momoplug");
   });
 
   it("GitHub workflow 的 Rust 缓存跟随根 Cargo workspace 并按 rustc 版本分代", () => {

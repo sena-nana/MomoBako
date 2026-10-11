@@ -11,3 +11,4 @@ Issue18 的离屏证据不能替代 Windows 真窗口和系统输入服务验收
 | IME、快捷键与焦点顺序 | 待设备验证 | 中文输入、Tab/Shift+Tab、Esc、全局快捷键 |
 | UIA / AccessKit | 待设备验证 | 检查角色、名称、状态、禁用控件和高对比度主题 |
 | 离屏 Runtime/WGPU | 已接入自动化 | 运行 `cargo test -p momobako-nana --test offscreen_acceptance -- --nocapture` |
+| 发布包 | `validate` 已接入发布流程；便携版本机启动过，待干净系统验证 | 没装 VC++ 运行库的 Windows 10/11 上解压便携版和安装版布局各启动一次；安装版布局解到只读目录（例如 `Program Files`）后确认数据都在 `%APPDATA%`、`%LOCALAPPDATA%` 的 `com.momobako.desktop` 下；见 [Nana 发布包](./nana-packaging.md) |

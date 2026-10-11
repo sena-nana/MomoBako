@@ -29,7 +29,25 @@ protocols = [
   { protocol_id = "momobako.filesystem.listDirectoryPage", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
   { protocol_id = "momobako.filesystem.statEntry", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
 ]
-protocol_classes = {}
+protocol_classes = {
+  "momobako.auth.createQrSession" = "effect",
+  "momobako.auth.pollQrSession" = "effect",
+  "momobako.auth.getLoginStatus" = "effect",
+  "momobako.auth.clearLogin" = "effect",
+  "momobako.auth.migrateRepositoryCredential" = "effect",
+  "momobako.media.prepareTrackPlayback" = "effect",
+  "momobako.media.downloadTrackPackage" = "effect",
+  "momobako.media.downloadPlaylistPackage" = "effect",
+  "momobako.media.resolveLyrics" = "effect",
+  "momobako.media.clearTrackCache" = "effect",
+  "momobako.filesystem.ensureAttachable" = "effect",
+  "momobako.filesystem.prepareRepositoryRoot" = "effect",
+  "momobako.filesystem.listFiles" = "effect",
+  "momobako.filesystem.listTree" = "effect",
+  "momobako.filesystem.listDirectory" = "effect",
+  "momobako.filesystem.listDirectoryPage" = "effect",
+  "momobako.filesystem.statEntry" = "effect",
+}
 handler_bindings = [
   { binding_id = "binding:momobako.netease.source:momobako.auth.createQrSession", plugin_id = "momobako.netease.source", protocol_id = "momobako.auth.createQrSession", target_protocol_id = "momobako.auth.createQrSession", target_runner_hint = "momobako.netease.source.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
   { binding_id = "binding:momobako.netease.source:momobako.auth.pollQrSession", plugin_id = "momobako.netease.source", protocol_id = "momobako.auth.pollQrSession", target_protocol_id = "momobako.auth.pollQrSession", target_runner_hint = "momobako.netease.source.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },

@@ -17,7 +17,13 @@ protocols = [
   { protocol_id = "momobako.downloader.removeDownload", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
   { protocol_id = "momobako.downloader.getRuntimeStatus", version = "1.0.0", input_schema = {}, output_schema = {}, error_schema = {}, codec = "json", compatibility = "compatible" },
 ]
-protocol_classes = {}
+protocol_classes = {
+  "momobako.downloader.ensureRuntime" = "effect",
+  "momobako.downloader.enqueueDownload" = "effect",
+  "momobako.downloader.awaitDownload" = "effect",
+  "momobako.downloader.removeDownload" = "effect",
+  "momobako.downloader.getRuntimeStatus" = "effect",
+}
 handler_bindings = [
   { binding_id = "binding:momobako.service.downloader:momobako.downloader.ensureRuntime", plugin_id = "momobako.service.downloader", protocol_id = "momobako.downloader.ensureRuntime", target_protocol_id = "momobako.downloader.ensureRuntime", target_runner_hint = "momobako.service.downloader.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },
   { binding_id = "binding:momobako.service.downloader:momobako.downloader.enqueueDownload", plugin_id = "momobako.service.downloader", protocol_id = "momobako.downloader.enqueueDownload", target_protocol_id = "momobako.downloader.enqueueDownload", target_runner_hint = "momobako.service.downloader.runner", pool_id = "default", priority = 0, policy = "single", metadata = {} },

@@ -21,3 +21,12 @@ exclude = [
   "External/Plugins/example/backend-rust",
   "External/Plugins/template/backend-rust",
 ]
+
+# 发布包用的配置，照 NanaUI 打包合同的 dist：在 release 上开 fat LTO、单代码生成单元、去掉符号。
+# 和 NanaUI 不同的是保留 panic = "unwind"：宿主的任务守卫和缩略图解码要在任务里接住 panic、按失败交回，
+# 改成 abort 时一次 panic 就会结束整个进程。插件照旧用 release 编。
+[profile.dist]
+inherits = "release"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"

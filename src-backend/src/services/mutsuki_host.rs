@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
@@ -24,6 +24,7 @@ use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
+use crate::services::child_process;
 use crate::services::mutsuki_runner::MomoTaskRuntime;
 use crate::services::plugin_events;
 use crate::services::repository::{
@@ -323,7 +324,7 @@ fn spawn_process_plugin_session(
     runtime_dir: PathBuf,
     runtime: Value,
 ) -> Result<ProcessPluginSession, String> {
-    let mut child = Command::new(&executable)
+    let mut child = child_process::command(&executable)
         .current_dir(runtime_dir)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())

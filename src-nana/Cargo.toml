@@ -17,7 +17,8 @@ zip = { version = "8.6", default-features = false, features = ["deflate"] }
 unarc-rs = "0.6.1"
 momobako-backend = { path = "../src-backend" }
 # view-macro：结构块容器的 `css!` 和 `#[derive(Store)]`，绑定式视图要用。
-nana-ui = { git = "https://github.com/sena-nana/NanaUI.git", rev = "1d65284f950a6a1b66c93aa2d47b838bd2aac28f", features = ["hosted", "bundled-fonts", "components", "icons-tabler", "view-macro"] }
+# packaged-resources：启动时读发布包的 manifest，并回答 `nana-packager validate --run` 的自检。
+nana-ui = { git = "https://github.com/sena-nana/NanaUI.git", rev = "1d65284f950a6a1b66c93aa2d47b838bd2aac28f", features = ["hosted", "bundled-fonts", "components", "icons-tabler", "view-macro", "packaged-resources"] }
 nana-ui-core = { git = "https://github.com/sena-nana/NanaUI.git", rev = "1d65284f950a6a1b66c93aa2d47b838bd2aac28f" }
 nana-ui-platform = { git = "https://github.com/sena-nana/NanaUI.git", rev = "1d65284f950a6a1b66c93aa2d47b838bd2aac28f", features = ["clipboard"] }
 
@@ -29,6 +30,10 @@ tray-icon = { version = "0.21.3", default-features = false }
 raw-window-handle = "0.6.2"
 # 系统媒体传输控件（测试构建不调用注册函数）、Media Foundation 视频解码和 ShellExecuteW 外部打开。
 windows = { version = "0.62", features = ["Foundation", "Media", "Storage_Streams", "Win32_Foundation", "Win32_System_Com", "Win32_System_WinRT", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging", "Win32_Media_MediaFoundation"] }
+
+[build-dependencies]
+# 把图标和版本信息编进 Windows 可执行文件，见 build.rs。
+embed-resource = "3.0.11"
 
 [dev-dependencies]
 nana-ui-devtools = { git = "https://github.com/sena-nana/NanaUI.git", rev = "1d65284f950a6a1b66c93aa2d47b838bd2aac28f", features = ["runtime-agent"] }

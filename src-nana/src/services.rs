@@ -34,13 +34,15 @@ pub struct NativeServices {
 }
 
 impl NativeServices {
-    /// 启动一次领域 Runtime，并将所有页面 ViewModel 绑定到同一实例。
+    /// 启动一次领域 Runtime，并将所有页面 ViewModel 绑定到同一实例。服务目录按布局取（`app_paths.rs`）；
+    /// 日志器起来以后接上随附插件和插件宿主（`plugin_host.rs`）。
     pub fn start() -> Result<Self, String> {
         let executor = Arc::new(tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
             .map_err(|error| format!("领域异步执行器启动失败：{error}"))?);
-        let runtime = RepositoryRuntime::start()?;
+        let locations = crate::app_paths::current();
+        let runtime = RepositoryRuntime::start_at(locations.service_root.clone())?;
         let (sink, receiver) = crate::backend::services::host_events::host_event_channel();
         if let Err(error) = runtime.set_event_sink(Arc::clone(&sink)) {
             eprintln!("Nana 资源库结构事件绑定失败：{error}");
@@ -54,6 +56,7 @@ impl NativeServices {
             Err(error) => eprintln!("Nana 应用日志器启动失败：{error}"),
         }
         let task_runtime = Arc::new(MomoTaskRuntime::new(runtime.clone()));
+        crate::plugin_host::start(locations, &runtime, &task_runtime);
         Ok(Self {
             executor,
             repository_query: RepositoryQueryViewModel::new(runtime.clone()),

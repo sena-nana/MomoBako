@@ -6,7 +6,7 @@
 - 每个插件一个独立工程，产出独立的 `.momoplug`；Rust 插件都是仓库根 Cargo workspace 的成员，共用根 `Cargo.lock` 与 `target/`
 - 新建 Rust 插件要把目录加进根 `Cargo.toml` 的 `workspace.members`，插件目录里不放 `Cargo.lock`；`template/backend-rust/` 与 `example/backend-rust/` 是示例，不在 workspace 里
 - `External/Plugins/` 自带插件开发所需工具链与打包脚本
-- `yarn tauri:dev` 每次都会完整构建、打包并暂存插件；主应用默认构建、`tauri build` 和 `verify` 不隐式编译插件，也不要求已有插件包；`.packages/*.momoplug` 只经 `src-tauri/tauri.external-plugins.conf.json` 由 `yarn tauri:build`、`yarn tauri:dev` 和发布流程带进安装包或开发窗口的资源目录
+- `yarn tauri:dev` 每次都会完整构建、打包并暂存插件；主应用默认构建、`tauri build` 和 `verify` 不隐式编译插件，也不要求已有插件包；`.packages/*.momoplug` 只经 `src-tauri/tauri.external-plugins.conf.json` 由 `yarn tauri:build`、`yarn tauri:dev` 带进 Tauri 安装包或开发窗口的资源目录；发布流程由 `yarn nana:package` 放进 Nana 发布包的 `runtime/plugins`
 - 插件运行时目录固定为 `<serviceRoot>/plugins`
 - 默认开发 staging 目录为 `src-tauri/.service-data/plugins`
 - `<serviceRoot>/plugins` 只保存 `.momoplug` 文件，不做持久解压安装

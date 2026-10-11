@@ -106,7 +106,7 @@ pub(super) fn export_tar_archive(
         return Err("tar export does not support encryption; use zip or 7z".to_string());
     }
 
-    let mut command = Command::new("tar");
+    let mut command = child_process::command("tar");
     command
         .current_dir(repo_root)
         .arg(if options.compression == "none" {
@@ -127,7 +127,7 @@ pub(super) fn run_7z_archive(
     output_path: &Path,
     options: &RepositoryArchiveExportOptions,
 ) -> Result<(), String> {
-    let mut command = Command::new(binary);
+    let mut command = child_process::command(binary);
     command
         .current_dir(repo_root)
         .arg("a")
@@ -164,7 +164,7 @@ pub(super) fn run_powershell_compress_archive(
         escape_powershell_single_quoted_path(output_path),
         powershell_compression_level(compression),
     );
-    let mut command = Command::new("powershell");
+    let mut command = child_process::command("powershell");
     command.arg("-NoProfile").arg("-Command").arg(script);
     run_command(command, "zip export")
 }
@@ -222,7 +222,7 @@ pub(super) struct GitExportResult {
 }
 
 pub(super) fn has_git_changes(repo_root: &Path) -> Result<bool, String> {
-    let output = Command::new("git")
+    let output = child_process::command("git")
         .current_dir(repo_root)
         .arg("status")
         .arg("--porcelain")
@@ -235,7 +235,7 @@ pub(super) fn has_git_changes(repo_root: &Path) -> Result<bool, String> {
 }
 
 pub(super) fn current_git_branch(repo_root: &Path) -> Result<String, String> {
-    let output = Command::new("git")
+    let output = child_process::command("git")
         .current_dir(repo_root)
         .arg("branch")
         .arg("--show-current")
@@ -253,7 +253,7 @@ pub(super) fn current_git_branch(repo_root: &Path) -> Result<String, String> {
 }
 
 pub(super) fn run_git(repo_root: &Path, args: &[&str]) -> Result<(), String> {
-    let mut command = Command::new("git");
+    let mut command = child_process::command("git");
     command.current_dir(repo_root).args(args);
     run_command(command, &format!("git {}", args.join(" ")))
 }
@@ -261,7 +261,7 @@ pub(super) fn run_git(repo_root: &Path, args: &[&str]) -> Result<(), String> {
 pub(super) fn find_7z_binary() -> Option<&'static str> {
     ["7z", "7zz", "7za"]
         .into_iter()
-        .find(|binary| Command::new(binary).arg("--help").output().is_ok())
+        .find(|binary| child_process::command(binary).arg("--help").output().is_ok())
 }
 
 pub(super) fn compression_flag(value: &str) -> &'static str {

@@ -2,7 +2,7 @@ Add-Type -AssemblyName System.Drawing
 
 $ErrorActionPreference = "Stop"
 
-$iconsDir = Join-Path $PSScriptRoot "..\src-tauri\icons"
+$iconsDir = Join-Path $PSScriptRoot "..\src-nana\icons"
 if (-not (Test-Path $iconsDir)) {
     throw "Icons directory not found: $iconsDir"
 }

@@ -54,15 +54,10 @@ impl SettingsStore {
     }
 }
 
-/// 返回当前宿主的稳定配置路径，不依赖 Tauri 或窗口对象。
+/// 应用设置文件的位置：发布包在应用路径的 config 下，开发时照旧在 `%LOCALAPPDATA%\MomoBako`，见 `app_paths.rs`。
+/// 侧栏、展示方式、圆角、播放和上次资源库这些界面偏好都放在它旁边。
 pub fn default_path() -> PathBuf {
-    let root = std::env::var_os("LOCALAPPDATA")
-        .or_else(|| std::env::var_os("APPDATA"))
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-        });
-    root.join("MomoBako").join("settings.json")
+    crate::app_paths::current().settings_dir.join("settings.json")
 }
 
 impl Default for ApplicationSettings {

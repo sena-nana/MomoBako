@@ -1,5 +1,6 @@
 //! Repository runtime facade and runtime-layer composition.
 
+pub mod bundled_plugins;
 mod executor;
 pub(crate) mod external_api;
 pub(crate) mod preview_server;

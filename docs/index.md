@@ -15,6 +15,7 @@ MomoBako 是一个桌面资源库工作台，面向本地素材管理、文件�
 - [Nana 离屏验收证据](./nana-offscreen-evidence.md)：离屏验收的命令、场景和证据文件，`scene_shots` 按场景出图，以及实况视觉和点击测试。
 - [Nana 与 Vue 对照](./nana-vue-parity.md)：对照方法、全局取舍、没照抄的 Vue 缺陷、已知差异和 NanaUI 缺口。
 - [Nana 设备矩阵](./nana-device-matrix.md)：离屏验收替代不了的设备验收项：真窗口、拖放和文件对话框、剪贴板和外部打开、托盘、IME、UIA/AccessKit。
+- [Nana 发布包](./nana-packaging.md)：用 `nana-packager` 打的两个 zip、包里的插件和外部程序、数据目录、本地打包和发布流程。
 
 ## 本地开发
 

@@ -18,6 +18,8 @@ use std::{
 };
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 
+use crate::services::child_process;
+
 mod action;
 mod api_design;
 mod asset_mutation;
@@ -81,12 +83,13 @@ pub(crate) use self::playback::download_playlist_with_progress;
 pub(crate) use self::playback::download_playlist_with_progress_cancellable;
 pub(crate) use self::plugin::extract_zip_plugin;
 pub(crate) use self::plugin::plugin_data_dir;
+pub(crate) use self::plugin::runtime_plugins_dir;
 use self::plugin::{
     apply_plugin_settings, broken_plugin_manifest, ensure_plugin_data_dir,
     ensure_repository_backend_runtime_available, is_source_plugin, load_plugin_config_values,
     load_plugin_settings, migrate_builtin_plugin_data_dirs, parse_plugin_manifest_with_source,
     plugin_legacy_ids, read_plugin_manifest_from_archive, resolve_plugin_manifest_dependencies,
-    runtime_plugins_dir, shutdown_helper_state_dir,
+    shutdown_helper_state_dir,
 };
 #[cfg(test)]
 use self::plugin::{is_repository_backend_plugin, parse_plugin_manifest};

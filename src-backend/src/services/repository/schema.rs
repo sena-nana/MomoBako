@@ -1,7 +1,5 @@
 //! Repository persistence constants and SQL schema.
 
-use super::*;
-
 pub(super) const REGISTRY_FILE_NAME: &str = "repositories.db";
 pub(super) const REPO_META_DIR: &str = ".momo";
 pub(super) const LEGACY_REPO_META_DIR: &str = ".meta";
@@ -14,7 +12,6 @@ pub(super) const THUMBNAIL_SIZE: u32 = 256;
 pub(super) const MAX_REMOTE_THUMBNAIL_BYTES: u64 = 10 * 1024 * 1024;
 pub(super) const PLUGIN_HOOK_EXECUTIONS_FILE_NAME: &str = "plugin-hook-executions.jsonl";
 
-pub(super) static FFMPEG_READY: OnceLock<Result<(), String>> = OnceLock::new();
 pub(super) const REGISTRY_SCHEMA_SQL: &str = r#"
 CREATE TABLE IF NOT EXISTS repositories (
   repo_id TEXT PRIMARY KEY,

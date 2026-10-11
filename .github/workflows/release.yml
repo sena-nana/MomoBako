@@ -24,9 +24,11 @@ env:
 
 jobs:
   publish-windows:
-    name: Verify and publish Windows bundle
+    name: Package and publish Windows release
     runs-on: windows-latest
-    timeout-minutes: 60
+    # dist 配置开了 fat LTO、单代码生成单元，本机 16 核冷编译主程序 35 分钟；加上插件发布构建和 nana-packager
+    # 冷编译，4 核的托管机比原来的 Tauri 打包慢得多。
+    timeout-minutes: 180
 
     steps:
       - name: Resolve ref
@@ -78,8 +80,8 @@ jobs:
         working-directory: External/Plugins
         run: corepack yarn install --immutable
 
-      - name: Verify MomoBako
-        run: corepack yarn verify
+      - name: Test backend
+        run: corepack yarn test:backend
 
       - name: Build external plugins
         working-directory: External/Plugins
@@ -89,19 +91,36 @@ jobs:
         working-directory: External/Plugins
         run: corepack yarn package
 
-      - name: Build and publish Windows bundle
-        uses: tauri-apps/tauri-action@v1
+      - name: Build MomoBako
+        run: corepack yarn nana:build
+
+      # nana-packager 按 src-nana/Cargo.toml 固定的 NanaUI 修订装进 target/nana-packager；打安装版布局和便携版，
+      # 各自 validate，便携版的 zip 解开后再跑 validate --run --tamper-suite。
+      - name: Package and validate MomoBako
+        run: corepack yarn nana:package --out "${{ runner.temp }}/nana-package" --expect-tag "${{ steps.release_ref.outputs.tag }}"
+
+      - name: Publish draft release
+        shell: pwsh
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: .
-          tauriScript: corepack yarn tauri
-          # 外置插件包经覆盖配置作为安装包资源带上，依赖前面的打包步骤。
-          args: --config src-tauri/tauri.external-plugins.conf.json
-          tagName: ${{ steps.release_ref.outputs.tag }}
-          releaseName: MomoBako ${{ steps.release_ref.outputs.tag }}
-          releaseDraft: true
-          generateReleaseNotes: true
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release_ref.outputs.tag }}
+          PACKAGE_DIR: ${{ runner.temp }}/nana-package
+        run: |
+          $assets = @(Get-ChildItem -LiteralPath $env:PACKAGE_DIR -Filter "MomoBako_*.zip" | ForEach-Object { $_.FullName })
+          if ($assets.Count -ne 2) {
+            throw "Expected the installer and portable archives, found $($assets.Count)."
+          }
+          $notes = "Windows x64。MomoBako_*_portable.zip 是便携版，数据在解压目录的 data 下；另一个 zip 解压到任意位置运行，数据在 %APPDATA%\com.momobako.desktop。"
+          gh release view $env:RELEASE_TAG *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $env:RELEASE_TAG @assets --clobber
+          } else {
+            $target = git rev-parse HEAD
+            gh release create $env:RELEASE_TAG @assets --draft --title "MomoBako $env:RELEASE_TAG" --notes $notes --generate-notes --target $target
+          }
+          if ($LASTEXITCODE -ne 0) {
+            throw "Publishing the draft release failed."
+          }
 
       - name: Upload external plugin packages
         uses: actions/upload-artifact@v4

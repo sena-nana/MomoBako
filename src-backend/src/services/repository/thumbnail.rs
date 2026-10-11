@@ -1,6 +1,7 @@
 //! Thumbnail, preview token, hashing, and palette utilities.
 
 use super::*;
+use crate::services::external_tools;
 
 pub(super) fn generate_thumbnail_for_file(
     repo: &RepositoryRecord,
@@ -363,9 +364,9 @@ pub(super) fn generate_video_thumbnail(
     source_path: &Path,
     thumbnail_path: &Path,
 ) -> Result<(), String> {
-    ensure_ffmpeg_ready()?;
+    external_tools::ensure_ffmpeg_ready()?;
 
-    let status = Command::new(ffmpeg_sidecar::paths::ffmpeg_path())
+    let status = child_process::command(external_tools::ffmpeg_path())
         .args(video_thumbnail_ffmpeg_args(source_path, thumbnail_path))
         .status()
         .map_err(|error| format!("ffmpeg unavailable: {error}"))?;
@@ -381,13 +382,13 @@ pub(super) fn generate_audio_thumbnail(
     source_path: &Path,
     thumbnail_path: &Path,
 ) -> Result<bool, String> {
-    ensure_ffmpeg_ready()?;
+    external_tools::ensure_ffmpeg_ready()?;
 
     if !audio_has_cover_stream(source_path)? {
         return Ok(false);
     }
 
-    let status = Command::new(ffmpeg_sidecar::paths::ffmpeg_path())
+    let status = child_process::command(external_tools::ffmpeg_path())
         .args(audio_thumbnail_ffmpeg_args(source_path, thumbnail_path))
         .status()
         .map_err(|error| format!("ffmpeg unavailable: {error}"))?;
@@ -400,7 +401,7 @@ pub(super) fn generate_audio_thumbnail(
 }
 
 pub(super) fn audio_has_cover_stream(source_path: &Path) -> Result<bool, String> {
-    let output = match Command::new(ffmpeg_sidecar::ffprobe::ffprobe_path())
+    let output = match child_process::command(external_tools::ffprobe_path())
         .args(audio_cover_probe_args(source_path))
         .output()
     {
@@ -483,15 +484,6 @@ pub(super) fn audio_cover_probe_args(source_path: &Path) -> Vec<OsString> {
         "json".into(),
         source_path.as_os_str().to_os_string(),
     ]
-}
-
-pub(super) fn ensure_ffmpeg_ready() -> Result<(), String> {
-    FFMPEG_READY
-        .get_or_init(|| {
-            ffmpeg_sidecar::download::auto_download()
-                .map_err(|error| format!("ffmpeg setup error: {error}"))
-        })
-        .clone()
 }
 
 pub(super) fn is_image_extension(extension: &str) -> bool {
