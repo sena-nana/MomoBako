@@ -7,9 +7,13 @@
 //! 视图只建一次，只读插件管理面板的信号：仓库行按仓库 id 做键，按钮的禁用、文案和二维码都是绑定，
 //! 处理器只带插件和仓库 id，会变的目标仓库在点下去时现读信号。
 
-use nana_ui::runtime::view::{fields, widget, AnyView, FieldWrite, IntoView, Item, Signal, Store, StoreList, StorePath};
+use std::sync::Arc;
+
+use nana_ui::runtime::view::{fields, widget, AnyView, FieldWrite, IntoView, Item, Signal, Store, StoreList, StorePath, StyledComponent};
 use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, QrCode, Stack};
-use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
+use nana_ui_core::{
+    BackgroundImage, BackgroundImageFit, BackgroundPosition, BackgroundRepeat, ImageSampling, RadiusTier, SemanticColorRole as Role,
+};
 
 use super::super::{ShellMessage, ShellViewModel};
 use super::bind::{row_text, ActionDisabled};
@@ -38,8 +42,10 @@ pub(crate) struct SessionView {
     pub requires_cache: bool,
     pub cache_button: &'static str,
     pub cache_path: String,
-    /// 二维码的扫码地址；会话只有图片时为 `None`，不画。
+    /// 二维码的扫码地址：有就重新编码画出来。
     pub qr_url: Option<String>,
+    /// 会话里的二维码图片（`data:image/…` 的 data URL）：没有扫码地址时照 Vue 直接画这张图。
+    pub qr_image: Option<String>,
     pub can_poll: bool,
     /// 「刷新二维码」重新登录的仓库。
     pub target_repo_id: Option<String>,
@@ -80,6 +86,7 @@ impl SourceAuthView {
             cache_button: if state.cache_path.is_empty() { "选择缓存目录" } else { "重新选择缓存目录" },
             cache_path: state.cache_path.clone(),
             qr_url: qr_url(session),
+            qr_image: qr_image(session),
             can_poll: state.can_poll(requires_cache),
             target_repo_id: state.target_repo_id.clone(),
         });
@@ -94,16 +101,23 @@ impl SourceAuthView {
     }
 }
 
-/// 会话里的扫码地址。Vue 画会话里的二维码图片；Nana 用同一会话的扫码地址重新编码，内容一致。
-/// 会话只有图片没有地址时不画，并记日志。
+/// 会话里的扫码地址。Vue 画会话里的二维码图片；Nana 有地址时用它重新编码，内容一致、边缘清楚。
 fn qr_url(session: &serde_json::Value) -> Option<String> {
-    let url = ["qrUrl", "qrurl"]
+    ["qrUrl", "qrurl"]
         .into_iter()
-        .find_map(|key| session.get(key).and_then(|item| item.as_str()).map(str::trim).filter(|text| !text.is_empty() && !text.starts_with("data:")));
-    if url.is_none() && session.get("qrImage").or_else(|| session.get("qrimg")).is_some_and(|item| !item.is_null()) {
-        eprintln!("Nana 扫码会话只有二维码图片，没有扫码地址，无法原生绘制");
+        .find_map(|key| session.get(key).and_then(|item| item.as_str()).map(str::trim).filter(|text| !text.is_empty() && !text.starts_with("data:")))
+        .map(str::to_string)
+}
+
+/// 会话里的二维码图片（Vue `qrImage ?? qrimg`）。只认 `data:image/` 开头的 data URL：网址要联网取，宿主不取。
+/// 有图片却画不了（不是 data URL）、也没有扫码地址时记日志。
+fn qr_image(session: &serde_json::Value) -> Option<String> {
+    let image = ["qrImage", "qrimg"].into_iter().find_map(|key| session.get(key).and_then(|item| item.as_str()).map(str::trim));
+    let data = image.filter(|text| text.starts_with("data:image/")).map(str::to_string);
+    if data.is_none() && image.is_some_and(|text| !text.is_empty()) && qr_url(session).is_none() {
+        eprintln!("Nana 扫码会话没有扫码地址，二维码图片也不是 data URL，画不出二维码");
     }
-    url.map(str::to_string)
+    data
 }
 
 /// 整个账号与仓库区，竖排间距 12。`plugin_id` 是展开了设置的这张卡片的插件。
@@ -223,16 +237,33 @@ fn session_flow(plugin_id: &str, source: Signal<Option<SourceAuthView>>) -> AnyV
         .visible(session_value(source, |session| !session.cache_path.is_empty()))
         .key(format!("admin-source-cache-path-{pid}"));
     let placeholder = QrCode::from_modules(vec![false], 1, QR_SIZE).map(|code| code.label("扫码登录二维码"));
+    // 二维码没有自己的显隐，套一层：有扫码地址时才显示（只有图片时画下面的图）。
     let qr = match placeholder {
-        Ok(code) => widget(code).prop::<Option<String>, QrPayload>(session_value(source, |session| session.qr_url.clone())).key("admin-source-qr").into_any(),
+        Ok(code) => widget(Stack::row(0.0).grow(0.0).shrink(0.0))
+            .visible(session_value(source, |session| session.qr_url.is_some()))
+            .children((widget(code).prop::<Option<String>, QrPayload>(session_value(source, |session| session.qr_url.clone())).key("admin-source-qr"),))
+            .key("admin-source-qr-frame")
+            .into_any(),
         Err(error) => {
             eprintln!("Nana 建不出二维码占位：{error}");
             ().into_any()
         }
     };
+    // 没有扫码地址时照 Vue `.source-auth-settings__qr` 画会话里的二维码图片：180 见方、白底、`--radius-sm`。
+    let frame = Stack::column(0.0)
+        .width(LengthSpec::Px(QR_SIZE))
+        .height(LengthSpec::Px(QR_SIZE))
+        .grow(0.0)
+        .shrink(0.0)
+        .radius(RadiusTier::Sm)
+        .with_layout(|layout| layout.background = Some([1.0, 1.0, 1.0, 1.0]));
+    let image = widget(frame)
+        .prop::<Option<String>, QrImage>(session_value(source, |session| session.qr_image.clone()))
+        .visible(session_value(source, |session| session.qr_url.is_none() && session.qr_image.is_some()))
+        .key("admin-source-qr-image");
     let qr_row = widget(row(0.0).width(LengthSpec::Fill).justify(nana_ui::runtime::JustifySpec::Center))
-        .visible(session_value(source, |session| session.qr_url.is_some()))
-        .children((qr,));
+        .visible(session_value(source, |session| session.qr_url.is_some() || session.qr_image.is_some()))
+        .children((qr, image));
     let refresh_id = plugin_id.to_string();
     let poll_id = plugin_id.to_string();
     let poll_icon = move || busy().then_some(icons::LOADER_CIRCLE);
@@ -303,3 +334,35 @@ impl FieldWrite<QrCode, Option<String>> for QrPayload {
         QrCode::encode(url, target.size).map(|code| code.modules != target.modules || code.width != target.width).unwrap_or(false)
     }
 }
+
+/// 二维码图片：会话里的 data URL 铺满 180 见方的框（`content_image`），换了图片原地换掉。
+pub(crate) struct QrImage;
+
+impl FieldWrite<Stack, Option<String>> for QrImage {
+    const FIELD: &'static str = "Stack.style.layout.paint.content_image";
+
+    fn write(target: &mut Stack, url: Option<String>) {
+        let style = <Stack as StyledComponent>::node_style_mut(target);
+        Arc::make_mut(&mut style.layout).paint.content_image = url.map(|url| BackgroundImage::Url {
+            url,
+            fit: BackgroundImageFit::Length,
+            size_width: Some(LengthSpec::Percent(100.0)),
+            size_height: Some(LengthSpec::Percent(100.0)),
+            position: BackgroundPosition::default(),
+            repeat: BackgroundRepeat::NoRepeat,
+            sampling: ImageSampling::Resample,
+        });
+    }
+
+    fn differs(target: &Stack, url: &Option<String>) -> bool {
+        let current = match &<Stack as StyledComponent>::node_style(target).layout.paint.content_image {
+            Some(BackgroundImage::Url { url, .. }) => Some(url.as_str()),
+            _ => None,
+        };
+        current != url.as_deref()
+    }
+}
+
+#[cfg(test)]
+#[path = "source_auth_page_tests.rs"]
+mod tests;
