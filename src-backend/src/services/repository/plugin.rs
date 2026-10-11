@@ -943,7 +943,7 @@ pub(super) fn shutdown_helper_state_dir(plugin_data_dir: &Path) -> Result<(), St
                 "taskkill",
                 pid,
                 &state_dir,
-                Command::new("taskkill")
+                child_process::command("taskkill")
                     .args(["/PID", &pid.to_string(), "/T", "/F"])
                     .status(),
             );
@@ -954,7 +954,7 @@ pub(super) fn shutdown_helper_state_dir(plugin_data_dir: &Path) -> Result<(), St
                 "kill",
                 pid,
                 &state_dir,
-                Command::new("kill")
+                child_process::command("kill")
                     .args(["-TERM", &pid.to_string()])
                     .status(),
             );

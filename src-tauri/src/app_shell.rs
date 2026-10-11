@@ -2,7 +2,10 @@
 
 use crate::services::host_events::{HostEvent, HostEventSink};
 use crate::services::logging::{init_app_logger, write_log};
-use crate::services::{mutsuki_host, mutsuki_runner::MomoTaskRuntime, runtime::RepositoryRuntime};
+use crate::services::{
+    mutsuki_host, mutsuki_runner::MomoTaskRuntime, runtime::bundled_plugins,
+    runtime::RepositoryRuntime,
+};
 use crate::{
     services::repository::{SystemLogLocationInput, SystemLogWriteRequest},
     viewmodels::{
@@ -12,7 +15,7 @@ use crate::{
     },
     window_state,
 };
-use std::{collections::HashSet, fs, path::Path, sync::Arc};
+use std::{path::Path, sync::Arc};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -130,34 +133,8 @@ fn stage_bundled_plugins(app: &AppHandle, service_root: &Path) -> Result<(), Str
     if !source_root.is_dir() {
         return Ok(());
     }
-    let target_root = service_root.join("plugins").join("builtin");
-    fs::create_dir_all(&target_root).map_err(|error| error.to_string())?;
-    let mut bundled_names = HashSet::new();
-    for entry in fs::read_dir(&source_root).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        let source_path = entry.path();
-        if source_path.extension().and_then(|value| value.to_str()) != Some("momoplug") {
-            continue;
-        }
-        let file_name = entry.file_name();
-        bundled_names.insert(file_name.clone());
-        let target_path = target_root.join(&file_name);
-        let temporary_path = target_root.join(format!("{}.new", file_name.to_string_lossy()));
-        fs::copy(&source_path, &temporary_path).map_err(|error| error.to_string())?;
-        if target_path.exists() {
-            fs::remove_file(&target_path).map_err(|error| error.to_string())?;
-        }
-        fs::rename(&temporary_path, &target_path).map_err(|error| error.to_string())?;
-    }
-    for entry in fs::read_dir(&target_root).map_err(|error| error.to_string())? {
-        let entry = entry.map_err(|error| error.to_string())?;
-        if entry.path().extension().and_then(|value| value.to_str()) == Some("momoplug")
-            && !bundled_names.contains(&entry.file_name())
-        {
-            fs::remove_file(entry.path()).map_err(|error| error.to_string())?;
-        }
-    }
-    Ok(())
+    let packages = bundled_plugins::list_plugin_packages(&source_root)?;
+    bundled_plugins::sync_bundled_plugins(&packages, service_root).map(|_| ())
 }
 
 /// Reuses the existing asset-scope behavior for repository thumbnail roots.
