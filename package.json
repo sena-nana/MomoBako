@@ -20,6 +20,8 @@
     "plugins:stage:dev": "node scripts/stage-external-plugins.mjs",
     "tauri:dev:with-plugins": "yarn tauri:dev",
     "tauri:build": "yarn plugins:build && yarn plugins:package && tauri build --config src-tauri/tauri.external-plugins.conf.json",
+    "nana:build": "cargo build -p momobako-nana --bin momobako-nana --profile dist --locked",
+    "nana:package": "node scripts/nana-package.ts",
     "icons:generate": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-icon.ps1",
     "icons:tauri": "yarn tauri icon src-nana/icons/icon-source.png --output src-nana/icons",
     "typecheck:node-scripts": "tsc --project tsconfig.node-scripts.json",

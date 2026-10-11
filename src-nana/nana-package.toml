@@ -1,0 +1,27 @@
+# MomoBako 的 NanaUI 打包配置，nana-packager 读它（合同见 NanaUI 的 docs/reference/packaging.md）。
+#
+# 这一份是安装版布局（backend = "installer"）。`yarn nana:package`（scripts/nana-package.ts）以它为底生成两份配置：
+# - 每个随附插件（External/Plugins/.packages 下的 .momoplug）加一条 [[runtime.plugins]]，放进 runtime/plugins；
+#   所以这里不写 runtime.plugins；
+# - 便携版只把 backend 换成 "portable"，数据落到 <根>/data。
+# 生成的配置不在这个目录，这里的相对路径（source、root 等）由脚本换成以本目录为基准的绝对路径，路径用正斜杠。
+#
+# [application] 和 [executable] 必须和二进制里的身份一致（src-nana/build.rs），不一致时 nana-packager 拒绝打包。
+# 升级版本时改 src-nana/Cargo.toml 的 version 和这里的 version。
+
+schema_version = 1
+
+[application]
+id = "com.momobako.desktop"
+name = "MomoBako"
+version = "0.1.0"
+vendor = "Sena"
+
+[executable]
+file_name = "MomoBako"
+
+[distribution]
+backend = "installer"
+
+# 外部程序不随包：ffmpeg 第一次生成音视频缩略图时下载到应用缓存目录（THIRD_PARTY_NOTICES.md 写了随包分发 FFmpeg
+# 要满足的许可条件）。要随包带时在这里加 [runtime] tools = [{ source = "..." }]，放进 runtime/tools，宿主先找那里。

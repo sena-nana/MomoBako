@@ -59,6 +59,8 @@ describe("MomoBako 工具链", () => {
       "tauri:dev:with-plugins": "yarn tauri:dev",
       "tauri:build": "yarn plugins:build && yarn plugins:package && tauri build --config src-tauri/tauri.external-plugins.conf.json",
       "test:backend": "cargo test -p momobako-backend --locked",
+      "nana:build": "cargo build -p momobako-nana --bin momobako-nana --profile dist --locked",
+      "nana:package": "node scripts/nana-package.ts",
       verify: "yarn typecheck:node-scripts && yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml",
     });
     expect(deps.vitepress).toBeDefined();
