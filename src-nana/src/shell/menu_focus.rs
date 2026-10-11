@@ -27,6 +27,8 @@ pub(crate) enum MenuSurface {
     Import,
     /// 文件条目的右键菜单。
     Entry,
+    /// 侧栏文件夹行的右键菜单。
+    Folder,
 }
 
 impl MenuSurface {
@@ -37,6 +39,7 @@ impl MenuSurface {
             Self::RepositoryAddMenu => "repository-add-menu",
             Self::Import => "file-import-menu",
             Self::Entry => "file-context-menu",
+            Self::Folder => "folder-context-menu",
         }
     }
 
@@ -69,6 +72,7 @@ impl MenuSurface {
                     && model.files.can_import(&ctx)
             }
             Self::Entry => model.files.entry_menu.is_some(),
+            Self::Folder => model.sidebar.folder_menu.is_some(),
         }
     }
 }

@@ -48,6 +48,7 @@ pub(crate) mod tree_sync;
 pub(crate) mod repo_operation;
 mod menu_focus;
 mod menu_focus_view;
+mod context_menu;
 pub use files::{display_mode_path, FileRow, FilesEffect, FilesMessage, HardlinkPrompt, VirtualQuery};
 pub(crate) use thumbs::{decode_preview_pixels, decode_thumbnail_file, thumbnail_slot, ThumbnailFrame};
 pub(crate) use inspect::poll_timers;

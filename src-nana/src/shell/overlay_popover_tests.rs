@@ -2,7 +2,7 @@
 //! 文件服务忙这些相关变化只改绑定的字段或变了的那一行；点外面只发一条关闭消息。浮层层常驻在
 //! AppShell 的 overlay 槽位里，有块时挡点击、空了放开，增删块不用重新装配；右键菜单不靠显式层级。
 
-use nana_ui::runtime::{component_descriptors, AppShell, ContextMenu, Entity, PositionSpec, StableNodeId};
+use nana_ui::runtime::{component_descriptors, AppShell, Entity, PositionSpec, StableNodeId};
 
 use super::OverlayKey;
 use crate::backend::services::repository::TaskProgressSnapshot;
@@ -377,18 +377,21 @@ fn folder_menu_follows_the_file_service_in_place() {
         y: 200.0,
     })));
     harness.flush();
-    // 菜单就是浮层块的根：脱离树挂出的根不在键表里，按根找。
-    let menu = harness.content_roots().0.expect("文件夹菜单在浮层里");
+    // 菜单层是浮层块的根：脱离树挂出的根不在键表里，按根找。
+    let layer = harness.content_roots().0.expect("文件夹菜单在浮层里");
+    let open = harness.keyed("folder-menu-open").expect("「打开」");
     let disabled = |harness: &ShellHarness| {
-        harness
-            .document()
-            .context()
-            .read(Entity::<ContextMenu>::from_stable_id(menu), |menu| menu.items.iter().map(|item| item.disabled).collect::<Vec<_>>())
-            .expect("菜单")
+        let nodes = harness.nodes();
+        ["open", "create", "rename", "delete"].map(|item| {
+            let id = harness.keyed(&format!("folder-menu-{item}")).unwrap_or_else(|| panic!("菜单里没有 {item}"));
+            nodes.iter().find(|node| node.id == id).unwrap_or_else(|| panic!("{item} 不在无障碍树里")).disabled
+        })
     };
     assert_eq!(disabled(&harness), [false, false, false, false]);
     harness.model.files.mutating = true;
     changed(&mut harness);
-    assert_eq!(harness.content_roots().0, Some(menu), "文件服务忙不该重挂菜单");
+    assert_eq!(harness.content_roots().0, Some(layer), "文件服务忙不该重挂菜单");
+    assert_eq!(harness.keyed("folder-menu-open"), Some(open), "没变的「打开」不重建");
     assert_eq!(disabled(&harness), [false, true, true, true], "处理中时后三项应该禁用");
+    harness.assert_same_as_fresh_mount();
 }

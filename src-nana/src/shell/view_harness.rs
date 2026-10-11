@@ -291,12 +291,17 @@ impl ShellHarness {
 
     /// 按一下名为 `key` 的键（例如 `"Enter"`），返回控件因此发出的消息，不归约，不走全局 Escape。
     pub fn key_messages(&mut self, key: &'static str) -> Vec<ShellMessage> {
+        self.key_messages_with(key, nana_ui::InputModifiers::default())
+    }
+
+    /// 按着 `modifiers` 按一下名为 `key` 的键（例如 Shift+`"F10"`），同 [`Self::key_messages`]。
+    pub fn key_messages_with(&mut self, key: &'static str, modifiers: nana_ui::InputModifiers) -> Vec<ShellMessage> {
         let input = nana_ui::KeyInput {
             physical: nana_ui_platform::PhysicalKey(key.into()),
             logical: nana_ui_platform::LogicalKey(key.into()),
             state: nana_ui::KeyState::Pressed,
             repeat: false,
-            modifiers: nana_ui::InputModifiers::default(),
+            modifiers,
         };
         let earlier = self.take_messages();
         self.held = earlier;

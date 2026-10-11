@@ -26,7 +26,7 @@
 
 并行改区域时各改各的文件：
 
-- 浮层和对话框：`view_part_overlay.rs`（`overlay_branch` 里自己那种浮层的分支，身份的结构见 `OverlayIdentity`），对话框框架 `overlay_dialog.rs`、`overlay_dialog_fields.rs`，会话 `overlay_session.rs`，以及 `sidebar_dialogs.rs`、`sidebar_smart_dialog.rs`、`sidebar_popover_view.rs`、`sidebar_tree_view.rs` 的菜单、`admin_view.rs` 的任务弹层、`files_menu.rs`、`workspace_dialogs.rs`、`workspace_export_dialog.rs` 等浮层视图。
+- 浮层和对话框：`view_part_overlay.rs`（`overlay_branch` 里自己那种浮层的分支，身份的结构见 `OverlayIdentity`），对话框框架 `overlay_dialog.rs`、`overlay_dialog_fields.rs`，会话 `overlay_session.rs`，以及 `sidebar_dialogs.rs`、`sidebar_smart_dialog.rs`、`sidebar_popover_view.rs`、`admin_view.rs` 的任务弹层、文件和文件夹两种右键菜单（共用 `context_menu.rs`，条目在 `files_menu.rs`、`sidebar_tree_view.rs`）、`workspace_dialogs.rs`、`workspace_export_dialog.rs` 等浮层视图。
 - 文件页和详情：`route_files.rs` 和 `files_*.rs`、`inspect_*.rs`。
 - 侧栏和其余路由：`view_part_sidebar.rs`、`sidebar_*.rs`，以及 `route_search.rs`、`route_playlists.rs`、`route_settings.rs`、`route_admin.rs`、`route_startup.rs`、`route_missing.rs`、`route_empty.rs`；首页外框和滚动主体在 `route_home.rs`。
 
@@ -203,7 +203,7 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 - 宿主自己关掉对话框（被同一宿主上别的浮层顶替、所在的块被停放）时发 `DialogToggled { open: false }`，`.model` 把开合信号写回假。不同步回 ViewModel：这不是用户的意思，开合只听归约。这块还是现在显示的块（ViewModel 还要它开着）时，下一帧 `sweep` 调 `show()` 再写真，放回树上以后重新打开，不发消息。只用 `.open(信号)` 不听回写的话，信号一直是真，再写真不算变化，就打不开了。
 - 字段、按钮、底栏、错误行用框架里的 `text_field` / `text_area_field` / `select_field` / `two_columns` / `action` / `footer` / `error_line` / `busy_note`，照 Vue `.dialog-field` 和 `.dialog-card__actions`。
 
-**先后和 Escape。** `OverlayKey` 的顺序就是同时打开时谁显示：关闭确认最先；其后是原来浮层槽位里的对话框、弹层和菜单；文件页的导出和文件对话框原来画在主区、压在浮层槽位下面，排在最后。Escape 先关显示着的那一层：显示着的对话框已经打开，由运行时拿到 Escape、发自己的关闭请求（`prevent_default` 为真，全局 Escape 不再发）；在放退场的对话框已经关上，运行时不再把 Escape 交给它；显示着的是弹层或菜单时走全局 Escape，`escape_layer` 里弹层和菜单都排在文件页的导出和文件对话框前面，等着的对话框不会先被关掉。`escape_layer` 里文件夹菜单排在仓库弹层前面、和 `OverlayKey` 相反，但两者都由点击打开，开着一个时浮层槽位挡住另一个的入口，不会同时开着。
+**先后和 Escape。** `OverlayKey` 的顺序就是同时打开时谁显示：关闭确认最先；其后是原来浮层槽位里的对话框、弹层和菜单；文件页的导出和文件对话框原来画在主区、压在浮层槽位下面，排在最后。Escape 先关显示着的那一层：显示着的对话框已经打开，由运行时拿到 Escape、发自己的关闭请求（`prevent_default` 为真，全局 Escape 不再发）；在放退场的对话框已经关上，运行时不再把 Escape 交给它；显示着的是弹层或菜单时走全局 Escape，`escape_layer` 里弹层和菜单都排在文件页的导出和文件对话框前面，等着的对话框不会先被关掉。`escape_layer` 里弹层和菜单的先后和 `OverlayKey` 一致：菜单能用键盘打开，焦点可以从开着的文件夹菜单走回页面、再打开仓库弹层，两层同时开着时显示的和 Escape 先关的都是仓库弹层。
 
 **组合输入。** 浮层换块会换掉输入框，新开的对话框一激活还会把焦点从别处的输入框拿走，所以文档里任何获得焦点的输入框还有预编辑时，浮层块都把换块延后到组合结束（`composing`）。打开期间的变化只写信号，不受影响。
 

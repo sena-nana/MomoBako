@@ -1,12 +1,13 @@
-//! 键盘打开的菜单：菜单按钮上的方向键、文件卡片上的菜单键打开菜单，焦点落在首项或末项，上下键在本层的
-//! 项之间走、首尾相接；Escape 关掉菜单以后焦点回到打开它的控件。指针打开的菜单不动焦点。
+//! 键盘打开的菜单：菜单按钮上的方向键、文件卡片和文件夹行上的菜单键打开菜单，焦点落在首项或末项，
+//! 上下键在本层的项之间走、首尾相接；Escape 关掉菜单以后焦点回到打开它的控件。指针打开的菜单不动焦点。
 
 use nana_ui::runtime::{RovingEdge, SecondaryPress, StableNodeId};
+use nana_ui::InputModifiers;
 
 use super::{request, MenuEdge, MenuFocusRequest, MenuSurface};
 use crate::shell::sidebar::{backend_options, PopoverMode};
 use crate::shell::view_harness::ShellHarness;
-use crate::shell::{FilesMessage, ShellMessage, ShellViewModel, SidebarMessage};
+use crate::shell::{FilesMessage, GapMessage, ShellMessage, ShellViewModel, SidebarMessage};
 
 fn scene(name: &str) -> ShellViewModel {
     crate::shell::acceptance_gap_models()
@@ -22,6 +23,9 @@ fn kind(message: &ShellMessage) -> &'static str {
         ShellMessage::Sidebar(SidebarMessage::OpenRepositorySwitcher) => "open-switcher",
         ShellMessage::Files(FilesMessage::OpenImportMenu) => "open-import",
         ShellMessage::Files(FilesMessage::OpenEntryMenu { .. }) => "open-entry",
+        ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::OpenFolderMenu { .. })) => "open-folder",
+        ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::CloseFolderMenu)) => "close-folder",
+        ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::OpenFolderCreate(_))) => "create-folder",
         ShellMessage::FocusMenu(_) => "focus-menu",
         _ => "other",
     }
@@ -37,7 +41,12 @@ fn press_on(harness: &mut ShellHarness, label: &str, key: &'static str) -> Vec<&
 /// 在现在的焦点上按 `key`：发出的消息逐条归约、同步；同步里挪焦点又发的消息（分组展开）照生产下一帧
 /// 那样接着归约，最后刷新一帧。返回这次按键发出的消息的种类。
 fn press(harness: &mut ShellHarness, key: &'static str) -> Vec<&'static str> {
-    let messages = harness.key_messages(key);
+    press_with(harness, key, InputModifiers::default())
+}
+
+/// 同 [`press`]，按着 `modifiers`。
+fn press_with(harness: &mut ShellHarness, key: &'static str, modifiers: InputModifiers) -> Vec<&'static str> {
+    let messages = harness.key_messages_with(key, modifiers);
     let sent = messages.iter().map(kind).collect();
     let mut pending = messages;
     for _ in 0..4 {
@@ -125,12 +134,51 @@ fn the_menu_key_on_a_card_opens_its_menu_onto_the_first_item() {
     assert_eq!(focused(&harness).as_deref(), Some("cover.png"), "关掉以后焦点回到卡片");
 }
 
+/// 文件夹行的右键菜单和条目菜单一样能用键盘：菜单键和 Shift+F10 打开、焦点落在首项，上下键首尾相接，
+/// Escape 关掉以后焦点回到文件夹行，Enter 执行这一项。
 #[test]
-fn the_menu_key_leaves_the_folder_menu_shut_until_the_keyboard_can_drive_it() {
+fn the_menu_key_on_a_folder_row_drives_the_folder_menu() {
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
     let folder = harness.node("assets");
     assert!(harness.keyed("folder-row-assets").is_some_and(|row| row == folder), "第一个 assets 是侧栏的文件夹行");
-    assert!(press_on(&mut harness, "assets", "ContextMenu").is_empty());
+    assert_eq!(press_on(&mut harness, "assets", "ContextMenu"), ["open-folder", "focus-menu"]);
+    assert!(harness.model.sidebar.folder_menu.as_ref().is_some_and(|menu| menu.path == "assets"), "菜单键打开这一行的菜单");
+    assert_eq!(focused(&harness).as_deref(), Some("打开"), "焦点落在首项");
+    press(&mut harness, "ArrowUp");
+    assert_eq!(focused(&harness).as_deref(), Some("删除"), "越过首项到末项");
+    press(&mut harness, "ArrowDown");
+    assert_eq!(focused(&harness).as_deref(), Some("打开"), "越过末项回到首项");
+    harness.press_escape();
+    assert!(harness.model.sidebar.folder_menu.is_none(), "Escape 关掉菜单");
+    assert_eq!(harness.focused(), Some(folder), "关掉以后焦点回到文件夹行");
+
+    let shift = InputModifiers { shift: true, ..InputModifiers::default() };
+    assert_eq!(press_with(&mut harness, "F10", shift), ["open-folder", "focus-menu"], "Shift+F10 也打开");
+    assert_eq!(focused(&harness).as_deref(), Some("打开"));
+    press(&mut harness, "ArrowDown");
+    assert_eq!(focused(&harness).as_deref(), Some("新建子文件夹"));
+    assert_eq!(press(&mut harness, "Enter"), ["close-folder", "create-folder"], "Enter 关掉菜单、执行这一项");
+    assert!(harness.model.sidebar.folder_menu.is_none());
+    assert!(harness.model.sidebar.folder_dialog.open, "新建子文件夹的对话框打开");
+    assert_eq!(harness.model.sidebar.folder_dialog.parent, "assets", "在这一行下面新建");
+}
+
+/// 键盘打开的菜单不困住焦点：焦点从文件夹菜单回到页面、在仓库头上打开切换列表时两层同时开着，
+/// 显示的是仓库弹层，Escape 也先关它，再关文件夹菜单。
+#[test]
+fn escape_closes_the_shown_menu_first_when_two_are_open() {
+    let mut harness = ShellHarness::mount(scene("live-files-plain"));
+    press_on(&mut harness, "assets", "ContextMenu");
+    assert!(harness.model.sidebar.folder_menu.is_some());
+    press_on(&mut harness, "资源库 · 默认资源库", "ArrowDown");
+    assert_eq!(harness.model.sidebar.popover, PopoverMode::Switcher);
+    assert!(harness.model.sidebar.folder_menu.is_some(), "文件夹菜单还开着，排在仓库弹层后面");
+    assert!(harness.keyed("folder-context-menu").is_none(), "同时只显示一层");
+    harness.press_escape();
+    assert_eq!(harness.model.sidebar.popover, PopoverMode::Closed, "Escape 先关显示着的仓库弹层");
+    assert!(harness.model.sidebar.folder_menu.is_some());
+    assert!(harness.keyed("folder-context-menu").is_some(), "仓库弹层关掉后文件夹菜单露出来");
+    harness.press_escape();
     assert!(harness.model.sidebar.folder_menu.is_none());
 }
 
