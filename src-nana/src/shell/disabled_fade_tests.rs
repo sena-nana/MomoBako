@@ -5,7 +5,7 @@
 //! 侧栏标题工具、添加资源库表单和对话框的关闭位在样式里写好和所在底色在 sRGB 里混出的停用色，播放条的
 //! 传输按钮由自绘按 `PaintState::disabled` 混；节点都不再整体淡化。
 
-use nana_ui::runtime::{SemanticColorRole, StableNodeId};
+use nana_ui::runtime::{Entity, IconButton, SemanticColorRole, StableNodeId};
 use nana_ui_core::SemanticColorMix;
 
 use crate::shell::sidebar::PopoverMode;
@@ -58,13 +58,23 @@ fn assert_mixed_over_surface(harness: &ShellHarness, id: StableNodeId, label: &s
     assert_eq!(disabled_mix(harness, id), faint_over_surface(), "「{label}」的停用色按 0.45 和底色在 sRGB 里混");
 }
 
+/// 传输按钮是 `IconButton`，自绘按停用状态混好颜色；提示照 Vue 只有循环模式有。
 #[test]
 fn disabled_player_buttons_are_dimmed_only_by_their_painter() {
     let harness = ShellHarness::mount(scene("live-files"));
+    let context = harness.document().context();
     for label in ["列表循环", "上一首", "播放", "下一首", "当前队列"] {
         let id = harness.node(label);
         assert!(disabled(&harness, id), "没有条目时「{label}」停用");
         assert_eq!(opacity(&harness, id), None, "「{label}」的停用色由自绘混好，节点不再整体淡化");
+        let (own_colors, painted, tooltip) = context
+            .read(Entity::<IconButton>::from_stable_id(id), |button| {
+                (button.colors_from_style, button.style.painter.is_some(), button.tooltip.as_ref().map(|tip| tip.label.to_string()))
+            })
+            .unwrap_or_else(|_| panic!("「{label}」应该是 IconButton"));
+        assert!(own_colors && painted, "「{label}」颜色照写的来、由自绘画");
+        let expected = (label == "列表循环").then(|| label.to_string());
+        assert_eq!(tooltip, expected, "「{label}」的提示照 Vue：只有循环模式写了 title");
     }
 }
 
