@@ -2,7 +2,8 @@
 //!
 //! 规则与 `src-tauri/src/window_state.rs` 相同：宽小于 960 或高小于 600 不恢复；
 //! 最大化时保留上一帧正常几何。坐标用 Nana 的逻辑像素，因为窗口命令按逻辑像素下发。
-//! 文件是 `%APPDATA%/com.momobako.desktop/nana-main-window-state.json`。
+//! 文件是应用数据目录下的 `nana-main-window-state.json`：安装版和开发时是 `%APPDATA%/com.momobako.desktop`，
+//! 便携版是 `<根>/data`，见 `app_paths.rs`。
 //! 离屏测试只覆盖合并和读写，不移动真窗口。
 
 use std::path::{Path, PathBuf};
@@ -237,7 +238,7 @@ fn capture(geometry: &WindowGeometry) -> Option<MainWindowSnapshot> {
 }
 
 fn state_path() -> Option<PathBuf> {
-    nana_ui_platform::app_data_dir("com.momobako.desktop").map(|dir| dir.join(STATE_FILE))
+    crate::app_paths::current().window_state_dir.as_ref().map(|dir| dir.join(STATE_FILE))
 }
 
 fn load_main_window_state(path: Option<&Path>) -> Result<Option<MainWindowState>, String> {

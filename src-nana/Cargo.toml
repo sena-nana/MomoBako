@@ -17,7 +17,8 @@ zip = { version = "8.6", default-features = false, features = ["deflate"] }
 unarc-rs = "0.6.1"
 momobako-backend = { path = "../src-backend" }
 # view-macro：结构块容器的 `css!` 和 `#[derive(Store)]`，绑定式视图要用。
-nana-ui = { git = "https://github.com/sena-nana/NanaUI.git", rev = "1d65284f950a6a1b66c93aa2d47b838bd2aac28f", features = ["hosted", "bundled-fonts", "components", "icons-tabler", "view-macro"] }
+# packaged-resources：启动时读发布包的 manifest，并回答 `nana-packager validate --run` 的自检。
+nana-ui = { git = "https://github.com/sena-nana/NanaUI.git", rev = "1d65284f950a6a1b66c93aa2d47b838bd2aac28f", features = ["hosted", "bundled-fonts", "components", "icons-tabler", "view-macro", "packaged-resources"] }
 nana-ui-core = { git = "https://github.com/sena-nana/NanaUI.git", rev = "1d65284f950a6a1b66c93aa2d47b838bd2aac28f" }
 nana-ui-platform = { git = "https://github.com/sena-nana/NanaUI.git", rev = "1d65284f950a6a1b66c93aa2d47b838bd2aac28f", features = ["clipboard"] }
 

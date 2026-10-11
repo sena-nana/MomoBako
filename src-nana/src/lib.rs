@@ -6,13 +6,16 @@
 
 use nana_ui::runtime::{DocumentId, FrameworkError};
 use nana_ui::{
-    ApplicationIdentity, ApplicationState, ApplicationWindow, DiagnosticsConfig, NanaApplication,
-    HostTexture, RuntimeApplication, RuntimeProgramContext, RuntimeProgramUpdate,
+    ApplicationState, ApplicationWindow, DiagnosticsConfig, NanaApplication, HostTexture,
+    ResourcePackOptions, RuntimeApplication, RuntimeProgramContext, RuntimeProgramUpdate,
 };
+use nana_ui_platform::ApplicationPaths;
 
 pub mod shell;
 mod app_icon;
+mod app_paths;
 mod app_dispatch;
+mod plugin_host;
 mod files_dispatch;
 mod inspect_dispatch;
 mod player_dispatch;
@@ -383,17 +386,29 @@ fn dispatch_workspace_effects(
 pub(crate) use shell::decode_preview_pixels;
 
 /// 启动原生 NanaUI 窗口。
+///
+/// 先按应用身份解析 NanaUI 的应用路径、定下本机读写位置（`app_paths.rs`），再把同一份路径交给 NanaUI。
+/// 启动时读发布包的 manifest；以 `NANA_PACKAGE_VALIDATE=1` 启动时 NanaUI 在开窗前做发布包自检并退出，
+/// 走不到领域服务，也不写服务目录。
 pub fn run() -> Result<(), nana_ui::HostedRunError> {
-    let identity = ApplicationIdentity::new(
-        "com.momobako.desktop",
-        "MomoBako",
-        env!("CARGO_PKG_VERSION"),
-    );
-    NanaApplication::builder(identity)
+    let identity = app_paths::identity();
+    let paths = match ApplicationPaths::resolve(&identity) {
+        Ok(paths) => Some(paths),
+        Err(error) => {
+            eprintln!("Nana 应用路径解析失败，按开发时的位置读写：{error}");
+            None
+        }
+    };
+    app_paths::install(app_paths::HostLocations::resolve(paths.as_ref(), &app_paths::LegacyInputs::from_env()));
+    let mut builder = NanaApplication::builder(identity)
         .diagnostics(DiagnosticsConfig::default())
-        .run::<RuntimeApplication<MomoBakoApplication>>(
-            app_icon::with_window_icon(window_state::main_window_descriptor()),
-        )
+        .resource_packs(ResourcePackOptions::new());
+    if let Some(paths) = paths {
+        builder = builder.paths(paths);
+    }
+    builder.run::<RuntimeApplication<MomoBakoApplication>>(app_icon::with_window_icon(
+        window_state::main_window_descriptor(),
+    ))
 }
 
 /// 为离屏验收创建与生产宿主相同的 Runtime 文档。
