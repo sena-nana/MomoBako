@@ -5,7 +5,7 @@ Vue/Tauri 界面（`src/`、`src-tauri/`）正在迁到 NanaUI 原生界面（`s
 ## 入口和运行
 
 - 原生入口是 crate `momobako-nana`：`src-nana/src/main.rs` 调 `momobako_nana::run()`（`src-nana/src/lib.rs`）。
-- NanaUI 固定在提交 `e062d098a9eb170b5c442df2bd61d5322830e673`。`src-nana/Cargo.toml` 的 `nana-ui`、`nana-ui-core`、`nana-ui-platform` 和开发依赖 `nana-ui-devtools` 都按这个 `rev` 从 Git 取。仓库里没有 NanaUI 副本，根 `Cargo.toml` 也没有 `[patch]`。
+- NanaUI 固定在提交 `1d65284f950a6a1b66c93aa2d47b838bd2aac28f`。`src-nana/Cargo.toml` 的 `nana-ui`、`nana-ui-core`、`nana-ui-platform` 和开发依赖 `nana-ui-devtools` 都按这个 `rev` 从 Git 取。仓库里没有 NanaUI 副本，根 `Cargo.toml` 也没有 `[patch]`。
 
 在仓库根目录运行：
 
