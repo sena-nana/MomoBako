@@ -17,11 +17,12 @@ use nana_ui::icons_tabler::{
 };
 use nana_ui::runtime::view::{each, fields, widget, AnyView, El, IntoView, Item, Signal, Store, StoreList, StorePath};
 use nana_ui::runtime::{
-    Activate, AlignSpec, IconButton, LengthSpec, ListItem, RadiusTier, SemanticColorRole, SidebarFrame, Stack,
+    Activate, AlignSpec, IconButton, LengthSpec, ListItem, RadiusTier, SecondaryPress, SemanticColorRole, SidebarFrame, Stack,
 };
 use nana_ui::{ButtonKind, ControlSize, Icon};
 
 use super::hot::{HotSignals, SpinField};
+use super::menu_focus::{focus_menu, MenuEdge, MenuSurface};
 use super::status::StatusLine;
 use super::player_view::key_part;
 use super::sidebar::ShortcutId;
@@ -88,6 +89,9 @@ fn switcher_label(name: &str) -> String {
 }
 
 /// 仓库头：当前仓库名加上下箭头，点开切换弹层。对应 `WorkspaceSidebarRepoHeader.vue`。
+///
+/// 和 Vue 的 `aria-haspopup="menu"` 一样是菜单按钮：焦点在它上面时 ArrowDown / ArrowUp（还有菜单键）
+/// 打开弹层，焦点落在切换列表的首项或末项。
 fn sidebar_switcher(head: Signal<HeadView>) -> AnyView {
     let name = head.with_untracked(|head| head.name.clone());
     let mut style = parts::row_style(28.0, 8.0, 8.0, 6.0, parts::ActiveTone::Accent, false);
@@ -96,12 +100,19 @@ fn sidebar_switcher(head: Signal<HeadView>) -> AnyView {
         widget(parts::fill_text(name.clone(), 13.0, 600)).prop::<String, fields::text::value>(move || head.with(|head| head.name.clone())),
         widget(parts::inherit_icon(SELECTOR, 13.0)),
     ));
-    let switcher = widget(ListItem::new(switcher_label(&name)).style(style))
+    let switcher = widget(ListItem::new(switcher_label(&name)).has_popup(true).style(style))
         .prop::<String, fields::list_item::label>(move || head.with(|head| switcher_label(&head.name)))
         .content(content)
         .key("repository-switcher")
         .on_cx(|_, _: &Activate, cx| {
             cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenRepositorySwitcher));
+        })
+        .on_cx(|_, event: &SecondaryPress, cx| {
+            let Some(edge) = MenuEdge::of_press(event) else {
+                return;
+            };
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenRepositorySwitcher));
+            cx.dispatch_program_all(focus_menu(MenuSurface::RepositorySwitcher, edge));
         });
     let top = Stack::column(0.0).with_layout(|layout| {
         layout.padding_bottom = Some(LengthSpec::Px(8.0));

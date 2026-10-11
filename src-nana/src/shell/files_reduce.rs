@@ -73,6 +73,7 @@ impl FilesState {
                 self.open_eagle(ctx, &mode);
             }
             FilesMessage::ToggleImportMenu => self.toggle_import_menu(),
+            FilesMessage::OpenImportMenu => self.import_open = true,
             FilesMessage::ToggleEagleImport => self.toggle_eagle_menu(),
             FilesMessage::SetCreateName(value) => self.create_name = value,
             FilesMessage::SubmitCreateFile => {
