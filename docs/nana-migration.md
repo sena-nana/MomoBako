@@ -102,6 +102,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 | `NANA_SCENES=… NANA_SIZES=… NANA_THEMES=… cargo test -p momobako-nana --test scene_shots -- --nocapture` | 按场景名出截图和节点清单，场景定义在 `src-nana/src/shell/acceptance*.rs` |
 | `cargo check -p momobako-backend -p momobako-nana` | 共享领域边界的编译 |
 | `yarn test:backend` | `momobako-backend` 单测，等于 `cargo test -p momobako-backend --locked`，不在 `yarn verify` 里 |
+| `cargo test -p momobako_source_netease_cloud_music`、`-p momobako_mutsuki_plugin_sdk` | 网易云来源插件（下载落盘不覆盖、暂存目录、错误原因）和插件 SDK（调用结果带回插件日志）；插件都是根 workspace 成员，用根目录的 `Cargo.lock` |
 | `yarn verify` | 前端测试、前端构建和 `src-tauri` 编译检查，不含 `momobako-nana` |
 
 和 Vue 对照时用本机的 `tmp/vue-mock`（`tmp/` 被 git 忽略，不在仓库里）：模拟 Tauri IPC，在无头 Edge 里渲染 `src/` 的真实页面，和 Nana 用同名场景、同一份夹具。做法见 [Nana 与 Vue 对照](./nana-vue-parity.md#对照方法)。
