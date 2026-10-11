@@ -4,6 +4,7 @@
 use nana_ui::runtime::{RovingEdge, SecondaryPress, StableNodeId};
 
 use super::{request, MenuEdge, MenuFocusRequest, MenuSurface};
+use crate::shell::sidebar::{backend_options, PopoverMode};
 use crate::shell::view_harness::ShellHarness;
 use crate::shell::{FilesMessage, ShellMessage, ShellViewModel, SidebarMessage};
 
@@ -62,18 +63,33 @@ fn focused(harness: &ShellHarness) -> Option<String> {
 fn arrows_on_the_repository_header_open_the_switcher_onto_either_end() {
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
     assert_eq!(press_on(&mut harness, "资源库 · 默认资源库", "ArrowDown"), ["open-switcher", "focus-menu"]);
-    assert_eq!(harness.model.sidebar.popover, crate::shell::sidebar::PopoverMode::Switcher, "ArrowDown 打开切换弹层");
+    assert_eq!(harness.model.sidebar.popover, PopoverMode::Switcher, "ArrowDown 打开切换弹层");
     assert_eq!(focused(&harness).as_deref(), Some("切换资源库 默认资源库"), "ArrowDown 聚焦首项");
     press(&mut harness, "ArrowDown");
     assert_eq!(focused(&harness).as_deref(), Some("添加资源库"), "上下键在项之间走");
     harness.press_escape();
-    assert_eq!(harness.model.sidebar.popover, crate::shell::sidebar::PopoverMode::Closed);
+    assert_eq!(harness.model.sidebar.popover, PopoverMode::Closed);
     assert_eq!(focused(&harness).as_deref(), Some("资源库 · 默认资源库"), "关掉以后焦点回到仓库头");
 
     press_on(&mut harness, "资源库 · 默认资源库", "ArrowUp");
     assert_eq!(focused(&harness).as_deref(), Some("删除当前资源库"), "ArrowUp 聚焦末项");
     press(&mut harness, "ArrowDown");
     assert_eq!(focused(&harness).as_deref(), Some("切换资源库 默认资源库"), "越过末项回到首项");
+}
+
+#[test]
+fn the_repository_popover_keeps_keyboard_focus_through_its_pages() {
+    let mut harness = ShellHarness::mount(scene("live-files-plain"));
+    press_on(&mut harness, "资源库 · 默认资源库", "ArrowDown");
+    press(&mut harness, "ArrowDown");
+    assert_eq!(focused(&harness).as_deref(), Some("添加资源库"));
+    press(&mut harness, "Enter");
+    assert_eq!(harness.model.sidebar.popover, PopoverMode::AddMenu);
+    let first = backend_options(&harness.model.admin.plugins).into_iter().find(|option| option.enabled).expect("有可用的来源").label;
+    assert_eq!(focused(&harness), Some(first), "换到添加菜单，焦点落在它的首项");
+    harness.press_escape();
+    assert_eq!(harness.model.sidebar.popover, PopoverMode::Closed);
+    assert_eq!(focused(&harness).as_deref(), Some("资源库 · 默认资源库"), "整个弹层关掉才还给仓库头");
 }
 
 #[test]
