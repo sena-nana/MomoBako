@@ -5,6 +5,8 @@
 mod auth;
 mod catalog;
 mod client;
+mod download;
+mod files;
 mod media;
 mod models;
 mod util;
@@ -12,8 +14,7 @@ mod util;
 use std::{fs, path::PathBuf};
 
 use momobako_mutsuki_plugin_sdk::{
-    export_mutsuki_momobako_plugin, write_host_log_silently, PluginCallEnvelope,
-    PluginRuntimeContext,
+    export_mutsuki_momobako_plugin, PluginCallEnvelope, PluginRuntimeContext,
 };
 
 use crate::models::{
@@ -54,11 +55,11 @@ export_mutsuki_momobako_plugin!(
     handle_call
 );
 
-/// 分发 ABI 调用；错误日志只记录方法名，不记录可能包含旧 Cookie 的载荷。
+/// 分发 ABI 调用。调用失败由宿主统一记一条 `callFailed`（方法和原因，不含载荷），这里不再重复记。
 fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String> {
     let method = request.method.clone();
     let runtime = runtime_context(request.runtime, request.payload.get("config"))?;
-    let result = match method.as_str() {
+    match method.as_str() {
         "auth.createQrSession" => {
             decode(request.payload).and_then(|p| auth::create_qr_session(&runtime, p))
         }
@@ -71,10 +72,10 @@ fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String>
         "media.prepareTrackPlayback" => decode::<PrepareTrackPlaybackPayload>(request.payload)
             .and_then(|p| media::prepare_track_playback(&runtime, p)),
         "media.downloadTrackPackage" => decode::<DownloadTrackPackagePayload>(request.payload)
-            .and_then(|p| media::download_track_package(&runtime, p)),
+            .and_then(|p| download::download_track_package(&runtime, p)),
         "media.downloadPlaylistPackage" => {
             decode::<DownloadPlaylistPackagePayload>(request.payload)
-                .and_then(|p| media::download_playlist_package(&runtime, p))
+                .and_then(|p| download::download_playlist_package(&runtime, p))
         }
         "media.resolveLyrics" => decode::<ResolveLyricsPayload>(request.payload)
             .and_then(|p| media::resolve_lyrics(&runtime, p)),
@@ -105,17 +106,7 @@ fn handle_call(request: PluginCallEnvelope) -> Result<serde_json::Value, String>
         | "filesystem.moveEntry"
         | "filesystem.deleteEntry" => Err("网易云音乐资源库当前为只读虚拟源".to_string()),
         _ => Err(format!("unsupported method: {method}")),
-    };
-    if let Err(error) = &result {
-        write_host_log_silently(
-            &runtime.host_runtime,
-            "error",
-            "sourceCallFailed",
-            "网易云来源调用失败。",
-            serde_json::json!({ "method": method, "error": error }),
-        );
     }
-    result
 }
 
 fn decode<T: serde::de::DeserializeOwned>(value: serde_json::Value) -> Result<T, String> {

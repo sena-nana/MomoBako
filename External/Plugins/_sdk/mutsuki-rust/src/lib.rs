@@ -24,6 +24,12 @@ pub use mutsuki_runtime_sdk::{
     export_mutsuki_plugin_abi_v2, AbiHostClient as AbiHostClientV2, LoadedPlugin,
 };
 
+/// 插件 handler 交回 `Err` 时的错误码；错误的 `route` 就是插件写的原因。
+pub const PLUGIN_CALL_FAILED: &str = "momobako.plugin_call_failed";
+/// [`write_host_log_silently`] 写下的事件种类，载荷是 `{ level, action, message, pluginId, context }`。宿主收下调用
+/// 结果时把它写进系统日志（`docs/api-design.md` 的插件 API）。
+pub const PLUGIN_LOG_EVENT: &str = "momobako.plugin.log";
+
 static EVENT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 thread_local! {
@@ -228,12 +234,19 @@ impl Runner for MomoPluginRunner {
                             error: None,
                         }
                     }
+                    // 失败时也把这次写下的日志带回去（失败以前的现场往往就在这些日志里）。Mutsuki Core 见到
+                    // `error` 就不看 `result`，宿主的插件调用先转交事件再交回错误。
                     Err(message) => EntryCompletion {
                         entry_id: entry.entry_id.clone(),
                         task_id: entry.task_id.clone(),
-                        result: None,
+                        result: (!events.is_empty()).then(|| {
+                            let mut result = RunnerResult::completed(entry.task_id.clone());
+                            result.status = RunnerStatus::Failed;
+                            result.events = events;
+                            result
+                        }),
                         error: Some(RuntimeError::new(
-                            "momobako.plugin_call_failed",
+                            PLUGIN_CALL_FAILED,
                             self.runtime.plugin_id.clone(),
                             message,
                         )),
@@ -245,7 +258,7 @@ impl Runner for MomoPluginRunner {
     }
 }
 
-/// 将插件日志转换为可观察的 Mutsuki DomainEvent。
+/// 将插件日志转换为可观察的 Mutsuki DomainEvent，随这次调用的结果（成功或失败）交给宿主写进系统日志。
 pub fn write_host_log_silently<T: Serialize>(
     runtime: &PluginRuntimeContext,
     level: &str,
@@ -264,8 +277,12 @@ pub fn write_host_log_silently<T: Serialize>(
     PENDING_EVENTS.with(|events| {
         events.borrow_mut().push(DomainEvent {
             event_id: format!("{}:{sequence}", runtime.plugin_id),
-            kind: "momobako.plugin.log".into(),
+            kind: PLUGIN_LOG_EVENT.into(),
             payload,
         });
     });
 }
+
+#[cfg(test)]
+#[path = "runner_tests.rs"]
+mod tests;

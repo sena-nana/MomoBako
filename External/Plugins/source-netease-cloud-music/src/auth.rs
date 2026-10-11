@@ -251,6 +251,15 @@ pub(crate) fn resolve_repository_credential(
     ))
 }
 
+/// 用当前凭据查一次登录状态：网易云说没有账号（登录已失效）时报错。取不到登录状态时交回取不到的原因。
+pub(crate) fn ensure_login_valid(runtime: &RuntimeContext, cookie: &str) -> Result<(), String> {
+    if client::fetch_login_status(runtime, cookie)?.account.is_none() {
+        Err("网易云登录已失效，请重新登录".to_string())
+    } else {
+        Ok(())
+    }
+}
+
 pub(crate) fn current_login_expired(runtime: &RuntimeContext) -> bool {
     resolve_repository_credential(runtime)
         .ok()

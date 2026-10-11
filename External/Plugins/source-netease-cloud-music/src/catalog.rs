@@ -141,6 +141,9 @@ fn list_directory_entries(
         Err(_) if auth::current_login_expired(runtime) => return Ok(Vec::new()),
         Err(error) => return Err(error),
     };
+    if let Some(error) = &folder.load_error {
+        return Err(playlist_read_error(&folder.playlist_name, error));
+    }
     Ok(folder.tracks.iter().map(track_entry).collect())
 }
 
@@ -155,28 +158,27 @@ fn list_playlist_directory_page(
         .into_iter()
         .find(|folder| folder.folder_path == folder_path)
         .ok_or_else(|| format!("directory not found: {folder_path}"))?;
-    match client::fetch_playlist_detail(runtime, &cookie, folder.playlist_id) {
-        Ok(detail) => {
-            let total_entries = playlist_track_total(&detail);
-            let tracks = hydrate_playlist_track_page(
-                runtime,
-                &config,
-                &cookie,
-                &detail,
-                folder.playlist_category,
-                &folder.playlist_name,
-                offset..offset.saturating_add(limit),
-            )?;
-            Ok(DirectoryPageResponse {
-                total_entries,
-                entries: tracks.iter().map(track_entry).collect(),
-            })
-        }
-        Err(_) => Ok(DirectoryPageResponse {
-            total_entries: 0,
-            entries: Vec::new(),
-        }),
-    }
+    let detail = client::fetch_playlist_detail(runtime, &cookie, folder.playlist_id)
+        .map_err(|error| playlist_read_error(&folder.playlist_name, &error))?;
+    let total_entries = playlist_track_total(&detail);
+    let tracks = hydrate_playlist_track_page(
+        runtime,
+        &config,
+        &cookie,
+        &detail,
+        folder.playlist_category,
+        &folder.playlist_name,
+        offset..offset.saturating_add(limit),
+    )?;
+    Ok(DirectoryPageResponse {
+        total_entries,
+        entries: tracks.iter().map(track_entry).collect(),
+    })
+}
+
+/// 列歌单目录时取不到歌单详情：报错，不当成空歌单（空页会让宿主以为歌单里没有歌）。
+fn playlist_read_error(playlist_name: &str, error: &str) -> String {
+    format!("读取歌单「{playlist_name}」失败：{error}")
 }
 
 pub(crate) fn stat_entry(
@@ -224,7 +226,7 @@ fn discover_playlist_folder_summaries(
     runtime: &RuntimeContext,
 ) -> Result<(RepoConfig, String, Vec<PlaylistFolder>), String> {
     let (config, cookie) = auth::resolve_repository_credential(runtime)?;
-    ensure_login_valid(runtime, &cookie)?;
+    auth::ensure_login_valid(runtime, &cookie)?;
     let items = client::fetch_user_playlists(runtime, &cookie, config.account_id)?;
     let mut folders = Vec::new();
     let mut created_names = BTreeSet::new();
@@ -463,17 +465,6 @@ fn build_tracks(
             })
         })
         .collect()
-}
-
-fn ensure_login_valid(runtime: &RuntimeContext, cookie: &str) -> Result<(), String> {
-    if client::fetch_login_status(runtime, cookie)?
-        .account
-        .is_none()
-    {
-        Err("网易云登录已失效，请重新登录".to_string())
-    } else {
-        Ok(())
-    }
 }
 
 fn category_entry(path: &str, category: &str, login_expired: bool) -> FileSystemEntry {

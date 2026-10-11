@@ -45,3 +45,9 @@ export type {
   PluginDataFilePreviewSourceResponse,
   ToolPageContribution,
 } from "./core";
+export type {
+  SourceDownloadDestination,
+  SourceDownloadEntryResult,
+  SourceDownloadFailure,
+  SourceDownloadResult,
+} from "./sourceDownload";

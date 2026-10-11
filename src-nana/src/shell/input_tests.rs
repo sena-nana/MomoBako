@@ -782,13 +782,14 @@ fn download_folder_calls_plugin_only_after_a_directory_is_chosen() {
         }
         other => panic!("unexpected {other:?}"),
     };
-    assert_eq!((run.progress.subject.as_str(), run.target.as_ref()), ("夜曲", None));
+    assert_eq!(run.progress.subject, "夜曲");
+    assert_eq!(run.destination, crate::shell::admin::source_download::DownloadDestination::LocalFolder("D:/downloads".into()));
     // Vue `runDownloadAction`：选好目录以后任务弹层出「下载单曲 · 正在下载 夜曲」36%，不确定进度。
     let row = model.operation.shown().cloned().expect("下载的进度行");
     assert_eq!((row.label.as_str(), row.detail.as_str(), row.value, row.indeterminate), ("下载单曲", "正在下载 夜曲", 36.0, true));
     send_admin(&mut model, crate::shell::admin::AdminMessage::DownloadFinished { run, result: Err("网络断开".into()) });
     assert!(model.operation.shown().is_none(), "下载失败时这一行取消");
-    assert_eq!(model.files.error, "网络断开", "失败的原因写进文件列");
+    assert_eq!(model.files.error, "下载单曲「夜曲」失败：网络断开", "失败的原因写进文件列");
 }
 
 fn send_admin(model: &mut ShellViewModel, message: crate::shell::admin::AdminMessage) {

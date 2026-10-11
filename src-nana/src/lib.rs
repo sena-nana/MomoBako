@@ -4,7 +4,7 @@
 //! `src-backend` 收口后由应用状态注入。离屏测试复用同一棵
 //! `RuntimeDocument`，不创建第二套 UI 树或 GPU 设备。
 
-use nana_ui::runtime::{DocumentId, FrameworkError, Task};
+use nana_ui::runtime::{DocumentId, FrameworkError};
 use nana_ui::{
     ApplicationIdentity, ApplicationState, ApplicationWindow, DiagnosticsConfig, NanaApplication,
     HostTexture, RuntimeApplication, RuntimeProgramContext, RuntimeProgramUpdate,
@@ -16,6 +16,8 @@ mod files_dispatch;
 mod inspect_dispatch;
 mod player_dispatch;
 mod admin_dispatch;
+mod download_dispatch;
+mod download_staging;
 mod sidebar_dispatch;
 mod sync_dispatch;
 mod task_guard;
@@ -172,19 +174,9 @@ impl ApplicationState for MomoBakoApplication {
         self.shell.surface_dirty = false;
         self.applied_appearance = None;
         appearance::sync(self, &mut window.document);
-        if !self.repositories_load_scheduled {
-            if let Some(services) = self.services.as_ref() {
-                let query = services.repository_query.clone();
-                let executor = services.executor.clone();
-                let generation = self.shell.workspace.list_generation;
-                if let Err(error) = context.run_task(Task::new(async move {
-                    let result = task_guard::settle("资源库列表", || executor.block_on(query.list_repositories()), Err);
-                    ShellMessage::WorkspaceListLoaded { generation, result }
-                })) {
-                    eprintln!("Nana 资源库加载任务提交失败：{error}");
-                }
-                self.repositories_load_scheduled = true;
-            }
+        if !self.repositories_load_scheduled && self.services.is_some() {
+            dispatch_list_repositories(self, context, self.shell.workspace.list_generation);
+            self.repositories_load_scheduled = true;
         }
         window_host::install_tray(self, context);
         Ok(())
@@ -293,8 +285,18 @@ impl ApplicationState for MomoBakoApplication {
     }
 }
 
-/// 执行工作台归约留下的副作用。服务未启动、任务提交失败或启动要等的读取（列表、同步、摘要）panic 时把错误写回
-/// 状态机，避免步骤停在进行中（`task_guard.rs`）。
+/// 读资源库列表（首屏启动第 1 步和刷新）。服务没起来、任务排不进去或 panic 时按失败交回，启动停在第 1 步给「重试」。
+fn dispatch_list_repositories(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, generation: u64) {
+    let failed = move |error| ShellMessage::WorkspaceListLoaded { generation, result: Err(error) };
+    task_guard::spawn_service(app.services.as_ref(), context, "资源库列表", failed, |services| {
+        let query = services.repository_query.clone();
+        let executor = services.executor.clone();
+        move || ShellMessage::WorkspaceListLoaded { generation, result: executor.block_on(query.list_repositories()) }
+    });
+}
+
+/// 执行工作台归约留下的副作用。服务都经 `task_guard` 派发：服务没起来、任务排不进去或 panic 时把错误写回状态机，
+/// 启动和换仓库的步骤不会停在进行中。
 fn dispatch_workspace_effects(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
@@ -314,134 +316,58 @@ fn dispatch_workspace_effects(
                     clear_stored: true,
                 }));
             }
-            WorkspaceEffect::RefreshRepositories { generation } => {
-                let prepared = app.services.as_ref().map(|services| {
-                    (services.repository_query.clone(), services.executor.clone())
-                });
-                let Some((query, executor)) = prepared else {
-                    eprintln!("Nana 资源库刷新需要领域服务，当前服务未启动");
-                    app.shell.reduce(ShellMessage::WorkspaceListLoaded {
-                        generation,
-                        result: Err("领域服务未启动".into()),
-                    });
-                    continue;
-                };
-                if let Err(error) = context.run_task(Task::new(async move {
-                    let result = task_guard::settle("资源库列表", || executor.block_on(query.list_repositories()), Err);
-                    ShellMessage::WorkspaceListLoaded { generation, result }
-                })) {
-                    eprintln!("Nana 资源库刷新任务提交失败：{error}");
-                    app.shell.reduce(ShellMessage::WorkspaceListLoaded {
-                        generation,
-                        result: Err(format!("资源库列表任务提交失败：{error}")),
-                    });
-                }
-            }
+            WorkspaceEffect::RefreshRepositories { generation } => dispatch_list_repositories(app, context, generation),
             WorkspaceEffect::SyncRepository { repo_id, generation } => {
-                let prepared = app
-                    .services
-                    .as_ref()
-                    .map(|services| (services.tasks.clone(), services.executor.clone()));
-                let Some((tasks, executor)) = prepared else {
-                    eprintln!("Nana 资源库同步需要领域服务，当前服务未启动");
-                    app.shell.reduce(ShellMessage::RepositorySynced {
-                        generation,
-                        result: Err("领域服务未启动".into()),
-                    });
-                    continue;
-                };
-                if let Err(error) = context.run_task(Task::new(async move {
-                    let sync = || {
-                        executor
+                let failed = move |error| ShellMessage::RepositorySynced { generation, result: Err(error) };
+                task_guard::spawn_service(app.services.as_ref(), context, "资源库同步", failed, |services| {
+                    let tasks = services.tasks.clone();
+                    let executor = services.executor.clone();
+                    move || {
+                        let result = executor
                             .block_on(tasks.execute(PROTOCOL_REPOSITORY_SYNC, SyncRequest { repo_id }))
-                            .map(|(output, _)| shell::SyncCounts::from_output(&output))
-                    };
-                    let result = task_guard::settle("资源库同步", sync, Err);
-                    ShellMessage::RepositorySynced { generation, result }
-                })) {
-                    eprintln!("Nana 资源库同步任务提交失败：{error}");
-                    app.shell.reduce(ShellMessage::RepositorySynced {
-                        generation,
-                        result: Err(format!("资源库同步任务提交失败：{error}")),
-                    });
-                }
+                            .map(|(output, _)| shell::SyncCounts::from_output(&output));
+                        ShellMessage::RepositorySynced { generation, result }
+                    }
+                });
             }
             WorkspaceEffect::LoadSnapshot { repo_id, generation } => {
-                let prepared = app.services.as_ref().map(|services| {
-                    (services.repository_query.clone(), services.executor.clone())
+                let failed = move |error| ShellMessage::RepositorySnapshotLoaded { generation, result: Err(error) };
+                task_guard::spawn_service(app.services.as_ref(), context, "资源库摘要", failed, |services| {
+                    let query = services.repository_query.clone();
+                    let executor = services.executor.clone();
+                    move || ShellMessage::RepositorySnapshotLoaded { generation, result: executor.block_on(query.get_repository_snapshot(repo_id)) }
                 });
-                let Some((query, executor)) = prepared else {
-                    eprintln!("Nana 资源库摘要需要领域服务，当前服务未启动");
-                    app.shell.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Err("领域服务未启动".into()) });
-                    continue;
-                };
-                if let Err(error) = context.run_task(Task::new(async move {
-                    let result = task_guard::settle("资源库摘要", || executor.block_on(query.get_repository_snapshot(repo_id)), Err);
-                    ShellMessage::RepositorySnapshotLoaded { generation, result }
-                })) {
-                    eprintln!("Nana 资源库摘要任务提交失败：{error}");
-                    app.shell.reduce(ShellMessage::RepositorySnapshotLoaded {
-                        generation,
-                        result: Err(format!("资源库摘要任务提交失败：{error}")),
-                    });
-                }
             }
             WorkspaceEffect::LoadFirstScreen { repo_id } => app_dispatch::dispatch_first_screen(app, context, repo_id),
             WorkspaceEffect::RelocateRepository { repo_id, path } => {
-                let prepared = app.services.as_ref().map(|services| {
-                    (services.tasks.clone(), services.repository_query.clone(), services.executor.clone())
+                let failed = |error| ShellMessage::MissingRelocateFinished(Err(error));
+                task_guard::spawn_service(app.services.as_ref(), context, "资源库重定向", failed, |services| {
+                    let tasks = services.tasks.clone();
+                    let query = services.repository_query.clone();
+                    let executor = services.executor.clone();
+                    move || {
+                        let result = executor
+                            .block_on(tasks.execute(PROTOCOL_REPOSITORY_RELOCATE, RepositoryRelocateRequest { repo_id, path }))
+                            .and_then(|(output, _)| app_dispatch::mutated_repository(&executor, &query, &output));
+                        ShellMessage::MissingRelocateFinished(result)
+                    }
                 });
-                let Some((tasks, query, executor)) = prepared else {
-                    eprintln!("Nana 资源库重定向需要领域服务，当前服务未启动");
-                    app.shell
-                        .reduce(ShellMessage::MissingRelocateFinished(Err("领域服务未启动".into())));
-                    continue;
-                };
-                if let Err(error) = context.run_task(Task::new(async move {
-                    let result = executor
-                        .block_on(tasks.execute(
-                            PROTOCOL_REPOSITORY_RELOCATE,
-                            RepositoryRelocateRequest { repo_id, path },
-                        ))
-                        .and_then(|(output, _)| app_dispatch::mutated_repository(&executor, &query, &output));
-                    ShellMessage::MissingRelocateFinished(result)
-                })) {
-                    eprintln!("Nana 资源库重定向任务提交失败：{error}");
-                    app.shell.reduce(ShellMessage::MissingRelocateFinished(Err(format!(
-                        "资源库重定向任务提交失败：{error}"
-                    ))));
-                }
             }
             WorkspaceEffect::DeleteRepository { repo_id, mode } => {
-                let prepared = app.services.as_ref().map(|services| {
-                    (
-                        services.repository_management.clone(),
-                        services.executor.clone(),
-                    )
-                });
                 let mode = match mode {
                     DeleteMode::RecordOnly => RepositoryDeleteMode::RecordOnly,
                     DeleteMode::DeleteMetadata => RepositoryDeleteMode::DeleteMetadata,
                     DeleteMode::DeleteFolder => RepositoryDeleteMode::DeleteFolder,
                 };
-                let Some((management, executor)) = prepared else {
-                    eprintln!("Nana 资源库删除需要领域服务，当前服务未启动");
-                    app.shell
-                        .reduce(ShellMessage::MissingDeleteFinished(Err("领域服务未启动".into())));
-                    continue;
-                };
-                if let Err(error) = context.run_task(Task::new(async move {
-                    ShellMessage::MissingDeleteFinished(
-                        executor.block_on(
-                            management.delete_repository(RepositoryDeleteRequest { repo_id, mode }),
-                        ),
-                    )
-                })) {
-                    eprintln!("Nana 资源库删除任务提交失败：{error}");
-                    app.shell.reduce(ShellMessage::MissingDeleteFinished(Err(format!(
-                        "资源库删除任务提交失败：{error}"
-                    ))));
-                }
+                let failed = |error| ShellMessage::MissingDeleteFinished(Err(error));
+                task_guard::spawn_service(app.services.as_ref(), context, "资源库删除", failed, |services| {
+                    let management = services.repository_management.clone();
+                    let executor = services.executor.clone();
+                    move || {
+                        let request = RepositoryDeleteRequest { repo_id, mode };
+                        ShellMessage::MissingDeleteFinished(executor.block_on(management.delete_repository(request)))
+                    }
+                });
             }
             WorkspaceEffect::RefreshRepositoriesSilent => {
                 shell::workspace_refresh::dispatch_silent_list(app, context);

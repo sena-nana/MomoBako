@@ -1,10 +1,10 @@
 //! 把预览、元数据和搜索副作用交给已有的仓库查询与交互 ViewModel。
 //!
-//! 图片解码失败写回错误态。文本超过上限不截断冒充成功。搜索结果按代次丢弃。
+//! 图片解码失败写回错误态。文本超过上限不截断冒充成功。搜索结果按代次丢弃。任务都经 `task_guard` 派发：服务没
+//! 起来、任务排不进去或解码时 panic 都按失败写回，预览不会停在读取中。
 
 use std::collections::BTreeMap;
 
-use nana_ui::runtime::Task;
 use nana_ui::RuntimeProgramContext;
 use serde_json::Value;
 
@@ -15,9 +15,10 @@ use crate::backend::services::repository::{
 use crate::shell::{
     DateBound, InspectEffect, InspectMessage, NumberBound, SearchRequestDraft, SearchRow, ShellMessage,
 };
+use crate::task_guard::spawn_service;
 use crate::{decode_preview_pixels, prepare_preview_text, MomoBakoApplication};
 
-/// 执行预览和搜索归约留下的请求。服务未启动时写回错误，避免按钮停在进行中。
+/// 执行预览和搜索归约留下的请求。
 pub fn dispatch_inspect_effects(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
     for effect in app.shell.inspect.take_effects() {
         match effect {
@@ -43,205 +44,152 @@ pub fn dispatch_inspect_effects(app: &mut MomoBakoApplication, context: &Runtime
     }
 }
 
-fn dispatch_image(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String, path: String) {
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 图片预览需要领域服务，当前服务未启动");
-        app.shell.reduce(ShellMessage::PreviewPixelsLoaded {
-            source: empty_source(&repo_id, &path),
-            pixels: Err("领域服务未启动".into()),
-        });
-        return;
-    };
-    let query = services.repository_query.clone();
-    let executor = services.executor.clone();
-    let fail_repo = repo_id.clone();
-    let fail_path = path.clone();
-    if let Err(error) = context.run_task(Task::new(async move {
-        let prepared = executor.block_on(query.prepare_preview_file_source(FileReadRequest {
-            repo_id: repo_id.clone(),
-            path: path.clone(),
-        }));
-        let (source, pixels) = match prepared {
-            Ok(source) => {
-                let pixels = executor
-                    .block_on(query.read_file(FileReadRequest { repo_id, path }))
-                    .and_then(|bytes| {
-                        if !source.media_type.starts_with("image/") {
-                            return Err(format!("原生纹理预览暂不支持 {}", source.media_type));
-                        }
-                        decode_preview_pixels(&bytes)
-                    });
-                (source, pixels)
-            }
-            Err(error) => (empty_source(&repo_id, &path), Err(error)),
-        };
-        ShellMessage::PreviewPixelsLoaded { source, pixels }
-    })) {
-        eprintln!("Nana 图片预览任务提交失败：{error}");
-        app.shell.reduce(ShellMessage::PreviewPixelsLoaded {
-            source: empty_source(&fail_repo, &fail_path),
-            pixels: Err(format!("图片预览任务提交失败：{error}")),
-        });
-    }
+fn dispatch_image(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String, path: String) {
+    let (fail_repo, fail_path) = (repo_id.clone(), path.clone());
+    let failed = move |error| ShellMessage::PreviewPixelsLoaded { source: empty_source(&fail_repo, &fail_path), pixels: Err(error) };
+    spawn_service(app.services.as_ref(), context, "图片预览", failed, |services| {
+        let query = services.repository_query.clone();
+        let executor = services.executor.clone();
+        move || {
+            let prepared = executor.block_on(query.prepare_preview_file_source(FileReadRequest {
+                repo_id: repo_id.clone(),
+                path: path.clone(),
+            }));
+            let (source, pixels) = match prepared {
+                Ok(source) => {
+                    let pixels = executor
+                        .block_on(query.read_file(FileReadRequest { repo_id, path }))
+                        .and_then(|bytes| {
+                            if !source.media_type.starts_with("image/") {
+                                return Err(format!("原生纹理预览暂不支持 {}", source.media_type));
+                            }
+                            decode_preview_pixels(&bytes)
+                        });
+                    (source, pixels)
+                }
+                Err(error) => (empty_source(&repo_id, &path), Err(error)),
+            };
+            ShellMessage::PreviewPixelsLoaded { source, pixels }
+        }
+    });
 }
 
 fn dispatch_media(
-    app: &mut MomoBakoApplication,
+    app: &MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
     repo_id: String,
     path: String,
     generation: u64,
 ) {
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 音视频预览需要领域服务，当前服务未启动");
-        app.shell.reduce(media_message(path, generation, Err("领域服务未启动".into())));
-        return;
-    };
-    let query = services.repository_query.clone();
-    let executor = services.executor.clone();
-    let task_path = path.clone();
-    let task_repo = repo_id.clone();
+    let fail_path = path.clone();
+    let failed = move |error| media_message(fail_path.clone(), generation, Err(error));
     let extension = std::path::Path::new(&path).extension().and_then(|extension| extension.to_str()).unwrap_or_default().to_string();
-    if let Err(error) = context.run_task(Task::new(async move {
-        // 和播放条装当前项走同一个解码：坏的 wav、mp3、flac、ogg 报它自己的原因，预览页写出来的和播放条一致。
-        let result = executor
-            .block_on(query.read_file(FileReadRequest { repo_id, path: task_path.clone() }))
-            .and_then(|bytes| crate::shell::player::decode_media(&task_repo, &extension, &bytes));
-        media_message(task_path, generation, result)
-    })) {
-        eprintln!("Nana 音视频预览任务提交失败：{error}");
-        app.shell.reduce(media_message(path, generation, Err(format!("音视频预览任务提交失败：{error}"))));
-    }
+    spawn_service(app.services.as_ref(), context, "音视频预览", failed, |services| {
+        let query = services.repository_query.clone();
+        let executor = services.executor.clone();
+        move || {
+            // 和播放条装当前项走同一个解码：坏的 wav、mp3、flac、ogg 报它自己的原因，预览页写出来的和播放条一致。
+            let result = executor
+                .block_on(query.read_file(FileReadRequest { repo_id: repo_id.clone(), path: path.clone() }))
+                .and_then(|bytes| crate::shell::player::decode_media(&repo_id, &extension, &bytes));
+            media_message(path, generation, result)
+        }
+    });
 }
 
 fn dispatch_text(
-    app: &mut MomoBakoApplication,
+    app: &MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
     repo_id: String,
     path: String,
     markdown: bool,
     generation: u64,
 ) {
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 文本预览需要领域服务，当前服务未启动");
-        app.shell.reduce(body_error(path, markdown, generation, "领域服务未启动".into()));
-        return;
-    };
-    let query = services.repository_query.clone();
-    let executor = services.executor.clone();
-    let task_path = path.clone();
-    if let Err(error) = context.run_task(Task::new(async move {
-        let result = executor
-            .block_on(query.read_file(FileReadRequest { repo_id, path: task_path.clone() }))
-            .map(|bytes| prepare_preview_text(&bytes));
-        if let Err(error) = &result {
-            eprintln!("Nana 读取文本预览失败：{task_path}：{error}");
+    let fail_path = path.clone();
+    let failed = move |error| body_error(fail_path.clone(), markdown, generation, error);
+    spawn_service(app.services.as_ref(), context, "文本预览", failed, |services| {
+        let query = services.repository_query.clone();
+        let executor = services.executor.clone();
+        move || {
+            let result = executor
+                .block_on(query.read_file(FileReadRequest { repo_id, path: path.clone() }))
+                .map(|bytes| prepare_preview_text(&bytes));
+            if let Err(error) = &result {
+                eprintln!("Nana 读取文本预览失败：{path}：{error}");
+            }
+            ShellMessage::Inspect(InspectMessage::BodyLoaded { path, markdown, generation, result })
         }
-        ShellMessage::Inspect(InspectMessage::BodyLoaded { path: task_path, markdown, generation, result })
-    })) {
-        eprintln!("Nana 文本预览任务提交失败：{error}");
-        app.shell.reduce(body_error(path, markdown, generation, format!("文本预览任务提交失败：{error}")));
-    }
+    });
 }
 
 fn dispatch_native(
-    app: &mut MomoBakoApplication,
+    app: &MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
     repo_id: String,
     path: String,
     view_id: String,
     generation: u64,
 ) {
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 原生预览需要领域服务，当前服务未启动");
-        app.shell.reduce(native_message(path, generation, Err("领域服务未启动".into())));
-        return;
-    };
-    let query = services.repository_query.clone();
-    let executor = services.executor.clone();
-    let task_path = path.clone();
-    if let Err(error) = context.run_task(Task::new(async move {
-        let result = executor
-            .block_on(query.read_file(FileReadRequest { repo_id, path: task_path.clone() }))
-            .and_then(|bytes| crate::shell::load_native_preview(&view_id, &bytes));
-        native_message(task_path, generation, result)
-    })) {
-        eprintln!("Nana 原生预览任务提交失败：{error}");
-        app.shell.reduce(native_message(path, generation, Err(format!("原生预览任务提交失败：{error}"))));
-    }
+    let fail_path = path.clone();
+    let failed = move |error| native_message(fail_path.clone(), generation, Err(error));
+    spawn_service(app.services.as_ref(), context, "原生预览", failed, |services| {
+        let query = services.repository_query.clone();
+        let executor = services.executor.clone();
+        move || {
+            let result = executor
+                .block_on(query.read_file(FileReadRequest { repo_id, path: path.clone() }))
+                .and_then(|bytes| crate::shell::load_native_preview(&view_id, &bytes));
+            native_message(path, generation, result)
+        }
+    });
 }
 
 fn dispatch_save(
-    app: &mut MomoBakoApplication,
+    app: &MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
     repo_id: String,
     asset_id: String,
     expected_version: i64,
     metadata: BTreeMap<String, Value>,
 ) {
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 保存元数据需要领域服务，当前服务未启动");
-        app.shell.reduce(saved_message(Err("领域服务未启动".into())));
-        return;
-    };
-    let query = services.repository_query.clone();
-    let executor = services.executor.clone();
-    if let Err(error) = context.run_task(Task::new(async move {
-        let result = executor
-            .block_on(query.update_asset_metadata(MetadataUpdateRequest {
-                repo_id,
-                asset_id,
-                expected_version,
-                metadata,
-                source: Some("desktop".into()),
-            }))
-            .map(|response| (response.outcome, response.asset));
-        saved_message(result)
-    })) {
-        eprintln!("Nana 保存元数据任务提交失败：{error}");
-        app.shell.reduce(saved_message(Err(format!("保存元数据任务提交失败：{error}"))));
-    }
+    let failed = |error| saved_message(Err(error));
+    spawn_service(app.services.as_ref(), context, "保存元数据", failed, |services| {
+        let query = services.repository_query.clone();
+        let executor = services.executor.clone();
+        move || {
+            let request = MetadataUpdateRequest { repo_id, asset_id, expected_version, metadata, source: Some("desktop".into()) };
+            saved_message(executor.block_on(query.update_asset_metadata(request)).map(|response| (response.outcome, response.asset)))
+        }
+    });
 }
 
-fn dispatch_asset(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String, asset_id: String) {
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 打开搜索结果需要领域服务，当前服务未启动");
-        app.shell.reduce(ShellMessage::AssetDetailLoaded(Err("领域服务未启动".into())));
-        return;
-    };
-    let query = services.repository_query.clone();
-    let executor = services.executor.clone();
-    if let Err(error) = context.run_task(Task::new(async move {
-        ShellMessage::AssetDetailLoaded(executor.block_on(query.get_asset_detail(repo_id, asset_id)))
-    })) {
-        eprintln!("Nana 打开搜索结果任务提交失败：{error}");
-        app.shell.reduce(ShellMessage::AssetDetailLoaded(Err(format!("打开搜索结果任务提交失败：{error}"))));
-    }
+fn dispatch_asset(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String, asset_id: String) {
+    let failed = |error| ShellMessage::AssetDetailLoaded(Err(error));
+    spawn_service(app.services.as_ref(), context, "打开搜索结果", failed, |services| {
+        let query = services.repository_query.clone();
+        let executor = services.executor.clone();
+        move || ShellMessage::AssetDetailLoaded(executor.block_on(query.get_asset_detail(repo_id, asset_id)))
+    });
 }
 
 fn dispatch_search(
-    app: &mut MomoBakoApplication,
+    app: &MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
     generation: u64,
     request: SearchRequestDraft,
 ) {
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 搜索需要领域服务，当前服务未启动");
-        app.shell.reduce(search_message(generation, Err("领域服务未启动".into())));
-        return;
-    };
-    let query = services.repository_query.clone();
-    let executor = services.executor.clone();
     let service_request = to_service_request(request);
-    if let Err(error) = context.run_task(Task::new(async move {
-        let result = executor
-            .block_on(query.search_assets(service_request))
-            .map(|response| response.results.into_iter().map(SearchRow::from_hit).collect());
-        search_message(generation, result)
-    })) {
-        eprintln!("Nana 搜索任务提交失败：{error}");
-        app.shell.reduce(search_message(generation, Err(format!("搜索任务提交失败：{error}"))));
-    }
+    let failed = move |error| search_message(generation, Err(error));
+    spawn_service(app.services.as_ref(), context, "搜索", failed, |services| {
+        let query = services.repository_query.clone();
+        let executor = services.executor.clone();
+        move || {
+            let result = executor
+                .block_on(query.search_assets(service_request))
+                .map(|response| response.results.into_iter().map(SearchRow::from_hit).collect());
+            search_message(generation, result)
+        }
+    });
 }
 
 fn to_service_request(request: SearchRequestDraft) -> SearchRequest {
