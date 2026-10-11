@@ -222,20 +222,23 @@ fn editable_asset(model: &ShellViewModel) -> Option<(String, String)> {
     Some((inspect.current_repo_id()?.to_string(), inspect.current_asset_id()?.to_string()))
 }
 
+impl CandidateForm {
+    /// 属于 `asset` 的初始表单。
+    fn fresh(asset: Option<&str>) -> Self {
+        Self { asset: asset.map(str::to_string), ..Self::default() }
+    }
+}
+
 impl CandidateState {
     /// 表单属于当前素材时的样子；属于别的素材时按初始状态。
     fn form_for(&self, asset: Option<&str>) -> CandidateForm {
-        if self.form.asset.as_deref() == asset {
-            self.form.clone()
-        } else {
-            CandidateForm { asset: asset.map(str::to_string), ..CandidateForm::default() }
-        }
+        if self.form.asset.as_deref() == asset { self.form.clone() } else { CandidateForm::fresh(asset) }
     }
 
     /// 要改表单：表单属于别的素材时先回到初始状态。
     fn form_mut(&mut self, asset: Option<&str>) -> &mut CandidateForm {
         if self.form.asset.as_deref() != asset {
-            self.form = CandidateForm { asset: asset.map(str::to_string), ..CandidateForm::default() };
+            self.form = CandidateForm::fresh(asset);
         }
         &mut self.form
     }
