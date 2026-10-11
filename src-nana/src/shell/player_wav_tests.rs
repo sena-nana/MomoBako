@@ -272,6 +272,89 @@ fn the_clock_advances_and_a_natural_end_moves_to_the_next_item() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// 播放时钟按帧往前拨 `ms` 毫秒。
+fn run_clock(model: &mut super::super::super::ShellViewModel, ms: u64) {
+    let frame = crate::frame_clock::FrameStep::millis(100);
+    for _ in 0..ms / 100 {
+        crate::shell::poll_timers(model, frame);
+    }
+}
+
+/// 暂停后继续（播放条、系统媒体键都走 `SetPlaying`），声卡从暂停时的进度接着出声，不从头或上次跳转的地方重来；
+/// 跳转以后再播一段、暂停、继续，同样接着当前进度，不退回跳转点。8 kHz 下 1 毫秒是 8 帧。
+#[test]
+fn resuming_after_a_pause_sounds_from_the_paused_position() {
+    let dir = temp_dir("wav-resume");
+    let path = dir.join("tone.wav");
+    std::fs::write(&path, pcm_wav(8_000, 1, 8, &[128u8; 16_000])).unwrap();
+    let mut model = shell(true);
+    model.player.repo_id = Some("repo".into());
+    model.player.queue = vec![wav_queue_item("tone", &path)];
+    send(&mut model, PlayerMessage::PlayItem { item_id: "tone".into() });
+    assert_eq!(model.player.wav.sounding(), Some((0, 1.0)), "装好以后从头出声");
+
+    run_clock(&mut model, 600);
+    assert_eq!(model.player.session.current_time_ms, 600);
+    send(&mut model, PlayerMessage::SetPlaying(false));
+    assert_eq!(model.player.wav.sounding(), None, "暂停停声");
+    send(&mut model, PlayerMessage::SetPlaying(true));
+    assert_eq!(model.player.session.current_time_ms, 600, "进度接着暂停处");
+    assert_eq!(model.player.wav.sounding(), Some((4_800, 1.0)), "声音也接着暂停处");
+
+    send(&mut model, PlayerMessage::Seek(1_000));
+    assert_eq!(model.player.wav.sounding(), Some((8_000, 1.0)), "播放中跳转从新位置出声");
+    run_clock(&mut model, 300);
+    send(&mut model, PlayerMessage::SetPlaying(false));
+    send(&mut model, PlayerMessage::SetPlaying(true));
+    assert_eq!(model.player.wav.sounding(), Some((10_400, 1.0)), "继续播放不退回跳转点");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// 预览页接管播放条以后同样：放一段、暂停、继续，从暂停处出声。
+#[test]
+fn a_previewed_track_resumes_where_it_was_paused() {
+    let bytes = pcm_wav(8_000, 1, 8, &[128u8; 16_000]);
+    let parts = crate::shell::preview_media_parts("repo", &bytes).expect("预览");
+    let mut model = shell(true);
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("audio/a.wav", "wav"))));
+    let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().unwrap() else {
+        panic!("没有音视频请求");
+    };
+    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(parts.session), pcm: parts.pcm, frames: None }));
+    send(&mut model, PlayerMessage::SetPlaying(true));
+    run_clock(&mut model, 1_200);
+    send(&mut model, PlayerMessage::SetPlaying(false));
+    send(&mut model, PlayerMessage::SetPlaying(true));
+    assert_eq!(model.inspect.media_session().map(|session| session.current_time_ms), Some(1_200));
+    assert_eq!(model.player.wav.sounding(), Some((9_600, 1.0)));
+}
+
+/// 播放中改音量，声卡马上按新音量从当前进度重新出声，不等下一次播放或跳转；暂停时只记下音量、不出声，
+/// 继续播放时用它。
+#[test]
+fn changing_the_volume_while_playing_takes_effect_at_the_current_position() {
+    let dir = temp_dir("wav-volume");
+    let path = dir.join("tone.wav");
+    std::fs::write(&path, pcm_wav(8_000, 1, 8, &[128u8; 16_000])).unwrap();
+    let mut model = shell(true);
+    model.player.repo_id = Some("repo".into());
+    model.player.queue = vec![wav_queue_item("tone", &path)];
+    send(&mut model, PlayerMessage::PlayItem { item_id: "tone".into() });
+    run_clock(&mut model, 500);
+    send(&mut model, PlayerMessage::SetVolume(0.25));
+    assert_eq!(model.player.session.volume, 0.25);
+    assert_eq!(model.player.session.status, "playing");
+    assert_eq!(model.player.wav.sounding(), Some((4_000, 0.25)), "新音量从当前进度出声");
+
+    send(&mut model, PlayerMessage::SetPlaying(false));
+    send(&mut model, PlayerMessage::SetVolume(0.5));
+    assert_eq!(model.player.wav.sounding(), None, "暂停时改音量不出声");
+    assert_eq!(model.player.session.status, "paused");
+    send(&mut model, PlayerMessage::SetPlaying(true));
+    assert_eq!(model.player.wav.sounding(), Some((4_000, 0.5)));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 /// 存下的播放会话照 Vue `setActivePlaylist(.., { restore: true })` 恢复：装载期间播放条显示存下的进度，
 /// 会话文件不被装载清零；装好以后能跳转就跳到存下的位置（超过时长时夹到结尾），不在播放就停在那里。
 #[test]

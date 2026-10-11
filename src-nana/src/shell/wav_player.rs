@@ -84,10 +84,13 @@ struct Cursor {
     /// 测试构建不打开设备，因此不保留这块缓冲。
     #[cfg(all(windows, not(test)))]
     playback_wav: Vec<u8>,
-    /// 播放头，单位是帧。
+    /// 播放头，单位是帧。播放中不随声卡前进：播放时钟只推进会话进度，重新出声前由 [`drive`] 对齐到会话进度。
     frame: u64,
     volume: f32,
     playing: bool,
+    /// 测试构建不开声卡，记下最近一次出声的起点帧和音量，停声后为空。单元测试据此核对出声位置。
+    #[cfg(test)]
+    sounding: Option<(u64, f32)>,
 }
 
 struct ParsedWav {
@@ -165,6 +168,18 @@ impl WavPlayer {
     pub(super) fn is_playing(&self) -> bool {
         self.inner.borrow().playing
     }
+
+    /// 测试用：声卡这时会从哪一帧、按什么音量出声。没在出声时为空。
+    #[cfg(test)]
+    pub(super) fn sounding(&self) -> Option<(u64, f32)> {
+        self.inner.borrow().sounding
+    }
+
+    /// 把播放头放到 `position_ms`，不动声卡。只在重新出声之前调用，见 [`drive`]。
+    fn locate(&self, position_ms: u64) {
+        let mut cursor = self.inner.borrow_mut();
+        cursor.frame = cursor.frame_at(position_ms);
+    }
 }
 
 impl std::fmt::Debug for WavPlayer {
@@ -208,13 +223,7 @@ impl PlaybackMediaPlugin for WavPlayer {
     fn seek(&mut self, position_ms: u64) -> Result<(), String> {
         self.ensure_loaded("跳转")?;
         let mut cursor = self.inner.borrow_mut();
-        let rate = u64::from(cursor.sample_rate);
-        let frame = if rate == 0 {
-            0
-        } else {
-            position_ms.saturating_mul(rate) / 1000
-        };
-        cursor.frame = frame.min(cursor.frame_count);
+        cursor.frame = cursor.frame_at(position_ms);
         // 跳转先停掉当前声音。只有仍在播放时才从新位置再开，暂停时不自动重开。
         if cursor.playing {
             device::start(&mut cursor);
@@ -226,8 +235,12 @@ impl PlaybackMediaPlugin for WavPlayer {
 
     fn set_volume(&mut self, volume: f32) -> Result<(), String> {
         self.ensure_loaded("音量")?;
-        // 记在游标里，下次 play 或播放中跳转时再缩放。拖动音量不重开，避免把声音拉回播放头。
-        self.inner.borrow_mut().volume = volume;
+        let mut cursor = self.inner.borrow_mut();
+        cursor.volume = volume;
+        // PlaySound 出声以后改不了音量，正在出声时按新音量从播放头重开；暂停时只记下，下次出声时用。
+        if cursor.playing {
+            device::start(&mut cursor);
+        }
         Ok(())
     }
 }
@@ -257,6 +270,8 @@ impl Cursor {
             frame: 0,
             volume: 1.0,
             playing: false,
+            #[cfg(test)]
+            sounding: None,
         }
     }
 
@@ -273,7 +288,16 @@ impl Cursor {
             frame: 0,
             volume: 1.0,
             playing: false,
+            #[cfg(test)]
+            sounding: None,
         }
+    }
+
+    /// 毫秒换成帧：帧 = 毫秒 × 采样率 / 1000，夹在总帧数以内。
+    fn frame_at(&self, position_ms: u64) -> u64 {
+        let rate = u64::from(self.sample_rate);
+        let frame = if rate == 0 { 0 } else { position_ms.saturating_mul(rate) / 1000 };
+        frame.min(self.frame_count)
     }
 }
 
@@ -293,6 +317,10 @@ pub(super) enum Output {
 }
 
 /// 按 [`Output`] 驱动播放、暂停、跳转和音量，返回新的会话和可能的错误。
+///
+/// 播放时钟只有一份，是会话进度（`player_preview.rs` 的 `advance_clock`）；游标的播放头不随声卡前进。
+/// 所以要重新出声时（继续播放、播放中换音量），先把播放头对到会话进度，声音才从界面上的进度接着走，
+/// 而不是从上次装载或跳转的位置重来。
 pub(super) fn drive(
     output: Output,
     wav: &WavPlayer,
@@ -300,7 +328,12 @@ pub(super) fn drive(
     action: Action,
 ) -> (PlaybackSessionState, Option<String>) {
     match output {
-        Output::Cursor => control(wav.clone(), session, action),
+        Output::Cursor => {
+            if matches!(action, Action::Play | Action::Volume(_)) {
+                wav.locate(session.current_time_ms);
+            }
+            control(wav.clone(), session, action)
+        }
         Output::Clock => control(ClockOnly, session, action),
     }
 }
@@ -641,10 +674,25 @@ impl Drop for Cursor {
     }
 }
 
-/// 测试构建和非 Windows 保持静音状态机，不打开设备。
+/// 测试构建和非 Windows 保持静音状态机，不打开设备。测试构建记下这次会从哪一帧、按什么音量出声；
+/// 没有剩余样本时和真设备一样不出声。
 #[cfg(not(all(windows, not(test))))]
 mod device {
-    pub(super) fn start(_cursor: &mut super::Cursor) {}
+    pub(super) fn start(cursor: &mut super::Cursor) {
+        #[cfg(test)]
+        {
+            cursor.sounding = (cursor.frame < cursor.frame_count).then_some((cursor.frame, cursor.volume));
+        }
+        #[cfg(not(test))]
+        let _ = cursor;
+    }
 
-    pub(super) fn stop(_cursor: &mut super::Cursor) {}
+    pub(super) fn stop(cursor: &mut super::Cursor) {
+        #[cfg(test)]
+        {
+            cursor.sounding = None;
+        }
+        #[cfg(not(test))]
+        let _ = cursor;
+    }
 }
