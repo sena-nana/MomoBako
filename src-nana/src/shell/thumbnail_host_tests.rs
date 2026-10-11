@@ -14,7 +14,7 @@ use crate::thumbnail_host::{TextureTable, ThumbnailHost};
 
 use super::files::{DisplayMode, FileRow, FilesMessage};
 use super::view_harness::ShellHarness;
-use super::{thumbnail_slot, FilesEffect, ShellMessage, ShellViewModel, ThumbnailFrame};
+use super::{thumbnail_slot, EnsuredThumbnail, FilesEffect, ShellMessage, ShellViewModel, ThumbnailFrame};
 
 /// 记下登记和移除的纹理表。`live` 是现在登记着的槽。
 #[derive(Default)]
@@ -70,27 +70,29 @@ impl Window {
         }
     }
 
+    /// 解码请求当场“解出”像素；浏览时生成缩略图的请求当场交回 `thumbs/{文件}` 这张缓存文件。
     fn decode(&mut self) {
-        let paths: Vec<String> = self
-            .harness
-            .model
-            .files
-            .take_effects()
-            .into_iter()
-            .flat_map(|effect| match effect {
-                FilesEffect::DecodeThumbnails { paths } => paths,
-                _ => Vec::new(),
-            })
-            .collect();
-        if paths.is_empty() {
-            return;
+        let mut paths = Vec::new();
+        let mut generated = Vec::new();
+        for effect in self.harness.model.files.take_effects() {
+            match effect {
+                FilesEffect::DecodeThumbnails { paths: more } => paths.extend(more),
+                FilesEffect::EnsureThumbnail { repo_id, path } => generated.push((repo_id, path)),
+                _ => {}
+            }
         }
-        let mut frames: Vec<ThumbnailFrame> = paths
-            .iter()
-            .map(|path| ThumbnailFrame { path: path.clone(), natural_width: 64, natural_height: 48, width: 2, height: 2, rgba: vec![255; 16] })
-            .collect();
-        self.host.queue(&mut frames);
-        self.harness.apply(ShellMessage::ThumbnailPixels(frames));
+        if !paths.is_empty() {
+            let mut frames: Vec<ThumbnailFrame> = paths
+                .iter()
+                .map(|path| ThumbnailFrame { path: path.clone(), natural_width: 64, natural_height: 48, width: 2, height: 2, rgba: vec![255; 16] })
+                .collect();
+            self.host.queue(&mut frames);
+            self.harness.apply(ShellMessage::ThumbnailPixels(frames));
+        }
+        for (repo_id, path) in generated {
+            let result = Ok(EnsuredThumbnail { thumbnail_path: Some(format!("thumbs/{path}")), custom: false, metadata: None });
+            self.harness.apply(ShellMessage::Files(FilesMessage::ThumbnailEnsured { repo_id, path, result }));
+        }
     }
 
     fn mounted(&self) -> HashSet<String> {
@@ -266,4 +268,24 @@ fn changing_directory_drops_the_old_textures_and_a_reload_keeps_them() {
         assert!(window.registered(&format!("thumbs/photos/img-{index:03}.png")), "新目录的缩略图登记了");
     }
     assert!(window.flashed.is_empty(), "卸了挂着的缩略图：{:?}", window.flashed);
+}
+
+/// 目录里的图片还没有缩略图（迁移以后新加的文件）：浏览时逐条请后端生成，结果写回以后卡片挂上缩略图节点，
+/// 空闲以后解码、登记纹理，卡片从类型图标换成缩略图。原来 Nana 从不请后端生成，这些卡片一直是类型图标。
+#[test]
+fn missing_thumbnails_are_generated_decoded_and_registered() {
+    let mut window = Window::mount(files_model(0), 240);
+    let repo_id = window.harness.model.workspace.active_repo_id.clone().expect("验收仓库");
+    let mut fresh = listing(&repo_id, "", 3);
+    for entry in &mut fresh.entries {
+        entry.thumbnail_path = None;
+    }
+    window.harness.apply(ShellMessage::FileBrowserLoaded(Ok(fresh)));
+    window.settle();
+    window.settle();
+    for index in 0..3 {
+        let path = format!("thumbs/img-{index:03}.png");
+        assert!(window.registered(&path), "{path} 生成以后解码登记：{:?}", window.table.calls);
+        assert!(window.ready(&path), "{path} 的卡片画缩略图");
+    }
 }

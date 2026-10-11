@@ -123,6 +123,7 @@ impl FilesState {
             FilesMessage::HardlinkConfirmed { result, .. } => self.note_hardlink_confirmed(result),
             FilesMessage::NoteError(error) => self.note_error(error),
             FilesMessage::ThumbnailSaved { path, thumbnail_path, custom } => self.note_thumbnail_saved(&path, thumbnail_path, custom),
+            FilesMessage::ThumbnailEnsured { repo_id, path, result } => self.note_thumbnail_ensured(ctx, &repo_id, &path, result),
             // 要读仓库和面板，在 `reduce_message` 里转成宿主拖放消息。
             FilesMessage::HostDrop(_) => {}
         }

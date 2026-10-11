@@ -210,6 +210,7 @@
 - `POST /repositories/{repoId}/thumbnails:ensure`
   - Request body includes repository-relative `path`
   - Reuse an existing valid thumbnail cache entry or generate one for supported local image/video files
+  - The desktop calls `ensure` while browsing for listed local files that have no thumbnail yet, one request at a time (thumbnail work runs behind the runtime write lock, so parallel requests would only queue there); entries in the trash and virtual source entries are skipped
   - Optional `action`: `ensure`, `refresh`, `save`, `clear`
   - `refresh` regenerates the cached thumbnail from the source file for types that have a generator (local images, video frames and embedded audio covers) and replaces the cache file only after the new one is written. A type without a generator keeps its existing thumbnail, a failed regeneration keeps the old thumbnail and returns the error, and an entry with a custom thumbnail (file or folder) keeps reporting the custom one
   - `save` accepts local `sourcePath`, remote HTTP(S) `sourceUrl`, or `imageBytes` for custom file/folder thumbnails; `sourceUrl` is downloaded by the backend

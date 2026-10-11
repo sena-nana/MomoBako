@@ -29,10 +29,12 @@ impl FilesState {
         false
     }
 
-    /// 还有缩略图或下一页时，等空闲间隔再解码，不在快照到达的同一拍发出请求。
+    /// 读目录（含续读）的快照到了：还有缩略图或下一页时，等空闲间隔再解码，不在快照到达的同一拍发出请求；
+    /// 新来的行里可能有还没生成缩略图的，生成队列下一次收尾重新挑（`files_thumbnail_ensure.rs`）。
     pub(super) fn arm_thumbnail_prefetch(&mut self) {
         let needs = self.has_more || !self.undecoded_thumbnail_paths().is_empty();
         self.schedule_thumbnail_prefetch(needs, self.prefetch_clock);
+        self.ensure.mark_rows_changed();
     }
 
     /// 还要解码的缩略图文件：列表行和智能文件夹行里没有纹理、没请求过的，宿主报告过挂着的缩略图时
@@ -201,10 +203,12 @@ impl FilesState {
         }
     }
 
-    /// 列表换了以后，解码请求只留还在列表里的：换回来的目录里解码失败过的缩略图可以再试。
+    /// 列表换了以后，解码请求只留还在列表里的：换回来的目录里解码失败过的缩略图可以再试。换上的行里可能有
+    /// 还没生成缩略图的，生成队列下一次收尾重新挑。
     pub(super) fn prune_decode_requests(&mut self) {
         let listed = self.listed_thumbnails();
         self.decode_requested.retain(|path| listed.contains(path));
+        self.ensure.mark_rows_changed();
     }
 
     fn request_decode(&mut self, paths: Vec<String>) {
