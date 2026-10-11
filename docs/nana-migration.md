@@ -14,16 +14,17 @@ cargo run -p momobako-nana   # 原生窗口
 yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂存外置插件
 ```
 
-原生窗口读写的本地文件：
+原生窗口读写的本地文件。位置由 `src-nana/src/app_paths.rs` 按 NanaUI 的应用路径定：下表是开发时（从 `target/` 运行）的位置，和以前一样；安装版和便携版落在应用数据、配置和缓存目录，便携版全在 `<根>/data`，见 [Nana 发布包](./nana-packaging.md#数据写在哪)。
 
-| 内容 | 位置 | 代码 |
+| 内容 | 开发时的位置 | 代码 |
 | --- | --- | --- |
-| 领域服务数据 | 当前目录下的 `.service-data` | `src-backend/src/services/runtime/mod.rs` |
+| 领域服务数据 | 当前目录下的 `.service-data` | `src-nana/src/app_paths.rs`、`src-backend/src/services/runtime/mod.rs` |
 | 应用设置 | `%LOCALAPPDATA%\MomoBako\settings.json`，没有这个变量时依次退到 `%APPDATA%`、当前目录 | `src-nana/src/settings.rs` |
 | 侧栏、展示方式、圆角 | 设置文件旁的 `sidebar.json`、`file-display.json`、`corners.json` | `workspace.rs`、`files_display.rs`、`admin_support.rs` |
 | 上次打开的资源库 | 设置文件旁的 `last-repository.json`（键同 Vue 本地存储 `momobako.lastActiveRepositoryId`） | `workspace_remember.rs` |
 | 播放设置、播放会话、播放器偏好 | 设置文件旁的 `playback-settings.json`、`playback-sessions.json`、`playlist-player-preferences.json` | `player_support.rs` |
 | 主窗口位置、尺寸和最大化 | 应用数据目录下的 `com.momobako.desktop/nana-main-window-state.json` | `src-nana/src/window_state.rs` |
+| 随附插件 | 读插件打包输出 `External/Plugins/.packages`，同步进服务目录的 `plugins/builtin` | `src-nana/src/plugin_host.rs` |
 
 ## 渲染和验收路径
 
@@ -45,7 +46,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 ## 服务和宿主事件
 
 - 领域代码在 `src-backend`（crate `momobako-backend`，含 `models`、`services`、`viewmodels`）。Nana 宿主、Tauri 窗口壳和 Eagle 来源插件（`External/Plugins/source-eagle-library`）都依赖它，领域代码不依赖 Tauri。
-- `NativeServices::start`（`src-nana/src/services.rs`）启动一份 `RepositoryRuntime`，把资源库查询、文件浏览、交互、管理、插件、系统和 Mutsuki 任务 ViewModel 都绑在它上面。壳层只经这些 ViewModel 调服务，不调 Tauri command。启动失败时窗口进错误页（`initialize`），`NativeServices` 销毁时关掉 Runtime 的辅助进程。
+- `NativeServices::start`（`src-nana/src/services.rs`）在 `app_paths.rs` 定下的服务目录启动一份 `RepositoryRuntime`，日志器起来以后由 `plugin_host.rs` 同步随附插件、设置外部程序目录、加载插件并装上插件宿主（和 Tauri 启动钩子同样的顺序；以前 Nana 没有插件宿主，后端插件都不可用），再把资源库查询、文件浏览、交互、管理、插件、系统和 Mutsuki 任务 ViewModel 都绑在它上面。壳层只经这些 ViewModel 调服务，不调 Tauri command。启动失败时窗口进错误页（`initialize`），`NativeServices` 销毁时关掉 Runtime 的辅助进程。
 - 归约留下的副作用由 `src-nana/src/*_dispatch.rs` 交给领域服务，结果作为 `ShellMessage` 回到归约。NanaUI 的任务工作线程在 `catch_unwind` 里跑任务：任务 panic 时线程不退出，但这个任务的结果消息丢掉、只记一条 `host.task_panicked` 故障，等着结果的状态收不到交回。所以所有派发点都经 `src-nana/src/task_guard.rs` 的 `spawn` / `spawn_service` 排任务，每个派发点只交代做什么和失败时交回什么：任务 panic 时在任务里接住、记进标准错误和系统日志（`taskPanicked`），任务排不进去（队列满、宿主停了）或服务没起来时当场经事件循环送回，三种都按失败交回，等着结果的状态（首屏启动、读取中、处理中、对话框的处理中）照常收尾（设置包和播放器类型失败照样进工作区，首屏启动前四步失败停在启动页给「重试」）。失败消息经事件循环到达，排在正在归约的这条消息之后。测试 `task_guard::tests::every_task_goes_through_the_guard` 扫描源码，直接调 `run_task` 的只能是 `task_guard.rs` 自己。缩略图解码在任务里逐张接住 panic，一张解不开不连累同一批的别的。
 - 宿主事件边界在 `src-backend/src/services/host_events.rs`：`HostEvent`（日志记录、资源库结构更新）和 `HostEventSink`。Tauri 入口（`src-tauri/src/app_shell.rs`）按原事件名 `system://log-recorded`、`repository://structure-updated` 和原 JSON 负载转给前端。Nana 用 `host_event_channel` 接收，`NativeServices::pump_host_events` 在独立线程里把事件转成 `ShellMessage::Host`。插件经 SDK 写的日志随这次插件调用的结果交回，后端收下结果时写进系统日志（`src-backend/src/services/plugin_events.rs`），和别的日志一样经日志记录事件进日志页。Mutsuki 任务运行时只存快照、不发变化通知，`NativeServices::watch_tasks` 另起一个线程每 250 ms 读一次（`src-nana/src/task_watch.rs`），排队、运行和取消中的任务有变化才发 `ShellMessage::TaskProgressLoaded`，服务销毁时线程退出。日志合并、启动日志和结构更新后的静默重读见逻辑矩阵的「宿主事件」。
 - 宿主请求在 `src-nana/src/host_api.rs`。外部打开和目录揭示（`OpenExternal`）、拖出和最小化到托盘（`HostInputRequest`）由 `host_bridge::perform` 执行，每次执行都清空队列；目录揭示交给 NanaUI 的 `reveal_in_file_manager`（文件在所在文件夹里选中，文件夹直接打开，路径不存在时报「路径不存在」），不再自己拼 `explorer /select,`；关闭确认是浮层里的确认框，只看 `InputState::pending_close`，不经宿主请求；窗口最小化、最大化和关闭经 `host_api::WindowCommand` 换成 Nana 平台命令。系统文件对话框直接排成 Nana 平台的 `WindowCommand::OpenFileDialog`，编号 1–8 在 `src-nana/src/shell/input_support.rs`。
@@ -86,7 +87,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 - **拖放**：拖入的放置决定由输入归约测试覆盖，拖出调用系统拖放；和资源管理器之间的真实拖放没有验收。
 - **托盘**：只在 Windows 上建；点击和菜单没有在真窗口里验收。
 - **UIA/AccessKit**：`hosted` 带 AccessKit 平台适配器；测试只读 NanaUI 自己的无障碍树，读屏器看到的结果没有验收。
-- **发布包**：仓库里没有 `momobako-nana` 的打包脚本；CI 和发布流程（`.github/workflows/`）只跑 `yarn verify`、`yarn test:backend` 和 Tauri 打包。
+- **发布包**：发布流程（`.github/workflows/release.yml`）改用 NanaUI 的 `nana-packager` 打 `momobako-nana`，不再调用 tauri-action：dist 配置编主程序，打安装版布局和便携版两个 zip，各自 `validate`，便携版再跑 `validate --run --tamper-suite`，发到草稿 Release。本地用 `yarn nana:build`、`yarn nana:package`，见 [Nana 发布包](./nana-packaging.md)。没有安装程序（NanaUI 还没有安装包后端）和代码签名；没在干净的 Windows 上验收：没装 VC++ 运行库时能不能启动、解压到只读目录（例如 `Program Files`）以后数据是不是都落在用户目录。CI（`ci.yml`）仍只跑 `yarn verify` 和 `yarn test:backend`，不打包、不跑 Nana 的测试。
 - **全局快捷键**：没有实现。Vue 和 Tauri 端（`src/`、`src-tauri/src`）也没有注册全局快捷键，宿主请求里不留占位变体。
 - **Vue 插件组件不进原生树**：插件前端注册的 Vue 组件（设置页、工具页、预览、播放器）不在原生树里运行。插件设置只画清单 `contributes.settings.fields` 声明的字段；第三方工具页只画页头和「这个工具页由插件的前端组件绘制，Nana 原生界面不能运行它。」（`admin_gap.rs`）；插件清单声明的预览贡献不登记：Vue 里它们由插件前端的 `registerPreview` 组件绘制，随附插件声明的扩展名都已有内置视图（`native_preview::builtin_view`），认不出的扩展名照 Vue 没有预览插件时一样只画缩略图或类型图标；只有播放器贡献、扩展名又不是音视频或图片的条目写「暂不支持播放 {扩展名} 文件」（`player_clip.rs`）。
 
@@ -104,6 +105,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 | `yarn test:backend` | `momobako-backend` 单测，等于 `cargo test -p momobako-backend --locked`，不在 `yarn verify` 里 |
 | `cargo test -p momobako_source_netease_cloud_music`、`-p momobako_mutsuki_plugin_sdk` | 网易云来源插件（下载落盘不覆盖、暂存目录、错误原因）和插件 SDK（调用结果带回插件日志）；插件都是根 workspace 成员，用根目录的 `Cargo.lock` |
 | `yarn verify` | 前端测试、前端构建和 `src-tauri` 编译检查，不含 `momobako-nana` |
+| `yarn nana:build`、`yarn nana:package` | dist 版主程序，打安装版布局和便携版、`nana-packager validate`、便携版自检，见 [Nana 发布包](./nana-packaging.md#本地打包) |
 
 和 Vue 对照时用本机的 `tmp/vue-mock`（`tmp/` 被 git 忽略，不在仓库里）：模拟 Tauri IPC，在无头 Edge 里渲染 `src/` 的真实页面，和 Nana 用同名场景、同一份夹具。做法见 [Nana 与 Vue 对照](./nana-vue-parity.md#对照方法)。
 

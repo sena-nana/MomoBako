@@ -29,6 +29,8 @@ yarn test:backend
 
 `cargo run -p momobako-nana` 从仓库根目录启动默认桌面端，服务数据写在当前目录的 `.service-data`。`yarn dev` 仅启动 Vite 前端。`yarn tauri:dev` 仍会先完整构建、打包并暂存外置插件，再启动 Tauri 对照窗口。
 
-原生插件共享仓库根 `Cargo.lock` 与 `target/`。日常增量调试可运行 `yarn plugins:build:dev <目录名或 pluginId>`；发布产物使用 `yarn plugins:build` 与 `yarn plugins:package`，生成带目标三元组的可复现 v2 `.momoplug`。`yarn tauri:build`、`yarn tauri:dev` 和发布流程通过 `--config src-tauri/tauri.external-plugins.conf.json` 把这些包作为资源带上；基础 `tauri.conf.json` 不声明插件资源，所以 `yarn verify` 不需要先打包插件。
+原生插件共享仓库根 `Cargo.lock` 与 `target/`。日常增量调试可运行 `yarn plugins:build:dev <目录名或 pluginId>`；发布产物使用 `yarn plugins:build` 与 `yarn plugins:package`，生成带目标三元组的可复现 v2 `.momoplug`。`yarn tauri:build`、`yarn tauri:dev` 通过 `--config src-tauri/tauri.external-plugins.conf.json` 把这些包作为资源带上；基础 `tauri.conf.json` 不声明插件资源，所以 `yarn verify` 不需要先打包插件。发布流程改用 `yarn nana:package` 把这些包放进 Nana 发布包的 `runtime/plugins`。
+
+发布包是 `momobako-nana`，用 NanaUI 的 `nana-packager` 打：先 `yarn plugins:build`、`yarn plugins:package`，再 `yarn nana:build`、`yarn nana:package`，产出便携版和安装版布局两个 zip，见 `docs/nana-packaging.md`。
 
 `yarn verify` 会串行运行前端测试、前端构建和 Tauri Rust 编译检查。`yarn test:backend` 运行 `momobako-backend` 的单元测试（`cargo test -p momobako-backend --locked`），不在 `yarn verify` 里，CI 单独执行。
