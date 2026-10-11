@@ -185,3 +185,36 @@ fn a_disabled_group_does_not_open() {
     assert!(hover(&mut harness, group).is_empty(), "禁用的分组不该报进出");
     assert!(!submenu_open(&harness), "禁用的分组展开了子菜单");
 }
+
+/// 点「刷新缩略图」请后端按源文件重新生成（`refresh`），不再把条目自己的路径当缩略图文件去解码；结果写回以后
+/// 重新解码同一个缓存文件，纹理跟着换。Vue `refreshWorkspaceEntryThumbnail` 也是调 `ensureThumbnail` 的 `refresh`。
+#[test]
+fn refreshing_a_thumbnail_asks_the_backend_to_regenerate_it() {
+    let mut harness = menu();
+    harness.model.files.take_effects();
+    let group = point(&harness, "file-menu-thumbnail");
+    hover(&mut harness, group);
+    let (x, y) = labeled(&harness, LAST_CHILD);
+    let clicked = harness.click_messages(x, y);
+    for message in clicked {
+        harness.apply(message);
+    }
+    let effects = harness.model.files.take_effects();
+    let repo_id = harness.model.workspace.active_repo_id.clone().expect("验收仓库");
+    assert!(
+        matches!(
+            effects.as_slice(),
+            [crate::shell::FilesEffect::MutateThumbnail { repo_id: requested, path, kind, action, source_path: None, image_bytes: None }]
+                if *requested == repo_id && path == "cover.png" && kind == "file" && action == "refresh"
+        ),
+        "刷新缩略图要请后端重新生成：{effects:?}"
+    );
+
+    let cached = "C:/acceptance/.momo/thumbnails/cover.jpg".to_string();
+    harness.apply(ShellMessage::Files(FilesMessage::ThumbnailSaved { path: "cover.png".into(), thumbnail_path: Some(cached.clone()), custom: false }));
+    let effects = harness.model.files.take_effects();
+    assert!(
+        matches!(effects.as_slice(), [crate::shell::FilesEffect::DecodeThumbnails { paths }] if paths == &[cached.clone()]),
+        "刷新回来以后重新解码缓存文件：{effects:?}"
+    );
+}

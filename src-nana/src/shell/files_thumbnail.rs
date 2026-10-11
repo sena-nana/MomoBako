@@ -1,5 +1,5 @@
 //! 文件表面的缩略图状态：挂着的缩略图等空闲再解码，解码出的原始宽高写回列表行，宿主卸掉的纹理
-//! 写回成没有纹理，刷新单条缩略图，以及自定义缩略图保存以后的写回。
+//! 写回成没有纹理，请后端刷新单条缩略图，以及自定义缩略图保存、清除和刷新以后的写回。
 //!
 //! 解码在调度里做（`files_dispatch.rs`、`thumbs.rs`），纹理由宿主按 `thumb:{path}` 登记和回收
 //! （`thumbnail_host.rs`、`thumbnail_cache.rs`）；这里只排 `DecodeThumbnails` 请求，记下哪些行的纹理
@@ -10,7 +10,7 @@ use std::collections::{HashMap, HashSet};
 
 use super::super::motion::PREFETCH_IDLE_MS;
 use super::super::thumbs::ThumbnailFrame;
-use super::{FileRow, FilesEffect, FilesState};
+use super::{FileContext, FileRow, FilesEffect, FilesState};
 
 impl FilesState {
     /// 虚拟列表还有下一页时，空闲 `PREFETCH_IDLE_MS` 后再解码缩略图。
@@ -29,10 +29,12 @@ impl FilesState {
         false
     }
 
-    /// 还有缩略图或下一页时，等空闲间隔再解码，不在快照到达的同一拍发出请求。
+    /// 读目录（含续读）的快照到了：还有缩略图或下一页时，等空闲间隔再解码，不在快照到达的同一拍发出请求；
+    /// 新来的行里可能有还没生成缩略图的，生成队列下一次收尾重新挑（`files_thumbnail_ensure.rs`）。
     pub(super) fn arm_thumbnail_prefetch(&mut self) {
         let needs = self.has_more || !self.undecoded_thumbnail_paths().is_empty();
         self.schedule_thumbnail_prefetch(needs, self.prefetch_clock);
+        self.ensure.mark_rows_changed();
     }
 
     /// 还要解码的缩略图文件：列表行和智能文件夹行里没有纹理、没请求过的，宿主报告过挂着的缩略图时
@@ -132,8 +134,9 @@ impl FilesState {
         self.effects.push(effect);
     }
 
-    /// 把保存结果写回这一行，并解码新的缩略图文件。没有路径时不假装已经有图。
-    pub(in crate::shell) fn note_custom_thumbnail(&mut self, path: &str, thumbnail_path: Option<String>, custom: bool) {
+    /// 把保存、清除或刷新的结果写回这一行，并重新解码缩略图文件：刷新以后缓存路径不变、内容换了，纹理也要换。
+    /// 没有路径时不假装已经有图。
+    pub(in crate::shell) fn note_thumbnail_saved(&mut self, path: &str, thumbnail_path: Option<String>, custom: bool) {
         let mut found = false;
         for row in &mut self.rows {
             if row.path == path {
@@ -148,7 +151,7 @@ impl FilesState {
             }
         }
         if !found {
-            eprintln!("Nana 自定义缩略图写回时找不到条目：{path}");
+            eprintln!("Nana 缩略图写回时找不到条目：{path}");
             return;
         }
         if let Some(thumb) = thumbnail_path.filter(|item| !item.trim().is_empty()) {
@@ -156,13 +159,26 @@ impl FilesState {
         }
     }
 
-    /// 重新解码这一条缩略图。自定义缩略图保存不走这里。
-    pub(in crate::shell) fn refresh_thumbnail(&mut self, path: &str) {
-        if path.trim().is_empty() {
-            eprintln!("Nana 刷新缩略图缺少路径");
+    /// 「刷新缩略图」：请后端按源文件重新生成（`ensure_thumbnail` 的 `refresh`，对应 Vue
+    /// `refreshWorkspaceEntryThumbnail`），结果和自定义缩略图一样经 `ThumbnailSaved` 写回。
+    pub(in crate::shell) fn refresh_thumbnail(&mut self, ctx: &FileContext, path: &str) {
+        let Some(repo_id) = ctx.repo_id.clone() else {
+            eprintln!("Nana 刷新缩略图没有活动仓库：{path}");
+            self.note_error("刷新缩略图缺少仓库。".into());
             return;
-        }
-        self.request_decode(vec![path.trim().to_string()]);
+        };
+        let Some(kind) = self.rows.iter().chain(&self.virtual_rows).find(|row| row.path == path).map(|row| row.kind.clone()) else {
+            eprintln!("Nana 刷新缩略图的条目已经不在列表里：{path}");
+            return;
+        };
+        self.effects.push(FilesEffect::MutateThumbnail {
+            repo_id,
+            path: path.to_string(),
+            kind,
+            action: "refresh".into(),
+            source_path: None,
+            image_bytes: None,
+        });
     }
 
     /// 换上新列表时，同一个缩略图文件已经有纹理的行接着用它：重读目录不让卡片闪回类型图标，也不重新解码
@@ -187,10 +203,12 @@ impl FilesState {
         }
     }
 
-    /// 列表换了以后，解码请求只留还在列表里的：换回来的目录里解码失败过的缩略图可以再试。
+    /// 列表换了以后，解码请求只留还在列表里的：换回来的目录里解码失败过的缩略图可以再试。换上的行里可能有
+    /// 还没生成缩略图的，生成队列下一次收尾重新挑。
     pub(super) fn prune_decode_requests(&mut self) {
         let listed = self.listed_thumbnails();
         self.decode_requested.retain(|path| listed.contains(path));
+        self.ensure.mark_rows_changed();
     }
 
     fn request_decode(&mut self, paths: Vec<String>) {

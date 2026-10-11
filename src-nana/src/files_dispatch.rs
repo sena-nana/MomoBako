@@ -17,7 +17,7 @@ use crate::backend::services::repository::{
     TrashMutationRequest,
 };
 use crate::shell::{
-    display_mode_path, FilesEffect, FilesMessage, HardlinkPrompt, ShellMessage,
+    display_mode_path, EnsuredThumbnail, FilesEffect, FilesMessage, HardlinkPrompt, ShellMessage,
 };
 use crate::task_guard::{settle, spawn, spawn_service};
 use crate::MomoBakoApplication;
@@ -88,6 +88,7 @@ pub fn dispatch_files_effects(app: &mut MomoBakoApplication, context: &RuntimePr
             FilesEffect::LoadAsset { repo_id, asset_id } => dispatch_asset(app, context, repo_id, asset_id),
             FilesEffect::PersistDisplayMode => app.shell.files.save_display_mode_file(&display_mode_path()),
             FilesEffect::DecodeThumbnails { paths } => dispatch_thumbnails(context, paths),
+            FilesEffect::EnsureThumbnail { repo_id, path } => dispatch_ensure(app, context, repo_id, path),
             FilesEffect::MutateThumbnail { repo_id, path, kind, action, source_path, image_bytes } => {
                 dispatch_thumbnail(app, context, repo_id, path, kind, action, source_path, image_bytes);
             }
@@ -107,7 +108,7 @@ pub fn dispatch_files_effects(app: &mut MomoBakoApplication, context: &RuntimePr
     }
 }
 
-/// 写入或清除自定义缩略图。清除后文件没有路径时再刷新，恢复默认图。
+/// 写入、清除自定义缩略图，或者请后端按源文件刷新缩略图。清除后文件没有路径时再刷新，恢复默认图。
 #[allow(clippy::too_many_arguments)]
 fn dispatch_thumbnail(
     app: &MomoBakoApplication,
@@ -119,8 +120,13 @@ fn dispatch_thumbnail(
     source_path: Option<String>,
     image_bytes: Option<Vec<u8>>,
 ) {
+    let what = match action.as_str() {
+        "refresh" => "刷新缩略图",
+        "clear" => "取消自定义缩略图",
+        _ => "自定义缩略图",
+    };
     let failed = |error| files_message(FilesMessage::NoteError(error));
-    spawn_service(app.services.as_ref(), context, "自定义缩略图", failed, |services| {
+    spawn_service(app.services.as_ref(), context, what, failed, |services| {
         let browser = services.file_browser.clone();
         let executor = services.executor.clone();
         move || {
@@ -128,7 +134,7 @@ fn dispatch_thumbnail(
             let saved = match executor.block_on(browser.ensure_thumbnail(request)) {
                 Ok(response) => response,
                 Err(error) => {
-                    eprintln!("Nana 自定义缩略图写入失败：{error}");
+                    eprintln!("Nana {what}失败：{path}：{error}");
                     return files_message(FilesMessage::NoteError(error));
                 }
             };
@@ -151,6 +157,33 @@ fn dispatch_thumbnail(
             })
         }
     });
+}
+
+/// 浏览时给一个还没有缩略图的文件生成一张（`ensure`）。成功和失败都交回 `ThumbnailEnsured`：生成队列等它
+/// 回来才排下一条，服务没起来、任务排不进去或者 panic 也照样交回失败，队列不会卡住。
+fn dispatch_ensure(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String, path: String) {
+    let (fail_repo, fail_path) = (repo_id.clone(), path.clone());
+    let failed = move |error| ensured_message(fail_repo.clone(), fail_path.clone(), Err(error));
+    spawn_service(app.services.as_ref(), context, "生成缩略图", failed, |services| {
+        let browser = services.file_browser.clone();
+        let executor = services.executor.clone();
+        move || {
+            let request = thumbnail_request(&repo_id, &path, "ensure", None, None);
+            let result = executor.block_on(browser.ensure_thumbnail(request)).map(|response| EnsuredThumbnail {
+                thumbnail_path: response.thumbnail_path,
+                custom: response.thumbnail_custom,
+                metadata: response.metadata,
+            });
+            if let Err(error) = &result {
+                eprintln!("Nana 生成缩略图失败：{path}：{error}");
+            }
+            ensured_message(repo_id, path, result)
+        }
+    });
+}
+
+fn ensured_message(repo_id: String, path: String, result: Result<EnsuredThumbnail, String>) -> ShellMessage {
+    files_message(FilesMessage::ThumbnailEnsured { repo_id, path, result })
 }
 
 fn thumbnail_request(repo_id: &str, path: &str, action: &str, source_path: Option<String>, image_bytes: Option<Vec<u8>>) -> ThumbnailRequest {

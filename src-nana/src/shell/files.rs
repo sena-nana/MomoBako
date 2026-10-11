@@ -10,6 +10,7 @@
 //! - `files_hardlink.rs`：硬链接候选的读取、确认和跳过；
 //! - `files_export.rs`：资源库导出对话框；
 //! - `files_thumbnail.rs`：缩略图的空闲预取、尺寸写回和自定义缩略图；
+//! - `files_thumbnail_ensure.rs`：浏览时逐条请后端生成还没有的缩略图；
 //! - `files_display.rs`：素材展示方式和它的持久化；
 //! - `files_operation.rs`：任务弹层「仓库操作」行上属于文件表面的部分。
 //!
@@ -40,6 +41,8 @@ mod reduce;
 mod selection;
 #[path = "files_thumbnail.rs"]
 mod thumbnail;
+#[path = "files_thumbnail_ensure.rs"]
+mod ensure;
 
 #[path = "local_time.rs"]
 pub(crate) mod local_time;
@@ -49,6 +52,7 @@ use export::ExportDraft;
 use operation::FilesOperation;
 
 pub use display::{display_mode_path, DisplayMode};
+pub use ensure::EnsuredThumbnail;
 pub(crate) use hardlink::hardlink_label;
 pub use hardlink::HardlinkPrompt;
 pub use menu_branch::BranchSource;
@@ -243,6 +247,9 @@ pub enum FilesEffect {
     PersistDisplayMode,
     /// 读取目录里还没解码的缩略图文件。
     DecodeThumbnails { paths: Vec<String> },
+    /// 浏览时给还没有缩略图的文件生成一张（`ensure_thumbnail` 的 `ensure`，Vue `loadThumbnailsForSnapshot`）。
+    /// 一次只有一条在途，结果回来再排下一条（`files_thumbnail_ensure.rs`）。
+    EnsureThumbnail { repo_id: String, path: String },
     /// 保存、清除或刷新一条自定义缩略图。字节只在剪贴板 data URL 时带上。
     MutateThumbnail { repo_id: String, path: String, kind: String, action: String, source_path: Option<String>, image_bytes: Option<Vec<u8>> },
     /// 压缩包导出。调用前必须已有真实输出路径。
@@ -279,6 +286,7 @@ pub enum FilesMessage {
     CopyText(String),
     /// 把输入的新标签加进草稿。
     SubmitTagDraft(String),
+    /// 「刷新缩略图」：请后端按源文件重新生成这一条的缩略图。
     RefreshThumbnail(String),
     OpenPath(String),
     LoadMore,
@@ -319,6 +327,8 @@ pub enum FilesMessage {
     NoteError(String),
     /// 缩略图已经写入。路径是缓存文件，用来重新解码纹理。
     ThumbnailSaved { path: String, thumbnail_path: Option<String>, custom: bool },
+    /// 浏览时生成缩略图的结果。`repo_id` 是请求时的仓库，已经换了仓库的结果不写回。
+    ThumbnailEnsured { repo_id: String, path: String, result: Result<EnsuredThumbnail, String> },
     /// 外部文件拖到文件列上：悬停、放下或离开。能不能放、放进哪个仓库由归约按当时的 ViewModel 决定。
     HostDrop(nana_ui::runtime::FileDropEvent),
 }
@@ -355,6 +365,8 @@ pub struct FilesState {
     mounted_version: u64,
     /// 已经请求解码、还没送回像素的缩略图文件。解码失败的留在这里，不反复重试。
     decode_requested: std::collections::HashSet<String>,
+    /// 浏览时生成缩略图的队列：排过哪些、在途的是哪条、列表换过没有（`files_thumbnail_ensure.rs`）。
+    ensure: ensure::EnsureQueue,
     pub(super) name_draft: String,
     /// 工具栏里的新建文件名。不占用对话框草稿，建成以后才清空（Vue `handleCreateFile`）。
     pub(super) create_name: String,

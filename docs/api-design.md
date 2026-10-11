@@ -210,15 +210,19 @@
 - `POST /repositories/{repoId}/thumbnails:ensure`
   - Request body includes repository-relative `path`
   - Reuse an existing valid thumbnail cache entry or generate one for supported local image/video files
+  - The desktop calls `ensure` while browsing for listed local files that have no thumbnail yet, one request at a time (thumbnail work runs behind the runtime write lock, so parallel requests would only queue there); entries in the trash and virtual source entries are skipped
   - Optional `action`: `ensure`, `refresh`, `save`, `clear`
+  - `refresh` regenerates the cached thumbnail from the source file for types that have a generator (local images, video frames and embedded audio covers) and replaces the cache file only after the new one is written. A type without a generator keeps its existing thumbnail, a failed regeneration keeps the old thumbnail and returns the error, and an entry with a custom thumbnail (file or folder) keeps reporting the custom one
   - `save` accepts local `sourcePath`, remote HTTP(S) `sourceUrl`, or `imageBytes` for custom file/folder thumbnails; `sourceUrl` is downloaded by the backend
   - `save + sourceUrl` 也能预取来源封面，例如网易云歌曲条目的 `sourcePayload.coverUrl`。删掉的 Vue 宿主这样预取过（当前页优先，下一页在空闲时预热），Nana 宿主现在不预取
+  - Image formats are recognized by content, and photos are turned upright by their EXIF orientation before generated or saved thumbnails are scaled
   - Thumbnail cache files live under repository `.momo/thumbnails/` and use sha256 hex filenames
   - File thumbnails also backfill derived metadata such as `thumbnailPalette`
   - Response fields: `repoId`, `path`, `assetId`, `kind`, `thumbnailPath`, `thumbnailCustom`, optional `metadata`
 - `POST /repositories/{repoId}/files:preparePreviewSource`
   - Request body includes repository-relative `path`
   - Response returns a session-scoped local preview `sourceUrl` backed by the in-process repository runtime, the `mediaType`, and may include `localPath`.
+  - `mediaType` follows the lowercase file extension, and the in-process preview server answers with the same `Content-Type`. Images are `image/png` (png), `image/jpeg` (jpg, jpeg), `image/webp`, `image/gif`, `image/bmp`, `image/tiff` (tif, tiff), `image/avif` and `image/svg+xml` (svg); video, audio, PDF, Office, Markdown, plain text, JSON and 3D formats map to their own types; any other extension is `application/octet-stream`. The desktop decodes a preview as an image only when `mediaType` starts with `image/`.
   - A successful preview-source preparation updates `assets.last_accessed_at` without creating a revision entry.
 - `POST /repositories/{repoId}/entries:preparePlayback`
   - Mutsuki protocol `momobako.playback.prepare`.

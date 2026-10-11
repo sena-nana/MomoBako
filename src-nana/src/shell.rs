@@ -54,7 +54,7 @@ mod menu_focus;
 mod menu_focus_view;
 mod focus_return;
 mod context_menu;
-pub use files::{display_mode_path, FileRow, FilesEffect, FilesMessage, HardlinkPrompt, VirtualQuery};
+pub use files::{display_mode_path, EnsuredThumbnail, FileRow, FilesEffect, FilesMessage, HardlinkPrompt, VirtualQuery};
 pub(crate) use thumbs::{decode_preview_pixels, decode_thumbnail_file, thumbnail_slot, ThumbnailFrame};
 pub(crate) use inspect::poll_timers;
 pub use inspect::{
@@ -382,6 +382,8 @@ impl ShellViewModel {
         self.flush_folder_mutations();
         self.settle_sidebar_dialogs();
         tree_sync::settle(self);
+        // 列表换过或者上一条生成结果回来了：给下一条还没有缩略图的文件排生成（`files_thumbnail_ensure.rs`）。
+        self.files.settle_thumbnail_ensure(self.workspace.active_repo_id.as_deref());
         // 同一次归约里先后开始的操作，照开始的先后交给槽位：文件和侧栏的在前，换仓库的在后。
         self.operation.apply(&mut self.files.operation);
         self.operation.apply(&mut self.sidebar.operation);

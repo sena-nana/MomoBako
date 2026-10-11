@@ -1,92 +1,174 @@
-//! PDF 文本提取和页面绘制。
+//! PDF 文本提取和页面绘制（渲染器接好以前的止血）。
 //!
-//! 内容流里的文字画进页面，DCTDecode 的 JPEG 也画进去。
-//! ASCII85、LZW、Flate 按顺序解开。解不开的流记成该页失败，不假装成空白成功。
+//! 页数和页序来自页树（`/Type /Page`，见 `native_preview_pdf_objects.rs`），不再把文件里的每个流都当成一页。
+//! 每页把内容流（含它调用的表单 XObject）里的文字画进页面；没有文字时画它调用的第一张 DCTDecode 图片。
+//! ASCII85、LZW、Flate 按顺序解开。解不开的内容流记成该页失败，不假装成空白成功；失败的页照样能翻过去。
 
+#[path = "native_preview_pdf_objects.rs"]
+mod objects;
 #[path = "native_preview_pdf_paint.rs"]
 mod paint;
 
 use super::super::bridge::{page_caption, NativeLoad, PageFrame};
+use objects::{Document, Page, Value};
 
-/// 抽出第一页文字。整份文件都画不出来时返回错误。
+/// 画出位图的页数上限：每页 480×640 的位图约 1.2 MB。后面的页记成失败、写明原因，页数仍是真实的。
+const RENDERED_PAGES: usize = 32;
+/// 表单 XObject 最多往里套几层。
+const FORM_DEPTH: usize = 8;
+
+/// 抽出第一页文字。整份文件都打不开时返回错误。
 #[cfg(test)]
 fn read(bytes: &[u8]) -> Result<String, String> {
     load(bytes).map(|item| item.text)
 }
 
-/// 按内容流分页。每一页要么有画面，要么带明确失败原因。
+/// 按页树分页。每一页要么有画面，要么带明确失败原因；只有不是 PDF、加密了或者一页也找不到时整份失败。
 pub(super) fn load(bytes: &[u8]) -> Result<NativeLoad, String> {
     if !has_pdf_header(bytes) {
         eprintln!("Nana PDF 文件头不匹配");
         return Err("不是 PDF 文件".into());
     }
-    let mut pages = collect_pages(bytes);
-    if pages.len() > 32 {
-        eprintln!("Nana PDF 只保留前 32 页");
-        pages.truncate(32);
+    if find_keyword(bytes, b"/Encrypt", 0).is_some() {
+        eprintln!("Nana PDF 已加密，内容流解不开");
+        return Err("加密的 PDF 暂不支持预览".into());
     }
+    let document = Document::parse(bytes);
+    let pages = document.pages();
     if pages.is_empty() {
-        eprintln!("Nana PDF 没有内容流");
-        return Err("PDF 没有可提取的文字".into());
+        eprintln!("Nana PDF 里没有找到页面");
+        return Err("PDF 里没有找到页面".into());
     }
-    let all_failed = pages.iter().all(|page| page.error.is_some() && page.text.trim().is_empty());
-    if all_failed {
-        let message = pages[0].error.clone().unwrap_or_else(|| "PDF 没有可提取的文字".into());
-        eprintln!("Nana PDF 页面失败：{message}");
-        return Err(message);
+    if pages.len() > RENDERED_PAGES {
+        eprintln!("Nana PDF 共 {} 页，只画前 {RENDERED_PAGES} 页", pages.len());
     }
-    let text = super::limit_text(&page_caption(0, pages.len(), &pages[0]));
-    Ok(NativeLoad { text, frames: pages, mesh: None, paged: true })
+    let frames: Vec<PageFrame> = pages
+        .iter()
+        .enumerate()
+        .map(|(index, page)| {
+            if index < RENDERED_PAGES {
+                render_page(&document, page)
+            } else {
+                paint::failed(format!("只预览前 {RENDERED_PAGES} 页"))
+            }
+        })
+        .collect();
+    let text = super::limit_text(&page_caption(0, frames.len(), &frames[0]));
+    Ok(NativeLoad { text, frames, mesh: None, paged: true })
 }
 
-fn collect_pages(bytes: &[u8]) -> Vec<PageFrame> {
-    let mut pages = Vec::new();
-    let mut cursor = 0;
-    while let Some(at) = find_keyword(bytes, b"stream", cursor) {
-        let Some(data_start) = stream_data_start(bytes, at + 6) else {
-            cursor = at + 6;
+/// 画一页：内容流和它调用的表单里的文字按点阵画；没有文字时画它调用的第一张 JPEG；都没有时这一页失败。
+fn render_page(document: &Document, page: &Page) -> PageFrame {
+    let content = match stream_text(document, &page.contents) {
+        Ok(content) => content,
+        Err(error) => {
+            eprintln!("Nana PDF 这一页的内容流解不开：{error}");
+            return paint::failed(error);
+        }
+    };
+    let mut text = show_text(&content);
+    let mut images = Vec::new();
+    follow_xobjects(document, &content, page.resources.as_ref(), 0, &mut text, &mut images);
+    if !text.trim().is_empty() {
+        return paint::paint_text(&text);
+    }
+    let mut last_error = None;
+    for jpeg in images {
+        match paint::paint_jpeg(&jpeg) {
+            Ok(frame) => return frame,
+            Err(error) => last_error = Some(error),
+        }
+    }
+    let message = last_error.unwrap_or_else(|| "这一页没有可绘制的内容".to_string());
+    eprintln!("Nana PDF {message}");
+    paint::failed(message)
+}
+
+/// 把这些内容流按顺序解开、拼起来（中间隔一个换行）。有一个解不开就交回它的原因。
+fn stream_text(document: &Document, streams: &[Value]) -> Result<Vec<u8>, String> {
+    let mut content = Vec::new();
+    for stream in streams {
+        let Value::Ref(number) = stream else {
             continue;
         };
-        let dict = dict_before(bytes, at);
-        let end_kw = find_keyword(bytes, b"endstream", data_start);
-        let data_end = match (direct_length(dict), end_kw) {
-            (Some(len), end) => {
-                let by_len = data_start.saturating_add(len).min(bytes.len());
-                end.map(|pos| by_len.min(pos)).unwrap_or(by_len)
-            }
-            (None, Some(pos)) => pos,
-            (None, None) => {
-                cursor = at + 6;
-                continue;
-            }
+        let Some((dict, data)) = document.stream(*number) else {
+            continue;
         };
-        if data_end > data_start {
-            pages.push(page_from_stream(dict, &bytes[data_start..data_end]));
+        if let paint::Decoded::Text(plain) = paint::decode(dict, data)? {
+            content.extend_from_slice(&plain);
+            content.push(b'\n');
         }
-        let next = end_kw.map(|pos| pos + b"endstream".len()).unwrap_or(data_end);
-        cursor = if next > at { next } else { at + 6 };
     }
-    pages
+    Ok(content)
 }
 
-fn page_from_stream(dict: &[u8], data: &[u8]) -> PageFrame {
-    match paint::decode(dict, data) {
-        Ok(paint::Decoded::Text(plain)) => {
-            let text = show_text(&plain);
-            if text.trim().is_empty() {
-                let message = "这一页没有可绘制的内容".to_string();
-                eprintln!("Nana PDF {message}");
-                paint::failed(message)
-            } else {
-                paint::paint_text(&text)
-            }
-        }
-        Ok(paint::Decoded::Jpeg(jpeg)) => match paint::paint_jpeg(&jpeg) {
-            Ok(frame) => frame,
-            Err(error) => paint::failed(error),
-        },
-        Err(error) => paint::failed(error),
+/// 内容里 `Do` 调用的 XObject：表单把它的文字接到 `text` 后面（再看它自己调用的），DCTDecode 的图片收进 `images`。
+fn follow_xobjects(document: &Document, content: &[u8], resources: Option<&Value>, depth: usize, text: &mut String, images: &mut Vec<Vec<u8>>) {
+    if depth >= FORM_DEPTH {
+        return;
     }
+    let Some(xobjects) = resources.map(|resources| document.resolve(resources)).and_then(|resources| resources.get("XObject")) else {
+        return;
+    };
+    let xobjects = document.resolve(xobjects).clone();
+    for name in invoked_xobjects(content) {
+        let Some(Value::Ref(number)) = xobjects.get(&name) else {
+            continue;
+        };
+        let (Some(object), Some((dict, data))) = (document.object(*number), document.stream(*number)) else {
+            continue;
+        };
+        let subtype = match object.value.get("Subtype") {
+            Some(Value::Name(subtype)) => subtype.as_str(),
+            _ => "",
+        };
+        match (subtype, paint::decode(dict, data)) {
+            ("Image", Ok(paint::Decoded::Jpeg(jpeg))) => images.push(jpeg),
+            ("Form", Ok(paint::Decoded::Text(form))) => {
+                let inner = show_text(&form);
+                if !inner.trim().is_empty() {
+                    if !text.is_empty() && !text.ends_with('\n') {
+                        text.push('\n');
+                    }
+                    text.push_str(&inner);
+                }
+                let own = object.value.get("Resources").or(resources);
+                follow_xobjects(document, &form, own, depth + 1, text, images);
+            }
+            (_, Err(error)) => eprintln!("Nana PDF XObject /{name} 解不开：{error}"),
+            _ => {}
+        }
+    }
+}
+
+/// 内容流里 `/名字 Do` 调用的 XObject 名字，按出现顺序。内嵌图片 `BI … ID … EI` 的二进制数据跳过。
+fn invoked_xobjects(content: &[u8]) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut index = 0;
+    let mut last_name: Option<String> = None;
+    while index < content.len() {
+        let start = index;
+        match objects::parse_value(content, &mut index, 0) {
+            Some(Value::Name(name)) => last_name = Some(name),
+            Some(Value::Other) => {
+                let token = content[start..index].trim_ascii_start();
+                if token == b"Do" {
+                    names.extend(last_name.take());
+                } else if token == b"ID" {
+                    index = find_keyword(content, b"EI", index).map(|end| end + 2).unwrap_or(content.len());
+                    last_name = None;
+                } else {
+                    last_name = None;
+                }
+            }
+            Some(_) => last_name = None,
+            None => break,
+        }
+        if index == start {
+            index += 1;
+        }
+    }
+    names
 }
 
 fn has_pdf_header(bytes: &[u8]) -> bool {
@@ -505,83 +587,25 @@ fn pdf_text(bytes: &[u8]) -> String {
     String::from_utf8(bytes.to_vec()).unwrap_or_else(|_| bytes.iter().map(|byte| char::from(*byte)).collect())
 }
 
+/// 测试用的最小 PDF：目录（1 号）、页树（2 号），每页一个页对象和一个内容流，内容流字典里另加 `extra`
+/// （比如滤镜），对象按页的顺序编号。
 #[cfg(test)]
-mod tests {
-    use std::io::Write;
-
-    use super::*;
-
-    fn zlib_bytes(plain: &[u8]) -> Vec<u8> {
-        let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-        encoder.write_all(plain).expect("压缩");
-        encoder.finish().expect("结束")
+pub(super) fn sample(pages: &[(&str, &[u8])]) -> Vec<u8> {
+    let kids: Vec<String> = (0..pages.len()).map(|index| format!("{} 0 R", 3 + index * 2)).collect();
+    let mut pdf = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_vec();
+    pdf.extend_from_slice(format!("2 0 obj\n<< /Type /Pages /Kids [{}] /Count {} >>\nendobj\n", kids.join(" "), pages.len()).as_bytes());
+    for (index, (extra, data)) in pages.iter().enumerate() {
+        let page = 3 + index * 2;
+        let contents = page + 1;
+        pdf.extend_from_slice(format!("{page} 0 obj\n<< /Type /Page /Parent 2 0 R /Contents {contents} 0 R >>\nendobj\n").as_bytes());
+        pdf.extend_from_slice(format!("{contents} 0 obj\n<< /Length {} {extra} >>\nstream\n", data.len()).as_bytes());
+        pdf.extend_from_slice(data);
+        pdf.extend_from_slice(b"\nendstream\nendobj\n");
     }
-
-    fn push_stream(out: &mut Vec<u8>, dict: &str, data: &[u8]) {
-        out.extend_from_slice(b"<< ");
-        out.extend_from_slice(dict.as_bytes());
-        out.extend_from_slice(b" >>\nstream\n");
-        out.extend_from_slice(data);
-        out.extend_from_slice(b"\nendstream\n");
-    }
-
-    /// 页眉 B 必须有左边竖干。和 8 共用点阵时，浅色预览会读成 MOMO8AKO。
-    #[test]
-    fn b_glyph_has_a_stem_that_eight_does_not() {
-        let bee = paint::paint_text("B");
-        let eight = paint::paint_text("8");
-        let index = ((24 * 480 + 16) * 4) as usize;
-        assert_eq!(&bee.rgba[index..index + 3], &[20, 20, 20], "B 左上角应是竖干");
-        assert_eq!(&eight.rgba[index..index + 3], &[255, 255, 255], "8 左上角应留白");
-    }
-
-    #[test]
-    fn uncompressed_tj_still_extracts() {
-        let pdf = b"%PDF-1.4\n1 0 obj\n<< /Length 14 >>\nstream\n(MomoBako) Tj\nendstream\nendobj\n%%EOF\n";
-        assert!(read(pdf).expect("pdf").contains("MomoBako"));
-        let tj = b"%PDF-1.4\n<< /Length 22 >>\nstream\n[(Mo) 20 (moBako)] TJ\nendstream\n%%EOF\n";
-        assert!(read(tj).expect("tj").contains("MomoBako"));
-    }
-
-    #[test]
-    fn flate_stream_extracts_inflated_text() {
-        let plain = b"(Inflated) Tj\n";
-        let compressed = zlib_bytes(plain);
-        let mut pdf = b"%PDF-1.4\n".to_vec();
-        push_stream(
-            &mut pdf,
-            &format!("/Length {} /Filter /FlateDecode /Type /XObject", compressed.len()),
-            &compressed,
-        );
-        assert!(!pdf.windows(plain.len()).any(|window| window == plain), "内容流不该带着明文");
-        let text = read(&pdf).expect("flate");
-        assert!(text.contains("Inflated"), "{text}");
-    }
-
-    #[test]
-    fn flate_array_and_corrupt_stream_keep_other_text() {
-        let plain = b"(Inflated) Tj\n";
-        let compressed = zlib_bytes(plain);
-        let mut pdf = b"%PDF-1.4\n".to_vec();
-        push_stream(&mut pdf, "/Filter /FlateDecode /Length 4", b"xxxx");
-        push_stream(&mut pdf, &format!("/Filter [/FlateDecode] /Length {}", compressed.len()), &compressed);
-        let loaded = load(&pdf).expect("mixed");
-        assert_eq!(loaded.frames.len(), 2, "{}", loaded.text);
-        let failed = loaded.frames[0].error.as_deref().unwrap_or("");
-        assert!(failed.contains("FlateDecode"), "{failed}");
-        assert!(loaded.frames[1].text.contains("Inflated"), "{}", loaded.frames[1].text);
-    }
-
-    #[test]
-    fn other_filters_and_bad_deflate_do_not_panic() {
-        for name in ["/ASCII85Decode", "/LZWDecode", "/DCTDecode"] {
-            let mut pdf = b"%PDF-1.4\n".to_vec();
-            push_stream(&mut pdf, &format!("/Filter {name} /Length 8"), b"(No) Tj\n");
-            assert!(read(&pdf).is_err(), "{name}");
-        }
-        let pdf = b"%PDF-1.4\n<< /Filter /FlateDecode >>\nstream\nxxxx\nendstream\n";
-        assert!(read(pdf).is_err());
-        let truncated = b"%PDF-1.4\n<< /Filter /FlateDecode /Length 2 >>\nstream\n\x78\x9c\nendstream\n";
-        assert!(read(truncated).is_err());
-    }
+    pdf.extend_from_slice(b"trailer\n<< /Root 1 0 R >>\n%%EOF\n");
+    pdf
 }
+
+#[cfg(test)]
+#[path = "native_preview_pdf_tests.rs"]
+mod tests;

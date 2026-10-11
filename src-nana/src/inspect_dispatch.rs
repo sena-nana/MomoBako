@@ -4,16 +4,18 @@
 //! 起来、任务排不进去或解码时 panic 都按失败写回，预览不会停在读取中。
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use nana_ui::RuntimeProgramContext;
 use serde_json::Value;
 
 use crate::backend::services::repository::{
-    FileReadRequest, MetadataUpdateRequest, SearchDateFilter, SearchMetadataFilter,
+    FilePreviewSourceResponse, FileReadRequest, MetadataUpdateRequest, SearchDateFilter, SearchMetadataFilter,
     SearchNumberFilter, SearchRequest, SearchSort,
 };
 use crate::playback_source::{prepare_and_read, Requester};
 use crate::shell::SourcePrep;
+use crate::backend::viewmodels::RepositoryQueryViewModel;
 use crate::shell::{
     DateBound, InspectEffect, InspectMessage, NumberBound, SearchRequestDraft, SearchRow, ShellMessage,
 };
@@ -46,34 +48,58 @@ pub fn dispatch_inspect_effects(app: &mut MomoBakoApplication, context: &Runtime
     }
 }
 
+/// 图片预览要用的两次服务调用。产品里是仓库查询 ViewModel，测试里换成带后端真实媒体类型的替身。
+pub(crate) trait ImagePreviewSource {
+    /// 准备预览源：后端按扩展名给出媒体类型和令牌，顺带写访问记录。
+    fn prepare(&self, request: FileReadRequest) -> Result<FilePreviewSourceResponse, String>;
+    /// 读出文件字节。
+    fn read(&self, request: FileReadRequest) -> Result<Vec<u8>, String>;
+}
+
+/// 产品里的预览源：在任务线程里阻塞调用仓库查询 ViewModel。
+struct QueryImageSource {
+    query: RepositoryQueryViewModel,
+    executor: Arc<tokio::runtime::Runtime>,
+}
+
+impl ImagePreviewSource for QueryImageSource {
+    fn prepare(&self, request: FileReadRequest) -> Result<FilePreviewSourceResponse, String> {
+        self.executor.block_on(self.query.prepare_preview_file_source(request))
+    }
+
+    fn read(&self, request: FileReadRequest) -> Result<Vec<u8>, String> {
+        self.executor.block_on(self.query.read_file(request))
+    }
+}
+
 fn dispatch_image(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String, path: String) {
     let (fail_repo, fail_path) = (repo_id.clone(), path.clone());
     let failed = move |error| ShellMessage::PreviewPixelsLoaded { source: empty_source(&fail_repo, &fail_path), pixels: Err(error) };
     spawn_service(app.services.as_ref(), context, "图片预览", failed, |services| {
-        let query = services.repository_query.clone();
-        let executor = services.executor.clone();
-        move || {
-            let prepared = executor.block_on(query.prepare_preview_file_source(FileReadRequest {
-                repo_id: repo_id.clone(),
-                path: path.clone(),
-            }));
-            let (source, pixels) = match prepared {
-                Ok(source) => {
-                    let pixels = executor
-                        .block_on(query.read_file(FileReadRequest { repo_id, path }))
-                        .and_then(|bytes| {
-                            if !source.media_type.starts_with("image/") {
-                                return Err(format!("原生纹理预览暂不支持 {}", source.media_type));
-                            }
-                            decode_preview_pixels(&bytes)
-                        });
-                    (source, pixels)
-                }
-                Err(error) => (empty_source(&repo_id, &path), Err(error)),
-            };
-            ShellMessage::PreviewPixelsLoaded { source, pixels }
-        }
+        let source = QueryImageSource { query: services.repository_query.clone(), executor: services.executor.clone() };
+        move || load_image_preview(&source, repo_id, path)
     });
+}
+
+/// 图片预览在任务线程里做的事：准备预览源，媒体类型是 `image/*` 才读字节、解成像素。准备、读取、解码失败和
+/// 不是图片的媒体类型都按失败交回，预览框写原因。
+pub(crate) fn load_image_preview(source: &impl ImagePreviewSource, repo_id: String, path: String) -> ShellMessage {
+    let prepared = match source.prepare(FileReadRequest { repo_id: repo_id.clone(), path: path.clone() }) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            eprintln!("Nana 准备图片预览失败：{path}：{error}");
+            return ShellMessage::PreviewPixelsLoaded { source: empty_source(&repo_id, &path), pixels: Err(error) };
+        }
+    };
+    let pixels = if prepared.media_type.starts_with("image/") {
+        source.read(FileReadRequest { repo_id, path: path.clone() }).and_then(|bytes| decode_preview_pixels(&bytes))
+    } else {
+        Err(format!("原生纹理预览暂不支持 {}", prepared.media_type))
+    };
+    if let Err(error) = &pixels {
+        eprintln!("Nana 图片预览失败：{path}：{error}");
+    }
+    ShellMessage::PreviewPixelsLoaded { source: prepared, pixels }
 }
 
 /// 一次音视频预览读取。`virtual_entry` 是在线条目，先准备播放源。
@@ -285,8 +311,8 @@ fn search_message(generation: u64, result: Result<Vec<SearchRow>, String>) -> Sh
     ShellMessage::Inspect(InspectMessage::SearchFinished { generation, result })
 }
 
-fn empty_source(repo_id: &str, path: &str) -> crate::backend::services::repository::FilePreviewSourceResponse {
-    crate::backend::services::repository::FilePreviewSourceResponse {
+fn empty_source(repo_id: &str, path: &str) -> FilePreviewSourceResponse {
+    FilePreviewSourceResponse {
         repo_id: repo_id.to_string(),
         path: path.to_string(),
         token: String::new(),
@@ -297,3 +323,7 @@ fn empty_source(repo_id: &str, path: &str) -> crate::backend::services::reposito
         modified_at: None,
     }
 }
+
+#[cfg(test)]
+#[path = "inspect_dispatch_tests.rs"]
+mod tests;

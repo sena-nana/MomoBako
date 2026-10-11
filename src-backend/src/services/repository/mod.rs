@@ -115,6 +115,7 @@ use self::sync_hardlink::*;
 use self::sync_incremental::sync_repository_changed_paths as sync_repository_changed_paths_incremental;
 use self::sync_metadata::*;
 use self::thumbnail::*;
+pub use self::thumbnail::preview_media_type_for_extension;
 use self::trash::*;
 use self::utils::*;
 #[cfg(test)]

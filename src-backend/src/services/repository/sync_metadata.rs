@@ -426,7 +426,12 @@ pub(super) fn sync_thumbnail_palette_metadata(
 }
 
 pub(super) fn extract_thumbnail_palette(path: &Path) -> Result<Vec<String>, String> {
-    let image = image::open(path).map_err(|error| format!("thumbnail palette error: {error}"))?;
+    // 缓存里的缩略图都叫 .jpg，从来源或旧版本拷来的可能是 PNG：按内容认格式，不按扩展名。
+    let image = image::ImageReader::open(path)
+        .and_then(|reader| reader.with_guessed_format())
+        .map_err(image::ImageError::IoError)
+        .and_then(|reader| reader.decode())
+        .map_err(|error| format!("thumbnail palette error: {error}"))?;
     let thumbnail = image.thumbnail(48, 48).to_rgb8();
     if thumbnail.width() == 0 || thumbnail.height() == 0 {
         return Ok(Vec::new());

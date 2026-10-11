@@ -28,8 +28,8 @@ const LOCAL_COMMENT: &str = "封面改用暖色版本。";
 /// 「冲突」页另一端已经存进服务器的注释。
 const SERVER_COMMENT: &str = "封面定稿，沿用冷色版本。";
 
-/// 验收用的最小 PDF。文本是解析器从流里读出的 `MomoBako`。
-pub(super) const PAGE_PDF: &[u8] = b"%PDF-1.4\n1 0 obj\n<< /Length 14 >>\nstream\n(MomoBako) Tj\nendstream\nendobj\n%%EOF\n";
+/// 验收用的最小 PDF：目录、页树和一页，文本是解析器从这一页的内容流里读出的 `MomoBako`。
+pub(super) const PAGE_PDF: &[u8] = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R >>\nendobj\n4 0 obj\n<< /Length 14 >>\nstream\n(MomoBako) Tj\nendstream\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF\n";
 
 /// 本面板的离屏对照场景。
 pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {

@@ -202,6 +202,8 @@ impl ApplicationState for MomoBakoApplication {
             inspect_dispatch::dispatch_inspect_effects(self, context);
         }
         window_host::prepare_motion(&mut self.shell, self.view.as_mut(), window, step);
+        // 空闲预取在准备帧里排下解码请求（`drive_prefetch`）：这一帧就交出去，不等下一条消息来了才解码。
+        files_dispatch::dispatch_files_effects(self, context);
         self.host.frames.note_demand(window.demand);
         for request in sidebar_dispatch::dispatch_prepared_browses(&mut self.shell) {
             sidebar_dispatch::dispatch_browse_request(self, context, request);
