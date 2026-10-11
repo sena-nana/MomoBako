@@ -257,6 +257,30 @@ fn incremental_sync_matches_a_fresh_mount_step_by_step() {
 
 /// `mount_shell` 在同一线程上同时开着两份文档时，按标记认出各自的骨架：同步谁只改谁，
 /// 文档里始终只有一棵壳层。
+/// 照 Vue 根文档的 `lang="zh-CN"`：测试 harness 和离屏验收文档（截图场景）都经 `ShellView::mount` 挂，
+/// 和生产窗口一样，挂好的文字按简体中文排。
+#[test]
+fn every_mount_shapes_text_in_simplified_chinese() {
+    let zh = nana_ui::runtime::LanguageTag::new("zh-CN");
+    let language = |document: &nana_ui::runtime::RuntimeDocument| {
+        let world = document.context().world();
+        let label = world
+            .project_accessibility(document.document())
+            .into_iter()
+            .find(|node| node.label.as_deref() == Some("默认资源库"))
+            .expect("侧栏的仓库名")
+            .id;
+        world.computed_style(label).and_then(|style| style.language.clone())
+    };
+    let harness = ShellHarness::mount(scene("live-files"));
+    assert_eq!(language(harness.document()), zh, "harness 挂的壳层");
+    let mut document = crate::acceptance_document_for_model(scene("live-files")).expect("验收文档");
+    document
+        .flush(nana_ui::runtime::LayoutViewport::new(1200.0, 800.0), &mut nana_ui::NanaTextShaper::default())
+        .expect("布局");
+    assert_eq!(language(&document), zh, "离屏验收和截图场景的壳层");
+}
+
 #[test]
 fn mount_shell_tells_live_documents_apart() {
     use nana_ui::runtime::component_descriptors::APP_SHELL;
