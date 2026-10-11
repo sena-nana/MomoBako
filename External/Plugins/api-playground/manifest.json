@@ -12,14 +12,9 @@
   "description": "在 MomoBako 内调试后端命令、外部 HTTP API 和插件 API。",
   "capabilities": ["tool-page", "api-playground", "external-api", "plugin-api"],
   "enabled": true,
-  "sdk": "frontend",
-  "runtime": "vue-module",
-  "entry": {
-    "frontend": {
-      "module": "dist/register.js",
-      "export": "register"
-    }
-  },
+  "sdk": "backend",
+  "runtime": "manifest-only",
+  "entry": {},
   "contributes": {
     "toolPages": [
       {

@@ -479,39 +479,9 @@ pub(super) fn core_tauri_api_definitions() -> Vec<ApiDefinition> {
         ),
         tauri_api_definition(
             "Plugin API",
-            "read_plugin_archive_text",
-            "读取插件包内文本文件。",
-            serde_json::json!({ "request": { "pluginId": "<pluginId>", "path": "manifest.json" } }),
-        ),
-        tauri_api_definition(
-            "Plugin API",
             "get_plugin_data_directory",
             "创建并读取插件自有数据目录。",
             serde_json::json!({ "pluginId": "<pluginId>" }),
-        ),
-        tauri_api_definition(
-            "Plugin API",
-            "prepare_plugin_data_file_preview_source",
-            "将插件数据目录内文件注册为受控预览源。",
-            serde_json::json!({
-                "request": {
-                    "pluginId": "<pluginId>",
-                    "path": "<absolutePluginDataFilePath>",
-                    "mediaType": "text/plain; charset=utf-8"
-                }
-            }),
-        ),
-        tauri_api_definition(
-            "Plugin API",
-            "prepare_repository_cache_file_preview_source",
-            "将资源库缓存目录内文件注册为受控预览源。",
-            serde_json::json!({
-                "request": {
-                    "repoId": "<repoId>",
-                    "path": "<absoluteRepositoryCacheFilePath>",
-                    "mediaType": "application/pdf"
-                }
-            }),
         ),
         tauri_api_definition(
             "Plugin API",

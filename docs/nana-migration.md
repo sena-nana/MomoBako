@@ -89,7 +89,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 - **UIA/AccessKit**：`hosted` 带 AccessKit 平台适配器；测试只读 NanaUI 自己的无障碍树，读屏器看到的结果没有验收。
 - **发布包**：发布流程（`.github/workflows/release.yml`）改用 NanaUI 的 `nana-packager` 打 `momobako-nana`，不再调用 tauri-action：dist 配置编主程序，打安装版布局和便携版两个 zip，各自 `validate`，便携版再跑 `validate --run --tamper-suite`，发到草稿 Release。本地用 `yarn nana:build`、`yarn nana:package`，见 [Nana 发布包](./nana-packaging.md)。没有安装程序（NanaUI 还没有安装包后端）和代码签名；没在干净的 Windows 上验收：没装 VC++ 运行库时能不能启动、解压到只读目录（例如 `Program Files`）以后数据是不是都落在用户目录。CI（`ci.yml`）仍只跑 `yarn verify` 和 `yarn test:backend`，不打包、不跑 Nana 的测试。
 - **全局快捷键**：没有实现。Vue 和 Tauri 端（`src/`、`src-tauri/src`）也没有注册全局快捷键，宿主请求里不留占位变体。
-- **Vue 插件组件不进原生树**：插件前端注册的 Vue 组件（设置页、工具页、预览、播放器）不在原生树里运行。插件设置只画清单 `contributes.settings.fields` 声明的字段；第三方工具页只画页头和「这个工具页由插件的前端组件绘制，Nana 原生界面不能运行它。」（`admin_gap.rs`）；插件清单声明的预览贡献不登记：Vue 里它们由插件前端的 `registerPreview` 组件绘制，随附插件声明的扩展名都已有内置视图（`native_preview::builtin_view`），认不出的扩展名照 Vue 没有预览插件时一样只画缩略图或类型图标；只有播放器贡献、扩展名又不是音视频或图片的条目写「暂不支持播放 {扩展名} 文件」（`player_clip.rs`）。
+- **插件不带界面**：插件前端（设置页、工具页、预览、播放器的 Vue 组件）已经删掉，插件只剩后端形态，见 [API 设计](./api-design.md) 的 Plugin API。插件设置只画清单 `contributes.settings.fields` 声明的字段；工具页来自清单的 `contributes.toolPages`，三个内置页面画原生页面，宿主没有的工具页只画页头和「MomoBako 没有这个工具页：插件只能打开内置的工具页，不能自带页面。」（`admin_gap.rs`）；预览由内置视图按扩展名绘制（`native_preview::builtin_view`），认不出的扩展名照 Vue 没有预览插件时一样只画缩略图或类型图标；只有播放器贡献、扩展名又不是音视频或图片的条目写「暂不支持播放 {扩展名} 文件」（`player_clip.rs`）。
 
 逐项的设备验收要求见 [设备矩阵](./nana-device-matrix.md)。
 

@@ -1,4 +1,3 @@
-import { build as esbuild } from "esbuild";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -96,40 +95,8 @@ function pluginMatchesRequest(name, manifest, project) {
     .some((id) => requestedPluginIds.has(id));
 }
 
-function frontendSourcePath(pluginDir, project) {
-  const sourceDir = project.build?.sourceDir ?? "src";
-  const sourceEntry = project.build?.sourceEntry ?? join(sourceDir, "register.js");
-  return join(pluginDir, sourceEntry);
-}
-
 function nativeManifestPath(pluginDir, project) {
   return join(pluginDir, project.build?.manifestPath ?? "Cargo.toml");
-}
-
-async function buildFrontendPlugin(pluginDir, outputDir, manifest, project) {
-  const frontendEntry = manifest.entry?.frontend?.module;
-  if (!frontendEntry) {
-    throw new Error(`frontend plugin is missing entry.frontend.module: ${pluginDir}`);
-  }
-
-  const sourcePath = frontendSourcePath(pluginDir, project);
-  const entryPath = join(outputDir, frontendEntry);
-  mkdirSync(dirname(entryPath), { recursive: true });
-
-  await esbuild({
-    absWorkingDir: pluginDir,
-    entryPoints: [sourcePath],
-    outfile: entryPath,
-    bundle: true,
-    format: "esm",
-    platform: "browser",
-    target: "es2022",
-    charset: "utf8",
-    sourcemap: false,
-    minify: false,
-    logLevel: "silent",
-    legalComments: "none",
-  });
 }
 
 function nativePluginArtifact(manifest) {
@@ -267,7 +234,7 @@ function distributionExcludePaths(project) {
   ]);
   if (project.build?.sourceDir) {
     excluded.add(project.build.sourceDir);
-  } else if (["cargo-native", "cargo-process", "frontend-module"].includes(project.build?.type)) {
+  } else if (["cargo-native", "cargo-process"].includes(project.build?.type)) {
     excluded.add("src");
   }
   for (const companion of project.build?.companionArtifacts ?? []) {
@@ -303,15 +270,6 @@ for (const name of readdirSync(pluginsRoot, { withFileTypes: true })) {
   writeDistributionManifest(outputDir);
 
   const buildType = project.build?.type;
-  if (buildType === "frontend-module") {
-    const sourcePath = frontendSourcePath(pluginDir, project);
-    if (existsSync(sourcePath)) {
-      await buildFrontendPlugin(pluginDir, outputDir, manifest, project);
-    } else {
-      console.log(`[build-external-plugins] skipped compile for ${name.name}: missing frontend source ${sourcePath}`);
-    }
-  }
-
   if (buildType === "cargo-native" || buildType === "cargo-process") {
     const cargoManifestPath = nativeManifestPath(pluginDir, project);
     if (existsSync(cargoManifestPath)) {

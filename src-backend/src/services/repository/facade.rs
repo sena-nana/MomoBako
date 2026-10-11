@@ -188,32 +188,11 @@ impl RepositoryState {
         plugin::call_plugin(self, request)
     }
 
-    pub fn read_plugin_archive_text(
-        &self,
-        request: PluginArchiveReadRequest,
-    ) -> Result<PluginArchiveTextResponse, String> {
-        plugin::read_plugin_archive_text(self, request)
-    }
-
     pub fn get_plugin_data_directory(
         &self,
         plugin_id: String,
     ) -> Result<PluginDataDirectoryResponse, String> {
         plugin::get_plugin_data_directory(self, plugin_id)
-    }
-
-    pub fn prepare_plugin_data_file_preview_source(
-        &self,
-        request: PluginDataFilePreviewSourceRequest,
-    ) -> Result<PluginDataFilePreviewSourceResponse, String> {
-        plugin::prepare_plugin_data_file_preview_source(self, request)
-    }
-
-    pub fn prepare_repository_cache_file_preview_source(
-        &self,
-        request: RepositoryCacheFilePreviewSourceRequest,
-    ) -> Result<RepositoryCacheFilePreviewSourceResponse, String> {
-        plugin::prepare_repository_cache_file_preview_source(self, request)
     }
 
     pub fn get_plugin_config(&self, plugin_id: String) -> Result<PluginConfigSnapshot, String> {
@@ -501,27 +480,6 @@ impl RepositoryState {
                     .map_err(db_error)?;
                     (Some(thumbnail_path), true)
                 }
-                "saveGenerated" => {
-                    let bytes = thumbnail_bytes_from_request(&request)?;
-                    let thumbnail_path = save_thumbnail_bytes(
-                        &thumbnail_root,
-                        &repo,
-                        &entry_path,
-                        kind,
-                        "generated",
-                        &bytes,
-                    )?;
-                    upsert_entry_thumbnail_record(
-                        &connection,
-                        &request.repo_id,
-                        &entry_path,
-                        kind,
-                        &thumbnail_path,
-                        false,
-                    )
-                    .map_err(db_error)?;
-                    (Some(thumbnail_path), false)
-                }
                 "clear" => {
                     remove_entry_thumbnail_record(&connection, &request.repo_id, &entry_path, kind)
                         .map_err(db_error)?;
@@ -652,20 +610,6 @@ impl RepositoryState {
                 )
                 .map_err(db_error)?;
                 (Some(thumbnail_path), true)
-            }
-            "saveGenerated" => {
-                let bytes = thumbnail_bytes_from_request(&request)?;
-                let thumbnail_path = save_thumbnail_bytes(
-                    &thumbnail_root,
-                    &repo,
-                    &entry_path,
-                    kind,
-                    "generated",
-                    &bytes,
-                )?;
-                remove_entry_thumbnail_record(&connection, &request.repo_id, &entry_path, kind)
-                    .map_err(db_error)?;
-                (Some(thumbnail_path), false)
             }
             "clear" => {
                 remove_entry_thumbnail_record(&connection, &request.repo_id, &entry_path, kind)

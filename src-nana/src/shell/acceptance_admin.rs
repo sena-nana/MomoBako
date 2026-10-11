@@ -112,7 +112,7 @@ fn logs_paused_scene() -> ShellViewModel {
     model
 }
 
-/// `extensions`：拓展页，全部内置插件。工具页来自前端插件的 `toolPages`。
+/// `extensions`：拓展页，全部内置插件。工具页来自工具插件清单的 `toolPages`。
 fn extensions_scene() -> ShellViewModel {
     let mut model = ShellViewModel::for_page(ShellPage::FileList);
     model.admin.note_backends(&[local_summary()]);
@@ -145,7 +145,7 @@ fn source_auth_methods_scene() -> ShellViewModel {
     model
 }
 
-/// `foreign-tool`：第三方插件的工具页。Vue 直接挂插件自己的组件，Nana 只能画页头和说明，
+/// `foreign-tool`：插件声明了宿主没有的工具页，只画页头和说明。Vue 里第三方工具页由插件自己的组件绘制，
 /// 没有 Vue 对照图。
 fn foreign_tool_scene() -> ShellViewModel {
     let mut model = ShellViewModel::for_page(ShellPage::FileList);

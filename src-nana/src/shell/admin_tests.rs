@@ -74,12 +74,11 @@ fn plugin(id: &str, source: &str, category: &str, kind: &str) -> PluginManifest 
     }
 }
 
-/// 能加载前端模块并声明工具页的插件。
+/// 只声明工具页的插件（仅清单）。
 fn tool_plugin(id: &str, pages: serde_json::Value) -> PluginManifest {
     let mut manifest = plugin(id, "builtin", "service", "tool");
-    manifest.sdk = "frontend".into();
-    manifest.runtime = "vue-module".into();
-    manifest.entry = json!({ "frontend": { "module": "dist/register.js" } });
+    manifest.runtime = "manifest-only".into();
+    manifest.entry = json!({});
     manifest.contributes = json!({ "toolPages": pages });
     manifest
 }
@@ -656,19 +655,22 @@ fn repository_actions_follow_selection_and_refuse_when_not_runnable() {
 }
 
 #[test]
-fn tool_pages_follow_frontend_manifests_and_keep_the_selection() {
-    let mut backend = tool_plugin("backend.tool", json!([{ "toolPageId": "backend.page", "label": "后端" }]));
-    backend.sdk = "backend".into();
+fn tool_pages_follow_enabled_manifests_and_keep_the_selection() {
+    let mut native = tool_plugin("backend.tool", json!([{ "toolPageId": "backend.page", "label": "后端" }]));
+    native.runtime = "native-dylib".into();
     let mut disabled = tool_plugin("disabled.tool", json!([{ "toolPageId": "disabled.page", "label": "停用" }]));
     disabled.enabled = false;
+    let mut broken = tool_plugin("broken.tool", json!([{ "toolPageId": "broken.page", "label": "出错" }]));
+    broken.status = "error".into();
     let pages = support::tool_pages_from_plugins(&[
         tool_plugin("a.tool", json!([{ "toolPageId": "zeta", "label": "Zeta", "order": 5 }, { "toolPageId": "  ", "label": "空" }])),
         tool_plugin("b.tool", json!([{ "toolPageId": "momobako.tool.api-playground", "label": "API Playground", "description": "调试" }])),
         tool_plugin("c.tool", json!([{ "toolPageId": "alpha", "label": "Alpha", "order": 5 }])),
-        backend,
+        native,
         disabled,
+        broken,
     ]);
-    assert_eq!(pages.iter().map(|page| page.id.as_str()).collect::<Vec<_>>(), ["alpha", "zeta", "momobako.tool.api-playground"]);
+    assert_eq!(pages.iter().map(|page| page.id.as_str()).collect::<Vec<_>>(), ["alpha", "zeta", "momobako.tool.api-playground", "backend.page"]);
     assert_eq!((pages[2].native, pages[2].plugin_name.as_str(), pages[2].description.as_str()), (true, "b.tool", "调试"));
     assert!(!pages[0].native);
 
@@ -881,9 +883,6 @@ fn slashes_and_repeated_ids_in_external_data_still_mount() {
         ] },
         "toolPages": [{ "toolPageId": "user/page", "label": "工具" }]
     });
-    odd.sdk = "frontend".into();
-    odd.runtime = "vue-module".into();
-    odd.entry = json!({ "frontend": { "module": "dist/register.js" } });
     load_bundle(&mut model, vec![odd.clone(), odd]);
     send(&mut model, AdminMessage::ToggleSettings("user/tool".into()));
     model.reduce(ShellMessage::LogsLoaded(Ok(SystemLogPage {

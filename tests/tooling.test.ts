@@ -1,11 +1,22 @@
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { resolveYarnCommand } from "../scripts/yarn-command.ts";
 
 function read(path: string) {
   return readFileSync(resolve(path), "utf-8");
+}
+
+/** 插件目录里的 JavaScript 源码；构建产物、依赖和 Rust 编译目录不算。 */
+function javascriptSources(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      return ["node_modules", "target", "dist"].includes(entry.name) ? [] : javascriptSources(path);
+    }
+    return /\.(?:js|mjs|cjs|ts|vue)$/.test(entry.name) ? [path] : [];
+  });
 }
 
 function expectNoSourceResidue(content: string) {
@@ -84,10 +95,8 @@ describe("MomoBako 工具链", () => {
   it("External/Plugins 提供标准开发入口并与主线源码隔离", () => {
     const devGuide = read("External/Plugins/dev.md");
     const pluginsPkg = JSON.parse(read("External/Plugins/package.json"));
-    const templateManifest = read("External/Plugins/template/manifest.json");
-    const templateProject = read("External/Plugins/template/plugin.project.json");
-    const exampleManifest = read("External/Plugins/example/manifest.json");
-    const exampleProject = read("External/Plugins/example/plugin.project.json");
+    const templateManifest = JSON.parse(read("External/Plugins/template/backend-rust/manifest.json"));
+    const exampleManifest = JSON.parse(read("External/Plugins/example/backend-rust/manifest.json"));
     const tsconfig = read("tsconfig.json");
 
     expect(devGuide).toContain("External/Plugins/");
@@ -102,12 +111,32 @@ describe("MomoBako 工具链", () => {
       package: "yarn typecheck:node-scripts && node scripts/package.ts",
       "stage:dev": "node scripts/stage-dev.mjs",
     });
-    expect(templateManifest).toContain("\"pluginId\"");
-    expect(templateProject).toContain("\"build\"");
-    expect(exampleManifest).toContain("\"pluginId\"");
-    expect(exampleProject).toContain("\"build\"");
+    expect(templateManifest).toMatchObject({ sdk: "backend", runtime: "native-dylib" });
+    expect(exampleManifest).toMatchObject({ sdk: "backend", runtime: "native-dylib" });
+    expect(pluginsPkg.dependencies.esbuild).toBeUndefined();
     expect(tsconfig).not.toContain("plugins/**/*.ts");
     expect(tsconfig).not.toContain("plugins/**/*.json");
+  });
+
+  it("External/Plugins 的插件都是后端形态，不带前端代码", () => {
+    const root = resolve("External/Plugins");
+    const pluginDirs = readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && existsSync(join(root, entry.name, "manifest.json")))
+      .map((entry) => entry.name);
+
+    expect(pluginDirs.length).toBeGreaterThan(0);
+    for (const dir of pluginDirs) {
+      const manifest = JSON.parse(read(`External/Plugins/${dir}/manifest.json`));
+      expect(manifest.sdk, dir).toBe("backend");
+      expect(["native-dylib", "process", "manifest-only"], dir).toContain(manifest.runtime);
+      expect(manifest.entry?.frontend, dir).toBeUndefined();
+      expect(manifest.contributes?.preview, dir).toBeUndefined();
+      if (existsSync(join(root, dir, "plugin.project.json"))) {
+        const project = JSON.parse(read(`External/Plugins/${dir}/plugin.project.json`));
+        expect(["cargo-native", "cargo-process", "manifest-only"], dir).toContain(project.build?.type);
+      }
+      expect(javascriptSources(join(root, dir)), dir).toEqual([]);
+    }
   });
 
   it("Tauri 基础配置不声明插件包资源，打包和开发窗口再叠加插件覆盖配置", () => {

@@ -1,9 +1,8 @@
 {
   "pluginId": "momobako.player.audio",
   "build": {
-    "type": "frontend-module",
+    "type": "manifest-only",
     "sourceDir": "src",
-    "entry": "dist/register.js",
     "outputDir": ".dist/player-audio"
   }
 }

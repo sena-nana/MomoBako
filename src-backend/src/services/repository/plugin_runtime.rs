@@ -607,7 +607,6 @@ fn read_discovered_plugin_manifest_from_archive_with_provenance(
         match manifest.runtime.as_str() {
             "native-dylib" => "abi",
             "process" => "process",
-            "vue-module" => "frontend",
             _ => "manifest",
         }
         .to_string(),

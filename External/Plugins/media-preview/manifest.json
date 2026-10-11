@@ -9,22 +9,13 @@
   },
   "kind": "preview",
   "category": "preview",
-  "description": "为常见图片与视频文件提供内联预览和播放列表播放能力。",
+  "description": "登记图片幻灯片和视频顺序播放两种播放集类型，由宿主播放。",
   "capabilities": ["preview", "playlist", "media", "image", "video"],
   "enabled": true,
-  "sdk": "frontend",
-  "runtime": "vue-module",
-  "entry": {
-    "frontend": {
-      "module": "dist/register.js",
-      "export": "register"
-    }
-  },
+  "sdk": "backend",
+  "runtime": "manifest-only",
+  "entry": {},
   "contributes": {
-    "preview": {
-      "extensions": ["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg", "mp4", "mov", "mkv", "webm", "avi", "m4v"],
-      "thumbnail": false
-    },
     "playlistPlayers": [
       {
         "playerTypeId": "momobako.playlist.image-slideshow",

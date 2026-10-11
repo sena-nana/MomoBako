@@ -11,12 +11,8 @@
     "stage:dev": "node scripts/stage-dev.mjs"
   },
   "dependencies": {
-    "@pixiv/three-vrm": "^3.4.5",
-    "esbuild": "^0.27.0",
     "jszip": "^3.10.1",
-    "pdfjs-dist": "^4.10.38",
-    "smol-toml": "1.6.1",
-    "three": "^0.184.0"
+    "smol-toml": "1.6.1"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

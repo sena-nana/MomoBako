@@ -89,19 +89,28 @@ afterEach(() => {
   }
 });
 
-test("manifest-only and frontend packages do not require plugin.toml", () => {
+test("manifest-only packages do not require plugin.toml", () => {
+  const directory = fixtureDir();
+  writeMomoManifest(directory, { sdk: "backend", runtime: "manifest-only", entry: {} });
+  writePluginPackageEnvelope(directory, "x86_64-pc-windows-msvc");
+  const result = validatePluginPackage(directory);
+  assert.equal(result.pluginToml, undefined);
+  assert.equal(result.packageEnvelope.deployment, "manifest");
+  assert.equal(result.packageEnvelope.targetTriple, "any");
+});
+
+test("rejects plugins that are not a backend form", () => {
   for (const manifest of [
-    { runtime: "manifest-only", entry: {} },
-    { runtime: "vue-module", entry: { frontend: { module: "dist/index.js" } } },
+    { sdk: "frontend", runtime: "vue-module", entry: { frontend: { module: "dist/index.js" } } },
+    { sdk: "frontend", runtime: "manifest-only", entry: {} },
+    { runtime: "unknown-runtime", entry: {} },
   ]) {
     const directory = fixtureDir();
     writeMomoManifest(directory, manifest);
-    if (manifest.runtime === "vue-module") {
-      mkdirSync(join(directory, "dist"));
-      writeFileSync(join(directory, "dist", "index.js"), "export default {};");
-    }
-    writePluginPackageEnvelope(directory, "x86_64-pc-windows-msvc");
-    assert.equal(validatePluginPackage(directory).pluginToml, undefined);
+    assert.throws(
+      () => writePluginPackageEnvelope(directory, "x86_64-pc-windows-msvc"),
+      /unsupported plugin form/,
+    );
   }
 });
 

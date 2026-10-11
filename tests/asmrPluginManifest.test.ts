@@ -13,13 +13,12 @@ describe("ASMR plugin contracts", () => {
       version: string;
       sdk: string;
       runtime: string;
-      entry: { frontend: { module: string; export: string } };
+      entry: Record<string, unknown>;
       optional: string[];
       hooks: Array<{ slot: string; action: string }>;
       contributes: {
         libraryExtension: {
           libraryKind: string;
-          entry: string;
           searchShortcuts: string[];
         };
         libraryKind: {
@@ -35,22 +34,13 @@ describe("ASMR plugin contracts", () => {
 
     expect(manifest.pluginId).toBe("momobako.library.asmr");
     expect(manifest.version).toBe("0.2.0");
-    expect(manifest.sdk).toBe("frontend");
-    expect(manifest.runtime).toBe("vue-module");
-    expect(manifest.entry.frontend).toMatchObject({
-      module: "src/register.js",
-      export: "register",
-    });
-    expect(manifest.contributes.libraryExtension).toMatchObject({
+    expect(manifest.sdk).toBe("backend");
+    expect(manifest.runtime).toBe("manifest-only");
+    expect(manifest.entry).toEqual({});
+    expect(manifest.contributes.libraryExtension).toEqual({
       libraryKind: "asmr",
-      entry: "src/register.js",
+      searchShortcuts: ["works", "lyrics", "continue", "random"],
     });
-    expect(manifest.contributes.libraryExtension.searchShortcuts).toEqual(expect.arrayContaining([
-      "works",
-      "lyrics",
-      "continue",
-      "random",
-    ]));
     expect(manifest.optional).toEqual(expect.arrayContaining([
       "momobako.parser.audio",
       "momobako.parser.asmr-folder",

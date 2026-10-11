@@ -29,14 +29,12 @@ use services::repository::{
     PlaylistDetail, PlaylistItemRemoveRequest, PlaylistItemsAddRequest,
     PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest, PlaylistMembershipIndex,
     PlaylistMembershipRequest, PlaylistMembershipSnapshot, PlaylistMutationRequest,
-    PlaylistMutationResponse, PlaylistSummary, PluginArchiveReadRequest, PluginArchiveTextResponse,
-    PluginCallRequest, PluginCallResult, PluginConfigDeleteRequest, PluginConfigSetRequest,
-    PluginConfigSnapshot, PluginDataDirectoryResponse, PluginDataFilePreviewSourceRequest,
-    PluginDataFilePreviewSourceResponse, PluginEnabledRequest, PluginHookExecutionListRequest,
+    PlaylistMutationResponse, PlaylistSummary, PluginCallRequest, PluginCallResult,
+    PluginConfigDeleteRequest, PluginConfigSetRequest, PluginConfigSnapshot,
+    PluginDataDirectoryResponse, PluginEnabledRequest, PluginHookExecutionListRequest,
     PluginHookExecutionListResponse, PluginInstallRequest, PluginManifest, PluginMutationResponse,
     RecentAccessHistoryClearRequest, RecentAccessHistoryClearResponse, RepositoryAction,
     RepositoryActionEnabledRequest, RepositoryActionMutationResponse, RepositoryActionRunRequest,
-    RepositoryCacheFilePreviewSourceRequest, RepositoryCacheFilePreviewSourceResponse,
     RepositoryDeleteRequest, RepositoryExportRequest, RepositoryFolderRequest,
     RepositoryMutationRequest, RepositoryMutationResponse, RepositoryRelocateRequest,
     RepositorySnapshot, RepositorySummary, RepositoryTreeSnapshot, RevisionActionRequest,
@@ -388,39 +386,11 @@ async fn download_playlist_with_progress(
 }
 
 #[tauri::command]
-async fn read_plugin_archive_text(
-    request: PluginArchiveReadRequest,
-    plugin_vm: tauri::State<'_, PluginViewModel>,
-) -> Result<PluginArchiveTextResponse, String> {
-    plugin_vm.read_plugin_archive_text(request).await
-}
-
-#[tauri::command]
 async fn get_plugin_data_directory(
     plugin_id: String,
     plugin_vm: tauri::State<'_, PluginViewModel>,
 ) -> Result<PluginDataDirectoryResponse, String> {
     plugin_vm.get_plugin_data_directory(plugin_id).await
-}
-
-#[tauri::command]
-async fn prepare_plugin_data_file_preview_source(
-    request: PluginDataFilePreviewSourceRequest,
-    plugin_vm: tauri::State<'_, PluginViewModel>,
-) -> Result<PluginDataFilePreviewSourceResponse, String> {
-    plugin_vm
-        .prepare_plugin_data_file_preview_source(request)
-        .await
-}
-
-#[tauri::command]
-async fn prepare_repository_cache_file_preview_source(
-    request: RepositoryCacheFilePreviewSourceRequest,
-    plugin_vm: tauri::State<'_, PluginViewModel>,
-) -> Result<RepositoryCacheFilePreviewSourceResponse, String> {
-    plugin_vm
-        .prepare_repository_cache_file_preview_source(request)
-        .await
 }
 
 #[tauri::command]
@@ -851,10 +821,7 @@ pub fn run() {
             prepare_entry_playback_source_with_progress,
             call_plugin,
             download_playlist_with_progress,
-            read_plugin_archive_text,
             get_plugin_data_directory,
-            prepare_plugin_data_file_preview_source,
-            prepare_repository_cache_file_preview_source,
             get_plugin_config,
             set_plugin_config_value,
             delete_plugin_config_value,
