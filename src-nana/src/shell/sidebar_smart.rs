@@ -299,7 +299,10 @@ impl SidebarState {
     }
 }
 
-/// 把对话框文本收成服务筛选，对应 Vue `buildSmartFolderFilter`。空白字段不写入。
+/// 把对话框文本收成服务筛选，对应 Vue `buildSmartFolderFilter` 加 `normalizeSmartFolderFilter`。空白字段不写入。
+///
+/// 匹配方式只在选了「任一匹配」时写 `or`：「全部匹配」不写，子级继承父级的匹配方式（后端合并父子筛选时
+/// 子级没写才用父级），顶层没写按全部匹配查。写成 `and` 会把「任一匹配」父级下的子级改成全部匹配。
 pub fn filter_from_draft(draft: &SmartFolderDraft) -> SmartFolderFilter {
     SmartFolderFilter {
         query: filled(&draft.query),
@@ -319,7 +322,7 @@ pub fn filter_from_draft(draft: &SmartFolderDraft) -> SmartFolderFilter {
         number_filters: parse_numbers(&draft.numbers),
         date_filters: parse_dates(&draft.dates),
         min_rating: positive_number(&draft.min_rating),
-        match_mode: Some(if draft.match_mode == "or" { "or" } else { "and" }.into()),
+        match_mode: (draft.match_mode == "or").then(|| "or".into()),
         sort: filled(&draft.sort_field).map(|field| SearchSort {
             field,
             direction: if draft.sort_direction == "desc" { "desc" } else { "asc" }.into(),
@@ -495,7 +498,37 @@ mod tests {
         let filter = filter_from_draft(&draft);
         assert_eq!(filter.min_rating, None);
         assert_eq!(filter.limit, None);
-        assert_eq!(filter.match_mode.as_deref(), Some("and"));
+        assert_eq!(filter.match_mode, None, "「全部匹配」不写匹配方式");
         assert!(filter.sort.is_none());
+    }
+
+    /// 后端合并父子筛选时子级没写匹配方式才继承父级（`child.match_mode.or(parent.match_mode)`）。
+    /// 「任一匹配」父级下的子级（Vue 建的，匹配方式留空）在对话框里显示「全部匹配」，原样保存不能把它
+    /// 改写成 and；新建的子级默认也不写，照样继承父级。只有选了「任一匹配」才写 or。
+    #[test]
+    fn saving_a_child_keeps_inheriting_the_parent_match_mode() {
+        let parent = SidebarSmartFolder {
+            id: "parent".into(),
+            parent_id: None,
+            name: "任一".into(),
+            filter: SmartFolderFilter { match_mode: Some("or".into()), ..SmartFolderFilter::default() },
+            children: Vec::new(),
+        };
+        let child = SidebarSmartFolder {
+            id: "child".into(),
+            parent_id: Some(parent.id.clone()),
+            name: "子级".into(),
+            filter: SmartFolderFilter { tags: Some(vec!["封面".into()]), ..SmartFolderFilter::default() },
+            children: Vec::new(),
+        };
+        let edit = SmartFolderDraft::from_folder(&child);
+        assert_eq!(edit.match_mode, "and", "没写匹配方式时对话框显示「全部匹配」");
+        assert_eq!(filter_from_draft(&edit).match_mode, None, "原样保存不改写子级的匹配方式");
+
+        let created = SmartFolderDraft { open: true, parent_id: parent.id.clone(), name: "新子级".into(), ..SmartFolderDraft::default() };
+        assert_eq!(filter_from_draft(&created).match_mode, None, "新建的子级照样继承父级");
+
+        let any = SmartFolderDraft { match_mode: "or".into(), ..edit };
+        assert_eq!(filter_from_draft(&any).match_mode.as_deref(), Some("or"));
     }
 }
