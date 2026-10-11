@@ -5,7 +5,8 @@
 //! 宿主（窗口底色、标题栏，经 `ApplicationState::theme`）和文档（调色板），圆角半径换成
 //! `RadiusTier` 刻度，「平滑 / 普通」换成主题的圆角形状（CSS `superellipse(2)` / 圆弧）。
 //! 对话框的站位、分区、开合动效和身后的遮罩也归主题：照 Vue `.modal-overlay`、`.modal-card` 和
-//! `.dialog-card__*` 写进 [`DialogRecipe`] 和 [`EffectTokens`]，深浅两套相同。
+//! `.dialog-card__*` 写进 [`DialogRecipe`] 和 [`EffectTokens`]，深浅两套相同。滚动条同样归主题：尺寸、颜色、
+//! 动效和显隐策略照 Vue 的全局 overlay 滚动条写进 `ThemeMetrics::scrollbar` 和 [`ScrollbarRecipe`]。
 //! 只有外观真的变了才重新编译和安装；失败只记日志，宿主和文档都保留上一份主题。
 
 use std::sync::Arc;
@@ -13,8 +14,10 @@ use std::sync::Arc;
 use nana_ui::runtime::{Easing, LengthSpec, RuntimeDocument, SemanticColorRole, ViewportAxis};
 use nana_ui::theme::{
     builtin_theme_arc, linear_scrim_alpha, CompiledTheme, CornerShape, DialogInsets, DialogMotion, DialogRecipe,
-    DialogTransition, EffectTokens, RadiusTier, SemanticColor, ThemeAppearance, ThemeDefinition, ThemeId,
+    DialogTransition, EffectTokens, RadiusTier, ScrollbarMetrics, ScrollbarMotion, ScrollbarRecipe, ScrollbarTransition,
+    ScrollbarVisibility, SemanticColor, ThemeAppearance, ThemeDefinition, ThemeId, ThemeMetrics, SCROLLBAR_METRICS,
 };
+use nana_ui_core::SemanticColorMix;
 use nana_ui_platform::SystemAppearance;
 
 use crate::shell::ShellViewModel;
@@ -63,11 +66,50 @@ impl Appearance {
         let shape = if self.smooth_corners { CornerShape::SQUIRCLE } else { CornerShape::Round };
         let base = ThemeDefinition::for_appearance(mode);
         let effects = modal_effects(base.effects);
-        base.with_metrics(theme_map::corner_metrics(self.corner_radius))
+        let metrics = ThemeMetrics { scrollbar: SCROLLBAR, ..theme_map::corner_metrics(self.corner_radius) };
+        base.with_metrics(metrics)
             .with_corner_shape(shape)
             .with_effects(effects)
             .with_dialog(dialog_recipe())
+            .with_scrollbar(scrollbar_recipe())
             .with_id(id)
+    }
+}
+
+/// 滚动条的尺寸，照 Vue 的全局 overlay 滚动条（`useGlobalScrollbarVisibility.ts` 和 Lilia
+/// `global-scrollbar.css`）：12px 宽的悬停和拖动区贴着滚动区的边（车道不内缩），里面 4px 的滑块，悬停和拖动都
+/// 不变粗，最短 24px。NanaUI 把滑块放在车道正中，竖条离右边 4px、横条离底边 4px；Vue 的竖条贴边、横条离底
+/// 4px，两端各留 4px。
+const SCROLLBAR: ScrollbarMetrics = ScrollbarMetrics {
+    thickness: 12.0,
+    thumb_thickness: 4.0,
+    thumb_active_thickness: 4.0,
+    thumb_min_length: 24.0,
+    track_inset: 0.0,
+    page_fraction: SCROLLBAR_METRICS.page_fraction,
+};
+/// `.global-scrollbar-overlay { transition: opacity .48s ease }`，淡入淡出同长；理由都没了以后先停的时长
+/// （`DEFAULT_HIDE_DELAY`）也是 480ms。
+const SCROLLBAR_FADE_MS: u16 = 480;
+
+/// 滚动条的颜色、动效和显隐，照 Vue 的全局 overlay 滚动条：原生滚动条隐藏、不占宽度；指针在滚动区上、滚动或
+/// 拖动时淡入 `--border-strong` 的胶囊滑块，没有轨道，悬停和拖动都不换色；理由都没了以后停 480ms 再淡出。
+/// 所有滚动区跟着这一份策略，不逐个写。
+fn scrollbar_recipe() -> ScrollbarRecipe {
+    let thumb = SemanticColorMix::role(SemanticColorRole::BorderStrong);
+    ScrollbarRecipe {
+        visibility: ScrollbarVisibility::AutoHide,
+        thumb,
+        thumb_hot: thumb,
+        thumb_active: thumb,
+        track_hot: None,
+        track_resident: None,
+        motion: ScrollbarMotion {
+            fade_in: ScrollbarTransition::new(SCROLLBAR_FADE_MS, CSS_EASE),
+            fade_out: ScrollbarTransition::new(SCROLLBAR_FADE_MS, CSS_EASE),
+            hide_delay_ms: SCROLLBAR_FADE_MS,
+            ..ScrollbarMotion::DEFAULT
+        },
     }
 }
 
@@ -342,6 +384,66 @@ mod tests {
         ] {
             assert!(keys.contains(key), "{key} 没有写 2xl 档：{keys:?}");
         }
+    }
+
+    /// 深浅两套都装上 Vue overlay 滚动条的尺寸和配方；滚动条只重画，不改布局。
+    #[test]
+    fn both_themes_install_the_vue_overlay_scrollbar() {
+        for mode in [ThemeAppearance::Light, ThemeAppearance::Dark] {
+            let appearance = Appearance { mode, corner_radius: 8.0, smooth_corners: true };
+            let theme = appearance.definition().compile().expect("主题能编译");
+            assert_eq!(theme.metrics().scrollbar, SCROLLBAR);
+            let recipe = theme.recipes().scrollbar();
+            assert_eq!(recipe.visibility, ScrollbarVisibility::AutoHide);
+            let border_strong = SemanticColorMix::role(SemanticColorRole::BorderStrong);
+            assert_eq!([recipe.thumb, recipe.thumb_hot, recipe.thumb_active], [border_strong; 3], "悬停和拖动都不换色");
+            assert_eq!((recipe.track_hot, recipe.track_resident), (None, None), "没有轨道");
+            let motion = recipe.motion;
+            assert_eq!((motion.fade_in.millis, motion.fade_out.millis, motion.hide_delay_ms), (480, 480, 480));
+            assert_eq!(motion.fade_out.easing, Easing::CubicBezier([0.25, 0.1, 0.25, 1.0]));
+            assert!(theme.metrics().same_layout(&ThemeMetrics { scrollbar: SCROLLBAR_METRICS, ..theme.metrics() }));
+        }
+    }
+
+    /// 指针进到能滚的滚动区以后，照 Vue 淡入贴着右边的 4px `--border-strong` 滑块，没有轨道；滑块叠在内容上，
+    /// 内容的宽度和没显示时一样。
+    #[test]
+    fn hovered_scroll_areas_fade_in_the_vue_overlay_thumb() {
+        use crate::shell::view_harness::ShellHarness;
+        use crate::shell::{ShellPage, ShellViewModel};
+        use nana_ui::runtime::ComponentGeometry;
+
+        let mut shell = ShellViewModel::for_page(ShellPage::Settings);
+        shell.settings.theme = "dark".into();
+        let mut harness = ShellHarness::mount_at(shell.clone(), 960.0, 600.0);
+        assert!(install(&mut harness.window.document, Appearance::from_shell(&shell, None)).is_some(), "主题装不上");
+        harness.finish_motion();
+        let scroll = harness.keyed("settings-scroll").expect("设置页的滚动区");
+        let world = |harness: &ShellHarness| harness.document().context().world().component_geometry(scroll);
+        let content = |harness: &ShellHarness| {
+            let document = harness.document();
+            let world = document.context().world();
+            let child = world.document_order(document.document()).into_iter().find(|id| world.parent_id(*id) == Some(scroll));
+            child.and_then(|child| world.layout_box(child))
+        };
+        assert!(world(&harness).is_none(), "指针不在滚动区上时不画滚动条");
+        let resting = content(&harness).expect("滚动内容");
+
+        let (x, y) = harness.center(scroll);
+        harness.pointer(nana_ui::PointerPhase::Move, x, y, nana_ui::InputModifiers::default());
+        harness.finish_motion();
+        let Some(ComponentGeometry::Scrollbar { vertical: Some(bar), horizontal: None }) = world(&harness) else {
+            panic!("指针在设置页上时竖向滚动条要显示：{:?}", world(&harness));
+        };
+        let bounds = harness.document().context().world().layout_box(scroll).expect("滚动区的布局盒");
+        let border_strong = harness.document().context().world().style_model().color(SemanticColorRole::BorderStrong);
+        assert_eq!(bar.thumb.width, 4.0, "滑块 4px");
+        assert_eq!(bar.lane.width, 12.0, "悬停和拖动区 12px");
+        assert!((bounds.x + bounds.width - (bar.lane.x + bar.lane.width)).abs() < 0.01, "车道贴着滚动区右边");
+        assert!((bounds.x + bounds.width - (bar.thumb.x + bar.thumb.width) - 4.0).abs() < 0.01, "滑块在车道正中，离右边 4px");
+        assert_eq!(bar.thumb_background, border_strong.as_rgba_array(), "淡入完是不透明的 --border-strong");
+        assert_eq!(bar.track_background, None, "没有轨道");
+        assert_eq!(content(&harness), Some(resting), "滚动条叠在内容上，不占布局");
     }
 
     #[test]

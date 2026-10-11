@@ -34,6 +34,12 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 - Vue 用 `--radius-2xl` 的大块表面都写 2xl 档：文件卡和详情卡、预览页、播放条、播放集面板，以及插件、日志和搜索页的工作台面板（`.search-workbench__panel`）。改了圆角半径重新装主题，这些表面跟着变，不用重建。
 - 「平滑」圆角是主题的 `CornerShape::SQUIRCLE`（CSS `superellipse(2)`），「普通」是圆弧。
 
+**滚动条。**
+- 照 Vue 的全局 overlay 滚动条（`src/composables/useGlobalScrollbarVisibility.ts`，样式在 Lilia `global-scrollbar.css`，最早写在 `2c6b17b` 的 `index.css`）：原生滚动条隐藏、不占宽度；指针到滚动区上、滚动或拖动时淡入一条 4px 的 `--border-strong` 胶囊，没有轨道，悬停和拖动都不换色、不变粗，最短 24px；理由都没了以后停 480ms 再按 `transition: opacity .48s ease` 淡出。Vue 现在看不到这条滚动条，是缺陷，见下文「没照抄的 Vue 缺陷」。
+- 写在主题里，所有滚动区跟随，不逐个写（`appearance.rs`）：尺寸是 `ThemeMetrics::scrollbar`（12px 车道贴着滚动区的边、不内缩，4px 滑块，激活时也是 4px），颜色、动效和显隐策略是 `ScrollbarRecipe`（`AutoHide`；三态滑块都是 `--border-strong`，没有轨道；淡入淡出 480ms CSS `ease`，停 480ms）。
+- 滚动条叠在内容上，画在滚动区所有后代之上（NanaUI `7f94c925d`），不占布局。56 个场景升级前后的截图只有停用图标按钮的颜色变了，内容宽度、网格列数和列表右边距都没有变化；换上这份尺寸和配方前后，截图和节点清单逐张相同。静止时滚动条不显示，截图里也没有滚动条；指针停在滚动区上时的样子由 `live_visual` 的 `hovered_settings_page_paints_the_overlay_thumb` 在真像素里查。
+- 和 Vue 设计的差别：Vue 只在指针进到滚动区右边（底边）12px 以内时浮出，Nana 指针进到滚动区就显示（NanaUI 的 `AutoHide` 没有只认边缘的模式，见下文「NanaUI 缺口」）；NanaUI 把滑块放在车道正中，竖条离右边 4px（Vue 贴边）、横条离底边 4px（和 Vue 一样），两端不留空（Vue 各留 4px）；滑块在滚动区自己的层叠上下文里，后面的兄弟节点和视口固定的浮层仍能盖住它，Vue 的滑块是 `z-index` 最高的固定定位浮层。
+
 **关闭窗口。** 和 Vue/Tauri 一样直接退出，只有存在未保存修改时才先确认。
 
 ## 没照抄的 Vue 缺陷
@@ -48,6 +54,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 - 添加菜单的 160px 宽被 `.ctx-menu` 的最小宽度覆盖。
 - 刷新文件夹树途中换了仓库，Vue 后半段的重读按当时的活动仓库读，会落到新仓库上；Nana 作废这一轮。
 - 换仓库时 Vue 不改当前面板：在回收站、智能文件夹或播放集面板上换仓库，面板留着，回收站面板接着显示新仓库的根目录（不是回收站），智能文件夹和播放集面板是空的。Nana 换仓库时这三个面板回到文件面板。
+- 看不到滚动条：原生滚动条被 Lilia 隐藏（`* { scrollbar-width: none }`、`::-webkit-scrollbar { width: 0 }`），本来由 overlay 滚动条代替。切到 LiliaUI（`613fa7d`）以后它的样式挪进了 Lilia 的 `global-scrollbar.css`，只有 Lilia 自己的 `installGlobalScrollbarVisibility` 会加载这份样式，MomoBako 调的是 `src/composables` 里自己那份旧实现，不加载。滚动和悬停边缘时浮层照样建出来、带上 `is-visible`，但没有定位和颜色：在 `tmp/vue-mock` 里滚动日志页，浮层的 `position` 是 `static`，`::before` 的 `content` 是 `none`、底色透明。所以 Vue 任何时候都看不到滚动条，也没法拖。Nana 按上文「滚动条」的设计意图画。
 
 ### 文件页
 - 导入菜单用了未定义的 `--panel-bg`，退回到 `#15171a` 深色底，字看不清。
@@ -187,5 +194,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 | 滚动范围按全部后代的盒子合并，不在里层的滚动区或裁剪盒处停下 | 上游 `941df646d` 已修：范围只算到最近的裁剪盒，里层滚动区只贡献自己的盒子。日志页主体恢复成滚动区（`route_admin.rs` 走 `home_scroll`），不滚的裁剪盒 `route_home::home_fixed` 和撑满它的 `fill_panel` 已删，矮窗口里日志页也能滚 |
 | `RadiusTier` 没有 2xl 档 | 已补：上游 `8541a2f8d` 的 `RadiusTier::Xxl` / `ThemeMetrics::radius_xxl`。`corner_metrics` 按两倍基数给，原来按像素给的 `theme_map::radius_2xl` 已删，插件、日志和搜索页的面板也从 Xl 改回 2xl，见上文「圆角」 |
 | 线性空间混合 | 设计如此，见上文「颜色合成」 |
+| 滚动条颜色写死成共享的主题角色，显隐瞬切、滚动时不出现，滑块被内容盖住 | 上游 `7f94c925d` 已补：`ScrollbarRecipe`（颜色、动效、应用级显隐策略）和 `ThemeMetrics::scrollbar` 的激活粗细、车道内缩；滚动条叠在内容上。`appearance.rs` 照 Vue 的 overlay 滚动条写进主题，见上文「滚动条」 |
+| `AutoHide` 指针进到滚动区就显示，没有 Vue 那样只认右边、底边 12px 热区的模式 | 未补。Nana 的滚动条比 Vue 的设计更常出现（指针在列表上就显示），显隐时机以外的样子和 Vue 一致。要对齐得在 `ScrollbarRecipe` 里加一种只在车道附近悬停才显示的策略 |
 | `IconButton` 停用时整枚淡到 50%（`88f659bb4`），没有退出口：`colors_from_style` 或自绘的按钮已经画了停用色，还会再淡一层，而且是线性空间合成，和 CSS `opacity` 不同 | 未补。播放条的传输按钮改用没有可见文字的 `Button` 承载自绘（见上文「颜色合成」）；侧栏标题工具和弹层关闭钮交给它淡化。修法：`colors_from_style` 的按钮不淡，或者给 `IconButton` 一个关掉淡化的开关 |
 | 任务工作线程不接 panic（`b02eaa231` 的 `spawn_task_workers` 在 `pollster::block_on` 外面没有 `catch_unwind`：任务 panic 时工作线程退出，四个都退出以后之后的 `run_task` 一律报「runtime host task executor has stopped」） | 上游 `d0486cf37` 已修：每个任务在 `catch_unwind` 里跑，panic 的任务丢掉自己的消息、记一条 `host.task_panicked` 故障，工作线程接着处理队列。结果消息仍然不交回，`Task` 也不能带一条出 panic 时交回的消息，所以 `task_guard` 照样在任务里接住 panic、按失败交回；它还负责任务排不进去和服务没起来时交回失败 |
