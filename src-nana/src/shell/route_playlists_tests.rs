@@ -253,6 +253,43 @@ fn row_buttons_click_their_own_actions() {
     );
 }
 
+/// 和 Vue 一样双击行（按钮以外的地方，这里点拖动柄）从这一条播放，单击只是选中；连点两行不算双击，三连击的
+/// 第三下也不再算。没有对应的播放插件时和行上禁用的「播放」一样，双击不播。
+#[test]
+fn double_clicking_a_row_plays_from_it() {
+    let mut harness = listed();
+    harness.take_messages();
+    let grip = |harness: &ShellHarness, id: &str| harness.center(harness.keyed(&format!("playlist-item-drag-{id}")).expect("拖动柄"));
+    let plays = |messages: &[ShellMessage]| messages.iter().any(|message| matches!(message, ShellMessage::Player(PlayerMessage::PlayListed { .. })));
+    let (x, y) = grip(&harness, "item-02");
+    assert!(!plays(&harness.click_messages(x, y)));
+    assert!(!plays(&harness.click_messages(x, y)), "没有播放插件时双击不播");
+
+    harness.apply(ShellMessage::PlaylistPlayersLoaded(Ok(vec![crate::backend::services::repository::PlaylistPlayerContribution {
+        player_type_id: "audio".into(),
+        label: "音频".into(),
+        file_class: "audio".into(),
+        supported_extensions: vec!["mp3".into(), "wav".into()],
+        supports_seek: true,
+        supports_volume: true,
+        supports_preview_navigation: true,
+        description: None,
+    }])));
+    harness.flush();
+    harness.take_messages();
+    let (first_x, first_y) = grip(&harness, "item-01");
+    assert!(harness.click_messages(first_x, first_y).is_empty(), "单击只是选中，不发消息");
+    let (x, y) = grip(&harness, "item-02");
+    assert!(!plays(&harness.click_messages(x, y)), "和上一下点的不是同一行，不算双击");
+    let messages = harness.click_messages(x, y);
+    assert!(
+        matches!(messages.as_slice(), [ShellMessage::Player(PlayerMessage::PlayListed { item_id: Some(id) })] if id == "item-02"),
+        "双击应该从这一条播放：{} 条消息",
+        messages.len()
+    );
+    assert!(!plays(&harness.click_messages(x, y)), "三连击的第三下不再算双击");
+}
+
 /// 从按钮上按下拖动会拖动这一行（和 Vue 整行都能拖一样）：拖到第一条上面发排序消息，按钮自己的动作不发。
 #[test]
 fn dragging_from_a_row_button_reorders_instead_of_clicking() {

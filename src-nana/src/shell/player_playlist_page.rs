@@ -11,9 +11,11 @@
 //! `keyed(..).each(..)` 建，`.container(..)` 把行直接建进 `ReorderList`，不多一层容器：增删、重排时
 //! 按编号保留各行的节点，留下的行一个都不重建，焦点、按钮和行里的状态都还是原来的；当前播放、文件名
 //! 这类字段原地改。按在行里的按钮上不移动就松开是按钮自己的点击，移动超过 4px 才拖动这一行，和 Vue
-//! 整行都能拖一样。
+//! 整行都能拖一样。和 Vue 一样双击行（按钮以外的地方）从这一条播放，能不能播和行上的「播放」一样。
 
+use std::cell::RefCell;
 use std::sync::Arc;
+use std::time::Instant;
 
 use nana_ui::runtime::view::{
     fields, signal, store, widget, AnyView, FieldWrite, IntoView, Item, Signal, Store, StoreList, StorePath, StyledComponent,
@@ -33,6 +35,26 @@ use super::{bar, icons, key_part, playlist_plugin_missing, player_message};
 
 /// 不能播放的条目整行的透明度。
 const UNREADY_OPACITY: f32 = 0.72;
+/// 两次单击之间不超过这么久、点的是同一行就算双击，和文件列表一样。
+const DOUBLE_PRESS_MS: u128 = 400;
+
+thread_local! {
+    /// 上一次单击的条目和时刻，认双击用。
+    static LAST_PRESS: RefCell<Option<(String, Instant)>> = const { RefCell::new(None) };
+}
+
+/// 这一下单击和上一下凑成了双击：同一行、间隔不超过 [`DOUBLE_PRESS_MS`]。凑成以后清掉记录，三连击不算两次双击。
+fn double_pressed(item_id: &str) -> bool {
+    LAST_PRESS.with(|slot| {
+        let mut slot = slot.borrow_mut();
+        let now = Instant::now();
+        let double = slot
+            .as_ref()
+            .is_some_and(|(previous, at)| previous == item_id && now.duration_since(*at).as_millis() <= DOUBLE_PRESS_MS);
+        *slot = (!double).then(|| (item_id.to_string(), now));
+        double
+    })
+}
 
 /// 播放集页要显示的东西。
 #[derive(Clone, Debug, PartialEq)]
@@ -168,7 +190,8 @@ pub(crate) fn view(signals: PlaylistPageSignals, player_bar: AnyView) -> AnyView
 
 /// 条目列表。整行都能拖动排序（按在按钮上要移动超过 4px 才拖），排序结果交回壳层持久化；行按编号建在
 /// `ReorderList` 里，增删、重排只动变了的行。列表的条目（拖动命中用的编号和名字、当前播放）跟着顺序和
-/// 字段原地换。
+/// 字段原地换。在行上（按钮以外）单击是列表的选中，两下凑成双击就从这一条播放；条目不能播或者没有对应的播放插件时
+/// 和行上禁用的「播放」一样什么也不做（Vue 的双击不看这些，会把不能播的条目也拿去播）。
 fn item_list(signals: PlaylistPageSignals) -> AnyView {
     let PlaylistPageSignals { head, entries, order } = signals;
     let keyed = entries.keyed(entry_key);
@@ -185,13 +208,24 @@ fn item_list(signals: PlaylistPageSignals) -> AnyView {
         .prop::<Vec<ReorderItem>, fields::reorder_list::items>(reorder)
         .visible(move || !order.with(Vec::is_empty))
         .key("playlist-reorder")
-        .on_cx(|_, event: &ReorderListEvent, cx| {
-            if let ReorderListEvent::Reorder { source, before } = event {
+        .on_cx(move |_, event: &ReorderListEvent, cx| match event {
+            ReorderListEvent::Reorder { source, before } => {
                 cx.dispatch_program_all(player_message(PlayerMessage::Reorder {
                     source: source.to_string(),
                     before: before.as_ref().map(|value| value.to_string()),
                 }));
             }
+            ReorderListEvent::Select(item_id) => {
+                if !double_pressed(item_id) {
+                    return;
+                }
+                let item_id = item_id.to_string();
+                let ready = keyed.at(&item_id).try_with(|entry| entry.ready).unwrap_or(false);
+                if ready && head.with_untracked(|head| head.has_player) {
+                    cx.dispatch_program_all(player_message(PlayerMessage::PlayListed { item_id: Some(item_id) }));
+                }
+            }
+            _ => {}
         });
     keyed.each(move |item| entry_row(item, head)).container(list).into_any()
 }
