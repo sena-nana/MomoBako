@@ -246,8 +246,18 @@ pub(super) fn preview_file_token(
     ])
 }
 
-pub(super) fn preview_media_type_for_extension(extension: &str) -> &'static str {
+/// 预览源的媒体类型，按小写扩展名给。桌面端只在类型以 `image/` 开头时把字节当图片解码，
+/// 图片扩展名必须落在 `image/*` 上（合同见 `docs/api-design.md` 的 `files:preparePreviewSource`）。
+pub fn preview_media_type_for_extension(extension: &str) -> &'static str {
     match extension {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
+        "gif" => "image/gif",
+        "bmp" => "image/bmp",
+        "tif" | "tiff" => "image/tiff",
+        "avif" => "image/avif",
+        "svg" => "image/svg+xml",
         "glb" | "vrm" => "model/gltf-binary",
         "gltf" => "model/gltf+json",
         "obj" => "text/plain",

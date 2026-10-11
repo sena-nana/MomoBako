@@ -219,6 +219,7 @@
 - `POST /repositories/{repoId}/files:preparePreviewSource`
   - Request body includes repository-relative `path`
   - Response returns a session-scoped local preview `sourceUrl` backed by the in-process repository runtime, the `mediaType`, and may include `localPath`.
+  - `mediaType` follows the lowercase file extension, and the in-process preview server answers with the same `Content-Type`. Images are `image/png` (png), `image/jpeg` (jpg, jpeg), `image/webp`, `image/gif`, `image/bmp`, `image/tiff` (tif, tiff), `image/avif` and `image/svg+xml` (svg); video, audio, PDF, Office, Markdown, plain text, JSON and 3D formats map to their own types; any other extension is `application/octet-stream`. The desktop decodes a preview as an image only when `mediaType` starts with `image/`.
   - A successful preview-source preparation updates `assets.last_accessed_at` without creating a revision entry.
 - `POST /repositories/{repoId}/entries:preparePlayback`
   - Mutsuki protocol `momobako.playback.prepare`.
