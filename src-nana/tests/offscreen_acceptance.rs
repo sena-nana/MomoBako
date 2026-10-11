@@ -501,6 +501,12 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
         "source-menu-unavailable" => &["来源认证或本地缓存不可用", "下载单曲到其他资源库", "清理播放缓存"],
         // 下载单曲到其他资源库、有两个候选：弹出选择，列出两个资源库。
         "source-download-target" => &["选择目标资源库", "下载到 第二资源库", "下载到 第三资源库"],
+        // 在线单曲的播放源还在准备：预览框是准备卡，写文件名和「准备音频」。
+        "online-preview-preparing" => &["文件预览", "晴天.mp3", "准备音频"],
+        // 在线单曲的播放源准备失败：预览框写失败标题、插件交回的原话和「重试」。
+        "online-preview-failed" => &["无法预览该音频", "网易云登录已失效，请重新登录", "重试"],
+        // 播放集里的在线单曲准备失败：播放条第二行写原话，「播放」可点。
+        "online-playback-failed" => &["我喜欢的音乐", "网易云接口请求超时，请检查网络后重试", "播放"],
         _ => page_labels(page),
     }
 }

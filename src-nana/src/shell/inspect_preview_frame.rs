@@ -49,6 +49,8 @@ struct HeadView {
     has_repo: bool,
     /// 目标的绝对路径，打开和定位用。
     absolute: String,
+    /// 目标在仓库里的相对路径，「打开」时记访问用。
+    target: String,
 }
 
 /// 正文的整块身份：在不在预览、排法和预览目标（滚动区键里的仓库和路径）。
@@ -130,6 +132,7 @@ fn head_view(model: &ShellViewModel) -> HeadView {
         directory: model.files.current_path.clone(),
         has_repo: repository.is_some(),
         absolute,
+        target: path,
     }
 }
 
@@ -169,8 +172,8 @@ fn header(head: Signal<HeadView>) -> AnyView {
     let back = action(("返回", icons::ARROW_LEFT, 15.0, 34.0), "inspect-back", back_disabled)
         .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::OpenDirectory(head.with_untracked(|view| view.directory.clone()))));
     let open = action(("打开", icons::EYE, 14.0, 32.0), "inspect-open", open_disabled).on_cx(move |_, _: &Activate, cx| {
-        let (has_repo, absolute_path) = head.with_untracked(|view| (view.has_repo, view.absolute.clone()));
-        cx.dispatch_program_all(ShellMessage::Input(super::super::input::InputMessage::OpenEntry { has_repo, absolute_path }));
+        let (has_repo, absolute_path, path) = head.with_untracked(|view| (view.has_repo, view.absolute.clone(), view.target.clone()));
+        cx.dispatch_program_all(ShellMessage::Input(super::super::input::InputMessage::OpenEntry { has_repo, absolute_path, path }));
     });
     let reveal = action(("定位", icons::FOLDER_OPEN, 14.0, 32.0), "inspect-reveal", reveal_disabled).on_cx(move |_, _: &Activate, cx| {
         let absolute_path = head.with_untracked(|view| view.absolute.clone());

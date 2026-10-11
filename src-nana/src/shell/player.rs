@@ -81,6 +81,8 @@ pub struct QueueItem {
     pub player_label: String,
     pub file_class: String,
     pub thumbnail_path: Option<String>,
+    /// 在线条目（网易云这类来源的单曲）：本地没有文件，装载前先准备播放源（`playback_prep.rs`）。
+    pub is_virtual: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -115,8 +117,9 @@ pub enum PlayerMessage {
     Reorder { source: String, before: Option<String> },
     OpenPreview { item_id: Option<String> },
     RestoreDetail(Result<PlaylistDetail, String>),
-    /// 当前项经仓库服务读出并解码后的结果。`still` 回带请求时的类别。
-    ItemLoaded { item_id: String, generation: u64, still: bool, result: Result<LoadedItem, String> },
+    /// 当前项经仓库服务读出并解码后的结果。`still` 回带请求时的类别；`prep` 是在线条目准备播放源的结果
+    /// （后端写下的访问、失败能不能重试），本地文件是默认值。
+    ItemLoaded { item_id: String, generation: u64, still: bool, result: Result<LoadedItem, String>, prep: super::SourcePrep },
 }
 
 #[derive(Clone, Debug)]
@@ -129,8 +132,9 @@ pub enum PlayerEffect {
     AddByPaths(PlaylistItemsByPathsAddRequest),
     Reorder(PlaylistItemsOrderRequest),
     RestoreDetail { repo_id: String, playlist_id: String },
-    /// 经仓库服务读出当前项的字节。`still` 为真时按图片解码，否则按音视频。
-    LoadItem { repo_id: String, item_id: String, path: String, extension: String, still: bool, generation: u64 },
+    /// 经仓库服务读出当前项的字节。`still` 为真时按图片解码，否则按音视频。`virtual_entry` 是在线条目：
+    /// 先经 `momobako.playback.prepare` 准备播放源，再读准备好的本地文件。
+    LoadItem { repo_id: String, item_id: String, path: String, extension: String, still: bool, generation: u64, virtual_entry: bool },
 }
 
 #[derive(Clone, Debug)]
@@ -185,6 +189,9 @@ pub struct PlayerState {
     loaded_item: Option<String>,
     /// 恢复会话时要接着放的条目和位置。这一项装好、又能跳转时跳过去，换了条目就作废。
     resume: Option<(String, u64)>,
+    /// 播放源准备失败、可以重试的条目（在线条目登录失效、网络不通……）。它还是当前项时播放条的「播放」可点，
+    /// 点了重新准备；换了条目、停止或装好了就作废。
+    retry_item: Option<String>,
 }
 
 impl Default for PlayerState {
@@ -227,6 +234,7 @@ impl Default for PlayerState {
             cursor_item: None,
             loaded_item: None,
             resume: None,
+            retry_item: None,
         }
     }
 }
@@ -441,6 +449,7 @@ impl PlayerState {
             return;
         };
         self.resume = None;
+        self.retry_item = None;
         self.current_id = Some(item.id.clone());
         if self.history.last().map(String::as_str) != Some(item.id.as_str()) {
             self.history.push(item.id.clone());
@@ -448,6 +457,11 @@ impl PlayerState {
         self.wants_playing = auto_play;
         clip::load_item(self, &item);
         self.persist_if_needed();
+    }
+
+    /// 当前项的播放源准备失败过、可以重试：播放条的「播放」可点，点了重新准备（`set_playing`）。
+    pub(crate) fn retry_pending(&self) -> bool {
+        self.retry_item.is_some() && self.retry_item == self.current_id
     }
 
     fn play_next(&mut self, natural_end: bool, inspect: &mut InspectState) {
@@ -504,6 +518,14 @@ impl PlayerState {
     }
 
     fn set_playing(&mut self, playing: bool, inspect: &mut InspectState) {
+        if playing && self.retry_pending() {
+            // 播放源准备失败过：再按「播放」就是重试，换一个代次重新准备，上一次晚到的结果丢掉。
+            if let Some(id) = self.current_id.clone() {
+                self.play_item(&id, true);
+                self.publish(inspect);
+            }
+            return;
+        }
         if self.still.is_some() {
             let drawable = self.still.as_ref().is_some_and(|item| item.frame.is_some());
             self.wants_playing = playing && drawable;
@@ -633,6 +655,7 @@ impl PlayerState {
         self.wav.clear();
         self.cursor_item = None;
         self.loaded_item = None;
+        self.retry_item = None;
         self.preview_path.clear();
         self.load_generation = self.load_generation.wrapping_add(1);
         self.drop_clip_frames();
@@ -718,8 +741,9 @@ impl PlayerState {
         resolve_player(player_type_id, &candidates, &self.preferences)
     }
 
-    fn transient_item(&mut self, path: &str, filename: &str, extension: &str, asset_id: &str, player_type_id: &str, label: &str, file_class: &str) -> QueueItem {
+    fn transient_item(&mut self, entry: &PreviewEntry<'_>, filename: &str, extension: &str, player_type_id: &str, label: &str, file_class: &str) -> QueueItem {
         self.transient_seq += 1;
+        let (path, asset_id) = (entry.path, entry.asset_id);
         let asset = if asset_id.trim().is_empty() { path.to_string() } else { asset_id.to_string() };
         QueueItem {
             id: format!("transient:{asset}:{}", self.transient_seq),
@@ -735,6 +759,7 @@ impl PlayerState {
             player_label: label.to_string(),
             file_class: file_class.to_string(),
             thumbnail_path: None,
+            is_virtual: entry.is_virtual,
         }
     }
 

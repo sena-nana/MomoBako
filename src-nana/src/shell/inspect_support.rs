@@ -113,25 +113,29 @@ fn trim_partial_utf8(bytes: &[u8]) -> &[u8] {
     bytes
 }
 
-/// 音视频预览先排队读文件。可解码音频成功后才允许播放控制。
+/// 音视频预览先排队读文件；在线条目先准备播放源（见 `playback_prep.rs`）。可解码音频成功后才允许播放控制。
 pub(super) fn begin_media(state: &mut super::InspectState, repo_id: &str, path: &str) {
     state.loading = true;
     state.body = super::PreviewBody::Empty;
     state.error.clear();
+    state.media_retry = false;
     state.effects.push(super::InspectEffect::LoadMedia {
         repo_id: repo_id.to_string(),
         path: path.to_string(),
         generation: state.generation,
+        virtual_entry: state.virtual_asset,
     });
 }
 
-/// 代次或路径过期时保留当前预览。可解码音频写入 paused 会话，其余失败。
+/// 代次或路径过期时保留当前预览。可解码音频写入 paused 会话，其余失败；`retryable` 是失败出在准备在线条目的
+/// 播放源上，预览框给「重试」。
 pub(super) fn note_media(
     state: &mut super::InspectState,
     path: String,
     generation: u64,
     result: Result<PlaybackSessionState, String>,
     frames: Option<Vec<VideoFrame>>,
+    retryable: bool,
 ) {
     if generation != state.generation || state.target_path.as_deref() != Some(path.as_str()) {
         eprintln!("Nana 忽略过期的音视频预览：{path}");
@@ -141,6 +145,7 @@ pub(super) fn note_media(
     match result {
         Ok(session) => {
             state.error.clear();
+            state.media_retry = false;
             super::bridge::install_video(state, frames);
             state.body = super::PreviewBody::Media(session);
         }
@@ -150,8 +155,24 @@ pub(super) fn note_media(
             let repo_id = state.repo_id.clone().unwrap_or_default();
             state.body = super::PreviewBody::Media(failed_session(&repo_id, error.clone()));
             state.error = error;
+            state.media_retry = retryable;
         }
     }
+}
+
+/// 预览框里的「重试」：在线条目的播放源准备失败以后，换一个代次重新准备，上一次晚到的结果丢掉。
+/// 不是这种失败（解码失败、已经换了文件）时不动。
+pub(super) fn retry_media(state: &mut super::InspectState) {
+    if !state.media_retry || state.kind != Some(PreviewKind::Media) {
+        eprintln!("Nana 当前预览没有可以重试的播放源准备");
+        return;
+    }
+    let (Some(repo_id), Some(path)) = (state.repo_id.clone(), state.target_path.clone()) else {
+        eprintln!("Nana 重试预览缺少资源库或文件");
+        return;
+    };
+    state.generation += 1;
+    begin_media(state, &repo_id, &path);
 }
 
 /// 一次预览解出的会话、音轨和可选画面。

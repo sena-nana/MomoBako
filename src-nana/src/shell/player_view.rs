@@ -36,7 +36,7 @@ pub(super) fn bar_stamp(model: &ShellViewModel) -> u64 {
     let player = &model.player;
     let session = &player.session;
     (super::files_view::previewing(model), model.player_surface_visible()).hash(&mut hasher);
-    (&player.current_id, player.can_play, player.queue_open, &player.repo_id).hash(&mut hasher);
+    (&player.current_id, player.can_play, player.retry_pending(), player.queue_open, &player.repo_id).hash(&mut hasher);
     format!("{:?}", player.mode).hash(&mut hasher);
     (player.settings.image_duration_ms, player.settings.object_fit_cover).hash(&mut hasher);
     (&session.status, &session.error, session.volume.to_bits(), session.duration_ms).hash(&mut hasher);

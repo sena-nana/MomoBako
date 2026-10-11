@@ -12,12 +12,13 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+use nana_ui::icons_tabler::REFRESH;
 use nana_ui::runtime::view::{widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, AlignSpec, GpuTextureView, IconGlyph, JustifySpec, LengthSpec, RadiusTier, ScrollAxes, ScrollView,
+    Activate, AlignSpec, Button, GpuTextureView, IconGlyph, JustifySpec, LengthSpec, RadiusTier, ScrollAxes, ScrollView,
     SemanticColorRole, Stack, Text, TextHorizontalAlignment, Thumbnail,
 };
-use nana_ui::ContentFit;
+use nana_ui::{ButtonKind, ContentFit};
 use nana_ui_core::Icon;
 
 use super::super::inspect::{InspectMessage, PreviewBody, PreviewKind};
@@ -95,8 +96,9 @@ enum ContentRef<'a> {
     Archive(&'a str),
     Model { extension: &'a str, raster: Option<PixelsRef<'a>>, content: &'a str, mesh: bool },
     Document { toolbar: Option<DocumentBar>, page: Option<(PixelsRef<'a>, Option<(usize, usize)>)>, error: Option<&'a str>, text: &'a str },
-    /// 失败浮层。`document` 是 PDF / Office：外面多包一层整列，顶栏可有可无。
-    Failed { title: &'static str, message: &'a str, toolbar: Option<DocumentBar>, document: bool },
+    /// 失败浮层。`document` 是 PDF / Office：外面多包一层整列，顶栏可有可无。`retry` 是在线条目的播放源准备
+    /// 失败，原因下面给「重试」。
+    Failed { title: &'static str, message: &'a str, toolbar: Option<DocumentBar>, document: bool, retry: bool },
     Loading(LoadingRef<'a>),
     Fallback(FallbackRef<'a>),
     /// 读取中、还不知道类型。
@@ -124,7 +126,7 @@ enum Body {
     Archive(String),
     Model { extension: String, raster: Option<Pixels>, content: String, mesh: bool },
     Document { toolbar: Option<DocumentBar>, page: Option<(Pixels, Option<(usize, usize)>)>, error: Option<String>, text: String },
-    Failed { title: &'static str, message: String, toolbar: Option<DocumentBar>, document: bool },
+    Failed { title: &'static str, message: String, toolbar: Option<DocumentBar>, document: bool, retry: bool },
     Pill { title: &'static str, detail: String, progress: bool, toolbar: Option<DocumentBar> },
     ArchiveLoading { detail: String },
     MediaLoading { name: String, video: bool },
@@ -241,12 +243,13 @@ fn image_ref(model: &ShellViewModel) -> ContentRef<'_> {
 /// 音视频读不出、解不开，或者播放器装不上同一个文件：照 Vue 预览插件的失败浮层（`.media-preview__overlay--error`）
 /// 替换唱片舞台，红色标题下一行原因。标题音频照 `audioPreview.js`「无法预览该音频」，视频照 `media-preview`
 /// 「无法预览该媒体」；原因是解码层或播放器写下的原文（没有原生解码器、某格式解码失败……），没有原文时用
-/// Vue 运行时的「音频无法播放」「视频无法播放」。这类失败就近显示，不进全局状态区。
+/// Vue 运行时的「音频无法播放」「视频无法播放」。这类失败就近显示，不进全局状态区。在线条目的播放源准备失败
+/// （来源登录失效、网络不通、缓存不可用）时原因是来源交回的原话，下面多一个「重试」重新准备。
 fn media_failed_ref<'a>(model: &'a ShellViewModel, error: Option<&'a str>) -> ContentRef<'a> {
     let video = super::super::inspect::support::is_video_extension(&model.inspect.facts.extension);
     let (title, fallback) = if video { ("无法预览该媒体", "视频无法播放") } else { ("无法预览该音频", "音频无法播放") };
     let message = error.map(str::trim).filter(|error| !error.is_empty()).unwrap_or(fallback);
-    ContentRef::Failed { title, message, toolbar: None, document: false }
+    ContentRef::Failed { title, message, toolbar: None, document: false, retry: model.inspect.media_retry }
 }
 
 /// 播放器挂载：视频文件画当前这一帧；还没有画面（离屏没有宿主纹理、解码只得到音轨）时画缩略图或视频图标，
@@ -301,7 +304,7 @@ fn failed_ref<'a>(model: &'a ShellViewModel, kind: &'a PreviewKind, message: &'a
         PreviewKind::Native { view_id, label } => ("无法预览该文档", document_toolbar(model, view_id, label), true),
         PreviewKind::Unsupported => return ContentRef::Fallback(fallback_ref(model)),
     };
-    ContentRef::Failed { title, message, toolbar, document }
+    ContentRef::Failed { title, message, toolbar, document, retry: false }
 }
 
 /// 读取中。文本、图片、模型是左上角的状态胶囊；音视频是居中的准备卡；PDF 保留顶栏。
@@ -389,7 +392,7 @@ impl ContentRef<'_> {
                     nav.hash(hasher);
                 }
             }
-            Self::Failed { title, message, toolbar, document } => (title, message, toolbar, document).hash(hasher),
+            Self::Failed { title, message, toolbar, document, retry } => (title, message, toolbar, document, retry).hash(hasher),
             Self::Loading(loading) => match loading {
                 LoadingRef::Pill { title, detail, progress, toolbar } => (0u8, title, detail, progress, toolbar).hash(hasher),
                 LoadingRef::Archive { detail } => (1u8, detail).hash(hasher),
@@ -423,7 +426,9 @@ impl ContentRef<'_> {
                 error: error.map(str::to_string),
                 text: text.to_string(),
             },
-            Self::Failed { title, message, toolbar, document } => Body::Failed { title, message: message.to_string(), toolbar, document },
+            Self::Failed { title, message, toolbar, document, retry } => {
+                Body::Failed { title, message: message.to_string(), toolbar, document, retry }
+            }
             Self::Loading(LoadingRef::Pill { title, detail, progress, toolbar }) => Body::Pill { title, detail, progress, toolbar },
             Self::Loading(LoadingRef::Archive { detail }) => Body::ArchiveLoading { detail },
             Self::Loading(LoadingRef::Media { name, video }) => Body::MediaLoading { name: name.to_string(), video },
@@ -459,8 +464,8 @@ pub(super) fn content_view(content: &PreviewContent) -> AnyView {
         Body::Archive(content) => inspect_library::archive_list(content),
         Body::Model { extension, raster, content, mesh } => model_view(extension, raster.as_ref(), content, *mesh),
         Body::Document { toolbar, page, error, text } => document_view(toolbar.as_ref(), page.as_ref(), error.as_deref(), text, scope),
-        Body::Failed { title, message, toolbar, document } => {
-            let overlay = overlay(title, message, "inspect-failed");
+        Body::Failed { title, message, toolbar, document, retry } => {
+            let overlay = if *retry { retry_overlay(title, message) } else { overlay(title, message, "inspect-failed") };
             if !document {
                 return overlay;
             }
@@ -710,8 +715,36 @@ fn hud_chip(label: &str, key: &'static str) -> AnyView {
 
 /// 浮层：铺满预览框，标题红色、原因弱色，最宽 520px，居中。
 fn overlay(title: &str, message: &str, key: &'static str) -> AnyView {
+    widget(Stack::fill_column(8.0).align(AlignSpec::Center).justify(JustifySpec::Center).padding(24.0))
+        .children((widget(overlay_heading(title)).key(key), widget(overlay_reason(message)).key(format!("{key}-reason"))))
+        .key(format!("{key}-overlay"))
+        .into_any()
+}
+
+/// 在线条目的播放源准备失败：同一个浮层，原因下面多一个「重试」（和启动页失败的「重试」同一种按钮），
+/// 点了重新准备播放源。
+fn retry_overlay(title: &str, message: &str) -> AnyView {
+    let retry = Button::new("重试").kind(ButtonKind::Ghost).icon(REFRESH).icon_size(14.0);
+    let retry = widget(retry)
+        .key("inspect-failed-retry")
+        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::RetryMedia)));
+    widget(Stack::fill_column(8.0).align(AlignSpec::Center).justify(JustifySpec::Center).padding(24.0))
+        .children((
+            widget(overlay_heading(title)).key("inspect-failed"),
+            widget(overlay_reason(message)).key("inspect-failed-reason"),
+            widget(Stack::row(0.0).justify(JustifySpec::Center)).children((retry,)),
+        ))
+        .key("inspect-failed-overlay")
+        .into_any()
+}
+
+fn overlay_heading(title: &str) -> Text {
     let mut heading = text(title, 14.0, 700, SemanticColorRole::Danger, 21.7);
     heading.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
+    heading
+}
+
+fn overlay_reason(message: &str) -> Text {
     let mut reason = text(message, 14.0, 400, SemanticColorRole::Muted, 21.7);
     reason.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
     {
@@ -720,10 +753,7 @@ fn overlay(title: &str, message: &str, key: &'static str) -> AnyView {
         layout.line_break = Some(nana_ui_core::LineBreakSpec::Anywhere);
         layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
     }
-    widget(Stack::fill_column(8.0).align(AlignSpec::Center).justify(JustifySpec::Center).padding(24.0))
-        .children((widget(heading).key(key), widget(reason).key(format!("{key}-reason"))))
-        .key(format!("{key}-overlay"))
-        .into_any()
+    reason
 }
 
 /// 居中的两行状态：压缩包读取中用它。

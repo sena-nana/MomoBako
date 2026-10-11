@@ -12,6 +12,8 @@ use crate::backend::services::repository::{
     FileReadRequest, MetadataUpdateRequest, SearchDateFilter, SearchMetadataFilter,
     SearchNumberFilter, SearchRequest, SearchSort,
 };
+use crate::playback_source::{prepare_and_read, Requester};
+use crate::shell::SourcePrep;
 use crate::shell::{
     DateBound, InspectEffect, InspectMessage, NumberBound, SearchRequestDraft, SearchRow, ShellMessage,
 };
@@ -32,8 +34,8 @@ pub fn dispatch_inspect_effects(app: &mut MomoBakoApplication, context: &Runtime
             InspectEffect::Autoplay { path, generation } => {
                 app.shell.reduce(ShellMessage::Inspect(InspectMessage::Autoplay { path, generation }));
             }
-            InspectEffect::LoadMedia { repo_id, path, generation } => {
-                dispatch_media(app, context, repo_id, path, generation);
+            InspectEffect::LoadMedia { repo_id, path, generation, virtual_entry } => {
+                dispatch_media(app, context, MediaRequest { repo_id, path, generation, virtual_entry });
             }
             InspectEffect::SaveMetadata { repo_id, asset_id, expected_version, metadata } => {
                 dispatch_save(app, context, repo_id, asset_id, expected_version, metadata);
@@ -74,25 +76,37 @@ fn dispatch_image(app: &MomoBakoApplication, context: &RuntimeProgramContext<She
     });
 }
 
-fn dispatch_media(
-    app: &MomoBakoApplication,
-    context: &RuntimeProgramContext<ShellMessage>,
+/// 一次音视频预览读取。`virtual_entry` 是在线条目，先准备播放源。
+struct MediaRequest {
     repo_id: String,
     path: String,
     generation: u64,
-) {
+    virtual_entry: bool,
+}
+
+/// 读出音视频并解码。本地条目经仓库服务读字节；在线条目先经 `momobako.playback.prepare` 准备播放源、读准备好的
+/// 本地文件（`playback_source.rs`），准备失败时标成可以重试，预览框给「重试」。
+fn dispatch_media(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, request: MediaRequest) {
+    let MediaRequest { repo_id, path, generation, virtual_entry } = request;
     let fail_path = path.clone();
-    let failed = move |error| media_message(fail_path.clone(), generation, Err(error));
+    let failed = move |error| {
+        let prep = SourcePrep { retryable: virtual_entry, ..SourcePrep::default() };
+        media_message(fail_path.clone(), generation, Err(error), prep)
+    };
     let extension = std::path::Path::new(&path).extension().and_then(|extension| extension.to_str()).unwrap_or_default().to_string();
     spawn_service(app.services.as_ref(), context, "音视频预览", failed, |services| {
         let query = services.repository_query.clone();
+        let tasks = services.tasks.clone();
         let executor = services.executor.clone();
         move || {
+            let (bytes, prep) = if virtual_entry {
+                prepare_and_read(&tasks, &executor, Requester::Preview, &repo_id, &path)
+            } else {
+                (executor.block_on(query.read_file(FileReadRequest { repo_id: repo_id.clone(), path: path.clone() })), SourcePrep::default())
+            };
             // 和播放条装当前项走同一个解码：坏的 wav、mp3、flac、ogg 报它自己的原因，预览页写出来的和播放条一致。
-            let result = executor
-                .block_on(query.read_file(FileReadRequest { repo_id: repo_id.clone(), path: path.clone() }))
-                .and_then(|bytes| crate::shell::player::decode_media(&repo_id, &extension, &bytes));
-            media_message(path, generation, result)
+            let result = bytes.and_then(|bytes| crate::shell::player::decode_media(&repo_id, &extension, &bytes));
+            media_message(path, generation, result, prep)
         }
     });
 }
@@ -247,12 +261,12 @@ fn some_dates(values: Vec<DateBound>) -> Option<Vec<SearchDateFilter>> {
     (!values.is_empty()).then(|| values.into_iter().map(|bound| SearchDateFilter { key: bound.key, from: bound.from, to: bound.to }).collect())
 }
 
-fn media_message(path: String, generation: u64, result: Result<crate::shell::MediaParts, String>) -> ShellMessage {
+fn media_message(path: String, generation: u64, result: Result<crate::shell::MediaParts, String>, prep: SourcePrep) -> ShellMessage {
     let (result, pcm, frames) = match result {
         Ok(parts) => (Ok(parts.session), parts.pcm, parts.frames),
         Err(error) => (Err(error), None, None),
     };
-    ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result, pcm, frames })
+    ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result, pcm, frames, prep })
 }
 
 fn native_message(path: String, generation: u64, result: Result<crate::shell::NativeLoad, String>) -> ShellMessage {

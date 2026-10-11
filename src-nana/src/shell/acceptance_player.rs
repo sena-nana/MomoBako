@@ -19,7 +19,7 @@ use crate::backend::services::repository::{
 use super::super::inspect::InspectMessage;
 use super::super::player::{PlayerEffect, PlayerMessage};
 use super::super::InspectEffect;
-use super::super::{ShellMessage, ShellPage, ShellViewModel, SidebarMessage};
+use super::super::{ShellMessage, ShellPage, ShellViewModel, SidebarMessage, SourcePrep};
 use super::base_scene::{playlist_players, tagged_file, Base, NOW, REPO_ID};
 
 const PLAYLIST_ID: &str = "playlist-demo";
@@ -138,14 +138,14 @@ fn fail_pending_loads(model: &mut ShellViewModel) {
             continue;
         };
         let result = Err(format!("无法读取当前项：验收仓库里没有 {path}"));
-        model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded { item_id, generation, still, result }));
+        model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded { item_id, generation, still, result, prep: SourcePrep::default() }));
     }
     model.player.requeue_effects(kept);
 }
 
 /// 点开侧栏里的播放集（Vue 侧栏的播放集默认收起，点的是收起态里那颗按钮），再按夹具送回详情；
 /// `items` 为空时详情还没回来。
-fn open_playlist(model: &mut ShellViewModel, summary: &PlaylistSummary, items: Option<Vec<PlaylistItem>>) {
+pub(super) fn open_playlist(model: &mut ShellViewModel, summary: &PlaylistSummary, items: Option<Vec<PlaylistItem>>) {
     model.reduce(ShellMessage::Sidebar(SidebarMessage::OpenSidebarPlaylist(summary.playlist_id.clone())));
     if model.sidebar.active_playlist_id.as_deref() != Some(summary.playlist_id.as_str()) {
         eprintln!("Nana 验收场景没有活动仓库，播放集未打开：{}", summary.playlist_id);
@@ -160,7 +160,7 @@ fn open_playlist(model: &mut ShellViewModel, summary: &PlaylistSummary, items: O
 }
 
 /// 双击第一条：从它开始播放整张列表。
-fn play_first(model: &mut ShellViewModel) {
+pub(super) fn play_first(model: &mut ShellViewModel) {
     let first = model.player.listed.as_ref().and_then(|detail| detail.items.first()).map(|item| item.playlist_item_id.clone());
     let Some(first) = first else {
         eprintln!("Nana 验收播放集是空的，没有可播放条目");
@@ -407,6 +407,7 @@ fn preview_no_player_scene() -> ShellViewModel {
                 result: Ok(parts.session),
                 pcm: parts.pcm,
                 frames: None,
+                prep: SourcePrep::default(),
             })),
             Err(error) => eprintln!("Nana 验收视频夹具解不开：{error}"),
         }
@@ -426,7 +427,8 @@ fn preview_audio_failed_scene() -> ShellViewModel {
     if let Some((path, generation)) = request {
         // 和宿主一样经 `decode_media` 解码，失败原因来自真实的解码层。
         let result = crate::shell::player::decode_media(REPO_ID, "opus", BROKEN_AUDIO).map(|parts| parts.session);
-        model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result, pcm: None, frames: None }));
+        let prep = SourcePrep::default();
+        model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result, pcm: None, frames: None, prep }));
     }
     model
 }
@@ -447,6 +449,7 @@ fn answer_media(model: &mut ShellViewModel) {
             result: Ok(parts.session),
             pcm: parts.pcm,
             frames: parts.frames,
+            prep: SourcePrep::default(),
         })),
         Err(error) => eprintln!("Nana 验收音频夹具解不开：{error}"),
     }

@@ -271,7 +271,8 @@ fn hand_media_to_player(model: &mut ShellViewModel, path: &str, pcm: Option<supe
     let repo_id = model.inspect.repo_id.clone().or_else(|| model.workspace.active_repo_id.clone()).unwrap_or_default();
     let asset_id = model.inspect.asset_id.clone().unwrap_or_default();
     let extension = model.inspect.facts.extension.clone();
-    let entry = PreviewEntry { repo_id: &repo_id, path, extension: &extension, asset_id: &asset_id };
+    let is_virtual = model.inspect.virtual_asset;
+    let entry = PreviewEntry { repo_id: &repo_id, path, extension: &extension, asset_id: &asset_id, is_virtual };
     if model.player.take_over_preview(entry, session, pcm, &mut model.inspect) {
         let generation = model.inspect.generation;
         model.inspect.effects.push(InspectEffect::Autoplay { path: path.to_string(), generation });

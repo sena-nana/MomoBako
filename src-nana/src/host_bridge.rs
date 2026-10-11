@@ -186,6 +186,7 @@ mod tests {
         model.reduce(ShellMessage::Input(InputMessage::OpenEntry {
             has_repo: true,
             absolute_path: "C:\\a.png".into(),
+            path: "a.png".into(),
         }));
         model.reduce(ShellMessage::Input(InputMessage::RevealEntry {
             absolute_path: "C:\\a.png".into(),

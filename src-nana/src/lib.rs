@@ -18,6 +18,8 @@ mod app_dispatch;
 mod plugin_host;
 mod files_dispatch;
 mod inspect_dispatch;
+mod library_dispatch;
+mod playback_source;
 mod player_dispatch;
 mod admin_dispatch;
 mod download_dispatch;
@@ -254,6 +256,7 @@ impl ApplicationState for MomoBakoApplication {
         sync_dispatch::dispatch_tree_sync_effects(self, context);
         files_dispatch::dispatch_files_effects(self, context);
         inspect_dispatch::dispatch_inspect_effects(self, context);
+        library_dispatch::dispatch_library_effects(self, context);
         window_host::after_update(self, context);
         let maximized = context.geometry().maximized;
         let window_commands = self.shell.input.take_platform_commands(*id, maximized);

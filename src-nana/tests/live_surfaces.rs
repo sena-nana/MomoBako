@@ -185,6 +185,7 @@ fn wav_preview() -> ShellViewModel {
         }),
         pcm: None,
         frames: None,
+        prep: momobako_nana::shell::SourcePrep::default(),
     }));
     model
 }

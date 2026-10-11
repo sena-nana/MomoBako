@@ -117,7 +117,8 @@ pub enum InputMessage {
         repo_root: String,
     },
     BoxSelect { paths: Vec<String>, append: bool },
-    OpenEntry { has_repo: bool, absolute_path: String },
+    /// 用系统程序打开条目。`path` 是仓库内相对路径，打开的同时照 Vue `openWorkspaceEntry` 记一次访问。
+    OpenEntry { has_repo: bool, absolute_path: String, path: String },
     RevealEntry { absolute_path: String },
     OpenExternalUrl { url: String },
     StartExternalDrag { paths: Vec<String>, trash: bool, backend_kind: String, repo_root: String },

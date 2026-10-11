@@ -425,7 +425,8 @@ fn failed_media_preview(path: &str, error: &str) -> ShellViewModel {
             _ => None,
         })
         .expect("预览排下了音视频读取");
-    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Err(error.into()), pcm: None, frames: None }));
+    let prep = crate::shell::SourcePrep::default();
+    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Err(error.into()), pcm: None, frames: None, prep }));
     model
 }
 

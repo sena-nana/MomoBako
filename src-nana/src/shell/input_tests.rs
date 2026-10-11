@@ -449,13 +449,13 @@ fn box_selection_open_reveal_and_external_drag_follow_the_vue_guards() {
 
     // 守卫拦下的请求不清状态区里的失败，真正开始的打开才清。
     model.status.fail(FailureSource::Host, "定位失败：上一次");
-    send(&mut model, InputMessage::OpenEntry { has_repo: false, absolute_path: "C:\\a.png".into() });
-    send(&mut model, InputMessage::OpenEntry { has_repo: true, absolute_path: " ".into() });
+    send(&mut model, InputMessage::OpenEntry { has_repo: false, absolute_path: "C:\\a.png".into(), path: "a.png".into() });
+    send(&mut model, InputMessage::OpenEntry { has_repo: true, absolute_path: " ".into(), path: "a.png".into() });
     send(&mut model, InputMessage::RevealEntry { absolute_path: " ".into() });
     send(&mut model, InputMessage::OpenExternalUrl { url: " ".into() });
     assert!(model.status.failure().is_some(), "守卫拦下的请求不该清掉上一次失败");
     assert!(model.input.host_requests.is_empty());
-    send(&mut model, InputMessage::OpenEntry { has_repo: true, absolute_path: "C:\\a.png".into() });
+    send(&mut model, InputMessage::OpenEntry { has_repo: true, absolute_path: "C:\\a.png".into(), path: "a.png".into() });
     assert!(model.status.failure().is_none());
     send(&mut model, InputMessage::RevealEntry { absolute_path: "C:\\a.png".into() });
     assert!(matches!(model.input.host_requests.last(), Some(crate::host_api::HostRequest::OpenExternal(request)) if request.reveal && request.target == "C:\\a.png"));

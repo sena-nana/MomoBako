@@ -1,16 +1,18 @@
 //! 把播放列表副作用交给已有的仓库交互。
 //!
 //! 成员、排序和按路径添加都没有替身。当前项的字节经仓库服务读取后在任务里解码，
-//! 条目里的相对路径不直接拿去读盘。任务都经 `task_guard` 派发：服务没起来、任务排不进去或任务 panic（解码器出错）
+//! 条目里的相对路径不直接拿去读盘；在线条目先经 `momobako.playback.prepare` 准备播放源，读后端交回的本地文件
+//! （`playback_source.rs`）。任务都经 `task_guard` 派发：服务没起来、任务排不进去或任务 panic（解码器出错）
 //! 时写回错误，避免界面停在“正在提交”或“读取中”。
 
 use nana_ui::RuntimeProgramContext;
 
 use crate::backend::services::repository::FileReadRequest;
+use crate::playback_source::{prepare_and_read, Requester};
 use crate::shell::player::{
     decode_loaded, PlayerEffect, PlayerMessage, preferences_path, sessions_path, settings_path,
 };
-use crate::shell::ShellMessage;
+use crate::shell::{ShellMessage, SourcePrep};
 use crate::task_guard::spawn_service;
 use crate::MomoBakoApplication;
 
@@ -26,8 +28,8 @@ pub fn dispatch_player_effects(app: &mut MomoBakoApplication, context: &RuntimeP
             PlayerEffect::AddByPaths(request) => dispatch_add_paths(app, context, request),
             PlayerEffect::Reorder(request) => dispatch_reorder(app, context, request),
             PlayerEffect::RestoreDetail { repo_id, playlist_id } => dispatch_restore(app, context, repo_id, playlist_id),
-            PlayerEffect::LoadItem { repo_id, item_id, path, extension, still, generation } => {
-                dispatch_load_item(app, context, LoadRequest { repo_id, item_id, path, extension, still, generation });
+            PlayerEffect::LoadItem { repo_id, item_id, path, extension, still, generation, virtual_entry } => {
+                dispatch_load_item(app, context, LoadRequest { repo_id, item_id, path, extension, still, generation, virtual_entry });
             }
         }
     }
@@ -94,7 +96,7 @@ fn dispatch_restore(app: &MomoBakoApplication, context: &RuntimeProgramContext<S
     });
 }
 
-/// 一次当前项读取请求。
+/// 一次当前项读取请求。`virtual_entry` 是在线条目，先准备播放源。
 struct LoadRequest {
     repo_id: String,
     item_id: String,
@@ -102,25 +104,36 @@ struct LoadRequest {
     extension: String,
     still: bool,
     generation: u64,
+    virtual_entry: bool,
 }
 
-/// 经仓库服务读出当前项，在任务里解码成会话、PCM 和画面，或图片帧。
+/// 读出当前项，在任务里解码成会话、PCM 和画面，或图片帧。本地条目经仓库服务读字节；在线条目先经
+/// `momobako.playback.prepare` 准备播放源、读准备好的本地文件（`playback_source.rs`），失败时标成可以重试。
 fn dispatch_load_item(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, request: LoadRequest) {
-    let LoadRequest { repo_id, item_id, path, extension, still, generation } = request;
+    let LoadRequest { repo_id, item_id, path, extension, still, generation, virtual_entry } = request;
     let failed_item = item_id.clone();
-    let failed = move |error| player(PlayerMessage::ItemLoaded { item_id: failed_item.clone(), generation, still, result: Err(error) });
+    let failed = move |error| {
+        let prep = SourcePrep { retryable: virtual_entry, ..SourcePrep::default() };
+        player(PlayerMessage::ItemLoaded { item_id: failed_item.clone(), generation, still, result: Err(error), prep })
+    };
     spawn_service(app.services.as_ref(), context, "播放当前项读取", failed, |services| {
         let query = services.repository_query.clone();
+        let tasks = services.tasks.clone();
         let executor = services.executor.clone();
         move || {
-            let result = executor
-                .block_on(query.read_file(FileReadRequest { repo_id: repo_id.clone(), path: path.clone() }))
-                .map_err(|error| {
-                    eprintln!("Nana 播放当前项读取失败：{path}：{error}");
-                    format!("无法读取当前项：{error}")
-                })
-                .and_then(|bytes| decode_loaded(&repo_id, still, &extension, &bytes));
-            player(PlayerMessage::ItemLoaded { item_id, generation, still, result })
+            let (bytes, prep) = if virtual_entry {
+                prepare_and_read(&tasks, &executor, Requester::Player, &repo_id, &path)
+            } else {
+                let bytes = executor
+                    .block_on(query.read_file(FileReadRequest { repo_id: repo_id.clone(), path: path.clone() }))
+                    .map_err(|error| {
+                        eprintln!("Nana 播放当前项读取失败：{path}：{error}");
+                        format!("无法读取当前项：{error}")
+                    });
+                (bytes, SourcePrep::default())
+            };
+            let result = bytes.and_then(|bytes| decode_loaded(&repo_id, still, &extension, &bytes));
+            player(PlayerMessage::ItemLoaded { item_id, generation, still, result, prep })
         }
     });
 }

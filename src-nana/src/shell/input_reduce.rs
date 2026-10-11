@@ -132,7 +132,7 @@ fn reduce_input(model: &mut ShellViewModel, message: InputMessage) {
             repo_root,
         } => host_drag(model, phase, &paths, has_repository, missing_repository, writable, files_panel, has_snapshot, &repo_root),
         InputMessage::BoxSelect { paths, append } => box_select(model, &paths, append),
-        InputMessage::OpenEntry { has_repo, absolute_path } => open_entry(model, has_repo, &absolute_path),
+        InputMessage::OpenEntry { has_repo, absolute_path, path } => open_entry(model, has_repo, &absolute_path, &path),
         InputMessage::RevealEntry { absolute_path } => reveal_entry(model, &absolute_path),
         InputMessage::OpenExternalUrl { url } => open_url(model, &url),
         InputMessage::StartExternalDrag { paths, trash, backend_kind, repo_root } => {
@@ -463,11 +463,17 @@ fn box_select(model: &mut ShellViewModel, paths: &[String], append: bool) {
     model.files.set_drag_selection(paths.to_vec(), primary.clone(), primary);
 }
 
-fn open_entry(model: &mut ShellViewModel, has_repo: bool, absolute_path: &str) {
+/// 照 Vue `openWorkspaceEntry`：记一次访问，再交给系统程序打开。两件事并行：访问记录在任务里写，回来再改
+/// 「最近使用」；记录失败只记日志，不挡住打开（Vue 记录失败时不打开，见 `nana-vue-parity.md`）。
+fn open_entry(model: &mut ShellViewModel, has_repo: bool, absolute_path: &str, path: &str) {
     if !has_repo || absolute_path.trim().is_empty() {
         return;
     }
     model.input.remember_external(absolute_path, false);
+    match model.workspace.active_repo_id.clone() {
+        Some(repo_id) => model.request_entry_access(&repo_id, path),
+        None => eprintln!("Nana 打开条目时没有活动资源库，不记访问：{path}"),
+    }
 }
 
 fn reveal_entry(model: &mut ShellViewModel, absolute_path: &str) {

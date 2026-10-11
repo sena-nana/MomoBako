@@ -348,3 +348,27 @@ fn abi_dispatch_submit_returns_handle_before_cancelled_task_finishes() {
     ));
     assert!(fixture.repo_root.join("keep.txt").is_file());
 }
+
+/// 宿主等着结果的任务失败时交回领域原因的原话，不再套协议、路由和证据的调试格式；
+/// 调试格式只留在任务快照里。
+#[test]
+fn awaited_task_failure_returns_the_domain_message() {
+    let fixture = RuntimeFixture::new("task-failure-message");
+    let runtime = MomoTaskRuntime::new(fixture.runtime.clone());
+    let executor = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .expect("test executor should start");
+    let error = executor
+        .block_on(runtime.execute(
+            PROTOCOL_PLAYBACK_PREPARE,
+            serde_json::json!({ "repoId": 1, "path": "missing.mp3" }),
+        ))
+        .expect_err("invalid playback payload should fail");
+    assert!(
+        error.starts_with("invalid momobako.playback.prepare payload:"),
+        "失败原因应是领域原话：{error}"
+    );
+    assert!(!error.contains("[protocol."), "不该带路由：{error}");
+    assert!(!error.contains("String("), "不该带证据的调试格式：{error}");
+}

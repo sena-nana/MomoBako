@@ -81,7 +81,7 @@ fn menu_entries(model: &ShellViewModel, row: &FileRow) -> Vec<MenuEntry> {
     let mutating = model.files.mutating;
     let file = row.kind == "file";
     let preview = || files(FilesMessage::OpenRow(row.path.clone()));
-    let open = input(InputMessage::OpenEntry { has_repo, absolute_path: absolute.clone() });
+    let open = input(InputMessage::OpenEntry { has_repo, absolute_path: absolute.clone(), path: row.path.clone() });
     let reveal = input(InputMessage::RevealEntry { absolute_path: absolute.clone() });
     if smart {
         return vec![

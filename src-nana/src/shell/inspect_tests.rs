@@ -199,6 +199,7 @@ fn media_without_a_decoder_never_reports_playing() {
         result: Err("没有原生解码器".into()),
         pcm: None,
         frames: None,
+        prep: crate::shell::SourcePrep::default(),
     }));
     let PreviewBody::Media(session) = &model.inspect.body else { panic!("不是音视频") };
     assert_eq!(session.status, "failed");
@@ -225,7 +226,8 @@ fn wav_preview_takes_over_the_bar_and_autoplays_once_dispatched() {
     let session = super::support::preview_media_session("repo", &tone_wav()).expect("wav");
     assert_eq!(session.status, "paused");
     assert_eq!(session.duration_ms, Some(2));
-    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(session), pcm: None, frames: None }));
+    let prep = crate::shell::SourcePrep::default();
+    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(session), pcm: None, frames: None, prep }));
     let item = model.player.current_item().cloned().expect("临时条目");
     assert!(item.transient);
     assert_eq!(item.path, "audio/a.wav");
@@ -574,6 +576,7 @@ fn avi_preview_plays_pauses_and_seeks_on_the_shared_session() {
         result: Ok(parts.session),
         pcm: parts.pcm,
         frames: parts.frames,
+        prep: crate::shell::SourcePrep::default(),
     }));
     assert_eq!(model.player.session.status, "paused");
     assert!(model.preview_token.as_deref().unwrap_or_default().starts_with("video:"));
@@ -607,7 +610,8 @@ fn volume_on_a_silent_video_is_remembered_without_failing_playback() {
     let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().unwrap() else {
         panic!("没有音视频请求");
     };
-    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(session), pcm: None, frames: parts.frames }));
+    let prep = crate::shell::SourcePrep::default();
+    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(session), pcm: None, frames: parts.frames, prep }));
     model.reduce(ShellMessage::Player(PlayerMessage::SetPlaying(true)));
     assert_eq!(model.player.session.status, "playing");
     model.reduce(ShellMessage::Player(PlayerMessage::SetVolume(0.3)));

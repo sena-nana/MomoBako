@@ -80,7 +80,8 @@ pub enum InspectEffect {
     LoadImage { repo_id: String, path: String },
     LoadText { repo_id: String, path: String, markdown: bool, generation: u64 },
     LoadNative { repo_id: String, path: String, view_id: String, generation: u64 },
-    LoadMedia { repo_id: String, path: String, generation: u64 },
+    /// 读音视频。`virtual_entry` 是在线条目：先经 `momobako.playback.prepare` 准备播放源，再读准备好的本地文件。
+    LoadMedia { repo_id: String, path: String, generation: u64, virtual_entry: bool },
     SaveMetadata { repo_id: String, asset_id: String, expected_version: i64, metadata: BTreeMap<String, Value> },
     LoadAsset { repo_id: String, asset_id: String },
     Search { generation: u64, request: SearchRequestDraft },
@@ -108,7 +109,11 @@ pub enum InspectMessage {
         result: Result<PlaybackSessionState, String>,
         pcm: Option<super::player::PreviewPcm>,
         frames: Option<Vec<support::VideoFrame>>,
+        /// 在线条目准备播放源的结果：后端写下的访问、失败能不能重试。本地文件是默认值。
+        prep: super::SourcePrep,
     },
+    /// 在线条目的播放源准备失败以后，预览框里的「重试」。
+    RetryMedia,
     TurnPage(i32),
     Orbit { yaw: f32, zoom: f32 },
     /// 宿主派发的自动播放。代次或文件对不上就不动。
@@ -163,6 +168,8 @@ pub struct InspectState {
     repo_id: Option<String>,
     expected_version: i64,
     virtual_asset: bool,
+    /// 当前音视频预览失败在准备播放源上（在线条目），预览框给「重试」。
+    pub(super) media_retry: bool,
     baseline: MetadataDraft,
     draft: MetadataDraft,
     conflict_detail: Option<AssetDetail>,
@@ -202,6 +209,7 @@ impl Default for InspectState {
             repo_id: None,
             expected_version: 0,
             virtual_asset: false,
+            media_retry: false,
             baseline: MetadataDraft::default(),
             draft: MetadataDraft::default(),
             conflict_detail: None,
@@ -294,6 +302,7 @@ impl InspectState {
         self.conflict_detail = None;
         self.asset_id = None;
         self.virtual_asset = false;
+        self.media_retry = false;
         self.facts = FileFacts::default();
     }
 
@@ -303,6 +312,7 @@ impl InspectState {
         self.kind = None;
         self.body = PreviewBody::Empty;
         self.loading = false;
+        self.media_retry = false;
         self.error.clear();
         self.asset_id = None;
         self.palette.clear();
@@ -313,6 +323,12 @@ impl InspectState {
 
     /// 按扩展名打开预览，并用水合后的元数据草稿替换上一份。
     pub(super) fn note_detail(&mut self, detail: &AssetDetail) {
+        self.note_selected_detail(detail, true);
+    }
+
+    /// 用水合后的元数据草稿替换上一份；`preview` 时再按扩展名读预览内容。单击只选中时右侧详情只看元数据，
+    /// 和 Vue 一样不挂预览：不读内容、不接管播放条、不准备在线条目的播放源，也就不记访问。
+    pub(super) fn note_selected_detail(&mut self, detail: &AssetDetail, preview: bool) {
         let extension = support::extension_of(&detail.summary.extension, &detail.summary.filename);
         let kind = support::classify(&extension);
         self.generation += 1;
@@ -340,7 +356,12 @@ impl InspectState {
         };
         support::fill_recorded_facts(&mut self.facts, &detail.metadata);
         self.timers.clear_metadata();
-        self.start_preview(&detail.summary.repo_id, &detail.summary.path, kind);
+        if preview {
+            self.start_preview(&detail.summary.repo_id, &detail.summary.path, kind);
+        } else {
+            self.loading = false;
+            self.body = PreviewBody::Empty;
+        }
     }
 
     pub(super) fn note_detail_error(&mut self, error: &str) {
@@ -440,7 +461,10 @@ impl InspectState {
                 self.note_body(path, markdown, generation, result);
             }
             InspectMessage::NativeLoaded { path, generation, result } => native_preview::note_loaded(self, path, generation, result),
-            InspectMessage::MediaLoaded { path, generation, result, frames, .. } => support::note_media(self, path, generation, result, frames),
+            InspectMessage::MediaLoaded { path, generation, result, frames, prep, .. } => {
+                support::note_media(self, path, generation, result, frames, prep.retryable);
+            }
+            InspectMessage::RetryMedia => support::retry_media(self),
             InspectMessage::TurnPage(delta) => bridge::turn(self, delta),
             InspectMessage::Orbit { yaw, zoom } => bridge::orbit(self, yaw, zoom),
             // 播放归播放器管，由 `bridge::apply` 交过去；预览状态本身不变。
@@ -636,6 +660,7 @@ pub(super) fn reduce_message(model: &mut ShellViewModel, message: super::ShellMe
     });
     let repo_id = model.workspace.active_repo_id.clone();
     let follow = bridge::follow(&message);
+    let access = preview_access(&model.inspect, &message);
     // 元数据保存的失败没有就近显示，交给状态区。
     let saving = matches!(message, InspectMessage::MetadataSaved(_));
     model.inspect.reduce(writable, repo_id.as_deref(), message);
@@ -643,9 +668,47 @@ pub(super) fn reduce_message(model: &mut ShellViewModel, message: super::ShellMe
         let failure = format!("保存元数据失败：{}", model.inspect.error);
         model.status.fail(super::status::FailureSource::Metadata, failure);
     }
+    match access {
+        PreviewAccess::None => {}
+        PreviewAccess::Recorded { repo_id, path, at } => model.note_entry_access(&repo_id, &path, &at),
+        PreviewAccess::Record { path } => {
+            let repo = model.inspect.repo_id.clone().or(repo_id).unwrap_or_default();
+            model.request_entry_access(&repo, &path);
+        }
+    }
     bridge::apply(model, follow);
     search::settle(model);
     None
+}
+
+/// 预览内容读好以后要记的访问（Vue 的预览插件都先 `preparePreviewFileSource` / 准备播放源，再发
+/// `emitRepositoryEntryAccess`）。
+enum PreviewAccess {
+    None,
+    /// 在线条目的播放源准备好了，后端已经写下访问时间：当场改「最近使用」。结果过期了也改。
+    Recorded { repo_id: String, path: String, at: String },
+    /// 当前预览的本地文件读好了字节，后端没有经手：排一次访问记录。
+    Record { path: String },
+}
+
+/// 在归约消费消息之前看出这次读取要记的访问。只有读的正是当前预览（代次和文件都对得上）、读成功了才记本地文件；
+/// 图片的预览源由 `PreviewPixelsLoaded` 在壳层记。
+fn preview_access(state: &InspectState, message: &InspectMessage) -> PreviewAccess {
+    let current = |path: &str, generation: u64| generation == state.generation && state.target_path.as_deref() == Some(path);
+    match message {
+        InspectMessage::MediaLoaded { prep: super::SourcePrep { accessed: Some(access), .. }, .. } => {
+            PreviewAccess::Recorded { repo_id: access.repo_id.clone(), path: access.path.clone(), at: access.at.clone() }
+        }
+        InspectMessage::MediaLoaded { path, generation, result: Ok(_), .. } if current(path, *generation) && !state.virtual_asset => {
+            PreviewAccess::Record { path: path.clone() }
+        }
+        InspectMessage::BodyLoaded { path, generation, result: Ok(_), .. } | InspectMessage::NativeLoaded { path, generation, result: Ok(_) }
+            if current(path, *generation) =>
+        {
+            PreviewAccess::Record { path: path.clone() }
+        }
+        _ => PreviewAccess::None,
+    }
 }
 
 #[path = "inspect_support.rs"]

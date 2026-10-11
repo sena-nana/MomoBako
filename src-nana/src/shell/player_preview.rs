@@ -28,6 +28,8 @@ pub(crate) struct PreviewEntry<'a> {
     pub path: &'a str,
     pub extension: &'a str,
     pub asset_id: &'a str,
+    /// 在线条目：接管以后播放条再装这一项时先准备播放源。
+    pub is_virtual: bool,
 }
 
 impl PlayerState {
@@ -107,8 +109,9 @@ impl PlayerState {
         if self.history.last() != Some(&item.id) {
             self.history.push(item.id.clone());
         }
-        // 还在读取的播放列表当前项作废；游标、画面和幻灯片都让给预览。
+        // 还在读取（或准备播放源）的播放列表当前项作废；游标、画面和幻灯片都让给预览。
         self.load_generation = self.load_generation.wrapping_add(1);
+        self.retry_item = None;
         self.wav.clear();
         self.still = None;
         self.outside_note = None;
@@ -244,7 +247,7 @@ impl PlayerState {
         };
         let extension = extension.trim().trim_start_matches('.').to_ascii_lowercase();
         let (player_type_id, label, file_class) = self.entry_player(&extension)?;
-        Some(self.transient_item(entry.path, &filename, &extension, entry.asset_id, &player_type_id, &label, &file_class))
+        Some(self.transient_item(entry, &filename, &extension, &player_type_id, &label, &file_class))
     }
 
     /// 能放这个扩展名的音视频播放器：插件登记的贡献优先，其次是内置候选。

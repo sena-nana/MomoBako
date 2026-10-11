@@ -229,7 +229,7 @@ fn background_refreshes_keep_the_failure() {
 fn starts_follow_the_vue_guards() {
     use crate::shell::input::InputMessage;
     let starts = |message| super::starts_operation(&ShellMessage::Input(message));
-    assert!(!starts(InputMessage::OpenEntry { has_repo: false, absolute_path: "C:\\a.png".into() }));
+    assert!(!starts(InputMessage::OpenEntry { has_repo: false, absolute_path: "C:\\a.png".into(), path: "a.png".into() }));
     assert!(!starts(InputMessage::RevealEntry { absolute_path: " ".into() }));
     assert!(starts(InputMessage::RevealEntry { absolute_path: "C:\\a.png".into() }));
     let drag = |trash: bool, backend: &str| InputMessage::StartExternalDrag {

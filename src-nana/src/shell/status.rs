@@ -198,7 +198,7 @@ impl Activity {
 pub(super) fn starts_operation(message: &ShellMessage) -> bool {
     let filled = |text: &str| !text.trim().is_empty();
     match message {
-        ShellMessage::Input(InputMessage::OpenEntry { has_repo, absolute_path }) => *has_repo && filled(absolute_path),
+        ShellMessage::Input(InputMessage::OpenEntry { has_repo, absolute_path, .. }) => *has_repo && filled(absolute_path),
         ShellMessage::Input(InputMessage::RevealEntry { absolute_path }) => filled(absolute_path),
         ShellMessage::Input(InputMessage::OpenExternalUrl { url }) => filled(url),
         ShellMessage::Input(InputMessage::StartExternalDrag { paths, trash, backend_kind, .. }) => {
