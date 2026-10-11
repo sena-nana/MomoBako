@@ -248,7 +248,7 @@ pub enum FilesEffect {
     /// 读取目录里还没解码的缩略图文件。
     DecodeThumbnails { paths: Vec<String> },
     /// 浏览时给还没有缩略图的文件生成一张（`ensure_thumbnail` 的 `ensure`，Vue `loadThumbnailsForSnapshot`）。
-    /// 一次只有一条在途，结果回来再排下一条（`files_thumbnail.rs`）。
+    /// 一次只有一条在途，结果回来再排下一条（`files_thumbnail_ensure.rs`）。
     EnsureThumbnail { repo_id: String, path: String },
     /// 保存、清除或刷新一条自定义缩略图。字节只在剪贴板 data URL 时带上。
     MutateThumbnail { repo_id: String, path: String, kind: String, action: String, source_path: Option<String>, image_bytes: Option<Vec<u8>> },
@@ -365,7 +365,7 @@ pub struct FilesState {
     mounted_version: u64,
     /// 已经请求解码、还没送回像素的缩略图文件。解码失败的留在这里，不反复重试。
     decode_requested: std::collections::HashSet<String>,
-    /// 浏览时生成缩略图的队列：排过哪些、在途的是哪条、列表换过没有（`files_thumbnail.rs`）。
+    /// 浏览时生成缩略图的队列：排过哪些、在途的是哪条、列表换过没有（`files_thumbnail_ensure.rs`）。
     ensure: ensure::EnsureQueue,
     pub(super) name_draft: String,
     /// 工具栏里的新建文件名。不占用对话框草稿，建成以后才清空（Vue `handleCreateFile`）。
