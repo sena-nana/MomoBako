@@ -7,6 +7,12 @@
 //!
 //! 文件预览只在预览框这一帧从 `file-preview` 槽取画面时上传，也是上传时登记一次；播放列表幻灯片、PDF 和
 //! 模型页图都编成内容图直接画，不经宿主纹理。
+//!
+//! 纹理按预乘 alpha 登记，解码出来的像素是直通 alpha：上传前在这里预乘（[`premultiply_srgb`]），半透明边缘
+//! 不再偏亮。
+
+use std::borrow::Cow;
+use std::sync::OnceLock;
 
 use nana_ui::{
     ApplicationWindow, GpuTextureDescriptor, GpuTextureFormat, GpuTextureRegion, GpuTextureUsages, HostTexture,
@@ -62,14 +68,15 @@ impl<T> ThumbnailHost<T> {
         Self { pending: Vec::new(), cache: ThumbnailCache::default(), capacity, swept: None }
     }
 
-    /// 从解码结果里拿走像素，留给下一帧上传。宽高仍留在消息里给布局用。
+    /// 从解码结果里拿走像素，预乘 alpha 以后留给下一帧上传。宽高仍留在消息里给布局用。
     pub(crate) fn queue(&mut self, frames: &mut [ThumbnailFrame]) {
         for frame in frames {
-            let rgba = std::mem::take(&mut frame.rgba);
+            let mut rgba = std::mem::take(&mut frame.rgba);
             if rgba.len() != (frame.width as usize).saturating_mul(frame.height as usize).saturating_mul(4) {
                 eprintln!("Nana 缩略图像素长度不对：{}", frame.path);
                 continue;
             }
+            premultiply_srgb(&mut rgba);
             self.pending.push(PendingThumb { path: frame.path.clone(), width: frame.width, height: frame.height, rgba });
         }
     }
@@ -197,10 +204,11 @@ pub(crate) fn publish_preview(
         eprintln!("Nana 文件预览纹理创建失败：{}x{}", pixels.width, pixels.height);
         return;
     };
+    let rgba = premultiplied(&pixels.rgba);
     if let Err(error) = context.gpu().write_texture(
         &texture,
         GpuTextureRegion::full(pixels.width, pixels.height),
-        &pixels.rgba,
+        &rgba,
         pixels.width.saturating_mul(4),
     ) {
         eprintln!("Nana 文件预览纹理上传失败：{error}");
@@ -214,4 +222,93 @@ pub(crate) fn publish_preview(
         HostTextureAlphaMode::Premultiplied,
     );
     app.preview_gpu = Some(NativePreviewGpu { token, width: pixels.width, height: pixels.height });
+}
+
+/// 要上传的预览像素：全不透明（照片、视频帧）原样上传，有半透明的复制一份预乘过的。
+fn premultiplied(rgba: &[u8]) -> Cow<'_, [u8]> {
+    if rgba.chunks_exact(4).all(|pixel| pixel[3] == 255) {
+        return Cow::Borrowed(rgba);
+    }
+    let mut owned = rgba.to_vec();
+    premultiply_srgb(&mut owned);
+    Cow::Owned(owned)
+}
+
+/// 直通 alpha 的 sRGB 像素原地预乘。
+///
+/// 算法：纹理是 sRGB 格式，采样时颜色先解成线性值，宿主按预乘的线性值混合（NanaUI 在线性空间混合）。所以半透明
+/// 像素的颜色先解成线性、乘上 alpha，再编回 sRGB；不透明的不变，全透明的清成 0。直接把直通 alpha 当预乘上传时，
+/// 半透明边缘的颜色没有乘 alpha，叠在底色上偏亮。
+fn premultiply_srgb(rgba: &mut [u8]) {
+    let linear = srgb_to_linear();
+    for pixel in rgba.chunks_exact_mut(4) {
+        match pixel[3] {
+            255 => {}
+            0 => pixel[..3].fill(0),
+            alpha => {
+                let alpha = f32::from(alpha) / 255.0;
+                for channel in &mut pixel[..3] {
+                    *channel = linear_to_srgb(linear[usize::from(*channel)] * alpha);
+                }
+            }
+        }
+    }
+}
+
+/// sRGB 编码值到线性值的对照表。
+fn srgb_to_linear() -> &'static [f32; 256] {
+    static TABLE: OnceLock<[f32; 256]> = OnceLock::new();
+    TABLE.get_or_init(|| {
+        std::array::from_fn(|value| {
+            let encoded = value as f32 / 255.0;
+            if encoded <= 0.04045 { encoded / 12.92 } else { ((encoded + 0.055) / 1.055).powf(2.4) }
+        })
+    })
+}
+
+/// 线性值编回 sRGB 的 0–255。
+fn linear_to_srgb(linear: f32) -> u8 {
+    let linear = linear.clamp(0.0, 1.0);
+    let encoded = if linear <= 0.003_130_8 { linear * 12.92 } else { 1.055 * linear.powf(1.0 / 2.4) - 0.055 };
+    (encoded * 255.0).round() as u8
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 半透明的白按线性预乘：一半透明的白是线性 0.5，编回 sRGB 是 188；全透明清成 0，不透明不变。
+    #[test]
+    fn straight_alpha_is_premultiplied_in_linear_light() {
+        let mut rgba = vec![255, 255, 255, 128, 10, 20, 30, 0, 12, 34, 56, 255];
+        premultiply_srgb(&mut rgba);
+        assert_eq!(rgba, vec![188, 188, 188, 128, 0, 0, 0, 0, 12, 34, 56, 255]);
+    }
+
+    /// 缩略图排进上传队列时已经预乘：半透明像素的颜色乘过 alpha，不按直通 alpha 上传。
+    #[test]
+    fn queued_thumbnails_are_premultiplied() {
+        let mut host = ThumbnailHost::<u32>::with_capacity(4);
+        let mut frames = vec![ThumbnailFrame {
+            path: "thumbs/a.png".into(),
+            natural_width: 1,
+            natural_height: 1,
+            width: 1,
+            height: 1,
+            rgba: vec![255, 0, 0, 64],
+        }];
+        host.queue(&mut frames);
+        let red = linear_to_srgb(64.0 / 255.0);
+        assert_eq!(host.pending[0].rgba, vec![red, 0, 0, 64], "半透明的红按预乘上传");
+    }
+
+    /// 预览像素全不透明时原样上传，不复制；有半透明时上传预乘过的副本，状态里的像素不动。
+    #[test]
+    fn preview_pixels_are_premultiplied_only_when_translucent() {
+        let opaque = vec![1, 2, 3, 255, 4, 5, 6, 255];
+        assert!(matches!(premultiplied(&opaque), Cow::Borrowed(_)), "照片和视频帧不复制");
+        let translucent = vec![255, 255, 255, 128, 1, 2, 3, 255];
+        assert_eq!(premultiplied(&translucent).as_ref(), &[188, 188, 188, 128, 1, 2, 3, 255]);
+        assert_eq!(translucent[0], 255, "原像素还是直通 alpha，内容图那条路照样用");
+    }
 }
