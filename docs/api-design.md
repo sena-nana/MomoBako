@@ -234,7 +234,7 @@
   - ViewModel: `RepositoryInteractionViewModel::record_entry_access`
   - Request body includes repository-relative `path`
   - Response returns `{ repoId, path, recordedAt }`
-  - Used by direct open flows that hand control to the host OS so the desktop can keep the "最近使用" category in sync without refreshing the whole snapshot.
+  - Used by direct open flows that hand control to the host OS so the desktop can keep the "最近使用" category in sync without refreshing the whole snapshot. The Nana host also calls it after it reads a local file's bytes directly for preview or playback, because `read_file` does not record access.
 - `POST /repositories/{repoId}/files:clearRecentAccessHistory`
   - ViewModel: `RepositoryInteractionViewModel::clear_recent_access_history`
   - Request body includes `repoId`
