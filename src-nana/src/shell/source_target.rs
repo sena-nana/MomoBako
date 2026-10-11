@@ -4,8 +4,9 @@
 //! `useEntryActionRepositoryDialog.ts`：候选是就绪、可写、不是当前这个的资源库（`requireReady`、
 //! `requireWritable`）；只有一个候选时直接用它，有几个时弹「选择目标资源库」让用户挑，取消就什么也不做。
 //! 选好以后任务弹层出「{动作名} · 准备下载 …」，载荷的 `destination` 写成 `{ kind: "repository", repoId, path }`
-//! 交给宿主（`admin_dispatch`）：调用插件、把下载回来的文件导入目标资源库（下载目录时放进以歌单命名的文件夹）
-//! 并同步它，最后照 Vue `context.refreshRepo()` 刷新当前资源库（收尾在 `source_download.rs`）。
+//! 交给宿主（`download_dispatch.rs`）：给这次下载建暂存目录、调用插件、把下载回来的文件导入目标资源库（下载目录
+//! 时放进以歌单命名的文件夹）、清掉暂存并同步它，最后照 Vue `context.refreshRepo()` 刷新当前资源库（收尾在
+//! `source_download.rs`）。
 //!
 //! Vue 在没有候选时点了什么也不发生（`openDialog` 返回 null），这里在菜单上就禁用这一项并写出原因
 //! （`entry_actions::NO_TARGET_REPOSITORY`）；点的那一刻候选没了（列表刚换过）写进文件列的错误。
@@ -15,7 +16,7 @@ use serde_json::Value;
 use super::super::entry_actions::DownloadProgress;
 use super::super::workspace::WorkspaceState;
 use super::super::ShellViewModel;
-use super::source_download::DownloadRun;
+use super::source_download::{DownloadDestination, DownloadRun};
 use super::AdminEffect;
 
 /// 等着选目标资源库的下载：调用插件要的东西，加上导入到目标资源库的哪个文件夹。
@@ -104,19 +105,24 @@ fn start(model: &mut ShellViewModel, download: RepositoryDownload, target: &Targ
         return;
     };
     object.insert("destination".into(), serde_json::json!({ "kind": "repository", "repoId": target.repo_id, "path": target.path }));
-    let run = DownloadRun::begin(model, progress, plugin_id, method, repository_id, Some(target.clone()));
+    let run = DownloadRun::begin(model, progress, plugin_id, method, repository_id, DownloadDestination::Repository(target.clone()));
     model.admin.push_effect(AdminEffect::DownloadToRepository { run, payload, parent_path });
 }
 
 /// 插件下载结果里要导入的文件（Vue `resultPaths`）：`paths` 和 `completed[].paths`，去掉空白和重复，顺序不变。
 pub(crate) fn result_paths(payload: &Value) -> Vec<String> {
-    let direct = payload.get("paths").and_then(Value::as_array).into_iter().flatten();
+    listed_paths(payload, "paths")
+}
+
+/// 插件下载结果里的一种路径列表：顶层的 `key` 和每一项 `completed[].key`，去掉空白和重复，顺序不变。
+pub(crate) fn listed_paths(payload: &Value, key: &str) -> Vec<String> {
+    let direct = payload.get(key).and_then(Value::as_array).into_iter().flatten();
     let completed = payload
         .get("completed")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .filter_map(|item| item.get("paths").and_then(Value::as_array))
+        .filter_map(|item| item.get(key).and_then(Value::as_array))
         .flatten();
     let mut paths: Vec<String> = Vec::new();
     for path in direct.chain(completed) {

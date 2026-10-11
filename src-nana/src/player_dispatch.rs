@@ -1,10 +1,9 @@
 //! 把播放列表副作用交给已有的仓库交互。
 //!
 //! 成员、排序和按路径添加都没有替身。当前项的字节经仓库服务读取后在任务里解码，
-//! 条目里的相对路径不直接拿去读盘。服务没启动或任务提交失败时写回错误，
-//! 避免界面停在“正在提交”或“读取中”。
+//! 条目里的相对路径不直接拿去读盘。任务都经 `task_guard` 派发：服务没起来、任务排不进去或任务 panic（解码器出错）
+//! 时写回错误，避免界面停在“正在提交”或“读取中”。
 
-use nana_ui::runtime::Task;
 use nana_ui::RuntimeProgramContext;
 
 use crate::backend::services::repository::FileReadRequest;
@@ -12,6 +11,7 @@ use crate::shell::player::{
     decode_loaded, PlayerEffect, PlayerMessage, preferences_path, sessions_path, settings_path,
 };
 use crate::shell::ShellMessage;
+use crate::task_guard::spawn_service;
 use crate::MomoBakoApplication;
 
 /// 执行播放器归约留下的请求。
@@ -33,111 +33,65 @@ pub fn dispatch_player_effects(app: &mut MomoBakoApplication, context: &RuntimeP
     }
 }
 
-fn dispatch_memberships(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String) {
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 播放列表成员需要领域服务，当前服务未启动");
-        app.shell.reduce(player(PlayerMessage::MembershipsLoaded {
-            repo_id,
-            result: Err("领域服务未启动".into()),
-        }));
-        return;
-    };
-    let interaction = services.repository_interaction.clone();
-    let executor = services.executor.clone();
-    let task_repo = repo_id.clone();
-    if let Err(error) = context.run_task(Task::new(async move {
-        player(PlayerMessage::MembershipsLoaded {
-            repo_id: task_repo.clone(),
-            result: executor.block_on(interaction.list_playlist_memberships(task_repo)).map(|index| index.memberships),
-        })
-    })) {
-        eprintln!("Nana 播放列表成员任务提交失败：{error}");
-        app.shell.reduce(player(PlayerMessage::MembershipsLoaded {
-            repo_id,
-            result: Err(format!("播放集成员任务提交失败：{error}")),
-        }));
-    }
+fn dispatch_memberships(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String) {
+    let failed_repo = repo_id.clone();
+    let failed = move |error| player(PlayerMessage::MembershipsLoaded { repo_id: failed_repo.clone(), result: Err(error) });
+    spawn_service(app.services.as_ref(), context, "播放集成员", failed, |services| {
+        let interaction = services.repository_interaction.clone();
+        let executor = services.executor.clone();
+        move || {
+            let result = executor.block_on(interaction.list_playlist_memberships(repo_id.clone())).map(|index| index.memberships);
+            player(PlayerMessage::MembershipsLoaded { repo_id, result })
+        }
+    });
 }
 
 fn dispatch_set_membership(
-    app: &mut MomoBakoApplication,
+    app: &MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
     request: crate::backend::services::repository::PlaylistMembershipRequest,
 ) {
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 更新播放列表成员需要领域服务，当前服务未启动");
-        app.shell.reduce(player(PlayerMessage::MembershipSaved(Err("领域服务未启动".into()))));
-        return;
-    };
-    let interaction = services.repository_interaction.clone();
-    let executor = services.executor.clone();
-    if let Err(error) = context.run_task(Task::new(async move {
-        player(PlayerMessage::MembershipSaved(executor.block_on(interaction.set_playlist_membership(request))))
-    })) {
-        eprintln!("Nana 更新播放列表成员任务提交失败：{error}");
-        app.shell.reduce(player(PlayerMessage::MembershipSaved(Err(format!("播放集成员任务提交失败：{error}")))));
-    }
+    let failed = |error| player(PlayerMessage::MembershipSaved(Err(error)));
+    spawn_service(app.services.as_ref(), context, "播放集成员", failed, |services| {
+        let interaction = services.repository_interaction.clone();
+        let executor = services.executor.clone();
+        move || player(PlayerMessage::MembershipSaved(executor.block_on(interaction.set_playlist_membership(request))))
+    });
 }
 
 fn dispatch_add_paths(
-    app: &mut MomoBakoApplication,
+    app: &MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
     request: crate::backend::services::repository::PlaylistItemsByPathsAddRequest,
 ) {
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 按路径加入播放列表需要领域服务，当前服务未启动");
-        app.shell.reduce(ShellMessage::PlaylistDetailLoaded(Err("领域服务未启动".into())));
-        return;
-    };
-    let interaction = services.repository_interaction.clone();
-    let executor = services.executor.clone();
-    if let Err(error) = context.run_task(Task::new(async move {
-        ShellMessage::PlaylistDetailLoaded(executor.block_on(interaction.add_playlist_items_by_paths(request)))
-    })) {
-        eprintln!("Nana 按路径加入播放列表任务提交失败：{error}");
-        app.shell.reduce(ShellMessage::PlaylistDetailLoaded(Err(format!("播放集添加条目任务提交失败：{error}"))));
-    }
+    let failed = |error| ShellMessage::PlaylistDetailLoaded(Err(error));
+    spawn_service(app.services.as_ref(), context, "播放集添加条目", failed, |services| {
+        let interaction = services.repository_interaction.clone();
+        let executor = services.executor.clone();
+        move || ShellMessage::PlaylistDetailLoaded(executor.block_on(interaction.add_playlist_items_by_paths(request)))
+    });
 }
 
 fn dispatch_reorder(
-    app: &mut MomoBakoApplication,
+    app: &MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
     request: crate::backend::services::repository::PlaylistItemsOrderRequest,
 ) {
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 播放列表排序需要领域服务，当前服务未启动");
-        app.shell.reduce(ShellMessage::PlaylistDetailLoaded(Err("领域服务未启动".into())));
-        return;
-    };
-    let interaction = services.repository_interaction.clone();
-    let executor = services.executor.clone();
-    if let Err(error) = context.run_task(Task::new(async move {
-        ShellMessage::PlaylistDetailLoaded(executor.block_on(interaction.reorder_playlist_items(request)))
-    })) {
-        eprintln!("Nana 播放列表排序任务提交失败：{error}");
-        app.shell.reduce(ShellMessage::PlaylistDetailLoaded(Err(format!("播放集排序任务提交失败：{error}"))));
-    }
+    let failed = |error| ShellMessage::PlaylistDetailLoaded(Err(error));
+    spawn_service(app.services.as_ref(), context, "播放集排序", failed, |services| {
+        let interaction = services.repository_interaction.clone();
+        let executor = services.executor.clone();
+        move || ShellMessage::PlaylistDetailLoaded(executor.block_on(interaction.reorder_playlist_items(request)))
+    });
 }
 
-fn dispatch_restore(
-    app: &mut MomoBakoApplication,
-    context: &RuntimeProgramContext<ShellMessage>,
-    repo_id: String,
-    playlist_id: String,
-) {
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 恢复播放会话需要领域服务，当前服务未启动");
-        app.shell.reduce(player(PlayerMessage::RestoreDetail(Err("领域服务未启动".into()))));
-        return;
-    };
-    let interaction = services.repository_interaction.clone();
-    let executor = services.executor.clone();
-    if let Err(error) = context.run_task(Task::new(async move {
-        player(PlayerMessage::RestoreDetail(executor.block_on(interaction.get_playlist_detail(repo_id, playlist_id))))
-    })) {
-        eprintln!("Nana 恢复播放会话任务提交失败：{error}");
-        app.shell.reduce(player(PlayerMessage::RestoreDetail(Err(format!("播放集详情任务提交失败：{error}")))));
-    }
+fn dispatch_restore(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String, playlist_id: String) {
+    let failed = |error| player(PlayerMessage::RestoreDetail(Err(error)));
+    spawn_service(app.services.as_ref(), context, "播放集详情", failed, |services| {
+        let interaction = services.repository_interaction.clone();
+        let executor = services.executor.clone();
+        move || player(PlayerMessage::RestoreDetail(executor.block_on(interaction.get_playlist_detail(repo_id, playlist_id))))
+    });
 }
 
 /// 一次当前项读取请求。
@@ -151,34 +105,24 @@ struct LoadRequest {
 }
 
 /// 经仓库服务读出当前项，在任务里解码成会话、PCM 和画面，或图片帧。
-fn dispatch_load_item(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, request: LoadRequest) {
+fn dispatch_load_item(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, request: LoadRequest) {
     let LoadRequest { repo_id, item_id, path, extension, still, generation } = request;
-    let Some(services) = app.services.as_ref() else {
-        eprintln!("Nana 播放当前项需要领域服务，当前服务未启动：{path}");
-        app.shell.reduce(player(PlayerMessage::ItemLoaded { item_id, generation, still, result: Err("领域服务未启动".into()) }));
-        return;
-    };
-    let query = services.repository_query.clone();
-    let executor = services.executor.clone();
-    let task_item = item_id.clone();
-    if let Err(error) = context.run_task(Task::new(async move {
-        let result = executor
-            .block_on(query.read_file(FileReadRequest { repo_id: repo_id.clone(), path: path.clone() }))
-            .map_err(|error| {
-                eprintln!("Nana 播放当前项读取失败：{path}：{error}");
-                format!("无法读取当前项：{error}")
-            })
-            .and_then(|bytes| decode_loaded(&repo_id, still, &extension, &bytes));
-        player(PlayerMessage::ItemLoaded { item_id: task_item, generation, still, result })
-    })) {
-        eprintln!("Nana 播放当前项读取任务提交失败：{error}");
-        app.shell.reduce(player(PlayerMessage::ItemLoaded {
-            item_id,
-            generation,
-            still,
-            result: Err(format!("播放当前项读取任务提交失败：{error}")),
-        }));
-    }
+    let failed_item = item_id.clone();
+    let failed = move |error| player(PlayerMessage::ItemLoaded { item_id: failed_item.clone(), generation, still, result: Err(error) });
+    spawn_service(app.services.as_ref(), context, "播放当前项读取", failed, |services| {
+        let query = services.repository_query.clone();
+        let executor = services.executor.clone();
+        move || {
+            let result = executor
+                .block_on(query.read_file(FileReadRequest { repo_id: repo_id.clone(), path: path.clone() }))
+                .map_err(|error| {
+                    eprintln!("Nana 播放当前项读取失败：{path}：{error}");
+                    format!("无法读取当前项：{error}")
+                })
+                .and_then(|bytes| decode_loaded(&repo_id, still, &extension, &bytes));
+            player(PlayerMessage::ItemLoaded { item_id, generation, still, result })
+        }
+    });
 }
 
 fn player(message: PlayerMessage) -> ShellMessage {

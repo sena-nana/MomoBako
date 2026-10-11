@@ -18,13 +18,14 @@ use mutsuki_plugin_api::PluginHostContext;
 use mutsuki_plugin_host::{PluginLoadRequest, PluginSession};
 use mutsuki_runtime_contracts::{
     BatchEntry, BatchPayload, DispatchLane, OrderingRequirement, PluginManifest, RowPayload,
-    RunnerContext, RunnerStatus, Task, TaskLease, WorkBatch, WorkResourcePlan,
+    RunnerContext, Task, TaskLease, WorkBatch, WorkResourcePlan,
 };
 use serde::Deserialize;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
 use crate::services::mutsuki_runner::MomoTaskRuntime;
+use crate::services::plugin_events;
 use crate::services::repository::{
     extract_zip_plugin, native_plugin_specs, plugin_data_dir, NativePluginSpec,
 };
@@ -596,7 +597,12 @@ fn call_session(
     protocol_id: &str,
     payload: Value,
 ) -> Result<Value, String> {
-    let runner_id = format!("{}.runner", session.manifest().plugin_id);
+    let plugin_id = session.manifest().plugin_id.clone();
+    let repo_id = payload
+        .get("repoId")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let runner_id = format!("{plugin_id}.runner");
     let runner = session
         .runner(&runner_id)
         .or_else(|| session.runners().next().cloned())
@@ -657,24 +663,17 @@ fn call_session(
     let completion = runner
         .run_batch(context, batch)
         .map_err(|error| format!("{}: {:?}", error.error.route, error.error.evidence))?;
-    let result = completion
+    let entry = completion
         .results
         .into_iter()
         .next()
         .ok_or_else(|| "plugin returned an empty completion batch".to_string())?;
-    if let Some(error) = result.error {
-        return Err(format!(
-            "plugin task failed: {} {:?}",
-            error.route, error.evidence
-        ));
-    }
-    let result = result
-        .result
-        .ok_or_else(|| "plugin returned no runner result".to_string())?;
-    if result.status != RunnerStatus::Completed {
-        return Err(format!("plugin task did not complete: {:?}", result.status));
-    }
-    Ok(result.output.unwrap_or(Value::Null))
+    plugin_events::settle_call(
+        &plugin_id,
+        repo_id.as_deref(),
+        entry,
+        &mut plugin_events::write_system_log,
+    )
 }
 
 fn drain_slots(slots: BTreeMap<String, Arc<PluginSlot>>) {

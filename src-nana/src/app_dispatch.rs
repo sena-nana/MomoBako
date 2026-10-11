@@ -2,17 +2,18 @@
 //!
 //! `MomoBakoApplication::update` 在归约之前调用 [`dispatch_services`]：播放集条目移除、
 //! 打开目录和读文件元数据这些消息各自提交一个后台任务，结果再作为新消息回到 `update`。页面数据的读取不在这里，
-//! 由归约排出副作用，再由各 `*_dispatch` 交给领域服务。
+//! 由归约排出副作用，再由各 `*_dispatch` 交给领域服务。任务都经 `task_guard` 派发：服务没起来、任务排不进去或
+//! panic 时按失败经事件循环送回，排在这条消息之后，不会先于它归约。
 
-use nana_ui::runtime::Task;
 use nana_ui::RuntimeProgramContext;
 
 use crate::backend::services::repository::{FileBrowserRequest, RepositorySummary};
 use crate::backend::viewmodels::RepositoryQueryViewModel;
 use crate::shell::ShellMessage;
+use crate::task_guard::spawn_service;
 use crate::MomoBakoApplication;
 
-/// 归约前提交这条消息需要的服务任务。服务没启动时不提交，任务提交失败只记日志。
+/// 归约前提交这条消息需要的服务任务。
 pub(crate) fn dispatch_services(
     app: &MomoBakoApplication,
     message: &ShellMessage,
@@ -41,36 +42,29 @@ pub(crate) fn mutated_repository(
     })
 }
 
-/// 提交一个服务任务，提交失败按 `what` 记日志。
-fn run(context: &RuntimeProgramContext<ShellMessage>, what: &str, task: Task<ShellMessage>) {
-    if let Err(error) = context.run_task(task) {
-        eprintln!("Nana {what}任务提交失败：{error}");
-    }
-}
-
 /// 播放集页移除条目。
 fn dispatch_playlists(
     app: &MomoBakoApplication,
     message: &ShellMessage,
     context: &RuntimeProgramContext<ShellMessage>,
 ) {
-    if let ShellMessage::RemovePlaylistItem { playlist_id, item_id } = message
-        && let Some(repository_id) = app.shell.repository_id.clone()
-        && let Some(services) = app.services.as_ref()
-    {
+    let ShellMessage::RemovePlaylistItem { playlist_id, item_id } = message else {
+        return;
+    };
+    let Some(repository_id) = app.shell.repository_id.clone() else {
+        return;
+    };
+    let request = crate::backend::services::repository::PlaylistItemRemoveRequest {
+        repo_id: repository_id,
+        playlist_id: playlist_id.clone(),
+        playlist_item_id: item_id.clone(),
+    };
+    let failed = |error| ShellMessage::PlaylistDetailLoaded(Err(error));
+    spawn_service(app.services.as_ref(), context, "播放列表项目移除", failed, |services| {
         let interaction = services.repository_interaction.clone();
         let executor = services.executor.clone();
-        let request = crate::backend::services::repository::PlaylistItemRemoveRequest {
-            repo_id: repository_id,
-            playlist_id: playlist_id.clone(),
-            playlist_item_id: item_id.clone(),
-        };
-        run(context, "播放列表项目移除", Task::new(async move {
-            ShellMessage::PlaylistDetailLoaded(
-                executor.block_on(interaction.remove_playlist_item(request)),
-            )
-        }));
-    }
+        move || ShellMessage::PlaylistDetailLoaded(executor.block_on(interaction.remove_playlist_item(request)))
+    });
 }
 
 /// 打开目录、选中文件读元数据。
@@ -81,48 +75,36 @@ fn dispatch_browse_and_preview(
 ) {
     if let ShellMessage::OpenDirectory(path) = message
         && let Some(repo_id) = app.shell.repository_id.clone()
-        && let Some(services) = app.services.as_ref()
     {
-        let browser = services.file_browser.clone();
-        let executor = services.executor.clone();
         let request = FileBrowserRequest {
             repo_id, directory_path: Some(path.clone()), include_tree: Some(false),
             special_location: None, offset: Some(0), limit: Some(200),
         };
-        run(context, "目录加载", Task::new(async move {
-            ShellMessage::FileBrowserLoaded(executor.block_on(browser.get_file_browser(request)))
-        }));
+        let failed = |error| ShellMessage::FileBrowserLoaded(Err(error));
+        spawn_service(app.services.as_ref(), context, "目录加载", failed, |services| {
+            let browser = services.file_browser.clone();
+            let executor = services.executor.clone();
+            move || ShellMessage::FileBrowserLoaded(executor.block_on(browser.get_file_browser(request)))
+        });
     }
     if let ShellMessage::SelectFile {
         asset_id: Some(asset_id),
         ..
     } = message
         && let Some(repository_id) = app.shell.repository_id.clone()
-        && let Some(services) = app.services.as_ref()
     {
-        let query = services.repository_query.clone();
-        let executor = services.executor.clone();
         let asset_id = asset_id.clone();
-        run(context, "文件元数据", Task::new(async move {
-            ShellMessage::AssetDetailLoaded(
-                executor.block_on(query.get_asset_detail(repository_id, asset_id)),
-            )
-        }));
+        let failed = |error| ShellMessage::AssetDetailLoaded(Err(error));
+        spawn_service(app.services.as_ref(), context, "文件元数据", failed, |services| {
+            let query = services.repository_query.clone();
+            let executor = services.executor.clone();
+            move || ShellMessage::AssetDetailLoaded(executor.block_on(query.get_asset_detail(repository_id, asset_id)))
+        });
     }
 }
 
-/// 启动和换仓库的第 4 步：读根目录首屏。服务没起来、提交失败或任务 panic 时按失败写回，启动不会停在第 4 步。
-pub(crate) fn dispatch_first_screen(
-    app: &mut MomoBakoApplication,
-    context: &RuntimeProgramContext<ShellMessage>,
-    repo_id: String,
-) {
-    let prepared = app.services.as_ref().map(|services| (services.file_browser.clone(), services.executor.clone()));
-    let Some((browser, executor)) = prepared else {
-        eprintln!("Nana 首屏目录需要领域服务，当前服务未启动");
-        app.shell.reduce(ShellMessage::FileBrowserLoaded(Err("领域服务未启动".into())));
-        return;
-    };
+/// 启动和换仓库的第 4 步：读根目录首屏。服务没起来、任务排不进去或 panic 时按失败写回，启动不会停在第 4 步。
+pub(crate) fn dispatch_first_screen(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String) {
     let request = FileBrowserRequest {
         repo_id,
         directory_path: None,
@@ -131,10 +113,10 @@ pub(crate) fn dispatch_first_screen(
         offset: Some(0),
         limit: Some(200),
     };
-    if let Err(error) = context.run_task(Task::new(async move {
-        ShellMessage::FileBrowserLoaded(crate::task_guard::settle("首屏目录", || executor.block_on(browser.get_file_browser(request)), Err))
-    })) {
-        eprintln!("Nana 首屏目录任务提交失败：{error}");
-        app.shell.reduce(ShellMessage::FileBrowserLoaded(Err(format!("首屏目录任务提交失败：{error}"))));
-    }
+    let failed = |error| ShellMessage::FileBrowserLoaded(Err(error));
+    spawn_service(app.services.as_ref(), context, "首屏目录", failed, |services| {
+        let browser = services.file_browser.clone();
+        let executor = services.executor.clone();
+        move || ShellMessage::FileBrowserLoaded(executor.block_on(browser.get_file_browser(request)))
+    });
 }
