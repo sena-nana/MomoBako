@@ -91,6 +91,41 @@ fn wav_session_loads_and_plays_then_pauses_seeks_and_sets_volume() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// 24 位、浮点、WAVE_FORMAT_EXTENSIBLE（DAW 导出的 16 位也常是这种）和 5.1 声道的 WAV 都能装进游标播放：
+/// 8/16 位单双声道原样留下，其余换成 16 位，多声道下混成立体声，时长按帧算。ADPCM 这类压缩编码写明编码标签。
+#[test]
+fn deep_float_extensible_and_surround_wavs_play() {
+    use crate::shell::audio_decode::pcm::{fmt_chunk, wav_file};
+    let dir = temp_dir("wav-formats");
+    let cases = [
+        ("deep", wav_file(&fmt_chunk(1, 2, 8_000, 24, None), &vec![0; 8_000 * 2 * 3]), (2, 16)),
+        ("float", wav_file(&fmt_chunk(3, 1, 8_000, 32, None), &vec![0; 8_000 * 4]), (1, 16)),
+        ("extensible", wav_file(&fmt_chunk(0, 2, 8_000, 16, Some((1, 0x3))), &vec![0; 8_000 * 2 * 2]), (2, 16)),
+        ("surround", wav_file(&fmt_chunk(0, 6, 8_000, 32, Some((3, 0x3F))), &vec![0; 8_000 * 6 * 4]), (2, 16)),
+    ];
+    let mut model = shell(true);
+    model.player.repo_id = Some("repo".into());
+    for (name, bytes, layout) in cases {
+        let pcm = super::super::pcm_from_bytes(&bytes).unwrap_or_else(|error| panic!("{name}：{error}"));
+        assert_eq!((pcm.channels, pcm.bits_per_sample, pcm.duration_ms), (layout.0, layout.1, 1_000), "{name}");
+        let path = dir.join(format!("{name}.wav"));
+        std::fs::write(&path, &bytes).unwrap();
+        model.player.queue = vec![wav_queue_item(name, &path)];
+        model.player.current_id = None;
+        send(&mut model, PlayerMessage::PlayItem { item_id: name.into() });
+        assert_eq!(model.player.session.status, "playing", "{name}：{:?}", model.player.session.error);
+        assert_eq!(model.player.session.duration_ms, Some(1_000), "{name}");
+    }
+
+    let adpcm = dir.join("adpcm.wav");
+    std::fs::write(&adpcm, wav_file(&fmt_chunk(2, 1, 8_000, 4, None), &[0; 64])).unwrap();
+    model.player.queue = vec![wav_queue_item("adpcm", &adpcm)];
+    send(&mut model, PlayerMessage::PlayItem { item_id: "adpcm".into() });
+    assert_eq!(model.player.session.status, "failed");
+    assert_eq!(model.player.session.error.as_deref(), Some("不支持的 WAV 编码（0x0002）"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn wav_player_rejects_a_non_wav_header() {
     let dir = temp_dir("wav-bad");
@@ -246,6 +281,54 @@ fn m4a_preview_takes_over_the_bar_without_the_audio_plugin() {
     assert_eq!(bar.subtitle(), "没有可用于播放此媒体的插件", "和 Vue 一样写在播放条次行，没有条目时也写");
 }
 
+/// 没解到结尾的片段：解码时写的说明（只解出了多少、全长多少）跟着会话进播放条第二行，播放集的当前项和预览接管
+/// 都一样；会话照样能放，预览框不当成失败。
+#[test]
+fn a_cut_clip_keeps_its_note_on_the_bar() {
+    let note = "只解出前 0:05（全长 2:31），之后的部分暂不能播放";
+    let bytes = pcm_wav(8_000, 1, 8, &[128u8; 8_000]);
+    let parts = || {
+        let mut parts = crate::shell::preview_media_parts("repo", &bytes).expect("预览");
+        parts.session.error = Some(note.into());
+        parts
+    };
+    let subtitle = |model: &super::super::super::ShellViewModel| super::super::super::player_view::bar::BarProps::from_model(model).subtitle();
+
+    let dir = temp_dir("wav-cut");
+    let path = dir.join("voice.wav");
+    std::fs::write(&path, &bytes).unwrap();
+    let mut model = shell(true);
+    model.player.repo_id = Some("repo".into());
+    model.player.queue = vec![wav_queue_item("voice", &path)];
+    model.reduce(ShellMessage::Player(PlayerMessage::PlayItem { item_id: "voice".into() }));
+    let generation = model
+        .player
+        .take_effects()
+        .into_iter()
+        .find_map(|effect| match effect {
+            PlayerEffect::LoadItem { generation, .. } => Some(generation),
+            _ => None,
+        })
+        .expect("当前项的读取请求");
+    let loaded = super::super::LoadedItem::Media(parts());
+    model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded { item_id: "voice".into(), generation, still: false, result: Ok(loaded) }));
+    assert_eq!(model.player.session.status, "playing");
+    assert_eq!(model.player.session.error.as_deref(), Some(note));
+    assert_eq!(subtitle(&model), note);
+    let _ = std::fs::remove_dir_all(dir);
+
+    let mut preview = shell(true);
+    preview.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("audio/voice.wav", "wav"))));
+    let InspectEffect::LoadMedia { path, generation, .. } = preview.inspect.take_effects().pop().unwrap() else {
+        panic!("没有音视频请求");
+    };
+    let parts = parts();
+    preview.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(parts.session), pcm: parts.pcm, frames: None }));
+    assert!(preview.player.preview_owns_bar());
+    assert_eq!(preview.inspect.media_session().map(|session| session.status.as_str()), Some("paused"));
+    assert_eq!(subtitle(&preview), note);
+}
+
 /// 播放时钟只有一份：每帧往前拨，到头按自然结束切到下一项并接着放。
 #[test]
 fn the_clock_advances_and_a_natural_end_moves_to_the_next_item() {
@@ -271,6 +354,89 @@ fn the_clock_advances_and_a_natural_end_moves_to_the_next_item() {
     assert_eq!(model.player.session.current_time_ms, 0);
     send(&mut model, PlayerMessage::SetPlaying(false));
     assert!(!crate::shell::poll_timers(&mut model, frame), "暂停时时钟不动");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// 播放时钟按帧往前拨 `ms` 毫秒。
+fn run_clock(model: &mut super::super::super::ShellViewModel, ms: u64) {
+    let frame = crate::frame_clock::FrameStep::millis(100);
+    for _ in 0..ms / 100 {
+        crate::shell::poll_timers(model, frame);
+    }
+}
+
+/// 暂停后继续（播放条、系统媒体键都走 `SetPlaying`），声卡从暂停时的进度接着出声，不从头或上次跳转的地方重来；
+/// 跳转以后再播一段、暂停、继续，同样接着当前进度，不退回跳转点。8 kHz 下 1 毫秒是 8 帧。
+#[test]
+fn resuming_after_a_pause_sounds_from_the_paused_position() {
+    let dir = temp_dir("wav-resume");
+    let path = dir.join("tone.wav");
+    std::fs::write(&path, pcm_wav(8_000, 1, 8, &[128u8; 16_000])).unwrap();
+    let mut model = shell(true);
+    model.player.repo_id = Some("repo".into());
+    model.player.queue = vec![wav_queue_item("tone", &path)];
+    send(&mut model, PlayerMessage::PlayItem { item_id: "tone".into() });
+    assert_eq!(model.player.wav.sounding(), Some((0, 1.0)), "装好以后从头出声");
+
+    run_clock(&mut model, 600);
+    assert_eq!(model.player.session.current_time_ms, 600);
+    send(&mut model, PlayerMessage::SetPlaying(false));
+    assert_eq!(model.player.wav.sounding(), None, "暂停停声");
+    send(&mut model, PlayerMessage::SetPlaying(true));
+    assert_eq!(model.player.session.current_time_ms, 600, "进度接着暂停处");
+    assert_eq!(model.player.wav.sounding(), Some((4_800, 1.0)), "声音也接着暂停处");
+
+    send(&mut model, PlayerMessage::Seek(1_000));
+    assert_eq!(model.player.wav.sounding(), Some((8_000, 1.0)), "播放中跳转从新位置出声");
+    run_clock(&mut model, 300);
+    send(&mut model, PlayerMessage::SetPlaying(false));
+    send(&mut model, PlayerMessage::SetPlaying(true));
+    assert_eq!(model.player.wav.sounding(), Some((10_400, 1.0)), "继续播放不退回跳转点");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+/// 预览页接管播放条以后同样：放一段、暂停、继续，从暂停处出声。
+#[test]
+fn a_previewed_track_resumes_where_it_was_paused() {
+    let bytes = pcm_wav(8_000, 1, 8, &[128u8; 16_000]);
+    let parts = crate::shell::preview_media_parts("repo", &bytes).expect("预览");
+    let mut model = shell(true);
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("audio/a.wav", "wav"))));
+    let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().unwrap() else {
+        panic!("没有音视频请求");
+    };
+    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(parts.session), pcm: parts.pcm, frames: None }));
+    send(&mut model, PlayerMessage::SetPlaying(true));
+    run_clock(&mut model, 1_200);
+    send(&mut model, PlayerMessage::SetPlaying(false));
+    send(&mut model, PlayerMessage::SetPlaying(true));
+    assert_eq!(model.inspect.media_session().map(|session| session.current_time_ms), Some(1_200));
+    assert_eq!(model.player.wav.sounding(), Some((9_600, 1.0)));
+}
+
+/// 播放中改音量，声卡马上按新音量从当前进度重新出声，不等下一次播放或跳转；暂停时只记下音量、不出声，
+/// 继续播放时用它。
+#[test]
+fn changing_the_volume_while_playing_takes_effect_at_the_current_position() {
+    let dir = temp_dir("wav-volume");
+    let path = dir.join("tone.wav");
+    std::fs::write(&path, pcm_wav(8_000, 1, 8, &[128u8; 16_000])).unwrap();
+    let mut model = shell(true);
+    model.player.repo_id = Some("repo".into());
+    model.player.queue = vec![wav_queue_item("tone", &path)];
+    send(&mut model, PlayerMessage::PlayItem { item_id: "tone".into() });
+    run_clock(&mut model, 500);
+    send(&mut model, PlayerMessage::SetVolume(0.25));
+    assert_eq!(model.player.session.volume, 0.25);
+    assert_eq!(model.player.session.status, "playing");
+    assert_eq!(model.player.wav.sounding(), Some((4_000, 0.25)), "新音量从当前进度出声");
+
+    send(&mut model, PlayerMessage::SetPlaying(false));
+    send(&mut model, PlayerMessage::SetVolume(0.5));
+    assert_eq!(model.player.wav.sounding(), None, "暂停时改音量不出声");
+    assert_eq!(model.player.session.status, "paused");
+    send(&mut model, PlayerMessage::SetPlaying(true));
+    assert_eq!(model.player.wav.sounding(), Some((4_000, 0.5)));
     let _ = std::fs::remove_dir_all(dir);
 }
 

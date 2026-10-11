@@ -1,8 +1,9 @@
 //! 纯 Rust 的 AVI 画面和音轨。
 //!
-//! 只解未压缩 BI_RGB 和 MJPEG。其它压缩交给系统媒体基础。
-//! 这里不出声，也不打开窗口。
+//! 只解未压缩 BI_RGB 和 MJPEG。其它压缩交给系统媒体基础。音轨的 `strf` 就是 WAVE 格式块，和 WAV 一样经
+//! `audio_pcm.rs` 换成游标能放的 PCM。这里不出声，也不打开窗口。
 
+use crate::shell::audio_decode::pcm::WaveFormat;
 use crate::shell::player::PreviewPcm;
 
 use super::{DecodedClip, VideoFrame};
@@ -51,7 +52,7 @@ pub(super) fn try_decode(bytes: &[u8]) -> Result<Option<DecodedClip>, String> {
         pcm_of(stream, pcm)
     });
     let duration_ms = duration_ms.max(pcm.as_ref().map(|audio| audio.duration_ms).unwrap_or(0));
-    Ok(Some(DecodedClip { duration_ms, frames, pcm }))
+    Ok(Some(DecodedClip { duration_ms, frames, pcm, cut: None }))
 }
 
 fn supported_video(stream: &Stream) -> bool {
@@ -110,30 +111,16 @@ fn decode_dib(stream: &Stream, payload: &[u8]) -> Result<VideoFrame, String> {
     Ok(VideoFrame { time_ms: 0, width: width as u32, height: height as u32, rgba })
 }
 
+/// 音轨换成游标能放的 PCM。没有音轨格式、没有样本或换不了时没有声音，画面照常放。
 fn pcm_of(stream: &Stream, pcm: Vec<u8>) -> Option<PreviewPcm> {
-    if stream.audio_format != 1 || stream.sample_rate == 0 {
+    let format = stream.wave.as_ref()?;
+    if pcm.is_empty() {
         return None;
     }
-    if stream.channels != 1 && stream.channels != 2 {
-        return None;
-    }
-    if stream.bits != 8 && stream.bits != 16 {
-        return None;
-    }
-    let frame_bytes = usize::from(stream.channels) * usize::from(stream.bits / 8);
-    if frame_bytes == 0 || pcm.len() % frame_bytes != 0 || pcm.is_empty() {
-        return None;
-    }
-    let frame_count = pcm.len() as u64 / frame_bytes as u64;
-    let duration_ms = frame_count.saturating_mul(1_000) / u64::from(stream.sample_rate);
-    Some(PreviewPcm {
-        sample_rate: stream.sample_rate,
-        channels: stream.channels,
-        bits_per_sample: stream.bits,
-        frame_count,
-        duration_ms,
-        pcm,
-    })
+    format
+        .preview_pcm(&pcm)
+        .map_err(|error| eprintln!("Nana AVI 音轨换算失败，按没有声音处理：{error}"))
+        .ok()
 }
 
 struct Stream {
@@ -146,10 +133,8 @@ struct Stream {
     compression: u32,
     scale: u32,
     rate: u32,
-    audio_format: u16,
-    channels: u16,
-    sample_rate: u32,
-    bits: u16,
+    /// 音轨的 WAVE 格式。不是音轨，或者格式块认不出时为空。
+    wave: Option<WaveFormat>,
 }
 
 struct Avi {
@@ -220,10 +205,7 @@ fn parse_strl(data: &[u8]) -> Option<Stream> {
         compression: 0,
         scale: scale.max(1),
         rate: rate.max(1),
-        audio_format: 0,
-        channels: 0,
-        sample_rate: 0,
-        bits: 0,
+        wave: None,
     };
     if stream.video && format.len() >= 20 {
         let height = i32::from_le_bytes(format[8..12].try_into().ok()?);
@@ -233,11 +215,8 @@ fn parse_strl(data: &[u8]) -> Option<Stream> {
         stream.bit_count = u16::from_le_bytes(format[14..16].try_into().ok()?);
         stream.compression = u32::from_le_bytes(format[16..20].try_into().ok()?);
     }
-    if stream.audio && format.len() >= 16 {
-        stream.audio_format = u16::from_le_bytes(format[0..2].try_into().ok()?);
-        stream.channels = u16::from_le_bytes(format[2..4].try_into().ok()?);
-        stream.sample_rate = u32::from_le_bytes(format[4..8].try_into().ok()?);
-        stream.bits = u16::from_le_bytes(format[14..16].try_into().ok()?);
+    if stream.audio {
+        stream.wave = WaveFormat::parse(&format).map_err(|error| eprintln!("Nana AVI 音轨格式认不出：{error}")).ok();
     }
     Some(stream)
 }
@@ -297,6 +276,55 @@ pub(crate) fn sample_uncompressed() -> Vec<u8> {
     let mut body = Vec::new();
     push_list(&mut body, b"hdrl", &hdrl);
     push_list(&mut body, b"movi", &movi);
+    let mut file = Vec::new();
+    file.extend_from_slice(b"RIFF");
+    file.extend_from_slice(&(body.len() as u32 + 4).to_le_bytes());
+    file.extend_from_slice(b"AVI ");
+    file.extend_from_slice(&body);
+    file
+}
+
+/// `count` 帧 `width`×`height` 的未压缩 32 位画面，每秒 `fps` 帧，带完整的主头、流头和 `idx1` 索引，
+/// 系统媒体基础也读得了。测试用，画面是逐帧变亮的灰。
+#[cfg(test)]
+pub(crate) fn sample_frames(count: u32, width: u32, height: u32, fps: u32) -> Vec<u8> {
+    let frame_bytes = width * height * 4;
+    let mut avih = Vec::new();
+    for value in [1_000_000 / fps, frame_bytes * fps, 0, 0x10, count, 0, 1, frame_bytes, width, height, 0, 0, 0, 0] {
+        avih.extend_from_slice(&value.to_le_bytes());
+    }
+    let mut strh = Vec::new();
+    strh.extend_from_slice(b"vids");
+    strh.extend_from_slice(b"DIB ");
+    for value in [0u32, 0, 0, 1, fps, 0, count, frame_bytes, u32::MAX, 0] {
+        strh.extend_from_slice(&value.to_le_bytes());
+    }
+    for value in [0i16, 0, width as i16, height as i16] {
+        strh.extend_from_slice(&value.to_le_bytes());
+    }
+    let mut strf = dib_format(width as i32, height as i32, 32);
+    strf[20..24].copy_from_slice(&frame_bytes.to_le_bytes());
+    let mut strl = Vec::new();
+    push_chunk(&mut strl, b"strh", &strh);
+    push_chunk(&mut strl, b"strf", &strf);
+    let mut hdrl = Vec::new();
+    push_chunk(&mut hdrl, b"avih", &avih);
+    push_list(&mut hdrl, b"strl", &strl);
+    let mut movi = Vec::new();
+    let mut index = Vec::new();
+    for ordinal in 0..count {
+        // 索引里的偏移从 `movi` 这四个字节算起，第一块在 4。
+        index.extend_from_slice(b"00db");
+        index.extend_from_slice(&0x10u32.to_le_bytes());
+        index.extend_from_slice(&(movi.len() as u32 + 4).to_le_bytes());
+        index.extend_from_slice(&frame_bytes.to_le_bytes());
+        let shade = (ordinal * 255 / count.max(1)) as u8;
+        push_chunk(&mut movi, b"00db", &solid(width as usize, height as usize, [shade, shade, shade, 255]));
+    }
+    let mut body = Vec::new();
+    push_list(&mut body, b"hdrl", &hdrl);
+    push_list(&mut body, b"movi", &movi);
+    push_chunk(&mut body, b"idx1", &index);
     let mut file = Vec::new();
     file.extend_from_slice(b"RIFF");
     file.extend_from_slice(&(body.len() as u32 + 4).to_le_bytes());
