@@ -147,7 +147,7 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
         AdminMessage::JsonDraft { plugin_id, key, value } => {
             model.admin.json_drafts.entry(plugin_id).or_default().insert(key, value);
         }
-        AdminMessage::SaveJson { plugin_id, key } => save_json(model, &plugin_id, &key),
+        AdminMessage::CommitDraft { plugin_id, key } => commit_draft(model, &plugin_id, &key),
         AdminMessage::ResetConfig { plugin_id, key } => reset_config(model, &plugin_id, &key),
         AdminMessage::RefreshPlugins => {
             model.admin.reset_action();
@@ -378,7 +378,10 @@ fn apply_field(model: &mut ShellViewModel, plugin_id: &str, key: &str, text: &st
     model.admin.reset_action();
     match support::normalize_field_input(&field, text, checked) {
         FieldChange::Reset => reset_config(model, plugin_id, key),
-        FieldChange::Invalid(error) => model.admin.action_error = error,
+        FieldChange::Invalid(error) => {
+            eprintln!("Nana 插件 {plugin_id} 的字段 {key} 输入无效：{error}");
+            model.admin.action_error = error;
+        }
         FieldChange::Set(value) => {
             model.admin.managing = true;
             model.admin.remember_outcome("插件设置已保存。", "插件设置保存失败。");
@@ -394,24 +397,55 @@ fn reset_config(model: &mut ShellViewModel, plugin_id: &str, key: &str) {
     model.admin.push_effect(AdminEffect::DeleteConfig { plugin_id: plugin_id.to_string(), key: key.to_string() });
 }
 
-fn save_json(model: &mut ShellViewModel, plugin_id: &str, key: &str) {
+/// 单行字段回车，单行和 JSON 字段失焦（Vue 文本框的 `@change`、JSON 文本域的 `@blur`）：有没提交的草稿、
+/// 而且和字段现在的值（配置快照，没有时是清单默认值）不同才提交，没改过的不保存。单行字段比显示的文字；
+/// JSON 字段比解析出来的值，只改了空白和缩进不算改过，解析不了的算改过、提交时报错。
+/// 插件管理在途时控件禁用、焦点也会离开，这时不重复提交，草稿留着。
+fn commit_draft(model: &mut ShellViewModel, plugin_id: &str, key: &str) {
     let Some(field) = field_of(model, plugin_id, key) else {
         eprintln!("Nana 插件 {plugin_id} 没有配置字段 {key}");
         return;
     };
-    if field.field_type != "json" {
-        eprintln!("Nana 插件字段 {key} 不是 JSON");
+    let json = field.field_type == "json";
+    let drafts = if json { &model.admin.json_drafts } else { &model.admin.field_drafts };
+    let Some(draft) = drafts.get(plugin_id).and_then(|drafts| drafts.get(key)).cloned() else {
+        return;
+    };
+    let current = support::config_value(&model.admin.config_snapshots, plugin_id, &field);
+    let unchanged = if json {
+        let current = current.cloned().unwrap_or(serde_json::Value::Null);
+        support::parse_json_draft(&field.label, &draft).is_ok_and(|value| value == current)
+    } else {
+        draft == support::field_text(current)
+    };
+    if unchanged {
         return;
     }
-    let draft = model.admin.json_drafts.get(plugin_id).and_then(|drafts| drafts.get(key)).cloned().unwrap_or_default();
+    if model.admin.managing {
+        eprintln!("Nana 插件 {plugin_id} 正在处理，字段 {key} 的草稿先不提交");
+        return;
+    }
+    if json {
+        save_json(model, plugin_id, &field, &draft);
+    } else {
+        apply_field(model, plugin_id, key, &draft, None);
+    }
+}
+
+/// 保存 JSON 字段：草稿按 JSON 解析，空白按 null 保存；不是有效 JSON 时不保存，写错误。
+fn save_json(model: &mut ShellViewModel, plugin_id: &str, field: &support::ConfigField, draft: &str) {
+    let key = field.key.as_str();
     model.admin.reset_action();
-    match support::parse_json_draft(&field.label, &draft) {
+    match support::parse_json_draft(&field.label, draft) {
         Ok(value) => {
             model.admin.managing = true;
             model.admin.remember_outcome("插件设置已保存。", "插件设置保存失败。");
             model.admin.push_effect(AdminEffect::SetConfig { plugin_id: plugin_id.to_string(), key: key.to_string(), value });
         }
-        Err(error) => model.admin.action_error = error,
+        Err(error) => {
+            eprintln!("Nana 插件 {plugin_id} 的字段 {key} 不是有效 JSON，不保存");
+            model.admin.action_error = error;
+        }
     }
 }
 

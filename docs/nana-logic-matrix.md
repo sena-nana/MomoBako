@@ -204,7 +204,7 @@
 | `repository.select` | Vue 设置页监听前端插件 SDK 的插件事件 | 无 | Nana 不运行前端插件，没有这条事件，不做 | 无 | 不做 |
 | `PluginManagerPanel.vue` 分组和搜索 | 插件列表或关键词 | 无 | 分类顺序是来源、库类型、解析、预览、服务、未分类；未知分类进未分类；搜索不区分大小写 | “3 个插件” | 已测试（未离屏） |
 | `PluginManagerPanel.vue` 删除 | 用户插件确认，或非用户插件 | `delete_plugin`，没有替身 | 先进入待确认，取消不请求；非用户插件忽略；成功文案在列表替换后出现 | 确认框标题“删除插件”，按钮“删除”（忙时“删除中...”） / “插件已删除。” | 已测试（未离屏） |
-| `PluginManagerPanel.vue` 字段 | 数字、选择、布尔、JSON | `set_plugin_config_value` 或 `delete_plugin_config_value`，没有替身 | 空数字或空选项是重置；非法 JSON 不请求；空 JSON 文本按 null 保存 | “原始 不是有效 JSON。” / “插件设置已保存。” | 已测试（未离屏） |
+| `PluginManagerPanel.vue` 字段 | 选择、布尔选了就提交；单行（文本、数字）回车或失焦提交，JSON 失焦提交（Vue `@change`、`@blur`） | `set_plugin_config_value` 或 `delete_plugin_config_value`，没有替身 | 空数字或空选项是重置；回车和失焦只在草稿和现在的值不同时提交（JSON 按解析出的值比，只改空白不算），插件管理在途时不重复提交；非法 JSON 不请求；空 JSON 文本按 null 保存 | “原始 不是有效 JSON。” / “插件设置已保存。” | 已测试（`admin_tests.rs`；失焦提交由实况视图的 `admin_fields_tests.rs` 覆盖，未离屏） |
 | `PluginManagerPanel.vue` 设置页 | 再次打开同一插件，或路由到未知插件 | 已有快照时不重复 `get_plugin_config` | 第二次折叠；未知和空白 id 忽略；设置页加载配置不跳走 | “插件设置” | 已测试（未离屏） |
 | `PluginManagerPanel.vue` 启停和安装 | 实况启停，或选择安装包 | `set_plugin_enabled`、`install_plugin_from_archive`，没有替身；选择安装包先发 `OpenFileDialog` | 不切到插件设置页；空白路径不安装；取消对话框不安装 | “插件已禁用。” / “插件已安装。” / “插件包选择失败：{原因}” | 已测试（未离屏） |
 | `PluginManagerPanel.vue` Vue 页面 | 自定义设置页或来源账号 | 有 `fields` 的设置页用原生字段，不读 `provider.settings`。来源账号按认证声明调用插件方法：建会话载荷 `{qrImage: true, qrimg: true}`，检查和退出载荷 `{}` | 没有 fields 的非来源设置页只画设置区页头和「打开目录」，没有升级提示。建会话成功写「请扫码并在手机端确认，然后检查登录结果。」，仓库行写登录状态和缓存路径；二维码取 `qrUrl` 或 `qrurl` 重新编码，`data:` 图片和 credentialRef 不画。缺 `createSessionMethod` 写错误行「认证声明没有 createSessionMethod。」 | “连接新账号” / “已登录” / “扫码登录二维码” | 已测试（建会话和二维码另有离屏场景 `source-auth-methods`） |

@@ -92,12 +92,15 @@ pub enum AdminMessage {
     ConfirmDelete,
     ToggleSettings(String),
     RoutePlugin(String),
-    /// 选项、勾选或回车提交的字段值。
+    /// 选项或勾选的字段值，选了就提交。
     ConfigInput { plugin_id: String, key: String, text: String, checked: Option<bool> },
-    /// 单行字段的草稿，回车才提交。
+    /// 单行字段的草稿，回车或失焦时提交（[`AdminMessage::CommitDraft`]）。
     FieldDraft { plugin_id: String, key: String, value: String },
+    /// JSON 字段的草稿，失焦时提交。
     JsonDraft { plugin_id: String, key: String, value: String },
-    SaveJson { plugin_id: String, key: String },
+    /// 单行字段回车，单行和 JSON 字段失焦：草稿和现在的值不同才提交（Vue 文本框的 `@change`、JSON 文本域的
+    /// `@blur`）。
+    CommitDraft { plugin_id: String, key: String },
     ResetConfig { plugin_id: String, key: String },
     ChooseArchive,
     RefreshPlugins,

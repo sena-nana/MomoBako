@@ -405,6 +405,24 @@ pub fn json_draft_text(value: &Value) -> String {
     serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
 }
 
+/// 字段现在的值：插件配置快照里有就用快照，否则用清单声明的默认值。
+pub fn config_value<'a>(
+    snapshots: &'a BTreeMap<String, crate::backend::services::repository::PluginConfigSnapshot>,
+    plugin_id: &str,
+    field: &'a ConfigField,
+) -> Option<&'a Value> {
+    snapshots.get(plugin_id).and_then(|snapshot| snapshot.values.get(&field.key)).or(field.default_value.as_ref())
+}
+
+/// 单行字段里显示的文字：字符串原样，其它值写成 JSON 文本，空值为空。
+pub fn field_text(value: Option<&Value>) -> String {
+    match value {
+        Some(Value::String(text)) => text.clone(),
+        Some(Value::Null) | None => String::new(),
+        Some(other) => other.to_string(),
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct BackendCount {
     pub plugin_id: String,
