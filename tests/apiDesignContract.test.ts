@@ -42,6 +42,14 @@ function apiTestMethods(pluginDir: string) {
 }
 
 describe("API design snapshot contract", () => {
+  it("lists only transports a client outside the host can call", () => {
+    const source = readFileSync(resolve("src-backend/src/services/repository/api_design.rs"), "utf-8");
+    const transports = [...source.matchAll(/transport: "([^"]+)"/g)].map((match) => match[1]);
+
+    expect(transports.sort()).toEqual(["external-http", "plugin-call"]);
+    expect(source).not.toMatch(/tauri/i);
+  });
+
   it("keeps all external HTTP routes represented in the API snapshot definitions", () => {
     const expected = externalRuntimeRoutes();
     const covered = new Set(externalDefinitionRoutes());

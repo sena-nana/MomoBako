@@ -1,4 +1,4 @@
-//! Plugin and cache command orchestration.
+//! Plugin and cache orchestration.
 
 use crate::services::repository::{
     ApiDesignSnapshot, CacheSnapshot, PluginCallRequest, PluginCallResult,

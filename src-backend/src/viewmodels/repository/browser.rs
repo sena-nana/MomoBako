@@ -1,4 +1,4 @@
-//! File-browser command orchestration for repository entries and trash operations.
+//! File-browser orchestration for repository entries and trash operations.
 
 use crate::services::repository::{
     FileBrowserRequest, FileBrowserSnapshot, FileCreateRequest, FileRenameRequest,

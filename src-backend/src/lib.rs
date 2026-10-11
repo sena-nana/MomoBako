@@ -1,7 +1,7 @@
 //! MomoBako 宿主无关领域服务库。
 //!
-//! models、services 与 ViewModel 住在这个 crate。Tauri 窗口壳和 Nana 宿主都依赖这里，
-//! 不把窗口、WebView 或 Tauri command 编进领域代码。
+//! models、services 与 ViewModel 住在这个 crate。Nana 宿主（`src-nana`）和 Eagle 来源插件依赖这里，
+//! 不把窗口、界面框架或宿主的事件循环编进领域代码。
 
 pub mod models;
 pub mod services;

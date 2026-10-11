@@ -792,7 +792,6 @@ fn api_playground_falls_back_and_sends_http_and_plugin_calls() {
             method: String::new(),
             path: String::new(),
             summary: "状态".into(),
-            command: None,
             plugin_id: Some("momobako.service.downloader".into()),
             plugin_method: Some("downloader.getRuntimeStatus".into()),
             requires_auth: None,

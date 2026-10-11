@@ -1,4 +1,4 @@
-//! Command orchestration for repository interactions such as playlists, smart folders, and revisions.
+//! Orchestration for repository interactions such as playlists, smart folders, and revisions.
 
 use crate::services::repository::{
     EntryAccessRecordRequest, EntryAccessRecordResponse, HardlinkCandidateResponse,

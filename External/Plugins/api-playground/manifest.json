@@ -9,7 +9,7 @@
   },
   "kind": "api-playground",
   "category": "service",
-  "description": "在 MomoBako 内调试后端命令、外部 HTTP API 和插件 API。",
+  "description": "在 MomoBako 内调试外部 HTTP API 和插件 API。",
   "capabilities": ["tool-page", "api-playground", "external-api", "plugin-api"],
   "enabled": true,
   "sdk": "backend",
@@ -20,7 +20,7 @@
       {
         "toolPageId": "momobako.tool.api-playground",
         "label": "API Playground",
-        "description": "调试后端与插件 API",
+        "description": "调试外部 HTTP API 与插件 API",
         "order": 10
       }
     ]

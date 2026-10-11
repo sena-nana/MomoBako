@@ -2,8 +2,8 @@
 //!
 //! 照 `External/Plugins/api-playground/src/register.js`：契约来自 API 设计快照，快照为空时
 //! 用同一组三个外部 API 兜底；可按传输方式和关键字筛选端点，HTTP 端点可改方法、目标和鉴权，
-//! 发送后把状态、响应头和响应体写回。外部 HTTP 走宿主的 http:// 连接；Nana 没有 Tauri
-//! 命令通道，「Core」端点照 Vue 在缺 `invokeCommand` 时的报错处理；插件端点走插件调用。
+//! 发送后把状态、响应头和响应体写回。外部 HTTP 走宿主的 http:// 连接；插件端点走插件调用。
+//! 快照只有这两种传输：领域服务的 ViewModel 在进程里调用，外面调不到，不列。
 
 #[path = "api_playground_view.rs"]
 pub(crate) mod view;
@@ -30,7 +30,6 @@ pub struct Endpoint {
     pub method: String,
     pub path: String,
     pub summary: String,
-    pub command: Option<String>,
     pub plugin_id: Option<String>,
     pub plugin_method: Option<String>,
     pub requires_auth: bool,
@@ -41,7 +40,6 @@ impl Endpoint {
     /// 下拉框和选中态用的稳定键。
     pub fn key(&self) -> String {
         match self.transport.as_str() {
-            "tauri-command" => format!("tauri-command:{}", self.command.clone().unwrap_or_else(|| self.path.clone())),
             "plugin-call" => format!(
                 "plugin-call:{}:{}",
                 self.plugin_id.clone().unwrap_or_default(),
@@ -55,7 +53,6 @@ impl Endpoint {
     pub fn option_label(&self) -> String {
         let short = match self.transport.as_str() {
             "external-http" => "HTTP".to_string(),
-            "tauri-command" => "CORE".to_string(),
             "plugin-call" => "PLUG".to_string(),
             other => other.to_uppercase(),
         };
@@ -64,7 +61,6 @@ impl Endpoint {
 
     fn label(&self) -> String {
         match self.transport.as_str() {
-            "tauri-command" => self.command.clone().unwrap_or_else(|| self.path.clone()),
             "plugin-call" => self.plugin_target(),
             _ => trim_external_prefix(&self.path),
         }
@@ -74,11 +70,10 @@ impl Endpoint {
         format!("{}:{}", self.plugin_id.clone().unwrap_or_default(), self.plugin_method.clone().unwrap_or_default())
     }
 
-    /// 传输方式的显示名：HTTP、Core、Plugin。
+    /// 传输方式的显示名：HTTP、Plugin。
     pub fn transport_label(&self) -> String {
         match self.transport.as_str() {
             "external-http" => "HTTP".into(),
-            "tauri-command" => "Core".into(),
             "plugin-call" => "Plugin".into(),
             other => other.to_string(),
         }
@@ -91,7 +86,6 @@ impl Endpoint {
             method: definition.method.clone(),
             path: definition.path.clone(),
             summary: definition.summary.clone(),
-            command: definition.command.clone(),
             plugin_id: definition.plugin_id.clone(),
             plugin_method: definition.plugin_method.clone(),
             requires_auth: definition.requires_auth.unwrap_or(false),
@@ -106,17 +100,15 @@ impl Endpoint {
         if self.transport.trim().is_empty() {
             self.transport = if self.plugin_id.is_some() || self.plugin_method.is_some() || self.method == "PLUGIN" {
                 "plugin-call".into()
-            } else if self.command.is_some() || self.method == "INVOKE" {
-                "tauri-command".into()
             } else {
                 "external-http".into()
             };
         }
         if self.method.trim().is_empty() {
-            self.method = if self.transport == "tauri-command" { "INVOKE".into() } else { "GET".into() };
+            self.method = "GET".into();
         }
         if self.path.trim().is_empty() {
-            self.path = self.command.clone().or_else(|| self.plugin_method.clone()).unwrap_or_default();
+            self.path = self.plugin_method.clone().unwrap_or_default();
         }
     }
 }
@@ -129,7 +121,6 @@ fn fallback_endpoints() -> Vec<Endpoint> {
         method: method.into(),
         path: path.into(),
         summary: summary.into(),
-        command: None,
         plugin_id: None,
         plugin_method: None,
         requires_auth: auth,
@@ -246,7 +237,6 @@ pub(crate) fn visible(model: &ShellViewModel) -> Vec<Endpoint> {
                 Some(endpoint.method.clone()),
                 Some(endpoint.path.clone()),
                 Some(endpoint.summary.clone()),
-                endpoint.command.clone(),
                 endpoint.plugin_id.clone(),
                 endpoint.plugin_method.clone(),
             ]
@@ -270,13 +260,13 @@ fn apply_endpoint(state: &mut ApiState, endpoint: &Endpoint) {
     state.request_text = request_template(endpoint);
 }
 
-/// 请求体模板：HTTP 的 GET/HEAD 为空，命令和插件默认 `{}`。
+/// 请求体模板：HTTP 的 GET/HEAD 为空，插件默认 `{}`。
 fn request_template(endpoint: &Endpoint) -> String {
     if endpoint.transport == "external-http" && (endpoint.method == "GET" || endpoint.method == "HEAD") {
         return String::new();
     }
     let template = endpoint.request_template.clone().or_else(|| match endpoint.transport.as_str() {
-        "tauri-command" | "plugin-call" => Some(json!({})),
+        "plugin-call" => Some(json!({})),
         _ => None,
     });
     template.map(|value| serde_json::to_string_pretty(&value).unwrap_or_default()).unwrap_or_default()
@@ -323,14 +313,13 @@ pub(crate) fn request_summary(model: &ShellViewModel) -> String {
     format!("{} {}", endpoint.transport_label(), target_text(model, &endpoint))
 }
 
-/// 目标框里的文字：HTTP 是完整地址，命令是命令名，插件是 `插件:方法`。
+/// 目标框里的文字：HTTP 是完整地址，插件是 `插件:方法`。
 pub(crate) fn target_text(model: &ShellViewModel, endpoint: &Endpoint) -> String {
     match endpoint.transport.as_str() {
         "external-http" => {
             let url = request_url(model);
             if url.is_empty() { endpoint.path.clone() } else { url }
         }
-        "tauri-command" => endpoint.command.clone().unwrap_or_else(|| endpoint.path.clone()),
         "plugin-call" => endpoint.plugin_target(),
         _ => endpoint.path.clone(),
     }
@@ -350,7 +339,6 @@ pub(crate) fn can_send(model: &ShellViewModel) -> bool {
             let target = if state.custom_path.trim().is_empty() { state.path.clone() } else { state.custom_path.clone() };
             !root_url(model).is_empty() && !state.method.is_empty() && !target.trim().is_empty()
         }
-        "tauri-command" => endpoint.command.is_some() || !endpoint.path.is_empty(),
         "plugin-call" => endpoint.plugin_id.is_some() && endpoint.plugin_method.is_some(),
         _ => false,
     }
@@ -464,7 +452,6 @@ fn send(model: &mut ShellViewModel) {
             let request = HttpRequest { method: state.method.clone(), url: request_url(model), headers, body };
             model.admin.push_effect(AdminEffect::HttpRequest(request));
         }
-        "tauri-command" => fail(model, "当前插件 SDK 未提供 invokeCommand。".into()),
         "plugin-call" => match parse_request(&model.admin.api.request_text, "插件 Payload JSON 无效") {
             Ok(payload) => model.admin.push_effect(AdminEffect::CallPlugin {
                 plugin_id: endpoint.plugin_id.clone().unwrap_or_default(),
@@ -534,7 +521,7 @@ fn format_text(text: &str) -> String {
     }
 }
 
-/// 复制请求：HTTP 是 curl，命令是 `invoke(...)`，插件是调用 JSON。
+/// 复制请求：HTTP 是 curl，插件是调用 JSON。
 fn copy(model: &mut ShellViewModel) {
     model.admin.api.notice.clear();
     model.admin.api.error.clear();
@@ -546,11 +533,6 @@ fn copy(model: &mut ShellViewModel) {
         "external-http" => {
             let token = if state.include_auth { model.admin.external.as_ref().map(|item| item.token.clone()).unwrap_or_default() } else { String::new() };
             curl(&state.method, &request_url(model), &token, &state.request_text)
-        }
-        "tauri-command" => {
-            let command = endpoint.command.clone().unwrap_or_else(|| endpoint.path.clone());
-            let args = if state.request_text.trim().is_empty() { "{}".to_string() } else { state.request_text.trim().to_string() };
-            format!("await invoke({}, {args});", Value::String(command))
         }
         "plugin-call" => match parse_request(&state.request_text, "插件 Payload JSON 无效") {
             Ok(payload) => serde_json::to_string_pretty(&json!({

@@ -1,8 +1,8 @@
-//! Repository service DTOs shared with ViewModels and Tauri commands.
+//! Repository service DTOs shared by the services, the ViewModels and the Nana host.
 
 use super::*;
 
-/// Core-owned playlist playback state shared by Nana and Tauri hosts.
+/// Core-owned playlist playback state shared by the services and the Nana host.
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaybackSessionState {
@@ -1793,8 +1793,6 @@ pub struct ApiDefinition {
     pub method: String,
     pub path: String,
     pub summary: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub command: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plugin_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

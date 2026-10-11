@@ -1,7 +1,7 @@
 //! 随附插件同步。
 //!
 //! 宿主随包带一组 `.momoplug`：Nana 安装版和便携版在 NanaUI 的 `runtime/plugins`，开发时是插件打包输出
-//! `External/Plugins/.packages`，Tauri 版是安装包资源目录下的 `plugins`。启动时由宿主交进这份清单，这里把服务目录的
+//! `External/Plugins/.packages`。启动时由宿主交进这份清单，这里把服务目录的
 //! `plugins/builtin` 同步成和它一模一样：内容变了的换新，清单里没有的删掉，内容没变的不动。插件目录的扫描、校验和
 //! 加载仍由插件运行时从 `plugins/builtin` 读，见 `repository/plugin_runtime.rs`。
 

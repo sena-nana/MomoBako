@@ -53,7 +53,7 @@ impl AppLogger {
         Ok(logger)
     }
 
-    /// 绑定宿主事件 sink；Tauri 适配器可在边界层自行转发。
+    /// 绑定宿主事件 sink；新记录作为 `HostEvent::LogRecorded` 交给宿主。
     pub fn set_event_sink(&self, sink: Arc<dyn HostEventSink>) -> Result<(), String> {
         let mut state = self
             .state

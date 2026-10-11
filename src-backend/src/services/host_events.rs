@@ -1,4 +1,4 @@
-//! 宿主无关的应用事件边界，供原生 UI 与迁移期 Tauri 适配器共同订阅。
+//! 宿主无关的应用事件边界：领域服务把事件交给宿主，宿主送进自己的 UI 事件循环。
 
 use crate::services::repository::{RepositoryStructureUpdatedEvent, SystemLogRecord};
 use std::sync::{mpsc, Arc};
@@ -9,25 +9,6 @@ use std::sync::{mpsc, Arc};
 pub enum HostEvent {
     LogRecorded(SystemLogRecord),
     RepositoryStructureUpdated(RepositoryStructureUpdatedEvent),
-}
-
-impl HostEvent {
-    /// 保留已有前端事件名称，避免迁移期监听协议变化。
-    pub fn name(&self) -> &'static str {
-        match self {
-            Self::LogRecorded(_) => "system://log-recorded",
-            Self::RepositoryStructureUpdated(_) => "repository://structure-updated",
-        }
-    }
-
-    /// 返回原事件负载，不添加 enum 标签或额外 envelope。
-    pub fn payload(&self) -> Result<serde_json::Value, String> {
-        match self {
-            Self::LogRecorded(record) => serde_json::to_value(record),
-            Self::RepositoryStructureUpdated(event) => serde_json::to_value(event),
-        }
-        .map_err(|error| error.to_string())
-    }
 }
 
 /// 跨线程事件接收边界，不依赖窗口句柄或 UI 框架。
@@ -63,25 +44,21 @@ mod tests {
         })
     }
 
+    /// 取结构更新事件的资源库 id；别的事件交回 None。
+    fn structure_repo_id(event: HostEvent) -> Option<String> {
+        match event {
+            HostEvent::RepositoryStructureUpdated(event) => Some(event.repo_id),
+            HostEvent::LogRecorded(_) => None,
+        }
+    }
+
     #[test]
-    fn channel_preserves_event_order_and_existing_payload() {
+    fn channel_preserves_event_order() {
         let (sink, receiver) = host_event_channel();
         sink.emit(structure_event("first")).unwrap();
         sink.emit(structure_event("second")).unwrap();
-        let first = receiver.recv().unwrap();
-        assert_eq!(first.name(), "repository://structure-updated");
-        assert_eq!(
-            first.payload().unwrap(),
-            serde_json::json!({
-                "repoId": "first",
-                "reason": "watcher",
-                "indexedAt": null,
-            })
-        );
-        assert_eq!(
-            receiver.recv().unwrap().payload().unwrap()["repoId"],
-            "second"
-        );
+        assert_eq!(structure_repo_id(receiver.recv().unwrap()).as_deref(), Some("first"));
+        assert_eq!(structure_repo_id(receiver.recv().unwrap()).as_deref(), Some("second"));
     }
 
     #[test]
