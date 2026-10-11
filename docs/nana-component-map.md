@@ -2,7 +2,7 @@
 
 本文锁定 `momobako-nana` 当前构建能用的 Nana 组件、和旧 Tauri/Vue 工作台的对应关系，以及还没有现成组件的宿主缺口。稳定 id 以 `src-nana/src/capability.rs` 的 `COMPILED_COMPONENT_IDS` 为准；目录变了，`compiled_catalog_matches_the_locked_product_set` 会失败。
 
-`src-nana/Cargo.toml` 给 `nana-ui` 开 `hosted`、`bundled-fonts`、`components`、`icons-tabler`、`view-macro`，给 `nana-ui-platform` 开 `clipboard`。`components` 打开 calendar、charts、controls、graph-canvas、image-viewer、rich-text；`hosted` 带上 GPU 和 AccessKit 平台适配；`view-macro` 提供结构块容器的 `css!` 和 `#[derive(Store)]`。没开 `syntax-highlighting` 和 `packaged-resources`。Nana 修订是 `5bd2104f14b1d03f24fd92c5e737ba8c287dfcf4`，不保留本地副本。
+`src-nana/Cargo.toml` 给 `nana-ui` 开 `hosted`、`bundled-fonts`、`components`、`icons-tabler`、`view-macro`、`packaged-resources`，给 `nana-ui-platform` 开 `clipboard`。`components` 打开 calendar、charts、controls、graph-canvas、image-viewer、rich-text；`hosted` 带上 GPU 和 AccessKit 平台适配；`view-macro` 提供结构块容器的 `css!` 和 `#[derive(Store)]`；`packaged-resources` 让程序启动时读发布包的 manifest，并回答 `nana-packager validate --run` 的自检（见 [发布包](./nana-packaging.md)）。没开 `syntax-highlighting`。Nana 修订是 `5bd2104f14b1d03f24fd92c5e737ba8c287dfcf4`，不保留本地副本。
 
 ## 已编译组件
 
