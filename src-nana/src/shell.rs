@@ -46,6 +46,8 @@ mod workspace;
 pub(crate) mod workspace_refresh;
 pub(crate) mod tree_sync;
 pub(crate) mod repo_operation;
+mod menu_focus;
+mod menu_focus_view;
 pub use files::{display_mode_path, FileRow, FilesEffect, FilesMessage, HardlinkPrompt, VirtualQuery};
 pub(crate) use thumbs::{decode_preview_pixels, decode_thumbnail_file, thumbnail_slot, ThumbnailFrame};
 pub(crate) use inspect::poll_timers;
@@ -148,6 +150,8 @@ pub enum ShellMessage {
     SilentWorkspace(workspace_refresh::SilentMessage),
     /// 刷新文件夹树时的同步和重读结果。具体分支在 `tree_sync::reduce_message` 里归约。
     TreeSync(tree_sync::TreeSyncMessage),
+    /// 键盘打开的菜单：焦点放进菜单的首项或末项，见 `menu_focus.rs`。
+    FocusMenu(menu_focus::MenuFocusRequest),
 }
 
 /// 已解码的 RGBA 预览帧；解码在服务任务中完成，窗口线程只负责上传 GPU 纹理。
@@ -245,6 +249,8 @@ pub struct ShellViewModel {
     pub tree_sync: tree_sync::TreeSyncState,
     /// 任务弹层的「仓库操作」行（Vue `operationProgress`），见 `repo_operation.rs`。
     pub operation: repo_operation::RepositoryOperation,
+    /// 键盘打开菜单时要把焦点放进哪个菜单，见 `menu_focus.rs`。
+    pub(crate) menu_focus: menu_focus::MenuFocus,
     /// 窗口逻辑宽。Vue 唯一按窗口宽度切换的断点在播放条，见 [`NARROW_VIEWPORT_PX`]。
     pub viewport_width: f32,
     /// 对话框、弹层或打开文件夹之后，手势松开时要重建树。
@@ -292,6 +298,7 @@ impl Default for ShellViewModel {
             status: status::StatusState::default(),
             tree_sync: tree_sync::TreeSyncState::default(),
             operation: repo_operation::RepositoryOperation::default(),
+            menu_focus: menu_focus::MenuFocus::default(),
             viewport_width: DEFAULT_VIEWPORT_PX,
             surface_dirty: false,
             revision: 0,
@@ -604,6 +611,7 @@ impl ShellViewModel {
             ShellMessage::SilentWorkspace(_) => {}
             ShellMessage::TreeSync(_) => {}
             ShellMessage::Asmr(_) => {}
+            ShellMessage::FocusMenu(request) => menu_focus::request(self, request),
         }
     }
 
@@ -644,6 +652,8 @@ pub(crate) use view_host::ShellView;
 mod tests;
 #[cfg(test)]
 mod escape_tests;
+#[cfg(test)]
+mod disabled_fade_tests;
 #[cfg(test)]
 mod data_load_tests;
 #[cfg(test)]

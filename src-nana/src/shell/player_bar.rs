@@ -6,7 +6,7 @@
 
 use nana_ui::runtime::view::{fields, widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, AlignSpec, IconButton, JustifySpec, LengthSpec, RadiusTier, RangeChanged, RangeField, SemanticColorRole,
+    Activate, AlignSpec, Button, JustifySpec, LengthSpec, RadiusTier, RangeChanged, RangeField, SemanticColorRole,
     SizeChanged, Stack, Text, Thumbnail,
 };
 use nana_ui::{ContentFit, Icon};
@@ -402,20 +402,28 @@ fn transport(props: &BarProps) -> AnyView {
 }
 
 /// 只有图标的按钮。可读名字给无障碍，图标按 Vue 的像素大小画，颜色是正文色。
-pub(crate) fn glyph_button(icon: Icon, label: &str, icon_size: f32, box_size: f32, disabled: bool) -> IconButton {
-    let mut button = IconButton::new(icon, label).colors_from_style().disabled(disabled);
-    button.style.foreground = Some(SemanticColorRole::Text);
-    button.style.background = None;
-    button.style.control_padding_x = None;
-    button.style.painter = Some(GlyphButton { icon, size: icon_size, color: SemanticColorRole::Text, dim: disabled }.into());
-    let layout = std::sync::Arc::make_mut(&mut button.style.layout);
+///
+/// 外观全由 [`GlyphButton`] 画，停用时它已按 Vue 的 0.45 在 sRGB 里和卡片底色混好。宿主用没有可见文字的
+/// `Button`，不用 `IconButton`：NanaUI 的 `IconButton` 停用时整枚再淡到 50%（线性空间合成），会淡两层。
+pub(crate) fn glyph_button(icon: Icon, label: &str, icon_size: f32, box_size: f32, disabled: bool) -> Button {
+    let button = Button::new("").accessible_name(label).disabled(disabled);
+    let mut style = button.style.clone();
+    style.foreground = Some(SemanticColorRole::Text);
+    style.background = None;
+    style.border = None;
+    style.control_height = None;
+    style.control_padding_x = None;
+    style.painter = Some(GlyphButton { icon, size: icon_size, color: SemanticColorRole::Text, dim: disabled }.into());
+    let layout = std::sync::Arc::make_mut(&mut style.layout);
     layout.width = Some(LengthSpec::Px(box_size));
     layout.height = Some(LengthSpec::Px(box_size));
     layout.min_width = Some(LengthSpec::Px(box_size));
     layout.min_height = Some(LengthSpec::Px(box_size));
+    layout.padding_left = Some(LengthSpec::Px(0.0));
+    layout.padding_right = Some(LengthSpec::Px(0.0));
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
-    button
+    button.style(style)
 }
 
 /// 12px 弱色时间。窄列里可以在「/」后面折行。

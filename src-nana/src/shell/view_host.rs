@@ -10,7 +10,8 @@
 //! 不放绑定。
 //!
 //! 数据流：`ShellMessage → reduce → 服务副作用 → ShellView::sync`。同步先写热信号和标题栏字段，
-//! 再让每一块写自己的信号、按需重挂。焦点在某块里、输入法还有预编辑时，这块的重挂延后，`prepare`
+//! 再让每一块写自己的信号、按需重挂，最后把焦点放进键盘打开的菜单（`menu_focus_view.rs`）。
+//! 焦点在某块里、输入法还有预编辑时，这块的重挂延后，`prepare`
 //! 每帧经 [`ShellView::retry_deferred`] 检查，组合结束后补挂；`prepare` 每帧还经
 //! [`ShellView::settle_overlays`] 卸掉放完退场的对话框。动效帧和播放推进只走
 //! [`ShellView::sync_hot`]。这里只写信号，不刷新绑定，刷新由输入路由和帧开头完成。
@@ -27,6 +28,7 @@ use nana_ui::runtime::{
 use nana_ui::RegionId;
 
 use super::hot::{self, HotSignals, ModelField, MotionFrame, PlaybackView, TaskFills, TitleBarView, TitleSignals};
+use super::menu_focus_view::MenuFocusView;
 use super::view_part::{body_mode, BodyMode, PartCx, PartId, ShellPart, Swap};
 use super::view_part_overlay::OverlayPart;
 use super::view_part_primary::PrimaryPart;
@@ -63,6 +65,8 @@ pub(crate) struct ShellView {
     overlay: OverlayPart,
     /// 等输入法组合结束才重挂的块。
     deferred: Vec<PartId>,
+    /// 键盘打开的菜单：焦点放进去，关掉时还回去。
+    menu_focus: MenuFocusView,
     /// 最近一次整体同步时 ViewModel 的版本。
     revision: u64,
     /// 上次收集挂着的缩略图时文档的变更代次。
@@ -116,6 +120,7 @@ impl ShellView {
             primary: PrimaryPart::new(primary),
             overlay: OverlayPart::new(overlay),
             deferred: Vec::new(),
+            menu_focus: MenuFocusView::new(model),
             revision: model.revision,
             thumbnails_scanned: None,
             stats: ViewStats::default(),
@@ -167,7 +172,7 @@ impl ShellView {
     }
 
     /// 整体同步：写热信号和标题栏；排法变了时侧栏和主区挪到新槽位（第一次排成工作台时才建侧栏）；
-    /// 再让每一块写信号、按需重挂。正在组合输入的块延后重挂。
+    /// 再让每一块写信号、按需重挂。正在组合输入的块延后重挂。最后照键盘打开的菜单放焦点。
     pub(crate) fn sync(&mut self, document: &mut RuntimeDocument, model: &ShellViewModel) -> Result<(), FrameworkError> {
         if !self.alive() {
             eprintln!("Nana 壳层骨架已随文档回收，跳过同步");
@@ -189,6 +194,8 @@ impl ShellView {
         }
         self.settle(document, mode, swap, error)?;
         self.overlay.sweep(document.context_mut());
+        let document_id = document.document();
+        self.menu_focus.sync(document.context_mut(), document_id, model);
         self.revision = model.revision;
         Ok(())
     }
