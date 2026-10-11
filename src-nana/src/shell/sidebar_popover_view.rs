@@ -382,14 +382,14 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
     Projected::register(view, BackendFormView::project);
     let submitting = move || view.with(|view| view.submitting);
     let mut close = IconButton::new(X, "关闭添加资源库").size(ControlSize::Small).with_tooltip("关闭");
-    close.style = parts::icon_button_style(22.0, RadiusTier::Sm, SemanticColorRole::Faint, None, false);
+    close.style = parts::icon_button_style(22.0, RadiusTier::Sm, SemanticColorRole::Faint, None);
     let header = widget(Stack::bar(8.0).align(AlignSpec::Center).min_height(LengthSpec::Px(24.0))).children((
         widget(parts::label_text(String::new(), 13.0, 700, Some(SemanticColorRole::Text)))
             .prop::<String, fields::text::value>(move || view.with(|view| view.title.clone())),
         widget(Stack::spacer()),
         widget(close.colors_from_style())
             .key("repository-form-close")
-            .prop::<bool, IconDimmed>(submitting)
+            .prop::<bool, fields::icon_button::disabled>(submitting)
             .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(sidebar_message(SidebarMessage::CloseRepositoryPopover))),
     ));
     let gap = |message: fn(String) -> GapMessage| move |value: String| sidebar_message(SidebarMessage::Gap(message(value)));
@@ -433,22 +433,6 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
         vec![header.into_any(), widget(Stack::column(10.0)).children(body).into_any(), actions.into_any()],
         "repository-backend-form",
     )
-}
-
-/// 图标按钮禁用：连同 0.45 透明度一起换。
-struct IconDimmed;
-
-impl FieldWrite<IconButton, bool> for IconDimmed {
-    const FIELD: &'static str = "IconButton.disabled+opacity";
-
-    fn write(target: &mut IconButton, disabled: bool) {
-        target.disabled = disabled;
-        Arc::make_mut(&mut target.style.layout).opacity = disabled.then_some(crate::theme_map::DISABLED_OPACITY);
-    }
-
-    fn differs(target: &IconButton, disabled: &bool) -> bool {
-        target.disabled != *disabled
-    }
 }
 
 /// 弹层里的错误：`--err-soft` 底、`--err` 12px 字，没有错误时不占位。

@@ -438,7 +438,7 @@ pub(super) fn danger_tree_action(
     on_activate: impl Fn(&mut nana_ui::runtime::ViewContext<IconButton>) + Send + 'static,
 ) -> AnyView {
     let mut button = IconButton::new(icon, label).size(ControlSize::Medium).kind(ButtonKind::Danger).with_tooltip(label);
-    button.style = parts::icon_button_style(22.0, RadiusTier::Xs, SemanticColorRole::Faint, None, false);
+    button.style = parts::icon_button_style(22.0, RadiusTier::Xs, SemanticColorRole::Faint, None);
     button.style.interaction.hovered.background = Some(SemanticColorRole::DangerSoftHover);
     button.style.interaction.hovered.foreground = Some(SemanticColorRole::Danger);
     widget(button.colors_from_style()).on_cx(move |_, _: &Activate, cx| on_activate(cx)).into_any()

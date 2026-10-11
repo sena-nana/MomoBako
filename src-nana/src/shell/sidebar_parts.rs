@@ -208,7 +208,8 @@ pub(crate) fn group_title(value: &str) -> Text {
 }
 
 /// 分组标题右侧的小图标按钮。对应 `.workspace-tree-action`：22×22、`--radius-xs`、弱色 13px 图标。
-/// 禁用（连同 0.45 透明度）按 `disabled` 绑定，常量也行；返回元素本身，调用方还能再绑图标。
+/// 禁用按 `disabled` 绑定，常量也行；停用时整枚淡到 50% 由 NanaUI 的 `IconButton` 自己做。
+/// 返回元素本身，调用方还能再绑图标。
 pub(crate) fn tree_action(
     icon: Icon,
     label: &'static str,
@@ -217,21 +218,15 @@ pub(crate) fn tree_action(
     on_activate: impl Fn(&mut ViewContext<IconButton>) + Send + 'static,
 ) -> El<IconButton> {
     let mut button = IconButton::new(icon, label).size(ControlSize::Medium).with_tooltip(label);
-    button.style = icon_button_style(TREE_ACTION_EDGE, RadiusTier::Xs, SemanticColorRole::Faint, None, false);
+    button.style = icon_button_style(TREE_ACTION_EDGE, RadiusTier::Xs, SemanticColorRole::Faint, None);
     widget(button.colors_from_style())
-        .prop::<bool, DimmedTool>(disabled)
+        .prop::<bool, fields::icon_button::disabled>(disabled)
         .key(key)
         .on_cx(move |_, _: &Activate, cx| on_activate(cx))
 }
 
-/// 方形图标按钮的样式：常态透明，悬停换 `--bg-hover` 和正文色，禁用整体 0.45。
-pub(crate) fn icon_button_style(
-    edge: f32,
-    radius: RadiusTier,
-    foreground: SemanticColorRole,
-    background: Option<SemanticColorRole>,
-    disabled: bool,
-) -> NodeStyle {
+/// 方形图标按钮的样式：常态透明，悬停换 `--bg-hover` 和正文色。停用的淡化归 NanaUI 的 `IconButton`。
+pub(crate) fn icon_button_style(edge: f32, radius: RadiusTier, foreground: SemanticColorRole, background: Option<SemanticColorRole>) -> NodeStyle {
     let mut style = NodeStyle::default();
     {
         let layout = Arc::make_mut(&mut style.layout);
@@ -244,9 +239,6 @@ pub(crate) fn icon_button_style(
         layout.padding_right = Some(LengthSpec::Px(0.0));
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(0.0);
-        if disabled {
-            layout.opacity = Some(DISABLED_OPACITY);
-        }
     }
     style.radius = Some(radius);
     style.foreground = Some(foreground);
@@ -323,7 +315,7 @@ pub(crate) fn footer_button(
     on_activate: impl Fn(&mut ViewContext<IconButton>) + Send + 'static,
 ) -> AnyView {
     let mut button = IconButton::new(icon, label).size(ControlSize::Large).with_tooltip(label);
-    button.style = icon_button_style(FOOTER_BUTTON_EDGE, RadiusTier::Sm, SemanticColorRole::Muted, None, false);
+    button.style = icon_button_style(FOOTER_BUTTON_EDGE, RadiusTier::Sm, SemanticColorRole::Muted, None);
     widget(button.colors_from_style())
         .prop::<FooterLook, FooterPaint>(look)
         .prop::<f32, super::super::hot::OpacityField>(move || {
@@ -386,22 +378,6 @@ impl FieldWrite<ListItem, bool> for DimmedRow {
     }
 
     fn differs(target: &ListItem, disabled: &bool) -> bool {
-        target.disabled != *disabled || target.style.layout.opacity != disabled.then_some(DISABLED_OPACITY)
-    }
-}
-
-/// 图标按钮的禁用：不可点，整颗 0.45 透明度。
-pub(crate) struct DimmedTool;
-
-impl FieldWrite<IconButton, bool> for DimmedTool {
-    const FIELD: &'static str = "IconButton.disabled+style.layout.opacity";
-
-    fn write(target: &mut IconButton, disabled: bool) {
-        target.disabled = disabled;
-        Arc::make_mut(&mut target.style.layout).opacity = disabled.then_some(DISABLED_OPACITY);
-    }
-
-    fn differs(target: &IconButton, disabled: &bool) -> bool {
         target.disabled != *disabled || target.style.layout.opacity != disabled.then_some(DISABLED_OPACITY)
     }
 }
