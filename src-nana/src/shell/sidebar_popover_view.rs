@@ -391,6 +391,8 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
     let submitting = move || view.with(|view| view.submitting);
     let mut close = IconButton::new(X, "关闭添加资源库").size(ControlSize::Small).with_tooltip("关闭");
     close.style = parts::icon_button_style(22.0, RadiusTier::Sm, SemanticColorRole::Faint, None);
+    // 提交中停用：照 Vue `button:disabled` 的 0.45 和弹层底色（`--bg-elev`）在 sRGB 里混。
+    close.style.interaction.disabled = crate::theme_map::disabled_paint(SemanticColorRole::Faint, SemanticColorRole::Surface);
     let header = widget(Stack::bar(8.0).align(AlignSpec::Center).min_height(LengthSpec::Px(24.0))).children((
         widget(parts::label_text(String::new(), 13.0, 700, Some(SemanticColorRole::Text)))
             .prop::<String, fields::text::value>(move || view.with(|view| view.title.clone())),

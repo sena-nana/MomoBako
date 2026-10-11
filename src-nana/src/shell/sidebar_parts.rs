@@ -18,7 +18,7 @@ use nana_ui::runtime::{
 };
 use nana_ui::{ControlSize, Icon};
 
-use crate::theme_map::DISABLED_OPACITY;
+use crate::theme_map::{disabled_paint, DISABLED_OPACITY};
 
 /// 导航行高度：`.workspace-shortcuts__item` 的 `min-height: 28px`。
 const NAV_ROW_HEIGHT: f32 = 28.0;
@@ -208,8 +208,11 @@ pub(crate) fn group_title(value: &str) -> Text {
 }
 
 /// 分组标题右侧的小图标按钮。对应 `.workspace-tree-action`：22×22、`--radius-xs`、弱色 13px 图标。
-/// 禁用按 `disabled` 绑定，常量也行；停用时整枚淡到 50% 由 NanaUI 的 `IconButton` 自己做。
-/// 返回元素本身，调用方还能再绑图标。
+/// 禁用按 `disabled` 绑定，常量也行。返回元素本身，调用方还能再绑图标。
+///
+/// 停用时照 Vue `button:disabled` 的 0.45 把弱色和侧栏底色（`--bg-elev`）在 sRGB 里混成不透明色，
+/// 颜色照写的来（`colors_from_style`），NanaUI 不再整枚淡化。播放集行上的「播放」也用侧栏底色：行选中时
+/// 底下是一层 `--accent-soft`，Vue 的停用图标会透出一点强调色，这里的字形是不透明的灰。
 pub(crate) fn tree_action(
     icon: Icon,
     label: &'static str,
@@ -219,13 +222,15 @@ pub(crate) fn tree_action(
 ) -> El<IconButton> {
     let mut button = IconButton::new(icon, label).size(ControlSize::Medium).with_tooltip(label);
     button.style = icon_button_style(TREE_ACTION_EDGE, RadiusTier::Xs, SemanticColorRole::Faint, None);
+    button.style.interaction.disabled = disabled_paint(SemanticColorRole::Faint, SemanticColorRole::Surface);
     widget(button.colors_from_style())
         .prop::<bool, fields::icon_button::disabled>(disabled)
         .key(key)
         .on_cx(move |_, _: &Activate, cx| on_activate(cx))
 }
 
-/// 方形图标按钮的样式：常态透明，悬停换 `--bg-hover` 和正文色。停用的淡化归 NanaUI 的 `IconButton`。
+/// 方形图标按钮的样式：常态透明，悬停换 `--bg-hover` 和正文色。会停用的按钮另写停用样子
+/// （`theme_map::disabled_paint`），要按它实际所在的底色混。
 pub(crate) fn icon_button_style(edge: f32, radius: RadiusTier, foreground: SemanticColorRole, background: Option<SemanticColorRole>) -> NodeStyle {
     let mut style = NodeStyle::default();
     {

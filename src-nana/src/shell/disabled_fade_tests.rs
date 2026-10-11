@@ -1,13 +1,17 @@
-//! 停用的按钮只淡一次。
+//! 停用的图标按钮照 Vue `button:disabled { opacity: 0.45 }` 只淡一次。
 //!
-//! NanaUI 的 `IconButton` 停用时只给按种类配色的按钮整枚淡到 50%；`colors_from_style` 的按钮照自己写的
-//! `style.interaction.disabled` 画，节点不透明度照写的来。播放条的传输按钮由自绘按 Vue 的 0.45 在 sRGB 里
-//! 和卡片底色混好停用色，宿主节点不能再整体淡化；侧栏的图标按钮颜色照写的来，框架也不再淡化。
+//! NanaUI 的 `IconButton` 停用时只给按种类配色的按钮整枚淡到 50%（线性空间合成）；`colors_from_style` 的按钮
+//! 照自己写的 `style.interaction.disabled` 画，节点不透明度照写的来。壳层里会停用的图标按钮都走后一种：
+//! 侧栏标题工具、添加资源库表单和对话框的关闭位在样式里写好和所在底色在 sRGB 里混出的停用色，播放条的
+//! 传输按钮由自绘按 `PaintState::disabled` 混；节点都不再整体淡化。
 
-use nana_ui::runtime::StableNodeId;
+use nana_ui::runtime::{SemanticColorRole, StableNodeId};
+use nana_ui_core::SemanticColorMix;
 
+use crate::shell::sidebar::PopoverMode;
 use crate::shell::view_harness::ShellHarness;
 use crate::shell::{ShellPage, ShellViewModel};
+use crate::theme_map::DISABLED_OPACITY;
 
 fn scene(name: &str) -> ShellViewModel {
     crate::shell::acceptance_gap_models()
@@ -25,6 +29,35 @@ fn disabled(harness: &ShellHarness, id: StableNodeId) -> bool {
     harness.document().context().world().accessibility(id).is_some_and(|state| state.disabled)
 }
 
+/// 节点停用时的字色混合。
+fn disabled_mix(harness: &ShellHarness, id: StableNodeId) -> Option<SemanticColorMix> {
+    harness.document().context().world().node_style(id).and_then(|style| style.interaction.disabled.foreground_mix)
+}
+
+/// 弱色叉号或图标盖在 `--bg-elev` 上按 0.45 混。
+fn faint_over_surface() -> Option<SemanticColorMix> {
+    Some(SemanticColorMix::new(SemanticColorRole::Faint, SemanticColorRole::Surface, DISABLED_OPACITY))
+}
+
+/// 对话框卡片里的关闭位（标题栏也有一个窗口的「关闭」）。
+fn dialog_close(harness: &ShellHarness) -> StableNodeId {
+    let surface = harness.keyed("dialog-surface").expect("对话框");
+    let world = harness.document().context().world();
+    harness
+        .nodes()
+        .into_iter()
+        .find(|node| node.label.as_deref() == Some("关闭") && world.is_descendant_or_self(node.id, surface))
+        .expect("导出对话框的关闭位")
+        .id
+}
+
+/// 停用的图标按钮：不透明度为空（NanaUI 没有再淡一层），停用色是在侧栏或卡片底色上混好的弱色。
+fn assert_mixed_over_surface(harness: &ShellHarness, id: StableNodeId, label: &str) {
+    assert!(disabled(harness, id), "「{label}」应该停用");
+    assert_eq!(opacity(harness, id), None, "「{label}」只淡一次，节点不再整体淡化");
+    assert_eq!(disabled_mix(harness, id), faint_over_surface(), "「{label}」的停用色按 0.45 和底色在 sRGB 里混");
+}
+
 #[test]
 fn disabled_player_buttons_are_dimmed_only_by_their_painter() {
     let harness = ShellHarness::mount(scene("live-files"));
@@ -36,11 +69,30 @@ fn disabled_player_buttons_are_dimmed_only_by_their_painter() {
 }
 
 #[test]
-fn disabled_sidebar_tools_are_not_faded_by_nana() {
+fn disabled_sidebar_tools_mix_their_ink_over_the_sidebar() {
     let harness = ShellHarness::mount(ShellViewModel::for_page(ShellPage::EmptyRepository));
     for label in ["新建播放集", "在当前目录新建文件夹", "刷新文件夹树", "新建智能文件夹"] {
-        let id = harness.node(label);
-        assert!(disabled(&harness, id), "没有资源库时「{label}」停用");
-        assert_eq!(opacity(&harness, id), None, "「{label}」颜色照写的来，NanaUI 不再整枚淡化");
+        assert_mixed_over_surface(&harness, harness.node(label), label);
     }
+}
+
+#[test]
+fn busy_close_buttons_mix_their_ink_over_their_card() {
+    let mut model = scene("live-files");
+    model.sidebar.popover = PopoverMode::BackendForm;
+    model.sidebar.submitting = true;
+    let harness = ShellHarness::mount(model);
+    let close = harness.node("关闭添加资源库");
+    assert_mixed_over_surface(&harness, close, "关闭添加资源库");
+
+    let mut harness = ShellHarness::mount(scene("export-dialog"));
+    let close = dialog_close(&harness);
+    assert!(!disabled(&harness, close), "没在导出时关闭位能点");
+    let resting = harness.document().context().world().node_style(close).and_then(|style| style.foreground);
+    assert_eq!(resting, Some(SemanticColorRole::Faint), "关闭位平时是弱色叉号，不被种类配色换成次要文字色");
+    harness.model.files.export.busy = true;
+    harness.model.mark_surface_dirty();
+    harness.sync();
+    harness.flush();
+    assert_mixed_over_surface(&harness, close, "关闭");
 }
