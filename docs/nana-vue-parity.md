@@ -8,6 +8,8 @@
 
 Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实现，并记在本页。
 
+Vue 前端、Tauri 外壳和插件前端已经删掉（见 [迁移边界](./nana-migration.md)）。本页提到的 Vue、Tauri 和插件前端文件都在提交 `7bc847c` 里；要重新出 Vue 截图，在这个提交的 worktree 里起对照环境。现有的 Vue 截图留在本机的 `tmp/vue-mock/shots/`。
+
 ## 对照方法
 
 - Vue 侧在本机的 `tmp/vue-mock`（`tmp/` 被 git 忽略，不在仓库里）：用 `@tauri-apps/api/mocks` 模拟 IPC，渲染 `src/` 的真实页面，在无头 Edge（与 WebView2 同内核）里截图。先在仓库根目录用 `yarn vite --config tmp/vue-mock/vite.config.ts` 起 Vite（端口 1420），再用 `bash tmp/vue-mock/shoot.sh <场景> [light|dark] [宽] [高]` 截一张，`shoot_all.sh` 批量截浅色、深色和 1200×800、960×600，图在 `tmp/vue-mock/shots/`。场景登记在 `tmp/vue-mock/scenes/*.ts`，夹具在 `fixtures.ts`，命令应答在 `ipc.ts`。
@@ -170,8 +172,8 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 
 ### 数据
 - 标签菜单没有仓库级标签组；智能文件夹的摘要行省略了。
-- `foreign-tool`（第三方插件自己的工具页）只画页头和说明。Vue 在这里直接挂插件组件，原生壳层不运行插件的 Vue 组件。
-- 插件清单声明的预览（`contributes.preview`）在 Vue 里要加载插件前端的 `dist/register.js`，由它 `registerPreview` 的 Vue 组件绘制，Nana 不运行插件前端，也就不登记这些贡献。随附插件（媒体、音频、文本、Office、压缩包、三维模型）声明的扩展名都由内置视图接手；只有第三方插件认得的扩展名照 Vue 没有预览插件时的样子，预览框只画缩略图或类型图标，不写字。原来给不能绘制的贡献写的「原生预览 · 名称 · 视图 id」随登记一起删掉。
+- `foreign-tool`（宿主没有内置页面的工具页）只画页头和说明。插件只能在清单里声明工具页，页面由宿主画，API Playground、文件导入和 Eagle 导入三个内置页面照旧（它们的插件改成了仅清单）。Vue 当时直接挂插件自己的组件；插件前端删掉以后，插件不能再自带页面。
+- 插件清单声明的预览（`contributes.preview`）在 Vue 里要加载插件前端的 `dist/register.js`，由它 `registerPreview` 的 Vue 组件绘制。插件前端删掉以后合同里没有这一项了（见 [API 设计](./api-design.md)），Nana 也从来不登记这些贡献。随附插件（媒体、音频、文本、Office、压缩包、三维模型）声明的扩展名都由内置视图接手；只有第三方插件认得的扩展名照 Vue 没有预览插件时的样子，预览框只画缩略图或类型图标，不写字。原来给不能绘制的贡献写的「原生预览 · 名称 · 视图 id」随登记一起删掉。
 - Vue 没有入口的设置卡已从设置页移除：缩略图缓存上限、默认播放器类型（`default_playlist_player_type_id`，不是设置页上的「音频播放」）、关闭行为、「保存应用设置」按钮，只为它们存在的消息和草稿也一并删掉。设置字段本身保留：缓存上限照旧校验和保存，默认播放器类型照旧读写，关闭行为照旧由关窗流程读取。主题改动后立即写入设置文件。
 
 ## NanaUI 缺口
