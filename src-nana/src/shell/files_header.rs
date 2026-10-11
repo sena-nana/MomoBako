@@ -1,7 +1,8 @@
 //! 文件卡片头部，对应 Vue `FileBrowserPanel.vue` 的 `files-browser__header`。
 //!
 //! 左边是眉题和面包屑药丸，右边是工具条：展示方式选择框、新建空文件输入、建文件和导入。
-//! 导入菜单是锚在「导入」按钮下方、右对齐的浮层，Eagle 的复制 / 剪切导入在菜单里展开。
+//! 导入菜单是锚在「导入」按钮下方、右对齐的浮层，Eagle 的复制 / 剪切导入在菜单里展开；菜单项在方向键
+//! 焦点组里，键盘从「导入」打开时焦点落在首项或末项（`menu_focus.rs`）。
 //! 左列按内容宽度排、不被工具条挤窄；工具条在剩余宽度里换行并右对齐。
 //!
 //! 常驻：头部只建一次。眉题、说明、展示方式和各按钮能不能点按字段绑定；面包屑是带键的 `each`，
@@ -14,11 +15,12 @@ use nana_ui::icons_tabler::{FILE, FOLDER_OPEN, PLUS, ROTATE, TRASH};
 use nana_ui::runtime::view::fields::{self, HiddenWhenEmpty};
 use nana_ui::runtime::view::{css, each, signal, widget, AnyView, IntoView, Signal};
 use nana_ui::runtime::{
-    Activate, AlignSpec, JustifySpec, LengthSpec, NodeStyle, PositionSpec, RadiusTier, Select, SelectChanged,
+    Activate, AlignSpec, JustifySpec, LengthSpec, NodeStyle, PositionSpec, RadiusTier, SecondaryPress, Select, SelectChanged,
     SelectOption, SemanticColorRole, Stack, TextChanged, TextInput,
 };
 
 use super::super::files::{DisplayMode, FileContext, FileDialog, FilesMessage};
+use super::super::menu_focus::{focus_menu, MenuEdge, MenuSurface, MENU_KEYS};
 use super::super::sidebar::SidebarMessage;
 use super::super::workspace::{LibraryCategory, WorkspacePanel};
 use super::super::{ShellMessage, ShellViewModel};
@@ -419,11 +421,21 @@ fn field_box(min_width: f32, height: f32) -> Stack {
 }
 
 /// 「导入」和它的菜单。菜单相对这一格绝对定位：按钮下方 8px、右边对齐；开着时才露出菜单和收起层。
+///
+/// 「导入」是菜单按钮：点击开合菜单；焦点在它上面时 ArrowDown / ArrowUp（还有菜单键）打开菜单，
+/// 焦点落在首项或末项。
 fn import_anchor(tools: Signal<Tools>) -> AnyView {
-    let button = widget(style::styled_button("导入", Some(FOLDER_OPEN), ButtonLook::TOOLBAR))
+    let button = widget(style::styled_button("导入", Some(FOLDER_OPEN), ButtonLook::TOOLBAR).has_popup(true))
         .prop::<bool, fields::button::disabled>(move || tools.with(|tools| !tools.create().can_import))
         .key("file-import")
         .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(file_message(FilesMessage::ToggleImportMenu)))
+        .on_cx(|_, event: &SecondaryPress, cx| {
+            let Some(edge) = MenuEdge::of_press(event) else {
+                return;
+            };
+            cx.dispatch_program_all(file_message(FilesMessage::OpenImportMenu));
+            cx.dispatch_program_all(focus_menu(MenuSurface::Import, edge));
+        })
         .into_any();
     widget(Stack::row(0.0).grow(0.0).shrink(0.0).with_layout(|layout| layout.position = PositionSpec::Relative))
         .visible(move || tools.with(|tools| tools.create.is_some()))
@@ -483,6 +495,7 @@ fn import_menu(tools: Signal<Tools>) -> AnyView {
         .visible(move || tools.with(Tools::menu_open))
         .children(rows)
         .key("file-import-menu")
+        .roving_focus(MENU_KEYS)
         .into_any()
 }
 

@@ -115,6 +115,11 @@ fn folder_row(item: FolderItem) -> AnyView {
         .key(format!("folder-row-{}", key_part(&path)))
         .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenFolder(open_path.clone()))))
         .on_cx(move |_, event: &SecondaryPress, cx| {
+            // 菜单键和 Shift+F10 不开：文件夹菜单是挂在浮层层里的普通 `ContextMenu`，没有经 `OverlayHost`
+            // 的 `activate_overlay` 打开，方向键和 Enter 走不到它，键盘打开了也操作不了。
+            if event.keyboard {
+                return;
+            }
             let label = item.try_with(|row| row.label.clone()).unwrap_or_default();
             cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(GapMessage::OpenFolderMenu {
                 path: menu_path.clone(),

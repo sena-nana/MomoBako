@@ -3,6 +3,7 @@
 //! 位置照 `useRepositorySwitcherUi.getPopoverPosition`：左边和仓库头按钮对齐，顶边在按钮下方 6px；
 //! 切换列表和按钮同宽，添加菜单按 `.ctx-menu` 的最小宽 180px，表单 320px，左右夹在视口里。
 //! 弹层下面铺一层透明的点击层，点弹层外面关闭，和 Vue 的外部按下关闭一致；提交中归约不关。
+//! 切换列表和添加菜单是菜单：项在方向键焦点组里，键盘从仓库头打开时焦点落在首项或末项（`menu_focus.rs`）。
 //!
 //! 弹层常驻：三页（切换、添加、表单）各是一块，换页时浮层块按身份换块；同一页打开期间位置、
 //! 列表、禁用和错误都经信号原地改，列表行按内容做键，变了的那一行才重建；表单输入框受控。
@@ -17,6 +18,7 @@ use nana_ui::runtime::{
 use nana_ui::{ButtonKind, ControlSize, Icon};
 
 use super::super::hot::{self, LayerPaint, LayerPaintField};
+use super::super::menu_focus::MENU_KEYS;
 use super::super::sidebar::{backend_options, BackendOption, GapMessage, PopoverMode};
 use super::super::view_part_overlay::dialog::{action, text_field, wrapping_text, DimmedDisabled};
 use super::super::view_part_overlay::session::{Draft, Projected};
@@ -122,9 +124,10 @@ fn dismiss_layer() -> AnyView {
         .into_any()
 }
 
-/// 弹层外框：`--bg-elev` 底、`--border-strong` 描边、`--radius-md`、投影。
-fn surface(padding: f32, gap: f32, children: Vec<AnyView>, label_key: &'static str) -> AnyView {
-    widget(
+/// 弹层外框：`--bg-elev` 底、`--border-strong` 描边、`--radius-md`、投影。`menu` 为真时（切换列表、添加菜单）
+/// 里面的项是一个方向键焦点组，上下键在项之间走。
+fn surface(padding: f32, gap: f32, children: Vec<AnyView>, label_key: &'static str, menu: bool) -> AnyView {
+    let surface = widget(
         Stack::column(gap)
             .padding(padding)
             .surface(SemanticColorRole::Surface)
@@ -143,8 +146,12 @@ fn surface(padding: f32, gap: f32, children: Vec<AnyView>, label_key: &'static s
             }),
     )
     .children(children)
-    .key(label_key)
-    .into_any()
+    .key(label_key);
+    if menu {
+        surface.roving_focus(MENU_KEYS).into_any()
+    } else {
+        surface.into_any()
+    }
 }
 
 /// 切换列表的一行：行的全部内容就是它的键，变了的行重建。
@@ -214,7 +221,7 @@ fn switcher(model: &ShellViewModel) -> AnyView {
             }),
         ))
         .into_any();
-    surface(6.0, 6.0, vec![list, actions, popover_error(move || view.with(|view| view.error.clone()))], "repository-switcher-popover")
+    surface(6.0, 6.0, vec![list, actions, popover_error(move || view.with(|view| view.error.clone()))], "repository-switcher-popover", true)
 }
 
 /// 一个资源库：勾选列、名称和丢失标记。当前库只铺 `--accent-soft` 底，文字仍是正文色。
@@ -306,6 +313,7 @@ fn add_menu(model: &ShellViewModel) -> AnyView {
         1.0,
         vec![widget(Stack::column(0.0)).children((rows,)).into_any(), empty.into_any(), popover_error(move || view.with(|view| view.error.clone()))],
         "repository-add-menu",
+        true,
     )
 }
 
@@ -432,6 +440,7 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
         10.0,
         vec![header.into_any(), widget(Stack::column(10.0)).children(body).into_any(), actions.into_any()],
         "repository-backend-form",
+        false,
     )
 }
 

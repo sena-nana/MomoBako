@@ -285,6 +285,8 @@ pub enum FilesMessage {
     OpenDialog(FileDialog),
     OpenEagle(String),
     ToggleImportMenu,
+    /// 键盘从「导入」打开菜单：只开不关，已经开着时不动。
+    OpenImportMenu,
     ToggleEagleImport,
     SetCreateName(String),
     SubmitCreateFile,
