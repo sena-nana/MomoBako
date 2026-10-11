@@ -1,8 +1,8 @@
 //! 服务任务的派发和 panic 兜底。
 //!
-//! NanaUI 的 `RuntimeProgramContext::run_task` 把任务排进宿主的四个工作线程，线程里直接 `block_on` 任务、不接
-//! panic（NanaUI `scene_host::spawn_task_workers`）：任务一旦 panic，那个工作线程就退出了，结果消息永远不会回来，
-//! 等着结果的状态（首屏启动、读取中、处理中）会一直停在原地。所以所有服务任务都经 [`spawn`] / [`spawn_service`]
+//! NanaUI 的 `RuntimeProgramContext::run_task` 把任务排进宿主的四个工作线程。任务 panic 时线程接住、接着处理队列，
+//! 但这个任务的结果消息丢掉，只记一条 `host.task_panicked` 故障（NanaUI `scene_host/tasks.rs`），等着结果的状态
+//! （首屏启动、读取中、处理中）会一直停在原地。所以所有服务任务都经 [`spawn`] / [`spawn_service`]
 //! 派发：每个派发点只交代做什么、失败时交回什么，panic、任务排不进去和服务没起来都按失败交回去，状态机照常收尾。
 //! 测试 `every_task_goes_through_the_guard` 扫描源码，保证没有派发点绕过这里直接排任务。
 
