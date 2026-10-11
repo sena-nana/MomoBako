@@ -64,22 +64,31 @@ describe("MomoBako 工具链", () => {
       "docs:preview": "vitepress preview docs",
       "plugins:build": "node scripts/build-external-plugins.mjs",
       "plugins:package": "node scripts/package-external-plugins.mjs",
-      "plugins:stage:dev": "node scripts/stage-external-plugins.mjs",
-      "tauri:dev": "yarn plugins:build && yarn plugins:package && yarn plugins:stage:dev && node scripts/tauri-dev.ts",
-      "tauri:dev:with-plugins": "yarn tauri:dev",
-      "tauri:build": "yarn plugins:build && yarn plugins:package && tauri build --config src-tauri/tauri.external-plugins.conf.json",
       "test:backend": "cargo test -p momobako-backend --locked",
       "nana:build": "cargo build -p momobako-nana --bin momobako-nana --profile dist --locked",
       "nana:package": "node scripts/nana-package.ts",
-      verify: "yarn typecheck:node-scripts && yarn test && cargo check --manifest-path src-tauri/Cargo.toml",
+      verify: "yarn typecheck:node-scripts && yarn test && cargo check -p momobako-backend -p momobako-nana --all-targets --locked",
     });
     expect(pkg.dependencies).toBeUndefined();
-    expect(Object.keys(deps).sort()).toEqual(["@tauri-apps/cli", "@types/node", "typescript", "vitepress", "vitest"]);
-    for (const script of ["dev", "build", "preview"]) {
+    expect(Object.keys(deps).sort()).toEqual(["@types/node", "typescript", "vitepress", "vitest"]);
+    for (const script of ["dev", "build", "preview", "plugins:stage:dev", "icons:tauri"]) {
       expect(pkg.scripts[script], script).toBeUndefined();
     }
-    for (const path of ["src", "public", "index.html", "vite.config.ts", "tsconfig.json", "tsconfig.node.json", "app.config.json"]) {
-      expect(existsSync(resolve(path)), `${path} 是 Vue 前端的文件，应删除`).toBe(false);
+    expect(Object.keys(pkg.scripts).filter((script) => script.startsWith("tauri"))).toEqual([]);
+    for (const path of [
+      "src",
+      "public",
+      "index.html",
+      "vite.config.ts",
+      "tsconfig.json",
+      "tsconfig.node.json",
+      "app.config.json",
+      "src-tauri",
+      "scripts/tauri-dev.ts",
+      "scripts/stage-external-plugins.mjs",
+      "External/Plugins/scripts/stage-dev.mjs",
+    ]) {
+      expect(existsSync(resolve(path)), `${path} 是 Vue 前端或 Tauri 外壳的文件，应删除`).toBe(false);
     }
   });
 
@@ -99,8 +108,8 @@ describe("MomoBako 工具链", () => {
     expect(pluginsPkg.scripts).toMatchObject({
       build: "node scripts/build.mjs",
       package: "yarn typecheck:node-scripts && node scripts/package.ts",
-      "stage:dev": "node scripts/stage-dev.mjs",
     });
+    expect(pluginsPkg.scripts["stage:dev"]).toBeUndefined();
     expect(templateManifest).toMatchObject({ sdk: "backend", runtime: "native-dylib" });
     expect(exampleManifest).toMatchObject({ sdk: "backend", runtime: "native-dylib" });
     expect(pluginsPkg.dependencies.esbuild).toBeUndefined();
@@ -125,22 +134,6 @@ describe("MomoBako 工具链", () => {
       }
       expect(javascriptSources(join(root, dir)), dir).toEqual([]);
     }
-  });
-
-  it("Tauri 基础配置不声明插件包资源，打包和开发窗口再叠加插件覆盖配置", () => {
-    const baseConfig = JSON.parse(read("src-tauri/tauri.conf.json"));
-    const pluginsConfig = JSON.parse(read("src-tauri/tauri.external-plugins.conf.json"));
-    const tauriDev = read("scripts/tauri-dev.ts");
-
-    expect(baseConfig.bundle.resources).toBeUndefined();
-    expect(pluginsConfig).toEqual({
-      bundle: {
-        resources: {
-          "../External/Plugins/.packages/*.momoplug": "plugins/",
-        },
-      },
-    });
-    expect(tauriDev).toContain('"src-tauri/tauri.external-plugins.conf.json"');
   });
 
   it("Yarn 启动器优先复用当前项目入口并在独立执行时回退 Corepack", () => {
@@ -230,7 +223,8 @@ describe("MomoBako 工具链", () => {
     const members = cargoWorkspaceMembers(read("Cargo.toml"));
 
     expect(existsSync(resolve("Cargo.lock"))).toBe(true);
-    expect(members).toEqual(expect.arrayContaining(["src-tauri", "src-backend", "External/Plugins/_sdk/mutsuki-rust"]));
+    expect(members).toEqual(expect.arrayContaining(["src-backend", "src-nana", "External/Plugins/_sdk/mutsuki-rust"]));
+    expect(members).not.toContain("src-tauri");
     for (const member of members) {
       expect(existsSync(resolve(member, "Cargo.toml")), `${member} 不是 Cargo 包目录`).toBe(true);
       expect(existsSync(resolve(member, "Cargo.lock")), `${member}/Cargo.lock 不会被 cargo 读取，应删除`).toBe(false);

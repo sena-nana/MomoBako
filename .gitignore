@@ -51,7 +51,6 @@ External/Plugins/.dist/
 External/Plugins/.packages/
 External/Plugins/.yarn/
 .service-data/
-src-tauri/.service-data/
 
 # TypeScript
 *.tsbuildinfo
@@ -65,14 +64,13 @@ coverage/
 *.lcov
 .vitest-cache/
 
-# Rust / Tauri
+# Rust
 target/
 **/target/
 # runtime 副本自带空 [workspace]，单独 cargo test 会写出这份锁；产品锁仍是根 Cargo.lock。
 vendor/nana-ui-runtime/Cargo.lock
 **/*.rs.bk
 *.pdb
-src-tauri/gen/schemas/
 
 # Databases
 *.sqlite

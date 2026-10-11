@@ -7,8 +7,7 @@
     "build": "node scripts/build.mjs",
     "package": "yarn typecheck:node-scripts && node scripts/package.ts",
     "test:package": "node --test scripts/plugin-package-manifest.node.ts",
-    "typecheck:node-scripts": "tsc --project tsconfig.node-scripts.json",
-    "stage:dev": "node scripts/stage-dev.mjs"
+    "typecheck:node-scripts": "tsc --project tsconfig.node-scripts.json"
   },
   "dependencies": {
     "jszip": "^3.10.1",

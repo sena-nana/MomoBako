@@ -19,10 +19,7 @@ const forbiddenPatterns = [
  */
 describe("ASMR host boundary", () => {
   it("keeps ASMR-specific implementation out of the domain backend", () => {
-    const files = [
-      ...scanSourceFiles(resolve("src-backend/src"), [".rs"]),
-      ...scanSourceFiles(resolve("src-tauri/src"), [".rs"]),
-    ];
+    const files = scanSourceFiles(resolve("src-backend/src"), [".rs"]);
     const violations = files.flatMap((file) => {
       const text = readFileSync(file, "utf-8");
       return forbiddenPatterns

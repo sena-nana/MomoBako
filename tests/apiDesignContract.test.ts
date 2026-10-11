@@ -2,22 +2,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-function tauriHandlerCommands() {
-  const source = readFileSync(resolve("src-tauri/src/lib.rs"), "utf-8");
-  const handler = source.match(/tauri::generate_handler!\[([\s\S]*?)\]/)?.[1] ?? "";
-  return handler
-    .split(",")
-    .map((command) => command.trim())
-    .filter(Boolean);
-}
-
-function apiDefinitionCommands() {
-  const source = readFileSync(resolve("src-backend/src/services/repository/api_design.rs"), "utf-8");
-  return [...source.matchAll(/tauri_api_definition\([^,]+,\s*"([^"]+)"/g)]
-    .map((match) => match[1])
-    .filter(Boolean);
-}
-
 function externalRuntimeRoutes() {
   const source = readFileSync(resolve("src-backend/src/services/runtime/external_api.rs"), "utf-8");
   return [...source.matchAll(/\(&Method::([A-Za-z]+),\s*"([^"]+)"\)\s*=>/g)]
@@ -58,13 +42,6 @@ function apiTestMethods(pluginDir: string) {
 }
 
 describe("API design snapshot contract", () => {
-  it("keeps all Tauri commands represented in the API snapshot definitions", () => {
-    const expected = tauriHandlerCommands();
-    const covered = new Set(apiDefinitionCommands());
-
-    expect(expected.filter((command) => !covered.has(command))).toEqual([]);
-  });
-
   it("keeps all external HTTP routes represented in the API snapshot definitions", () => {
     const expected = externalRuntimeRoutes();
     const covered = new Set(externalDefinitionRoutes());

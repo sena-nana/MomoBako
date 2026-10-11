@@ -49,15 +49,8 @@ Write-Output "Generating MomoBako icons from $svgPath"
 $source = Get-SvgEmbeddedImage $svgPath
 Write-Output "  source: $($source.Width) x $($source.Height)"
 
-$icon1024 = Resize-Bitmap $source 1024 1024
-Save-Png $icon1024 (Join-Path $iconsDir "icon-source.png")
-Save-Png $icon1024 (Join-Path $iconsDir "icon.png")
-
 $icon256 = Resize-Bitmap $source 256 256
 Save-Png $icon256 (Join-Path $iconsDir "128x128@2x.png")
-
-$icon128 = Resize-Bitmap $source 128 128
-Save-Png $icon128 (Join-Path $iconsDir "128x128.png")
 
 $icon32 = Resize-Bitmap $source 32 32
 Save-Png $icon32 (Join-Path $iconsDir "32x32.png")
@@ -114,9 +107,7 @@ $fileStream.Dispose()
 Write-Output "  -> $icoPath"
 
 $source.Dispose()
-$icon1024.Dispose()
 $icon256.Dispose()
-$icon128.Dispose()
 $icon32.Dispose()
 foreach ($size in $icoSizes) {
     $icoBitmaps[$size].Dispose()

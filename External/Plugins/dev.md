@@ -6,9 +6,8 @@
 - 每个插件一个独立工程，产出独立的 `.momoplug`；Rust 插件都是仓库根 Cargo workspace 的成员，共用根 `Cargo.lock` 与 `target/`
 - 新建 Rust 插件要把目录加进根 `Cargo.toml` 的 `workspace.members`，插件目录里不放 `Cargo.lock`；`template/backend-rust/` 与 `example/backend-rust/` 是示例，不在 workspace 里
 - `External/Plugins/` 自带插件开发所需工具链与打包脚本
-- `yarn tauri:dev` 每次都会完整构建、打包并暂存插件；主应用默认构建、`tauri build` 和 `verify` 不隐式编译插件，也不要求已有插件包；`.packages/*.momoplug` 只经 `src-tauri/tauri.external-plugins.conf.json` 由 `yarn tauri:build`、`yarn tauri:dev` 带进 Tauri 安装包或开发窗口的资源目录；发布流程由 `yarn nana:package` 放进 Nana 发布包的 `runtime/plugins`
-- 插件运行时目录固定为 `<serviceRoot>/plugins`
-- 默认开发 staging 目录为 `src-tauri/.service-data/plugins`
+- 主应用的构建（`cargo build -p momobako-nana`、`yarn nana:build`）和 `verify` 不隐式编译插件，也不要求已有插件包；开发时从仓库根目录 `cargo run -p momobako-nana`，宿主直接读 `External/Plugins/.packages`（`src-nana/src/app_paths.rs`），目录不存在就不同步；发布流程由 `yarn nana:package` 把 `.packages/*.momoplug` 放进 Nana 发布包的 `runtime/plugins`
+- 插件运行时目录固定为 `<serviceRoot>/plugins`：随附插件在 `plugins/builtin`（宿主启动时从 `.packages` 或发布包同步进来），用户安装的在 `plugins/user`
 - `<serviceRoot>/plugins` 只保存 `.momoplug` 文件，不做持久解压安装
 - 宿主直接读取 `.momoplug` 内部的 `manifest.json`、`plugin.toml`、原生库和资源
 - 插件只有后端形态：`native-dylib`（进程内加载的 Mutsuki ABI 动态库，只给随附插件用）、`process`（独立进程里的 Mutsuki runner）、`manifest-only`（只有声明，不执行任何代码）
@@ -34,7 +33,6 @@ External/Plugins/
     build.mjs
     package.ts
     plugin-package-manifest.ts
-    stage-dev.mjs
   _sdk/
     mutsuki-rust/
   template/
@@ -240,23 +238,19 @@ role = "office-convert-helper"
 
 ## 9. 构建与调试
 
-主线只保留可选辅助命令：
+主仓库根只保留可选辅助命令：
 
-- `yarn plugins:build`
+- `yarn plugins:build`：发布构建；`yarn plugins:build:dev <目录名或 pluginId>` 用 dev 配置做增量调试
 - `yarn plugins:package`
-- `yarn plugins:stage:dev`
-- `yarn tauri:dev`
-- `yarn tauri:dev:with-plugins`（兼容别名）
 
 推荐流程：
 
 1. 进入 `External/Plugins/` 并执行 `yarn install`
 2. 复制 `template/backend-rust/` 创建新插件工程，补上 `plugin.project.json` 和 `plugin.toml`（照现有原生插件，例如 `parser-asmr-folder/`），并把目录加进根 `Cargo.toml` 的 `workspace.members`；只有声明的插件只要 `manifest.json`，`plugin.project.json` 写 `build.type` 为 `manifest-only`（不写这个文件时也按它构建）
 3. 编写 `manifest.json` 与 `src/lib.rs`
-4. 回到主仓库根目录执行 `yarn tauri:dev`
+4. 回到主仓库根目录执行 `yarn plugins:build`、`yarn plugins:package`，再 `cargo run -p momobako-nana`
 
-`yarn tauri:dev` 会依次执行完整插件构建、打包、暂存和桌面端启动；`yarn tauri:dev:with-plugins` 保留为兼容别名。主仓库根的 `plugins:build`、`plugins:package`、`plugins:stage:dev` 只是对 `External/Plugins/package.json` 脚本的转发，方便单独排查构建阶段，不再承载插件工具链本体。
-不传 `<serviceRoot>` 时，`stage:dev` 会把 `.momoplug` 复制到 `src-tauri/.service-data/plugins`；传入 `<serviceRoot>` 时仍复制到 `<serviceRoot>/plugins`。
+主仓库根的 `plugins:build`、`plugins:package` 只是对 `External/Plugins/package.json` 脚本的转发，方便单独排查构建阶段，不再承载插件工具链本体。开发时宿主启动就把 `External/Plugins/.packages` 里的包同步进服务目录（当前目录下的 `.service-data`）的 `plugins/builtin`，不用另外暂存。
 
 `template/backend-rust/` 与 `example/backend-rust/` 不在根 workspace 里，也不经 `yarn build` 构建；它们没有 `plugin.toml` 和 `plugin.project.json`，要打成可安装的 v2 包，照上面第 2 步补齐并加进 workspace。
 双清单与 artifact 规则可用 `yarn test:package` 做定向验证。
