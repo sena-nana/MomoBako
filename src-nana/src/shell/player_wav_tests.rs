@@ -311,7 +311,7 @@ fn a_cut_clip_keeps_its_note_on_the_bar() {
         })
         .expect("当前项的读取请求");
     let loaded = super::super::LoadedItem::Media(parts());
-    model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded { item_id: "voice".into(), generation, still: false, result: Ok(loaded) }));
+    model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded { item_id: "voice".into(), generation, still: false, result: Ok(loaded), prep: crate::shell::SourcePrep::default() }));
     assert_eq!(model.player.session.status, "playing");
     assert_eq!(model.player.session.error.as_deref(), Some(note));
     assert_eq!(subtitle(&model), note);
@@ -323,7 +323,7 @@ fn a_cut_clip_keeps_its_note_on_the_bar() {
         panic!("没有音视频请求");
     };
     let parts = parts();
-    preview.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(parts.session), pcm: parts.pcm, frames: None }));
+    preview.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(parts.session), pcm: parts.pcm, frames: None, prep: crate::shell::SourcePrep::default() }));
     assert!(preview.player.preview_owns_bar());
     assert_eq!(preview.inspect.media_session().map(|session| session.status.as_str()), Some("paused"));
     assert_eq!(subtitle(&preview), note);
@@ -405,7 +405,7 @@ fn a_previewed_track_resumes_where_it_was_paused() {
     let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().unwrap() else {
         panic!("没有音视频请求");
     };
-    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(parts.session), pcm: parts.pcm, frames: None }));
+    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(parts.session), pcm: parts.pcm, frames: None, prep: crate::shell::SourcePrep::default() }));
     send(&mut model, PlayerMessage::SetPlaying(true));
     run_clock(&mut model, 1_200);
     send(&mut model, PlayerMessage::SetPlaying(false));
