@@ -174,7 +174,7 @@ pub(super) fn save_custom_thumbnail_bytes(
     save_thumbnail_bytes(thumbnail_root, repo, entry_path, kind, "custom", bytes)
 }
 
-pub(super) fn save_thumbnail_bytes(
+fn save_thumbnail_bytes(
     thumbnail_root: &Path,
     repo: &RepositoryRecord,
     entry_path: &str,

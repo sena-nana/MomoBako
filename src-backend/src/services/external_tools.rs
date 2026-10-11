@@ -3,7 +3,7 @@
 //! 宿主启动时用 [`configure`] 交进两个目录：随包带的程序目录（Nana 包是 NanaUI 的 `runtime/tools`，只读）和下载
 //! 程序用的可写目录（Nana 是应用缓存目录下的 `tools`）。找程序的顺序是随包目录、下载目录、可执行文件旁边
 //! （ffmpeg-sidecar 原来的下载位置，开发时可能已经有）、`PATH`。都找不到时下载到下载目录，不写进安装目录。
-//! 宿主没有配置时（Tauri 版）保持 ffmpeg-sidecar 的原样：下载到可执行文件旁边。
+//! 宿主没给下载目录时（Nana 解析不出应用路径时，后端单测也不设置）照 ffmpeg-sidecar 的默认下载到可执行文件旁边。
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;

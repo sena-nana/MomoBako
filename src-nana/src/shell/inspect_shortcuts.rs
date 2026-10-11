@@ -150,13 +150,13 @@ mod tests {
             description: String::new(),
             capabilities: Vec::new(),
             enabled: true,
-            sdk: "frontend".into(),
+            sdk: "backend".into(),
             entry: serde_json::Value::Null,
             contributes: serde_json::json!({
                 "libraryExtension": { "libraryKind": "asmr", "searchShortcuts": shortcuts }
             }),
             source: "builtin".into(),
-            runtime: "vue-module".into(),
+            runtime: "manifest-only".into(),
             permissions: Vec::new(),
             requires: Vec::new(),
             optional: Vec::new(),

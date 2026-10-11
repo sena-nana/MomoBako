@@ -35,15 +35,7 @@ pub struct RepositoryRuntime {
 }
 
 impl RepositoryRuntime {
-    /// Starts the repository runtime and all long-lived background services.
-    pub fn start() -> Result<Self, String> {
-        let root = std::env::current_dir()
-            .map_err(|error| error.to_string())?
-            .join(".service-data");
-        Self::start_at(root)
-    }
-
-    /// 在指定的服务数据目录启动 Runtime；`start` 只负责把当前目录下的 `.service-data` 交进来。
+    /// 在指定的服务数据目录启动 Runtime 和所有常驻后台服务；目录由宿主定（Nana 见 `src-nana/src/app_paths.rs`）。
     pub fn start_at(root: PathBuf) -> Result<Self, String> {
         let repository_state = Arc::new(RepositoryState::from_root(root.clone()));
         let write_lock = Arc::new(Mutex::new(()));

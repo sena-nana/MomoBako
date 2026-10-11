@@ -7,12 +7,12 @@ function readManifest<T = Record<string, unknown>>(): T {
 }
 
 describe("API Playground plugin manifest", () => {
-  it("declares a frontend tool page for debugging the external API", () => {
+  it("puts the host's built-in API Playground page on the extension page", () => {
     const manifest = readManifest<{
       pluginId: string;
       sdk: string;
       runtime: string;
-      entry: { frontend: { module: string; export: string } };
+      entry: Record<string, unknown>;
       permissions: string[];
       hooks: Array<{ slot: string; action: string }>;
       contributes: {
@@ -26,12 +26,9 @@ describe("API Playground plugin manifest", () => {
     }>();
 
     expect(manifest.pluginId).toBe("momobako.tool.api-playground");
-    expect(manifest.sdk).toBe("frontend");
-    expect(manifest.runtime).toBe("vue-module");
-    expect(manifest.entry.frontend).toMatchObject({
-      module: "dist/register.js",
-      export: "register",
-    });
+    expect(manifest.sdk).toBe("backend");
+    expect(manifest.runtime).toBe("manifest-only");
+    expect(manifest.entry).toEqual({});
     expect(manifest.contributes.toolPages[0]).toMatchObject({
       toolPageId: "momobako.tool.api-playground",
       label: "API Playground",

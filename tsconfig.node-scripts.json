@@ -15,7 +15,6 @@
   "include": [
     "scripts/nana-package.ts",
     "scripts/nana-package-config.ts",
-    "scripts/tauri-dev.ts",
     "scripts/yarn-command.ts"
   ]
 }

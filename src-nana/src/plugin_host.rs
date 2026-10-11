@@ -1,6 +1,6 @@
 //! 启动时接上随附插件、外部程序目录和插件宿主。
 //!
-//! Tauri 版在 `src-tauri/src/app_shell.rs` 的启动钩子里做同样的事，顺序也一样：
+//! 依次做三件事：
 //! 1. 把随附插件同步进服务目录的 `plugins/builtin`（`momobako_backend::services::runtime::bundled_plugins`）。发布包
 //!    以包里 manifest 列出的插件为准：把新版本解压到旧目录上时，`runtime/plugins` 里会留下旧版本的包，它们不算随附插件。
 //! 2. 把随包程序目录和下载目录交给 `external_tools`，ffmpeg 缺了下载到缓存目录，不写进安装目录。

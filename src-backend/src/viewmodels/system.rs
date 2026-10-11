@@ -1,4 +1,4 @@
-//! Desktop-system command orchestration for lightweight shell-facing helpers.
+//! Desktop-system orchestration for lightweight shell-facing helpers.
 
 use crate::services::logging::{clear_logs, list_logs, write_log};
 use crate::services::repository::{BinaryFileWriteRequest, BinaryFileWriteResponse};
@@ -92,7 +92,7 @@ impl SystemViewModel {
         list_logs(query)
     }
 
-    /// 写入一条来自前端或命令层的系统日志。
+    /// 写入一条来自宿主界面的系统日志。
     pub async fn write_system_log(
         &self,
         request: SystemLogWriteRequest,

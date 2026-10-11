@@ -15,7 +15,7 @@
 - 任务比较复杂时,先拆解为明确子任务;可并行或边界清晰的部分使用子智能体完成,主 Agent 负责整合、验证和收口。
 - 不做打补丁式修复;遇到问题先定位根因,再在正确边界修正。
 - 优先沿用现有结构和命名,不要顺手做无关重构。
-- 跨端数据模型先改 `src/types/repository.ts` 与 `docs/api-design.md`,再同步 `src/services/repositoryApi.ts`、`src-tauri/src/repository_service.rs` 和相关测试。
+- 跨端数据模型先改 `docs/api-design.md`,再同步 `src-backend`、`src-nana` 和相关测试。
 - 不加冗余注释;设计风格写进 `DESIGN.md`,API 和架构细节写进 `docs/`。
 - 不覆盖用户或其他 Agent 的已有改动。
 - 严格基于MVVM架构进行代码结构设计，不出现超大单独代码文件，每个文件最大1000行，按功能分区拆分代码文件，做到高内聚低耦合。
@@ -26,12 +26,12 @@
 
 - 保持 MomoBako 的工程工具气质:克制、清晰、可扫描。
 - 视觉分级明确:主内容 > 当前状态 > 过程信息 / 辅助操作。
-- 优先使用现有 CSS 变量、间距和组件语言;深浅主题都要可读。
+- 优先使用现有 Nana 主题变量(`src-nana/src/theme_map.rs`)、间距和组件语言;深浅主题都要可读。
 - UI 设计或交互模式调整优先参考 `DESIGN.md`,不要引入与 MomoBako 无关的聊天、Agent runner 或计划确认界面规则。
 
 ## 验证
 
-- 按影响范围运行最小必要验证: `yarn test`、`yarn build`、`cargo check --manifest-path src-tauri/Cargo.toml`、`yarn test:backend` 或 `yarn verify`。
+- 按影响范围运行最小必要验证: `yarn test`、`cargo test -p momobako-nana --locked --lib`、`cargo check -p momobako-backend -p momobako-nana --all-targets --locked`、`yarn test:backend` 或 `yarn verify`。
 - 改动 `src-backend/` 时运行 `yarn test:backend`;它不在 `yarn verify` 里,由 CI 单独执行。
-- 文档、注释、配置说明等低风险改动可不跑测试;涉及数据模型、持久化、文件同步、Tauri 命令、构建配置或用户关键路径时,优先运行最小必要验证。
+- 文档、注释、配置说明等低风险改动可不跑测试;涉及数据模型、持久化、文件同步、宿主调用的 ViewModel 接口、构建配置或用户关键路径时,优先运行最小必要验证。
 - 若未运行测试、构建或验证,在最终说明里写清楚原因;若验证无法运行,写清楚阻塞原因和剩余风险。

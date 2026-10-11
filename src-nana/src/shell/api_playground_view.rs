@@ -23,7 +23,7 @@ use super::super::style::{self, action, column, label, mono, pad, row, wrapping,
 use super::super::AdminMessage;
 use super::{can_send, endpoints, request_summary, selected_ref, target_text, token_preview, visible, ApiMessage};
 
-const TRANSPORTS: [(&str, &str); 4] = [("all", "全部"), ("external-http", "HTTP"), ("tauri-command", "Core"), ("plugin-call", "Plugin")];
+const TRANSPORTS: [(&str, &str); 3] = [("all", "全部"), ("external-http", "HTTP"), ("plugin-call", "Plugin")];
 
 fn api(message: ApiMessage) -> ShellMessage {
     ShellMessage::Admin(AdminMessage::Api(message))
@@ -288,7 +288,7 @@ fn request_column(signals: PlaygroundSignals) -> AnyView {
     let transport_caption = node_ref();
     let transport = native_select(Select::new(Some(initial.transport.clone())).options(TRANSPORTS.iter().map(|(value, text)| SelectOption::new(*value, *text))));
     let keyword = signals.keyword.signal();
-    let search = style::native_input(TextInput::new(keyword.get_untracked()).label("Search").placeholder("plugin / repository / command"));
+    let search = style::native_input(TextInput::new(keyword.get_untracked()).label("Search").placeholder("plugin / repository / method"));
     let filters = two_columns(
         GridTrack::Px(126.0),
         GridTrack::MinMax { min_px: 0.0, fr: 1.0, max_px: None },

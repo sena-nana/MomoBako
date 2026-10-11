@@ -1,9 +1,8 @@
 {
   "pluginId": "momobako.tool.file-manager",
   "build": {
-    "type": "frontend-module",
+    "type": "manifest-only",
     "sourceDir": "src",
-    "entry": "dist/register.js",
     "outputDir": ".dist/file-manager"
   }
 }

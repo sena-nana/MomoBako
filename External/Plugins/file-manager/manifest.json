@@ -12,14 +12,9 @@
   "description": "在当前工作区目录执行文件夹导入和 ZIP 导入。",
   "capabilities": ["tool-page", "file-import"],
   "enabled": true,
-  "sdk": "frontend",
-  "runtime": "vue-module",
-  "entry": {
-    "frontend": {
-      "module": "dist/register.js",
-      "export": "register"
-    }
-  },
+  "sdk": "backend",
+  "runtime": "manifest-only",
+  "entry": {},
   "contributes": {
     "toolPages": [
       {

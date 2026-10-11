@@ -1,11 +1,22 @@
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { resolveYarnCommand } from "../scripts/yarn-command.ts";
 
 function read(path: string) {
   return readFileSync(resolve(path), "utf-8");
+}
+
+/** 插件目录里的 JavaScript 源码；构建产物、依赖和 Rust 编译目录不算。 */
+function javascriptSources(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      return ["node_modules", "target", "dist"].includes(entry.name) ? [] : javascriptSources(path);
+    }
+    return /\.(?:js|mjs|cjs|ts|vue)$/.test(entry.name) ? [path] : [];
+  });
 }
 
 function expectNoSourceResidue(content: string) {
@@ -53,76 +64,76 @@ describe("MomoBako 工具链", () => {
       "docs:preview": "vitepress preview docs",
       "plugins:build": "node scripts/build-external-plugins.mjs",
       "plugins:package": "node scripts/package-external-plugins.mjs",
-      "plugins:stage:dev": "node scripts/stage-external-plugins.mjs",
-      dev: "vite",
-      "tauri:dev": "yarn plugins:build && yarn plugins:package && yarn plugins:stage:dev && node scripts/tauri-dev.ts",
-      "tauri:dev:with-plugins": "yarn tauri:dev",
-      "tauri:build": "yarn plugins:build && yarn plugins:package && tauri build --config src-tauri/tauri.external-plugins.conf.json",
       "test:backend": "cargo test -p momobako-backend --locked",
       "nana:build": "cargo build -p momobako-nana --bin momobako-nana --profile dist --locked",
       "nana:package": "node scripts/nana-package.ts",
-      verify: "yarn typecheck:node-scripts && yarn test && yarn build && cargo check --manifest-path src-tauri/Cargo.toml",
+      verify: "yarn typecheck:node-scripts && yarn test && cargo check -p momobako-backend -p momobako-nana --all-targets --locked",
     });
-    expect(deps.vitepress).toBeDefined();
-    expect(deps.jszip).toBeUndefined();
-    expect(pkg.dependencies.three).toBeDefined();
-    expect(pkg.dependencies["@pixiv/three-vrm"]).toBeDefined();
-    expect(pkg.dependencies["@lilia/ui"]).toMatch(
-      /^github:sena-nana\/LiliaUI#workspace=@lilia\/ui&commit=[0-9a-f]{40}$/,
-    );
-    const liliaCommit = pkg.dependencies["@lilia/ui"].match(/commit=([0-9a-f]{40})$/)?.[1];
-    for (const workspace of ["theme", "ui-contract", "ui-foundation"]) {
-      expect(pkg.dependencies[`@lilia/${workspace}`]).toBe(
-        `github:sena-nana/LiliaUI#workspace=@lilia/${workspace}&commit=${liliaCommit}`,
-      );
+    expect(pkg.dependencies).toBeUndefined();
+    expect(Object.keys(deps).sort()).toEqual(["@types/node", "typescript", "vitepress", "vitest"]);
+    for (const script of ["dev", "build", "preview", "plugins:stage:dev", "icons:tauri"]) {
+      expect(pkg.scripts[script], script).toBeUndefined();
     }
-    expect(pkg.dependencies["@lucide/vue"]).toBeDefined();
-    expect(pkg.dependencies["lucide-vue-next"]).toBeUndefined();
-    expect(pkg.devDependencies["@types/three"]).toBeDefined();
+    expect(Object.keys(pkg.scripts).filter((script) => script.startsWith("tauri"))).toEqual([]);
+    for (const path of [
+      "src",
+      "public",
+      "index.html",
+      "vite.config.ts",
+      "tsconfig.json",
+      "tsconfig.node.json",
+      "app.config.json",
+      "src-tauri",
+      "scripts/tauri-dev.ts",
+      "scripts/stage-external-plugins.mjs",
+      "External/Plugins/scripts/stage-dev.mjs",
+    ]) {
+      expect(existsSync(resolve(path)), `${path} 是 Vue 前端或 Tauri 外壳的文件，应删除`).toBe(false);
+    }
   });
 
   it("External/Plugins 提供标准开发入口并与主线源码隔离", () => {
     const devGuide = read("External/Plugins/dev.md");
     const pluginsPkg = JSON.parse(read("External/Plugins/package.json"));
-    const templateManifest = read("External/Plugins/template/manifest.json");
-    const templateProject = read("External/Plugins/template/plugin.project.json");
-    const exampleManifest = read("External/Plugins/example/manifest.json");
-    const exampleProject = read("External/Plugins/example/plugin.project.json");
-    const tsconfig = read("tsconfig.json");
+    const templateManifest = JSON.parse(read("External/Plugins/template/backend-rust/manifest.json"));
+    const exampleManifest = JSON.parse(read("External/Plugins/example/backend-rust/manifest.json"));
 
     expect(devGuide).toContain("External/Plugins/");
     expect(devGuide).toContain("External/Plugins/package.json");
     expect(devGuide).toContain("<serviceRoot>/plugins");
     expect(devGuide).toContain(".momoplug");
-    expect(devGuide).toContain("register(ctx)");
+    expect(devGuide).toContain("manifest-only");
+    expect(devGuide).not.toContain("register(ctx)");
     expect(devGuide).toContain("Mutsuki ABI v2");
     expect(pluginsPkg.scripts).toMatchObject({
       build: "node scripts/build.mjs",
       package: "yarn typecheck:node-scripts && node scripts/package.ts",
-      "stage:dev": "node scripts/stage-dev.mjs",
     });
-    expect(templateManifest).toContain("\"pluginId\"");
-    expect(templateProject).toContain("\"build\"");
-    expect(exampleManifest).toContain("\"pluginId\"");
-    expect(exampleProject).toContain("\"build\"");
-    expect(tsconfig).not.toContain("plugins/**/*.ts");
-    expect(tsconfig).not.toContain("plugins/**/*.json");
+    expect(pluginsPkg.scripts["stage:dev"]).toBeUndefined();
+    expect(templateManifest).toMatchObject({ sdk: "backend", runtime: "native-dylib" });
+    expect(exampleManifest).toMatchObject({ sdk: "backend", runtime: "native-dylib" });
+    expect(pluginsPkg.dependencies.esbuild).toBeUndefined();
   });
 
-  it("Tauri 基础配置不声明插件包资源，打包和开发窗口再叠加插件覆盖配置", () => {
-    const baseConfig = JSON.parse(read("src-tauri/tauri.conf.json"));
-    const pluginsConfig = JSON.parse(read("src-tauri/tauri.external-plugins.conf.json"));
-    const tauriDev = read("scripts/tauri-dev.ts");
+  it("External/Plugins 的插件都是后端形态，不带前端代码", () => {
+    const root = resolve("External/Plugins");
+    const pluginDirs = readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && existsSync(join(root, entry.name, "manifest.json")))
+      .map((entry) => entry.name);
 
-    expect(baseConfig.bundle.resources).toBeUndefined();
-    expect(pluginsConfig).toEqual({
-      bundle: {
-        resources: {
-          "../External/Plugins/.packages/*.momoplug": "plugins/",
-        },
-      },
-    });
-    expect(tauriDev).toContain('"src-tauri/tauri.external-plugins.conf.json"');
+    expect(pluginDirs.length).toBeGreaterThan(0);
+    for (const dir of pluginDirs) {
+      const manifest = JSON.parse(read(`External/Plugins/${dir}/manifest.json`));
+      expect(manifest.sdk, dir).toBe("backend");
+      expect(["native-dylib", "process", "manifest-only"], dir).toContain(manifest.runtime);
+      expect(manifest.entry?.frontend, dir).toBeUndefined();
+      expect(manifest.contributes?.preview, dir).toBeUndefined();
+      if (existsSync(join(root, dir, "plugin.project.json"))) {
+        const project = JSON.parse(read(`External/Plugins/${dir}/plugin.project.json`));
+        expect(["cargo-native", "cargo-process", "manifest-only"], dir).toContain(project.build?.type);
+      }
+      expect(javascriptSources(join(root, dir)), dir).toEqual([]);
+    }
   });
 
   it("Yarn 启动器优先复用当前项目入口并在独立执行时回退 Corepack", () => {
@@ -212,7 +223,8 @@ describe("MomoBako 工具链", () => {
     const members = cargoWorkspaceMembers(read("Cargo.toml"));
 
     expect(existsSync(resolve("Cargo.lock"))).toBe(true);
-    expect(members).toEqual(expect.arrayContaining(["src-tauri", "src-backend", "External/Plugins/_sdk/mutsuki-rust"]));
+    expect(members).toEqual(expect.arrayContaining(["src-backend", "src-nana", "External/Plugins/_sdk/mutsuki-rust"]));
+    expect(members).not.toContain("src-tauri");
     for (const member of members) {
       expect(existsSync(resolve(member, "Cargo.toml")), `${member} 不是 Cargo 包目录`).toBe(true);
       expect(existsSync(resolve(member, "Cargo.lock")), `${member}/Cargo.lock 不会被 cargo 读取，应删除`).toBe(false);
@@ -240,35 +252,5 @@ describe("MomoBako 工具链", () => {
     expect(index).toContain("[架构](./architecture.md)");
     expect(index).toContain("[API 设计](./api-design.md)");
     expect(index).toContain("[样式标准](./design/style-standard.md)");
-  });
-
-  it("全局滚动条使用隐藏原生条和 overlay 显隐样式", () => {
-    const styles = read("src/styles/index.css").replace(/\r\n/g, "\n");
-    const main = read("src/main.ts");
-    const facade = read("src/ui/index.ts");
-    const scrollbars = read("src/ui/core/index.ts");
-
-    expect(styles).toContain('@import "../ui/styles.css";');
-    expect(facade).toContain('export * from "@lilia/ui/layouts";');
-    expect(facade).toContain('export * from "./core";');
-    expect(main).toContain(
-      'installGlobalScrollbarVisibility',
-    );
-    expect(main).toContain('from "./ui"');
-    expect(scrollbars).toContain("installGlobalScrollbarVisibility");
-    expect(scrollbars).toContain("uninstallGlobalScrollbarVisibility");
-  });
-
-  it("LiliaUI 字体资源随样式入口一起提供", () => {
-    const fonts = [
-      "public/fonts/noto-sans-sc-chinese-simplified-400-normal.woff2",
-      "public/fonts/noto-sans-sc-chinese-simplified-500-normal.woff2",
-      "public/fonts/noto-sans-sc-chinese-simplified-600-normal.woff2",
-      "public/fonts/noto-sans-sc-chinese-simplified-700-normal.woff2",
-    ];
-
-    for (const fontPath of fonts) {
-      expect(readFileSync(resolve(fontPath))).toBeDefined();
-    }
   });
 });

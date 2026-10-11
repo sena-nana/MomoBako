@@ -305,14 +305,6 @@ impl RepositoryState {
         );
     }
 
-    /// Returns repository thumbnail roots that should be exposed to the desktop asset scope.
-    pub fn list_repository_thumbnail_roots(&self) -> Result<Vec<PathBuf>, String> {
-        self.load_repository_records()?
-            .into_iter()
-            .map(|repo| self.repository_thumbnail_root(&repo))
-            .collect()
-    }
-
     /// Opens a previously registered preview file source for the preview HTTP server.
     pub fn open_preview_file_source(&self, token: &str) -> Result<(File, String), String> {
         let source = self

@@ -111,28 +111,6 @@ pub(super) fn call_plugin(
     })
 }
 
-pub(super) fn read_plugin_archive_text(
-    state: &RepositoryState,
-    request: PluginArchiveReadRequest,
-) -> Result<PluginArchiveTextResponse, String> {
-    state.ensure_initialized()?;
-    let registry = plugin_catalog(&state.root);
-    let normalized_plugin_id = registry.normalize_plugin_id(&request.plugin_id);
-    let registration = registry
-        .registration(&normalized_plugin_id)
-        .ok_or_else(|| format!("plugin not found: {}", request.plugin_id))?;
-    let archive_path = registration.archive_path.as_path();
-    let relative_path = safe_zip_relative_path(request.path.trim())?;
-    let archive_entry_path =
-        plugin_archive_entry_path(&registration.manifest_prefix, &relative_path);
-    let text = read_plugin_archive_text_entry(archive_path, &archive_entry_path)?;
-    Ok(PluginArchiveTextResponse {
-        plugin_id: registration.manifest.plugin_id.clone(),
-        path: archive_entry_path,
-        text,
-    })
-}
-
 pub(super) fn get_plugin_data_directory(
     state: &RepositoryState,
     plugin_id: String,
@@ -147,111 +125,6 @@ pub(super) fn get_plugin_data_directory(
     Ok(PluginDataDirectoryResponse {
         plugin_id: registration.manifest.plugin_id.clone(),
         path: data_dir.to_string_lossy().to_string(),
-    })
-}
-
-pub(super) fn prepare_plugin_data_file_preview_source(
-    state: &RepositoryState,
-    request: PluginDataFilePreviewSourceRequest,
-) -> Result<PluginDataFilePreviewSourceResponse, String> {
-    state.ensure_initialized()?;
-    let registry = plugin_catalog(&state.root);
-    let normalized_plugin_id = registry.normalize_plugin_id(&request.plugin_id);
-    let registration = registry
-        .registration(&normalized_plugin_id)
-        .ok_or_else(|| format!("plugin not found: {}", request.plugin_id))?;
-    let data_dir = ensure_plugin_data_dir(&state.root, &registration.manifest.plugin_id)?;
-    let canonical_data_dir = data_dir.canonicalize().map_err(io_error)?;
-    let source_path = PathBuf::from(request.path.trim());
-    if !source_path.is_absolute() {
-        return Err("plugin data preview path must be absolute".to_string());
-    }
-    if !source_path.is_file() {
-        return Err(format!(
-            "plugin data preview file is not available: {}",
-            source_path.to_string_lossy()
-        ));
-    }
-    let canonical_source_path = source_path.canonicalize().map_err(io_error)?;
-    if !canonical_source_path.starts_with(&canonical_data_dir) {
-        return Err(format!(
-            "plugin data preview path is outside plugin data directory: {}",
-            source_path.to_string_lossy()
-        ));
-    }
-    let media_type = request.media_type.trim();
-    let media_type = if media_type.is_empty() {
-        "application/octet-stream"
-    } else {
-        media_type
-    };
-    let metadata = fs::metadata(&canonical_source_path).map_err(io_error)?;
-    let modified_at = metadata
-        .modified()
-        .ok()
-        .map(system_time_to_rfc3339)
-        .transpose()
-        .map_err(time_error)?;
-    let token = state.register_preview_source_path(canonical_source_path.clone(), media_type)?;
-    Ok(PluginDataFilePreviewSourceResponse {
-        plugin_id: registration.manifest.plugin_id.clone(),
-        path: canonical_source_path.to_string_lossy().to_string(),
-        token,
-        source_url: None,
-        media_type: media_type.to_string(),
-        size_bytes: metadata.len() as i64,
-        modified_at,
-    })
-}
-
-pub(super) fn prepare_repository_cache_file_preview_source(
-    state: &RepositoryState,
-    request: RepositoryCacheFilePreviewSourceRequest,
-) -> Result<RepositoryCacheFilePreviewSourceResponse, String> {
-    state.ensure_initialized()?;
-    let repo = state.load_repository_record(&request.repo_id)?;
-    let repo_root = PathBuf::from(&repo.summary.path);
-    let cache_root = repository_meta_dir(&repo_root).join("cache");
-    let canonical_cache_root = cache_root.canonicalize().map_err(io_error)?;
-    let source_path = PathBuf::from(request.path.trim());
-    if !source_path.is_absolute() {
-        return Err("repository cache preview path must be absolute".to_string());
-    }
-    if !source_path.is_file() {
-        return Err(format!(
-            "repository cache preview file is not available: {}",
-            source_path.to_string_lossy()
-        ));
-    }
-    let canonical_source_path = source_path.canonicalize().map_err(io_error)?;
-    if !canonical_source_path.starts_with(&canonical_cache_root) {
-        return Err(format!(
-            "repository cache preview path is outside repository cache directory: {}",
-            source_path.to_string_lossy()
-        ));
-    }
-    let media_type = request.media_type.trim();
-    let media_type = if media_type.is_empty() {
-        "application/octet-stream"
-    } else {
-        media_type
-    };
-    let metadata = fs::metadata(&canonical_source_path).map_err(io_error)?;
-    let modified_at = metadata
-        .modified()
-        .ok()
-        .map(system_time_to_rfc3339)
-        .transpose()
-        .map_err(time_error)?;
-    let token = state.register_preview_source_path(canonical_source_path.clone(), media_type)?;
-    Ok(RepositoryCacheFilePreviewSourceResponse {
-        repo_id: repo.summary.repo_id,
-        path: canonical_source_path.to_string_lossy().to_string(),
-        token,
-        source_url: None,
-        media_type: media_type.to_string(),
-        size_bytes: metadata.len() as i64,
-        modified_at,
     })
 }
 
@@ -430,6 +303,7 @@ pub(super) fn parse_plugin_manifest_with_source(
 ) -> Result<PluginManifest, String> {
     let mut manifest = serde_json::from_str::<PluginManifest>(raw).map_err(json_error)?;
     manifest.plugin_id = normalized_builtin_plugin_id(&manifest.plugin_id).to_string();
+    ensure_backend_plugin_form(&manifest)?;
     if manifest.category.trim().is_empty() {
         manifest.category = plugin_category_for_kind(&manifest.kind).to_string();
     }
@@ -445,6 +319,34 @@ pub(super) fn parse_plugin_manifest_with_source(
         manifest.compat.sdk_version = PLUGIN_SDK_VERSION.to_string();
     }
     Ok(manifest)
+}
+
+/// 插件只有后端形态：`sdk` 是 `backend`，`runtime` 是 `native-dylib`、`process` 或 `manifest-only`。
+/// 别的形态（包括已删除的前端插件 `vue-module`）读清单时就拒绝，插件目录里显示为读取失败的插件。
+fn ensure_backend_plugin_form(manifest: &PluginManifest) -> Result<(), String> {
+    if manifest.sdk == "backend"
+        && matches!(
+            manifest.runtime.as_str(),
+            "native-dylib" | "process" | "manifest-only"
+        )
+    {
+        return Ok(());
+    }
+    crate::app_log!(
+        "warn",
+        "plugin.runtime",
+        "unsupportedPluginForm",
+        "插件不是后端形态，不加载。",
+        serde_json::json!({
+            "pluginId": manifest.plugin_id,
+            "sdk": manifest.sdk,
+            "runtime": manifest.runtime,
+        })
+    );
+    Err(format!(
+        "unsupported plugin form: {} (sdk {}, runtime {}); plugins must be backend native-dylib, process or manifest-only",
+        manifest.plugin_id, manifest.sdk, manifest.runtime
+    ))
 }
 
 pub(super) fn plugin_legacy_ids(manifest: &PluginManifest) -> Vec<String> {
@@ -1369,7 +1271,6 @@ fn validate_plugin_package_envelope<R: Read + std::io::Seek>(
     let expected_deployment = match manifest.runtime.as_str() {
         "native-dylib" => "abi",
         "process" => "process",
-        "vue-module" => "frontend",
         _ => "manifest",
     };
     if envelope.deployment != expected_deployment {
@@ -1391,7 +1292,7 @@ fn validate_plugin_package_envelope<R: Read + std::io::Seek>(
         }
     }
     if expected_deployment != "manifest" && envelope.artifacts.is_empty() {
-        return Err("executable or frontend package requires declared artifacts".to_string());
+        return Err("executable package requires declared artifacts".to_string());
     }
 
     let mut paths = HashSet::new();
@@ -1533,26 +1434,6 @@ pub(super) fn read_plugin_manifest_from_archive(
         .read_to_string(&mut manifest_raw)
         .map_err(io_error)?;
     Ok((manifest_raw, manifest_prefix))
-}
-
-fn read_plugin_archive_text_entry(archive_path: &Path, entry_path: &str) -> Result<String, String> {
-    let file = File::open(archive_path).map_err(io_error)?;
-    let mut archive = zip::ZipArchive::new(file).map_err(|error| error.to_string())?;
-    let mut archive_entry = archive
-        .by_name(entry_path)
-        .map_err(|_| format!("plugin archive entry not found: {entry_path}"))?;
-    let mut text = String::new();
-    archive_entry.read_to_string(&mut text).map_err(io_error)?;
-    Ok(text)
-}
-
-pub(super) fn plugin_archive_entry_path(prefix: &str, relative_path: &Path) -> String {
-    let relative = relative_path.to_string_lossy().replace('\\', "/");
-    if prefix.is_empty() {
-        relative
-    } else {
-        format!("{prefix}{relative}")
-    }
 }
 
 fn hash_text_sha256(value: &str) -> String {

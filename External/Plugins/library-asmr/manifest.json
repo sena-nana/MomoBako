@@ -23,15 +23,10 @@
     "organize-candidates"
   ],
   "enabled": true,
-  "sdk": "frontend",
-  "entry": {
-    "frontend": {
-      "module": "src/register.js",
-      "export": "register"
-    }
-  },
+  "sdk": "backend",
+  "entry": {},
   "source": "builtin",
-  "runtime": "vue-module",
+  "runtime": "manifest-only",
   "permissions": [
     "readRepository",
     "readMetadata",
@@ -83,14 +78,6 @@
   "contributes": {
     "libraryExtension": {
       "libraryKind": "asmr",
-      "entry": "src/register.js",
-      "slots": [
-        "metadataPanel",
-        "previewPanel",
-        "fileSummary",
-        "searchShortcuts",
-        "playlist"
-      ],
       "searchShortcuts": [
         "works",
         "lyrics",

@@ -1,5 +1,5 @@
 // 统一解析项目锁定的 Yarn 入口，避免依赖 Node 安装目录中的 Corepack 私有路径。
-import { spawn, spawnSync, type SpawnOptions, type SpawnSyncOptions } from "node:child_process";
+import { spawnSync, type SpawnSyncOptions } from "node:child_process";
 import { win32 as win32Path } from "node:path";
 
 export interface YarnCommandOptions {
@@ -52,13 +52,4 @@ export function runYarn(
 ) {
   const yarn = resolveYarnCommand();
   return spawnSync(yarn.command, [...yarn.args, ...args], options);
-}
-
-/** 启动长生命周期 Yarn 子进程，供 Tauri 开发服务器使用。 */
-export function spawnYarn(
-  args: readonly string[],
-  options: SpawnOptions,
-) {
-  const yarn = resolveYarnCommand();
-  return spawn(yarn.command, [...yarn.args, ...args], options);
 }

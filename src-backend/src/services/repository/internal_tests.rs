@@ -938,7 +938,7 @@ mod tests {
         assert!(manifests.iter().any(|manifest| {
             manifest.plugin_id == "momobako.preview.media"
                 && manifest.category == "preview"
-                && manifest.sdk == "frontend"
+                && manifest.runtime == "manifest-only"
                 && manifest.hooks.iter().any(|hook| hook.slot == "playlist")
         }));
         assert!(manifests.iter().any(|manifest| {
@@ -1052,96 +1052,6 @@ mod tests {
         assert_eq!(PathBuf::from(response.path), expected_path);
         assert!(expected_path.is_dir());
         assert!(expected_path.starts_with(service_root.join("plugin-data")));
-    }
-
-    #[test]
-    fn plugin_data_file_preview_source_is_limited_to_plugin_data_dir() {
-        let workspace = TestWorkspace::new("plugin-data-preview-source");
-        let service_root = workspace.path("service");
-        seed_standard_test_plugins(&service_root);
-        let state = RepositoryState::from_root(service_root.clone());
-        let data_dir = plugin_data_dir(&service_root, LOCAL_FILESYSTEM_PLUGIN_ID);
-        fs::create_dir_all(&data_dir).expect("plugin data directory should be created");
-        let preview_file = data_dir.join("preview.txt");
-        fs::write(&preview_file, b"hello").expect("preview file should be written");
-        let outside_file = service_root.join("outside.txt");
-        fs::write(&outside_file, b"outside").expect("outside file should be written");
-
-        let response = state
-            .prepare_plugin_data_file_preview_source(PluginDataFilePreviewSourceRequest {
-                plugin_id: LEGACY_LOCAL_FILESYSTEM_PLUGIN_ID.to_string(),
-                path: preview_file.to_string_lossy().to_string(),
-                media_type: "text/plain; charset=utf-8".to_string(),
-            })
-            .expect("plugin data preview source should register");
-
-        assert_eq!(response.plugin_id, LOCAL_FILESYSTEM_PLUGIN_ID);
-        assert_eq!(response.media_type, "text/plain; charset=utf-8");
-        assert_eq!(response.size_bytes, 5);
-        assert!(state.open_preview_file_source(&response.token).is_ok());
-
-        let error = state
-            .prepare_plugin_data_file_preview_source(PluginDataFilePreviewSourceRequest {
-                plugin_id: LOCAL_FILESYSTEM_PLUGIN_ID.to_string(),
-                path: outside_file.to_string_lossy().to_string(),
-                media_type: "text/plain".to_string(),
-            })
-            .expect_err("outside plugin data files should be rejected");
-
-        assert!(error.contains("outside plugin data directory"));
-    }
-
-    #[test]
-    fn repository_cache_file_preview_source_is_limited_to_repository_cache_dir() {
-        let workspace = TestWorkspace::new("repository-cache-preview-source");
-        let service_root = workspace.path("service");
-        let repo_root = workspace.path("repo");
-        install_local_filesystem_test_plugin_archive(&service_root);
-        let state = RepositoryState::from_root(service_root);
-
-        state
-            .create_repository(RepositoryMutationRequest {
-                repo_id: Some("repo-preview-cache".to_string()),
-                name: "缓存预览测试".to_string(),
-                path: repo_root.to_string_lossy().to_string(),
-                backend_plugin_id: Some(LOCAL_FILESYSTEM_PLUGIN_ID.to_string()),
-                backend_config: None,
-                skip_initial_sync: true,
-            })
-            .expect("repository should be created");
-
-        let cache_dir = repo_root
-            .join(REPO_META_DIR)
-            .join("cache")
-            .join("office-preview");
-        fs::create_dir_all(&cache_dir).expect("repository cache dir should be created");
-        let preview_file = cache_dir.join("preview.pdf");
-        fs::write(&preview_file, b"%PDF-1.4").expect("preview cache file should be written");
-        let outside_file = repo_root.join("outside.pdf");
-        fs::write(&outside_file, b"%PDF-1.4").expect("outside file should be written");
-
-        let response = state
-            .prepare_repository_cache_file_preview_source(RepositoryCacheFilePreviewSourceRequest {
-                repo_id: "repo-preview-cache".to_string(),
-                path: preview_file.to_string_lossy().to_string(),
-                media_type: "application/pdf".to_string(),
-            })
-            .expect("repository cache preview source should register");
-
-        assert_eq!(response.repo_id, "repo-preview-cache");
-        assert_eq!(response.media_type, "application/pdf");
-        assert_eq!(response.size_bytes, 8);
-        assert!(state.open_preview_file_source(&response.token).is_ok());
-
-        let error = state
-            .prepare_repository_cache_file_preview_source(RepositoryCacheFilePreviewSourceRequest {
-                repo_id: "repo-preview-cache".to_string(),
-                path: outside_file.to_string_lossy().to_string(),
-                media_type: "application/pdf".to_string(),
-            })
-            .expect_err("outside repository cache files should be rejected");
-
-        assert!(error.contains("outside repository cache directory"));
     }
 
     #[test]
@@ -1711,8 +1621,8 @@ mod tests {
     }
 
     #[test]
-    fn read_plugin_archive_text_supports_single_root_directory_packages() {
-        let workspace = TestWorkspace::new("plugin-archive-read-text");
+    fn frontend_plugin_packages_are_listed_as_unreadable() {
+        let workspace = TestWorkspace::new("plugin-frontend-rejected");
         let service_root = workspace.path("service");
         let runtime_root = runtime_plugins_dir(&service_root);
         fs::create_dir_all(&runtime_root).expect("runtime plugin dir should be created");
@@ -1739,20 +1649,24 @@ mod tests {
                 )],
             },
         );
+        write_test_plugin_archive(&runtime_root.join("good-plugin.momoplug"), "user.good-plugin");
+
         let state = RepositoryState::from_root(service_root);
+        let plugins = state.list_plugins().expect("plugins should load");
 
-        let response = state
-            .read_plugin_archive_text(PluginArchiveReadRequest {
-                plugin_id: "momobako.example.text-preview".to_string(),
-                path: "dist/register.js".to_string(),
-            })
-            .expect("archive text should load from single-root package");
-
-        assert_eq!(
-            response.path,
-            "momobako-example-text-preview-0.1.0/dist/register.js"
-        );
-        assert!(response.text.contains("register"));
+        assert!(!plugins
+            .iter()
+            .any(|plugin| plugin.plugin_id == "momobako.example.text-preview"));
+        let rejected = plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == "broken.example-text-preview-0-1-0")
+            .expect("frontend plugin package should be listed as unreadable");
+        assert!(!rejected.enabled);
+        assert!(matches!(rejected.status.as_str(), "error" | "disabled"));
+        assert!(rejected.description.contains("unsupported plugin form"));
+        assert!(plugins
+            .iter()
+            .any(|plugin| plugin.plugin_id == "user.good-plugin" && plugin.status == "ready"));
     }
 
     #[test]
@@ -1768,20 +1682,12 @@ mod tests {
                 name: "Media Preview",
                 source: "builtin",
                 runtime: "manifest-only",
-                sdk: "frontend",
+                sdk: "backend",
                 kind: "preview",
                 plugin_type_layer: "library-kind",
                 plugin_type_kind: "preview",
-                entry: serde_json::json!({
-                    "frontend": {
-                        "module": "dist/register.js",
-                        "export": "register"
-                    }
-                }),
-                extra_files: vec![(
-                    "dist/register.js".to_string(),
-                    "export function register() {}".to_string(),
-                )],
+                entry: serde_json::json!({}),
+                extra_files: Vec::new(),
             },
         );
 
@@ -1973,8 +1879,8 @@ mod tests {
                         "kind": "preview"
                     },
                     "capabilities": ["preview", "playlist", "media"],
-                    "sdk": "frontend",
-                    "runtime": "vue-module",
+                    "sdk": "backend",
+                    "runtime": "manifest-only",
                     "source": "builtin",
                     "hooks": [
                         { "slot": "playlist", "action": "preview.media.enqueue", "label": "加入播放列表" }
@@ -1995,7 +1901,7 @@ mod tests {
                         "kind": "audio"
                     },
                     "capabilities": ["library", "audio"],
-                    "sdk": "frontend",
+                    "sdk": "backend",
                     "runtime": "manifest-only",
                     "source": "builtin",
                     "optional": ["momobako.parser.audio"]

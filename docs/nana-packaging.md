@@ -23,7 +23,7 @@ zip 解开是一个 `MomoBako` 目录，布局照 NanaUI 合同：
 MomoBako/
 ├─ MomoBako.exe                  主程序，带图标和版本信息
 └─ runtime/
-   ├─ plugins/*.momoplug         随附插件，External/Plugins 下除 example、template 外的全部插件
+   ├─ plugins/*.momoplug         随附插件，External/Plugins 下的全部插件（现在 44 个，其中 10 个后端插件）
    ├─ manifest/package.json      身份、布局、随附插件清单、每个文件的大小和 BLAKE3
    ├─ manifest/portable          只有便携版有，空文件，标记便携布局
    └─ bin/、resources/、tools/   现在是空的
@@ -90,7 +90,7 @@ corepack yarn nana:package                             # 打包、校验、压 z
 5. 用 `gh release create --draft` 建草稿 Release 并上传两个 zip（同名草稿已经在时用 `gh release upload --clobber` 覆盖），说明里写两个 zip 的区别，后面接自动生成的更新记录；
 6. 照旧把 `.momoplug` 作为工作流产物上传。
 
-发布流程不再调用 tauri-action，也不读 `src-tauri`。CI（`ci.yml`）这一轮没有改，仍跑 `yarn verify` 和 `yarn test:backend`。
+CI（`ci.yml`）跑 `yarn verify`（Node 脚本类型检查、vitest 和 `momobako-backend`、`momobako-nana` 的编译检查）和 `yarn test:backend`，另外构建并打包插件，不打主程序的发布包。
 
 ## 校验
 
@@ -102,7 +102,7 @@ corepack yarn nana:package                             # 打包、校验、压 z
 | 警告 | `manifest.signature`、`signing.publisher`：没有发布者签名。`dependencies.vc-runtime`：动态链接 VC++ 运行库（`MSVCP140.dll`、`VCRUNTIME140.dll`、`VCRUNTIME140_1.dll`）。`dependencies.assumed-system`：`dcomp.dll`（DirectComposition，Windows 自带，只是不在 NanaUI 的系统库名单里） |
 | 未执行 | `startup.early-splash`、`startup.ui-ready-handoff`、`installer.round-trip`、`static-app-plan`：NanaUI 还没实现 |
 
-自检只验证到开窗以前。本地另外把便携版解到一个短路径下直接启动：窗口进到工作区（还没有资源库），48 个随附插件同步进 `data/service-data/plugins/builtin`，10 个后端插件都加载上、进程插件的运行器起来了；关窗（`WM_CLOSE`）以后进程和运行器都退出，所有文件都在 `data/` 下，本机的 `%APPDATA%`、`%LOCALAPPDATA%` 没有动。
+自检只验证到开窗以前。本地另外把便携版解到一个短路径下直接启动：窗口进到工作区（还没有资源库），48 个随附插件（当时还有 4 个只有前端的预览插件，删掉以后是 44 个）同步进 `data/service-data/plugins/builtin`，10 个后端插件都加载上、进程插件的运行器起来了；关窗（`WM_CLOSE`）以后进程和运行器都退出，所有文件都在 `data/` 下，本机的 `%APPDATA%`、`%LOCALAPPDATA%` 没有动。
 
 dist 版主程序约 87 MB，两个 zip 各约 53 MiB。本机 16 核冷编译主程序约 35 分钟（fat LTO、单代码生成单元），插件发布构建约 9 分钟。
 

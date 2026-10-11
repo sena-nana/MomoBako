@@ -1,8 +1,8 @@
-//! Repository service DTOs shared with ViewModels and Tauri commands.
+//! Repository service DTOs shared by the services, the ViewModels and the Nana host.
 
 use super::*;
 
-/// Core-owned playlist playback state shared by Nana and Tauri hosts.
+/// Core-owned playlist playback state shared by the services and the Nana host.
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaybackSessionState {
@@ -1013,66 +1013,11 @@ pub(super) struct PluginRuntimeCallResult {
     pub(super) runtime: Option<PluginCallRuntime>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginArchiveReadRequest {
-    pub plugin_id: String,
-    pub path: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginArchiveTextResponse {
-    pub plugin_id: String,
-    pub path: String,
-    pub text: String,
-}
-
 #[derive(Debug, Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginDataDirectoryResponse {
     pub plugin_id: String,
     pub path: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginDataFilePreviewSourceRequest {
-    pub plugin_id: String,
-    pub path: String,
-    pub media_type: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RepositoryCacheFilePreviewSourceRequest {
-    pub repo_id: String,
-    pub path: String,
-    pub media_type: String,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PluginDataFilePreviewSourceResponse {
-    pub plugin_id: String,
-    pub path: String,
-    pub token: String,
-    pub source_url: Option<String>,
-    pub media_type: String,
-    pub size_bytes: i64,
-    pub modified_at: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RepositoryCacheFilePreviewSourceResponse {
-    pub repo_id: String,
-    pub path: String,
-    pub token: String,
-    pub source_url: Option<String>,
-    pub media_type: String,
-    pub size_bytes: i64,
-    pub modified_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, Clone)]
@@ -1848,8 +1793,6 @@ pub struct ApiDefinition {
     pub method: String,
     pub path: String,
     pub summary: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub command: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plugin_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

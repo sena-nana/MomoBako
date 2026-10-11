@@ -2,7 +2,6 @@
 
 use super::{sync_watched_paths, RepositoryRuntime};
 use crate::services::repository::RepositoryState;
-use std::path::PathBuf;
 
 fn log_runtime_operation_error(action: &str, message: &str, error: &str) {
     crate::app_log!(
@@ -15,7 +14,7 @@ fn log_runtime_operation_error(action: &str, message: &str, error: &str) {
 }
 
 impl RepositoryRuntime {
-    /// Runs a read-only repository operation on Tauri's blocking pool.
+    /// Runs a read-only repository operation on the host Tokio runtime's blocking pool.
     pub async fn run_read<T, F>(&self, operation: F) -> Result<T, String>
     where
         T: Send + 'static,
@@ -101,36 +100,6 @@ impl RepositoryRuntime {
                 log_runtime_operation_error(
                     "collectionWriteTaskFailed",
                     "资源库集合写入任务执行失败。",
-                    &error,
-                );
-                Err(error)
-            }
-        }
-    }
-
-    /// Returns all repository roots that are allowed to serve thumbnails to the UI shell.
-    pub async fn repository_thumbnail_roots(&self) -> Result<Vec<PathBuf>, String> {
-        let repository_state = self.repository_state.clone();
-        match tokio::task::spawn_blocking(move || {
-            repository_state.list_repository_thumbnail_roots()
-        })
-        .await
-        {
-            Ok(result) => {
-                if let Err(error) = &result {
-                    log_runtime_operation_error(
-                        "thumbnailRootsFailed",
-                        "读取缩略图授权目录失败。",
-                        error,
-                    );
-                }
-                result
-            }
-            Err(error) => {
-                let error = error.to_string();
-                log_runtime_operation_error(
-                    "thumbnailRootsTaskFailed",
-                    "读取缩略图授权目录任务执行失败。",
                     &error,
                 );
                 Err(error)

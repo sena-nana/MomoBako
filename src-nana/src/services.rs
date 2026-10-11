@@ -1,7 +1,7 @@
 //! Nana 宿主使用的共享应用服务组合。
 //!
 //! 每个 ViewModel 都由同一个 `RepositoryRuntime` 构造，保证读写锁、事件 sink、
-//! 预览服务和任务 runner 只有一份所有权；页面层只持有这个组合，不直接接触 Tauri。
+//! 预览服务和任务 runner 只有一份所有权；页面层只持有这个组合。
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;

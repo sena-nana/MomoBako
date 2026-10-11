@@ -49,9 +49,9 @@ for (const name of readdirSync(distRoot, { withFileTypes: true }).sort((left, ri
   if (!existsSync(manifestPath)) continue;
   const manifest = readMomoPluginManifest(manifestPath);
   if (
-    requestedPluginIds.size === 0
-      ? ["example", "template"].includes(name.name)
-      : !requestedPluginIds.has(name.name) && !requestedPluginIds.has(manifest.pluginId)
+    requestedPluginIds.size > 0
+    && !requestedPluginIds.has(name.name)
+    && !requestedPluginIds.has(manifest.pluginId)
   ) {
     continue;
   }

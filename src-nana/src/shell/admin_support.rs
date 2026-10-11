@@ -169,11 +169,10 @@ pub fn plugin_source_label(source: &str) -> &'static str {
     }
 }
 
-/// 运行时芯片：原生动态库、Vue 模块、仅清单，其余是「未知运行时」。
+/// 运行时芯片：原生动态库、仅清单，其余是「未知运行时」。
 pub fn plugin_runtime_label(runtime: &str) -> &'static str {
     match runtime {
         "native-dylib" => "原生动态库",
-        "vue-module" => "Vue 模块",
         "manifest-only" => "仅清单",
         _ => "未知运行时",
     }
@@ -779,17 +778,12 @@ pub fn is_builtin_tool_page(id: &str) -> bool {
     matches!(id, TOOL_FILE_MANAGER | TOOL_EAGLE_IMPORTER | TOOL_API_PLAYGROUND)
 }
 
-/// 拓展页的工具：已启用、可加载前端模块的插件里 `contributes.toolPages` 的条目，
-/// 按 `order`（缺省 100）、名称、标识排序，和 Vue 的注册表一致。
+/// 拓展页的工具：已启用、状态可用的插件里 `contributes.toolPages` 的条目，
+/// 按 `order`（缺省 100）、名称、标识排序，和 Vue 的注册表一致。页面由宿主画，插件只声明。
 pub fn tool_pages_from_plugins(plugins: &[PluginManifest]) -> Vec<super::ToolPageEntry> {
     let mut pages = Vec::new();
     for plugin in plugins {
-        let loadable = plugin.enabled
-            && plugin.sdk == "frontend"
-            && plugin.runtime == "vue-module"
-            && plugin.entry.get("frontend").and_then(|item| item.get("module")).and_then(|item| item.as_str()).is_some_and(|text| !text.trim().is_empty())
-            && !matches!(plugin.status.as_str(), "disabled" | "unavailable" | "error");
-        if !loadable {
+        if !plugin.enabled || matches!(plugin.status.as_str(), "disabled" | "unavailable" | "error") {
             continue;
         }
         let Some(entries) = plugin.contributes.get("toolPages").and_then(|item| item.as_array()) else {

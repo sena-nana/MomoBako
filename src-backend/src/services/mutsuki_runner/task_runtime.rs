@@ -227,7 +227,7 @@ impl MomoTaskRuntime {
         task_runtime
     }
 
-    /// 将序列化后的 Tauri 请求提交到正确 lane，并保留旧的输出/进度契约。
+    /// 把宿主的请求序列化后提交到正确 lane，交回任务输出和进度事件。
     pub async fn execute<Request>(&self, protocol_id: &'static str, request: Request) -> TaskResult
     where
         Request: Serialize + Send + 'static,

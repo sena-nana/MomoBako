@@ -1,7 +1,0 @@
-{
-  "bundle": {
-    "resources": {
-      "../External/Plugins/.packages/*.momoplug": "plugins/"
-    }
-  }
-}

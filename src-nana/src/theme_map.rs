@@ -11,7 +11,7 @@ use nana_ui_core::SemanticColorMix;
 
 /// 一条 CSS 变量到 Nana 调色板字段的对应。
 pub struct ColorRole {
-    /// `DESIGN.md` 与 `src/styles` 使用的变量名。
+    /// `DESIGN.md` 的令牌名，沿用 Vue 界面 CSS 变量的名字。
     pub css: &'static str,
     /// `SemanticPalette` 上的字段名。
     pub nana: &'static str,

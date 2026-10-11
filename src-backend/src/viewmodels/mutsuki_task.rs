@@ -1,4 +1,4 @@
-//! MomoBako 长任务的 Tauri 命令编排边界。
+//! MomoBako 长任务的提交、观察和取消边界。
 
 use crate::services::mutsuki_runner::MomoTaskRuntime;
 use serde::Serialize;

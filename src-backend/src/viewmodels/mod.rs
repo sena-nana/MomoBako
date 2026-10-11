@@ -1,4 +1,4 @@
-//! Tauri command orchestration layer.
+//! ViewModel layer: the async operations the Nana host calls in process.
 
 pub mod mutsuki_task;
 pub mod plugin;

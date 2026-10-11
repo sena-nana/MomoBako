@@ -7,19 +7,17 @@ import { parse, stringify } from "smol-toml";
 interface MomoPluginManifest {
   pluginId: string;
   version: string;
+  sdk?: string;
   runtime?: string;
   entry?: {
     backend?: unknown;
-    frontend?: {
-      module?: string;
-    };
   };
 }
 
 export const PLUGIN_PACKAGE_FORMAT_VERSION = 2;
 export const PLUGIN_PACKAGE_MANIFEST = "momobako.package.json";
 
-export type PluginDeployment = "manifest" | "frontend" | "abi" | "process";
+export type PluginDeployment = "manifest" | "abi" | "process";
 
 export interface PluginPackageArtifact {
   role: string;
@@ -158,12 +156,20 @@ export function sha256File(path: string): string {
   return `sha256:${createHash("sha256").update(readFileSync(path)).digest("hex")}`;
 }
 
-/** 根据产品清单选择宿主部署模型，避免安装来源伪装成执行信任级别。 */
+/**
+ * 根据产品清单选择宿主部署模型，避免安装来源伪装成执行信任级别。
+ * 插件只有后端形态（native-dylib、process、manifest-only），别的形态（包括原来的前端插件）直接报错。
+ */
 function deploymentForManifest(manifest: MomoPluginManifest): PluginDeployment {
-  if (manifest.runtime === "native-dylib") return "abi";
-  if (manifest.runtime === "process") return "process";
-  if (manifest.runtime === "vue-module" || manifest.entry?.frontend?.module) return "frontend";
-  return "manifest";
+  if (manifest.sdk === undefined || manifest.sdk === "backend") {
+    if (manifest.runtime === "native-dylib") return "abi";
+    if (manifest.runtime === "process") return "process";
+    if (manifest.runtime === "manifest-only") return "manifest";
+  }
+  throw new Error(
+    `unsupported plugin form: ${manifest.pluginId} (sdk ${manifest.sdk ?? "unset"}, runtime ${manifest.runtime ?? "unset"}); `
+      + "plugins must be backend native-dylib, process or manifest-only",
+  );
 }
 
 /** 读取并收窄 v2 包信封。 */
@@ -178,7 +184,7 @@ function readPluginPackageEnvelope(path: string): PluginPackageEnvelope {
     || typeof envelope.pluginId !== "string"
     || typeof envelope.version !== "string"
     || typeof envelope.targetTriple !== "string"
-    || !["manifest", "frontend", "abi", "process"].includes(envelope.deployment ?? "")
+    || !["manifest", "abi", "process"].includes(envelope.deployment ?? "")
     || envelope.productManifest !== "manifest.json"
     || !Array.isArray(envelope.artifacts)
   ) {
@@ -210,10 +216,6 @@ export function writePluginPackageEnvelope(pluginDir: string, targetTriple: stri
         executable: companion.executable,
       });
     }
-  } else if (manifest.entry?.frontend?.module) {
-    const path = manifest.entry.frontend.module.replace(/\\/g, "/");
-    const absolutePath = resolvePluginPackagePath(pluginDir, path, "frontend artifact");
-    artifacts.push({ role: "frontend", path, sha256: sha256File(absolutePath) });
   }
 
   const envelope: PluginPackageEnvelope = {

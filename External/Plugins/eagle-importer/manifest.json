@@ -12,14 +12,9 @@
   "description": "把 EagleLibrary 合并导入当前工作区目录。",
   "capabilities": ["tool-page", "eagle-import"],
   "enabled": true,
-  "sdk": "frontend",
-  "runtime": "vue-module",
-  "entry": {
-    "frontend": {
-      "module": "dist/register.js",
-      "export": "register"
-    }
-  },
+  "sdk": "backend",
+  "runtime": "manifest-only",
+  "entry": {},
   "contributes": {
     "toolPages": [
       {

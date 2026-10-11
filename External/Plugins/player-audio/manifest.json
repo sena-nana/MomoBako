@@ -8,22 +8,13 @@
   },
   "kind": "preview",
   "category": "preview",
-  "description": "提供可替换的通用音频预览、歌词与播放列表播放能力。",
-  "capabilities": ["preview", "playlist", "audio", "lyrics", "momobako.player.audio"],
+  "description": "登记音频顺序播放的播放集类型，是音频播放能力的官方实现，由宿主播放。",
+  "capabilities": ["preview", "playlist", "audio", "momobako.player.audio"],
   "enabled": true,
-  "sdk": "frontend",
-  "runtime": "vue-module",
-  "entry": {
-    "frontend": {
-      "module": "dist/register.js",
-      "export": "register"
-    }
-  },
+  "sdk": "backend",
+  "runtime": "manifest-only",
+  "entry": {},
   "contributes": {
-    "preview": {
-      "extensions": ["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"],
-      "thumbnail": false
-    },
     "playlistPlayers": [
       {
         "playerTypeId": "momobako.playlist.audio-sequence",

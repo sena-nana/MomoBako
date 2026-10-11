@@ -83,8 +83,8 @@ fn source(path: &str) -> FilePreviewSourceResponse {
 }
 
 /// 分派照 Vue `filePreviewExtensions.ts`：图片、Markdown（先于文本）、文本、音视频，再是内置的 PDF、
-/// 模型和压缩包；随附插件（`office-preview` 的 pdf、`three-model-preview`、`preview-archive`）声明的扩展名
-/// 都落到内置视图上，认不出的扩展名（例如只有第三方插件认得的 psd）照 Vue 没有预览插件时一样不预览。
+/// Office、模型和压缩包（原来由 `office-preview`、`three-model-preview`、`preview-archive` 插件的前端绘制），
+/// 认不出的扩展名（例如 psd）照 Vue 没有预览插件时一样不预览。
 #[test]
 fn extension_dispatch_prefers_markdown_and_native_preview() {
     assert_eq!(super::support::classify("PNG"), PreviewKind::Image);

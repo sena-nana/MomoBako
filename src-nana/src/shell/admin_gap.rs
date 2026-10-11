@@ -1,11 +1,11 @@
 //! 拓展页：左侧插件工具导航和右侧工具页，下面是插件管理面板。
 //!
 //! 照 `ExtensionsPanel.vue`：有工具页时先画两栏（导航 180–240 宽，页面占余下宽度，
-//! 最小高 520），再画「文件系统与插件」。内置的 API Playground、文件导入和 Eagle 导入画原生页面；
-//! 其它插件的工具页是插件自己的 Vue 组件，Nana 跑不了，只画页头和说明。
+//! 最小高 520），再画「文件系统与插件」。插件清单只声明工具页，内置的 API Playground、文件导入和
+//! Eagle 导入画原生页面；宿主没有的工具页 id 只画页头和说明。
 //!
 //! 页面只建一次，只读 [`ToolsSignals`]：导航按工具页 id 做键，选中态和文字是绑定；右侧按当前工具页
-//! 的种类换内容（原生页面的输入框和按钮在各自的页面里绑定），第三方页面的说明随工具页一起换。
+//! 的种类换内容（原生页面的输入框和按钮在各自的页面里绑定），没有内置页面的工具页的说明随工具页一起换。
 
 use nana_ui::runtime::view::{css, dynamic, signal, widget, AnyView, IntoView, Signal};
 use nana_ui::runtime::{Activate, AlignSpec, InteractionStyle, LengthSpec, NodeStyle, SemanticPaint, Stack};
@@ -219,7 +219,7 @@ fn page_frame(signals: ToolsSignals) -> AnyView {
     .into_any()
 }
 
-/// 第三方工具页：Vue 里是插件自己的组件。Nana 不能运行它，画页头并说明原因。
+/// 宿主没有内置的工具页：插件不能自带页面，只画页头并说明原因。
 fn foreign_page(page: &ToolPageEntry) -> AnyView {
     let mut header = vec![
         widget(style::eyebrow_text(&page.plugin_name)).key(format!("admin-foreign-tool-eyebrow-{}", style::key_part(&page.id))).into_any(),
@@ -234,7 +234,7 @@ fn foreign_page(page: &ToolPageEntry) -> AnyView {
                 .into_any(),
         );
     }
-    let notice = style::state_notice("这个工具页由插件的前端组件绘制，Nana 原生界面不能运行它。", false, "admin-foreign-tool-notice").into_any();
+    let notice = style::state_notice("MomoBako 没有这个工具页：插件只能打开内置的工具页，不能自带页面。", false, "admin-foreign-tool-notice").into_any();
     widget(pad(column(14.0), 18.0, 18.0, 18.0, 18.0))
         .children((widget(column(0.0)).children(header), notice))
         .key(format!("admin-foreign-tool-{}", style::key_part(&page.id)))

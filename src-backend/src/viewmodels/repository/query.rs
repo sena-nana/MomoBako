@@ -1,4 +1,4 @@
-//! Read-heavy repository command orchestration for snapshots, search, metadata, and file preview.
+//! Read-heavy repository orchestration for snapshots, search, metadata, and file preview.
 
 use crate::services::repository::{
     AssetDetail, FilePreviewSourceResponse, FileReadRequest, MetadataUpdateRequest,

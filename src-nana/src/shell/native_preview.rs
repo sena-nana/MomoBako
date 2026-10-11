@@ -1,7 +1,7 @@
 //! 内置原生预览。压缩包列文件，PDF 画页面，Office 抽文本，模型能解析的网格会光栅化。
 //!
-//! 扩展名到预览视图的对应在 [`builtin_view`]：随附插件（`preview-archive`、`office-preview`、
-//! `three-model-preview`）声明的扩展名都在这里。插件声明的别的预览要运行插件前端的 Vue 组件，Nana 不登记。
+//! 扩展名到预览视图的对应在 [`builtin_view`]：原来由 `preview-archive`、`office-preview`、
+//! `three-model-preview` 插件前端绘制的扩展名都在这里。插件不带预览，清单里的预览声明宿主不读。
 //! PDF 按内容流翻页。解不开的滤镜记成该页失败，不假装成空白成功。
 //! Open XML 仍走 zip。二进制 Office 只刮取连续的 UTF-16LE 文本，不还原版式。
 //! OBJ、STL、glTF/GLB、3MF、VRM 能取出三角形就软件光栅成页图，编码成 PNG 画进预览框。

@@ -1,13 +1,11 @@
-//! Plugin and cache command orchestration.
+//! Plugin and cache orchestration.
 
 use crate::services::repository::{
-    ApiDesignSnapshot, CacheSnapshot, PluginArchiveReadRequest, PluginArchiveTextResponse,
-    PluginCallRequest, PluginCallResult, PluginConfigDeleteRequest, PluginConfigSetRequest,
-    PluginConfigSnapshot, PluginDataDirectoryResponse, PluginDataFilePreviewSourceRequest,
-    PluginDataFilePreviewSourceResponse, PluginEnabledRequest, PluginHookExecutionListRequest,
+    ApiDesignSnapshot, CacheSnapshot, PluginCallRequest, PluginCallResult,
+    PluginConfigDeleteRequest, PluginConfigSetRequest, PluginConfigSnapshot,
+    PluginDataDirectoryResponse, PluginEnabledRequest, PluginHookExecutionListRequest,
     PluginHookExecutionListResponse, PluginInstallRequest, PluginManifest, PluginMutationResponse,
     PlaylistPlayerContribution,
-    RepositoryCacheFilePreviewSourceRequest, RepositoryCacheFilePreviewSourceResponse,
 };
 use crate::services::runtime::RepositoryRuntime;
 
@@ -30,15 +28,6 @@ impl PluginViewModel {
             .await
     }
 
-    pub async fn read_plugin_archive_text(
-        &self,
-        request: PluginArchiveReadRequest,
-    ) -> Result<PluginArchiveTextResponse, String> {
-        self.runtime
-            .run_read(move |state| state.read_plugin_archive_text(request))
-            .await
-    }
-
     pub async fn get_plugin_data_directory(
         &self,
         plugin_id: String,
@@ -46,30 +35,6 @@ impl PluginViewModel {
         self.runtime
             .run_write(move |state| state.get_plugin_data_directory(plugin_id))
             .await
-    }
-
-    pub async fn prepare_plugin_data_file_preview_source(
-        &self,
-        request: PluginDataFilePreviewSourceRequest,
-    ) -> Result<PluginDataFilePreviewSourceResponse, String> {
-        let mut response = self
-            .runtime
-            .run_read(move |state| state.prepare_plugin_data_file_preview_source(request))
-            .await?;
-        response.source_url = Some(self.runtime.preview_source_url(&response.token));
-        Ok(response)
-    }
-
-    pub async fn prepare_repository_cache_file_preview_source(
-        &self,
-        request: RepositoryCacheFilePreviewSourceRequest,
-    ) -> Result<RepositoryCacheFilePreviewSourceResponse, String> {
-        let mut response = self
-            .runtime
-            .run_read(move |state| state.prepare_repository_cache_file_preview_source(request))
-            .await?;
-        response.source_url = Some(self.runtime.preview_source_url(&response.token));
-        Ok(response)
     }
 
     pub async fn get_plugin_config(
