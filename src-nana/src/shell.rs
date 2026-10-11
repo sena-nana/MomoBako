@@ -645,6 +645,8 @@ mod tests;
 #[cfg(test)]
 mod escape_tests;
 #[cfg(test)]
+mod disabled_fade_tests;
+#[cfg(test)]
 mod data_load_tests;
 #[cfg(test)]
 mod operation_row_tests;

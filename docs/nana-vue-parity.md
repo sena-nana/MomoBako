@@ -21,6 +21,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 **颜色合成。**
 - NanaUI 在线性空间混合（见 NanaUI `docs/reference/text-engine.md`），Chromium 在 sRGB 空间混合。带透明度的主题角色（强调浅底、悬停底、浅红浅绿底）在 Nana 里更亮，深色主题下更明显。主题角色保留 NanaUI 的设计，不为对齐改动。
 - 例外：Vue 用整块 `opacity` 盖在已知不透明底色上的地方（禁用态、色块外圈、播放条淡化），改用 `SemanticColorMix::new(前景, 底色, 比例)` 直接在 sRGB 通道混。
+- 停用的图标按钮：NanaUI 的 `IconButton` 停用时整枚淡到 50%（线性空间合成）。侧栏标题工具、添加资源库表单的关闭钮交给它，不再自己写 0.45；播放条的传输按钮由自绘按上一条在 sRGB 里混好停用色，宿主是没有可见文字的 `Button`，不让 NanaUI 再淡一层（`disabled_fade_tests.rs`）。
 - 纯黑遮罩：线性空间里是把底色乘以 `1 - α`。要和 Vue 的 45% 黑一样暗，不透明度取 `linear_scrim_alpha(0.45) = 1 - 0.55^2.2 ≈ 0.732`。对话框的遮罩是主题的效果令牌 `modal_scrim`，`appearance.rs` 按这个换算写进去；背景模糊是 `modal_scrim_blur`，照 CSS 写 2。
 
 **按钮。**

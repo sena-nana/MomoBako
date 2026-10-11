@@ -160,7 +160,7 @@ fn caret(
     let look = move |expanded: bool| if expanded { (CARET_DOWN, labels.0) } else { (CARET_RIGHT, labels.1) };
     let (icon, label) = look(expanded());
     let mut button = IconButton::new(icon, label).size(ControlSize::Small);
-    let mut style = parts::icon_button_style(TOGGLE_WIDTH, nana_ui::runtime::RadiusTier::Xs, SemanticColorRole::Faint, None, false);
+    let mut style = parts::icon_button_style(TOGGLE_WIDTH, nana_ui::runtime::RadiusTier::Xs, SemanticColorRole::Faint, None);
     {
         let layout = Arc::make_mut(&mut style.layout);
         layout.height = Some(LengthSpec::Px(20.0));
