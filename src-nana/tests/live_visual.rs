@@ -3,7 +3,7 @@
 //! 文档由生产挂载函数建出（`acceptance_document_at_width`，内部是 `mount_shell`），在 1200×800 和
 //! 960×600 的浅深色下截图，再查布局盒：标题栏控件和中文窗口按钮都在，文件列、详情和播放条不互相压住，
 //! 底部入口留在侧栏里；读不到像素时失败，不当作通过。另测窗口按钮、启动页、缺失页和智能文件夹对话框的
-//! 点击，以及重挂以后输入框里的字和光标不丢。
+//! 点击，重挂以后输入框里的字和光标不丢，以及指针停在滚动区上时 overlay 滚动条画在内容上面。
 
 use std::fs;
 use std::path::PathBuf;
@@ -11,11 +11,13 @@ use std::path::PathBuf;
 use momobako_nana::backend::services::repository::{
     FileBrowserEntry, FileBrowserSnapshot, RepositoryStructureCacheState, TaskProgressSnapshot,
 };
+use momobako_nana::appearance::{self, Appearance};
 use momobako_nana::shell::{
-    commit_interaction, mount_shell, ShellMessage, ShellViewModel, WorkspaceRepository,
+    commit_interaction, mount_shell, ShellMessage, ShellPage, ShellViewModel, WorkspaceRepository,
 };
 use momobako_nana::acceptance_document_at_width;
-use nana_ui::runtime::{Entity, StableNodeId, TextInput};
+use nana_ui::runtime::{ComponentGeometry, Entity, StableNodeId, TextInput};
+use nana_ui::theme::{SemanticPalette, ThemeAppearance};
 use nana_ui_devtools::agent::{
     AccessibilityDumpNode, AgentSession, BoundsDump, RuntimeAgentSession,
     protocol::{HitDump, RectDump, ThemeName},
@@ -69,6 +71,61 @@ fn live_workspace_title_bar_layout_and_clicks_hold() {
     assert_missing();
     assert_clicks();
     assert_smart_folder_dialog();
+}
+
+/// 指针停在能滚的设置页上：照 Vue 的 overlay 滚动条淡入 4px 的 `--border-strong` 滑块，画在内容上面；
+/// 真像素里滑块中心就是滑块的颜色。截图留在 `target/nana-live-visual/settings-scrollbar-dark-960.png`。
+#[test]
+fn hovered_settings_page_paints_the_overlay_thumb() {
+    assert!(offscreen::pixels_available(), "读不到像素，不能当作通过");
+    let model = ShellViewModel::for_page(ShellPage::Settings);
+    let document = acceptance_document_at_width(model.clone(), 960.0).expect("production document");
+    let mut session = RuntimeAgentSession::new(document, 960, 600).expect("agent session");
+    session.set_theme(ThemeName::Dark).expect("theme");
+    let installed = appearance::install(session.document_mut(), Appearance::for_mode(&model, ThemeAppearance::Dark));
+    assert!(installed.is_some(), "外观装不上");
+    session.flush().expect("layout");
+    let scroll = keyed(&session, "settings-scroll");
+    let bounds = session.document().context().world().layout_box(scroll).expect("滚动区的布局盒");
+    session.hover_xy(bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0).expect("悬停");
+    // 淡入放完：越过下一个动效截止时间 2 秒。指针还在里面，不会开始淡出。
+    for _ in 0..2 {
+        let context = session.document_mut().context_mut();
+        let Some(deadline) = context.next_animation_deadline() else {
+            break;
+        };
+        context.advance_animations(deadline + std::time::Duration::from_secs(2));
+    }
+    session.flush().expect("淡入后的布局");
+    let Some(ComponentGeometry::Scrollbar { vertical: Some(bar), .. }) =
+        session.document().context().world().component_geometry(scroll)
+    else {
+        panic!("指针在设置页上时竖向滚动条要显示");
+    };
+    session.screenshot_png(visual_dir().join("settings-scrollbar-dark-960.png")).expect("截图");
+    let (size, pixels) = session.screenshot_rgba().expect("pixels");
+    let (x, y) = ((bar.thumb.x + bar.thumb.width / 2.0) as u32, (bar.thumb.y + bar.thumb.height / 2.0) as u32);
+    let at = ((y * size.width + x) * 4) as usize;
+    let thumb = SemanticPalette::dark().border_strong;
+    let expected = [thumb.r, thumb.g, thumb.b].map(|channel| (channel * 255.0).round() as i32);
+    let painted = [pixels[at], pixels[at + 1], pixels[at + 2]].map(i32::from);
+    assert!(
+        painted.iter().zip(expected).all(|(painted, expected)| (painted - expected).abs() <= 2),
+        "滑块中心 ({x}, {y}) 应该是 --border-strong {expected:?}，实际 {painted:?}"
+    );
+    assert_eq!(bar.thumb.width, 4.0);
+}
+
+/// 组装路径最后一段是 `key` 的节点。
+fn keyed(session: &RuntimeAgentSession, key: &str) -> StableNodeId {
+    let document = session.document();
+    let context = document.context();
+    context
+        .world()
+        .document_order(document.document())
+        .into_iter()
+        .find(|id| context.assembly_path(*id).is_some_and(|path| path.rsplit('/').next() == Some(key)))
+        .unwrap_or_else(|| panic!("没有键为 {key} 的节点"))
 }
 
 /// 每次更新都整棵重挂。两次按键之间重挂，第二个字仍要进同一个输入框。
@@ -284,9 +341,15 @@ fn paint(session: &mut RuntimeAgentSession) {
     assert!(stats.width > 0 && stats.height > 0);
 }
 
-fn shot_path(theme: ThemeName, width: u32, height: u32) -> PathBuf {
+/// 实况截图的目录 `src-nana/target/nana-live-visual`，没有时建出来。
+fn visual_dir() -> PathBuf {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/nana-live-visual");
     fs::create_dir_all(&dir).expect("visual dir");
+    dir
+}
+
+fn shot_path(theme: ThemeName, width: u32, height: u32) -> PathBuf {
+    let dir = visual_dir();
     let name = match theme {
         ThemeName::Light if width == 1200 => "live-files-light.png",
         ThemeName::Dark if width == 1200 => "live-files-dark.png",

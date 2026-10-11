@@ -251,12 +251,17 @@ impl OverlaySession for Presence {
     }
 }
 
-/// 标题右侧的关闭位：24 见方、弱色叉号，悬停换底色（`.repository-export-dialog__close`）。
+/// 标题右侧的关闭位：24 见方、弱色叉号，悬停换 `--bg-hover` 底和正文色（`.repository-export-dialog__close`）。
 /// 点它由框架变成关闭请求，按钮自己不发消息；处理中显示为禁用。
+///
+/// 颜色照写的来（`colors_from_style`）：按种类配色会把叉号换成 `--text-muted`，停用时还会整枚按线性空间
+/// 淡到 50%。悬停、按下和焦点沿用 `IconButton` 自带的样子；停用照 Vue `button:disabled` 的 0.45 和卡片底色
+/// （`--bg-elev`）在 sRGB 里混。
 fn close_affordance(busy: BusyFn) -> AnyView {
-    let mut button = IconButton::new(X, "关闭").size(ControlSize::Small);
+    let mut button = IconButton::new(X, "关闭").size(ControlSize::Small).colors_from_style();
     button.style.radius = Some(RadiusTier::Sm);
     button.style.foreground = Some(SemanticColorRole::Faint);
+    button.style.interaction.disabled = crate::theme_map::disabled_paint(SemanticColorRole::Faint, SemanticColorRole::Surface);
     widget(button).key("dialog-close").prop::<bool, fields::icon_button::disabled>(move || busy()).into_any()
 }
 

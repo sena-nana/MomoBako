@@ -24,8 +24,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use nana_ui::runtime::view::{detached, entity_ref, node_ref, widget, with_refs};
 use nana_ui::runtime::{
-    component_descriptors, AppContext, AppShell, Entity, FrameworkError, LengthSpec, RuntimeDocument, StableNodeId, Text,
-    Thumbnail, Workspace, WorkspaceRegionSlot,
+    component_descriptors, AppContext, AppShell, Entity, FrameworkError, LanguageTag, LengthSpec, RuntimeDocument,
+    StableNodeId, Text, Thumbnail, Workspace, WorkspaceRegionSlot,
 };
 use nana_ui::RegionId;
 
@@ -46,6 +46,9 @@ pub(crate) struct ViewStats {
     /// 因输入法组合而延后的次数。
     pub deferred: u64,
 }
+
+/// 应用的语言，照 Vue 根文档的 `<html lang="zh-CN">`。
+const APP_LANGUAGE: &str = "zh-CN";
 
 /// 标记节点的文字前缀；后面是进程内唯一的编号。
 const MARKER_PREFIX: &str = "momobako-shell:";
@@ -81,8 +84,13 @@ pub(crate) struct ShellView {
 
 impl ShellView {
     /// 挂骨架，再把三块内容按 `model` 挂进槽位。骨架和各块的常驻信号都建在这次挂载的作用域里。
+    ///
+    /// 挂之前先给这份文档声明应用语言（[`APP_LANGUAGE`]）：中文标点挤压、避头尾按中文排，拉丁文字和数字
+    /// 也按简体中文挑字形，和 Chrome 用同一份字体画 `lang="zh-CN"` 一致。真实窗口、测试 harness 和截图场景
+    /// 都从这里挂，排出来的字一样。
     pub(crate) fn mount(document: &mut RuntimeDocument, model: &ShellViewModel) -> Result<Self, FrameworkError> {
         let document_id = document.document();
+        document.context_mut().set_default_language(LanguageTag::new(APP_LANGUAGE));
         let marker_text = format!("{MARKER_PREFIX}{}", NEXT_MARKER.fetch_add(1, Ordering::Relaxed));
         let motion = MotionFrame::project(model);
         let fills = TaskFills::project(model);

@@ -76,6 +76,7 @@
 - `dynamic` 和 `when` 的容器不能直接给一个 `Stack`；`each` 可以用 `.container(元素)` 把行直接建进给定的元素（播放集条目这样建进 `ReorderList`）。要替换一行有样式的芯片（筛选芯片行、结果行右侧）时用 `.horizontal(n)`，再用 `css!` 补上原来那个 `Stack` 写过的字段（`flex-wrap`、`justify-content`、`width`、`flex-grow` 等），改完跑 `scene_shots` 逐字节比较。竖排父容器里的 `dynamic` 容器不改排版：内容变了整块换、里面又没有可聚焦控件的小块（插件卡片的芯片、原因和四段）可以这样包，可有可无时再给容器 `.visible(..)`。
 - 一行里固定几个、可有可无的块（日志卡片的来源芯片和元数据芯片）直接建出来，各自 `.visible(..)`，不用嵌套列表。
 - 滚动容器写 key，并让 key 带上内容身份（例如 `workspace-page-scroll-{区域}-{面板}`）：换内容时从顶部开始，同一内容重挂时 `remount_state` 按键路径找回偏移。常驻以后滚动容器不再重建，偏移自然留着。
+- 滚动条的尺寸、颜色和显隐都跟主题（`appearance.rs` 照 Vue 的 overlay 滚动条写），`ScrollView` 不写 `.scrollbars`。滚动条叠在内容上、不占布局，内容右边不用给它让宽度。
 - 面板高度按内容量（`workbench_panel` 的 `min-height` 是 `MinContent`）时，没写定高度的滚动区按里面的全部内容量高，和 CSS 的 `min-height: min-content` 一样：日志列表只写 `flex-basis: 0` 和最小高，面板会被量成全部日志那么高。要在面板里伸展的滚动列表写定基准高（日志列表 72）再 `flex-grow`。
 
 ### 输入框的四条纪律

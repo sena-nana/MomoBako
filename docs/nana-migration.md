@@ -5,7 +5,7 @@ Vue/Tauri 界面（`src/`、`src-tauri/`）正在迁到 NanaUI 原生界面（`s
 ## 入口和运行
 
 - 原生入口是 crate `momobako-nana`：`src-nana/src/main.rs` 调 `momobako_nana::run()`（`src-nana/src/lib.rs`）。
-- NanaUI 固定在提交 `1d65284f950a6a1b66c93aa2d47b838bd2aac28f`。`src-nana/Cargo.toml` 的 `nana-ui`、`nana-ui-core`、`nana-ui-platform` 和开发依赖 `nana-ui-devtools` 都按这个 `rev` 从 Git 取。仓库里没有 NanaUI 副本，根 `Cargo.toml` 也没有 `[patch]`。
+- NanaUI 固定在提交 `5bd2104f14b1d03f24fd92c5e737ba8c287dfcf4`。`src-nana/Cargo.toml` 的 `nana-ui`、`nana-ui-core`、`nana-ui-platform` 和开发依赖 `nana-ui-devtools` 都按这个 `rev` 从 Git 取。仓库里没有 NanaUI 副本，根 `Cargo.toml` 也没有 `[patch]`。
 
 在仓库根目录运行：
 
@@ -28,7 +28,7 @@ yarn tauri:dev               # Vue/Tauri 对照窗口，先构建、打包并暂
 
 ## 渲染和验收路径
 
-- 产品窗口：`run()` 用 `NanaApplication::builder(..).run::<RuntimeApplication<MomoBakoApplication>>(..)`。`MomoBakoApplication` 实现 `ApplicationState`：`initialize` 启动领域服务，读应用设置和本地偏好；`build` 在窗口文档里挂常驻壳层（`ShellView::mount`），提交读资源库列表的任务，建托盘；`update` 先做服务派发，再归约、执行副作用、同步视图；`prepare` 每帧推进计时器、动效和播放时钟，派发预取和目录请求，上传预览和缩略图纹理。步长是两帧之间真实流逝的时间（`frame_clock.rs`）：上一帧没要连续帧时从 0 起算，界面计时器和动效一帧最多算 250 ms，播放时钟不封顶；动效、计时器或播放还在走时按 30 帧要帧。界面进 `RuntimeDocument`，NanaUI 把它提交成 `UiScene`，由 `SceneWgpuPainter` 画到宿主 Surface。
+- 产品窗口：`run()` 用 `NanaApplication::builder(..).run::<RuntimeApplication<MomoBakoApplication>>(..)`。`MomoBakoApplication` 实现 `ApplicationState`：`initialize` 启动领域服务，读应用设置和本地偏好；`build` 在窗口文档里挂常驻壳层（`ShellView::mount`，挂之前照 Vue 的 `lang="zh-CN"` 声明文档语言），提交读资源库列表的任务，建托盘；`update` 先做服务派发，再归约、执行副作用、同步视图；`prepare` 每帧推进计时器、动效和播放时钟，派发预取和目录请求，上传预览和缩略图纹理。步长是两帧之间真实流逝的时间（`frame_clock.rs`）：上一帧没要连续帧时从 0 起算，界面计时器和动效一帧最多算 250 ms，播放时钟不封顶；动效、计时器或播放还在走时按 30 帧要帧。界面进 `RuntimeDocument`，NanaUI 把它提交成 `UiScene`，由 `SceneWgpuPainter` 画到宿主 Surface。
 - 离屏和测试不开窗口：`acceptance_document_for_model`（`lib.rs`）新建一份 `RuntimeDocument`，用 `mount_shell` 挂壳层（和产品窗口一样走 `ShellView::mount`），再交给 `nana-ui-devtools` 的 `RuntimeAgentSession` 布局、出图、读无障碍树和点击。这条路径不启动领域服务和网络服务，验收场景的服务应答由场景按夹具送回（`acceptance_base.rs`）。
 - 离屏结果不替代 Windows 真窗口、拖放、IME、托盘、UIA/AccessKit 和发布包的验收，见 [设备矩阵](./nana-device-matrix.md)。
 

@@ -5,7 +5,9 @@
 //! 具体数值由 `SemanticPalette` 持有；本模块只锁住颜色角色、字号、侧栏宽度和圆角刻度的对应，另给离屏
 //! 清屏色比对用的背景色。
 
+use nana_ui::runtime::{SemanticColorRole, SemanticPaint};
 use nana_ui::theme::{SemanticPalette, ThemeAppearance, ThemeMetrics, UI_METRICS, type_scale};
+use nana_ui_core::SemanticColorMix;
 
 /// 一条 CSS 变量到 Nana 调色板字段的对应。
 pub struct ColorRole {
@@ -143,6 +145,18 @@ pub const TYPE_ROLES: &[TypeRole] = &[
 /// 有的控件直接写节点透明度，有的在 sRGB 里和所在底色混成不透明色（渲染器按线性空间合成会更亮），
 /// 都用这一个值。遮罩的 0.45（`appearance.rs` 的 `SCRIM_CSS_ALPHA`）是另一个意思，不用它。
 pub const DISABLED_OPACITY: f32 = 0.45;
+
+/// 停用控件的字色：Vue `button:disabled` 的 0.45 整体不透明度盖在不透明底色 `base` 上的结果。
+///
+/// `SemanticColorMix::new` 在 sRGB 通道里按比例混（带预乘透明度，两种颜色都不透明时就是逐通道线性插值），
+/// 和浏览器合成 `opacity` 的结果一致，混出来的是不透明色；直接写节点不透明度会被渲染器按线性空间合成，
+/// 比 Vue 亮。`colors_from_style` 的 `IconButton` 照写的停用样子画，NanaUI 不再整枚淡化。
+pub fn disabled_paint(foreground: SemanticColorRole, base: SemanticColorRole) -> SemanticPaint {
+    SemanticPaint {
+        foreground_mix: Some(SemanticColorMix::new(foreground, base, DISABLED_OPACITY)),
+        ..SemanticPaint::default()
+    }
+}
 
 /// Vue `--app-corner-radius` 的默认值（`src/ui/core/useCornerStyle.ts`）。
 pub const DEFAULT_CORNER_RADIUS_PX: f32 = 8.0;

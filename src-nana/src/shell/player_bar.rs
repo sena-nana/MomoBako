@@ -6,7 +6,7 @@
 
 use nana_ui::runtime::view::{fields, widget, AnyView, IntoView};
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, JustifySpec, LengthSpec, RadiusTier, RangeChanged, RangeField, SemanticColorRole,
+    Activate, AlignSpec, IconButton, JustifySpec, LengthSpec, RadiusTier, RangeChanged, RangeField, SemanticColorRole,
     SizeChanged, Stack, Text, Thumbnail,
 };
 use nana_ui::{ContentFit, Icon};
@@ -367,6 +367,9 @@ fn cover(props: &BarProps, dim: Option<(SemanticColorRole, f32)>) -> AnyView {
 }
 
 /// 循环模式、上一首、播放 / 暂停、下一首、当前队列。
+///
+/// 提示照 Vue：只有循环模式写了 `title`（当前模式名）。Vue 另外四个按钮只有 `aria-hidden` 的图标，读屏
+/// 读不出名字；这里都给无障碍名，不加提示。
 fn transport(props: &BarProps) -> AnyView {
     let has_item = props.has_item();
     let skip_disabled = !has_item || !props.can_play;
@@ -379,7 +382,7 @@ fn transport(props: &BarProps) -> AnyView {
     let (play_icon, play_label) = if playing { (icons::PAUSE, "暂停") } else { (icons::PLAY, "播放") };
     widget(Stack::row(6.0).grow(0.0).shrink(0.0).align(AlignSpec::Center))
         .children((
-            widget(glyph_button(mode_icon, mode_label, 15.0, 32.0, !has_item))
+            widget(glyph_button(mode_icon, mode_label, 15.0, 32.0, !has_item).with_tooltip(mode_label))
                 .key("player-cycle-mode")
                 .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(player_message(PlayerMessage::CycleMode))),
             widget(glyph_button(icons::SKIP_BACK, "上一首", 16.0, 32.0, skip_disabled))
@@ -401,20 +404,19 @@ fn transport(props: &BarProps) -> AnyView {
         .into_any()
 }
 
-/// 只有图标的按钮。可读名字给无障碍，图标按 Vue 的像素大小画，颜色是正文色。
+/// 只有图标的传输按钮（Vue `.ui-icon-button`）：`label` 是无障碍名，图标按 Vue 的像素大小画，颜色是正文色，
+/// 外框 `box_size` 见方。
 ///
-/// 外观全由 [`GlyphButton`] 画，停用时它已按 Vue 的 0.45 在 sRGB 里和卡片底色混好。宿主用没有可见文字的
-/// `Button`，不用 `IconButton`：NanaUI 的 `IconButton` 停用时整枚再淡到 50%（线性空间合成），会淡两层。
-pub(crate) fn glyph_button(icon: Icon, label: &str, icon_size: f32, box_size: f32, disabled: bool) -> Button {
-    let button = Button::new("").accessible_name(label).disabled(disabled);
-    let mut style = button.style.clone();
-    style.foreground = Some(SemanticColorRole::Text);
-    style.background = None;
-    style.border = None;
-    style.control_height = None;
-    style.control_padding_x = None;
-    style.painter = Some(GlyphButton { icon, size: icon_size, color: SemanticColorRole::Text, dim: disabled }.into());
-    let layout = std::sync::Arc::make_mut(&mut style.layout);
+/// 外观全由 [`GlyphButton`] 画：它不调 `draw_default`，`IconButton` 的内建图标、悬停底和焦点底都不画；
+/// 停用时它按 `PaintState::disabled` 照 Vue 的 0.45 在 sRGB 里和卡片底色混。颜色照写的来
+/// （`colors_from_style`），NanaUI 不再把停用的按钮整枚淡化，只淡自绘这一次。
+pub(crate) fn glyph_button(icon: Icon, label: &str, icon_size: f32, box_size: f32, disabled: bool) -> IconButton {
+    let mut button = IconButton::new(icon, label).colors_from_style().disabled(disabled);
+    button.style.foreground = Some(SemanticColorRole::Text);
+    button.style.background = None;
+    button.style.control_padding_x = None;
+    button.style.painter = Some(GlyphButton { icon, size: icon_size, color: SemanticColorRole::Text }.into());
+    let layout = std::sync::Arc::make_mut(&mut button.style.layout);
     layout.width = Some(LengthSpec::Px(box_size));
     layout.height = Some(LengthSpec::Px(box_size));
     layout.min_width = Some(LengthSpec::Px(box_size));
@@ -423,7 +425,7 @@ pub(crate) fn glyph_button(icon: Icon, label: &str, icon_size: f32, box_size: f3
     layout.padding_right = Some(LengthSpec::Px(0.0));
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
-    button.style(style)
+    button
 }
 
 /// 12px 弱色时间。窄列里可以在「/」后面折行。

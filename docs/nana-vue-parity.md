@@ -21,7 +21,11 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 **颜色合成。**
 - NanaUI 在线性空间混合（见 NanaUI `docs/reference/text-engine.md`），Chromium 在 sRGB 空间混合。带透明度的主题角色（强调浅底、悬停底、浅红浅绿底）在 Nana 里更亮，深色主题下更明显。主题角色保留 NanaUI 的设计，不为对齐改动。
 - 例外：Vue 用整块 `opacity` 盖在已知不透明底色上的地方（禁用态、色块外圈、播放条淡化），改用 `SemanticColorMix::new(前景, 底色, 比例)` 直接在 sRGB 通道混。
-- 停用的图标按钮：NanaUI 的 `IconButton` 停用时整枚淡到 50%（线性空间合成）。侧栏标题工具、添加资源库表单的关闭钮交给它，不再自己写 0.45；播放条的传输按钮由自绘按上一条在 sRGB 里混好停用色，宿主是没有可见文字的 `Button`，不让 NanaUI 再淡一层（`disabled_fade_tests.rs`）。
+- 停用的图标按钮：NanaUI 的 `IconButton` 只给按种类配色的按钮停用时整枚淡到 50%（线性空间合成）；`colors_from_style` 的按钮照自己写的 `style.interaction.disabled` 画、不再淡（`cfc484ac7`）。壳层里会停用的图标按钮都是后一种，按上一条在 sRGB 里混好停用色，节点不透明度为空（`disabled_fade_tests.rs`）：
+  - 侧栏四个标题工具、播放集行上的「播放」和添加资源库表单的关闭钮：弱色和 `--bg-elev` 按 0.45 混（`theme_map::disabled_paint`）。播放集行选中时底下是一层 `--accent-soft`，停用的「播放」仍按侧栏底色混，没有 Vue 透出来的那一点强调色。
+  - 对话框的关闭位（导出对话框）：也改成 `colors_from_style`，平时是 Vue 的弱色叉号（按种类配色会被换成次要文字色），导出中按卡片底色混。
+  - 播放条的传输按钮：挂自绘的 `IconButton`，自绘不调 `draw_default`，按 `PaintState::disabled` 和卡片底色混。
+  - 标题栏的侧栏开关和 Vue 一样从不停用。
 - 纯黑遮罩：线性空间里是把底色乘以 `1 - α`。要和 Vue 的 45% 黑一样暗，不透明度取 `linear_scrim_alpha(0.45) = 1 - 0.55^2.2 ≈ 0.732`。对话框的遮罩是主题的效果令牌 `modal_scrim`，`appearance.rs` 按这个换算写进去；背景模糊是 `modal_scrim_blur`，照 CSS 写 2。
 
 **按钮。**
@@ -33,6 +37,12 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 - 圆角半径基数来自设置（0–20，默认 8）。xs 到 2xl 分别是基数的 0.5、0.75、1、1.25、1.5、2 倍（`theme_map::corner_metrics`），2xl 是主题的 `RadiusTier::Xxl`。
 - Vue 用 `--radius-2xl` 的大块表面都写 2xl 档：文件卡和详情卡、预览页、播放条、播放集面板，以及插件、日志和搜索页的工作台面板（`.search-workbench__panel`）。改了圆角半径重新装主题，这些表面跟着变，不用重建。
 - 「平滑」圆角是主题的 `CornerShape::SQUIRCLE`（CSS `superellipse(2)`），「普通」是圆弧。
+
+**滚动条。**
+- 照 Vue 的全局 overlay 滚动条（`src/composables/useGlobalScrollbarVisibility.ts`，样式在 Lilia `global-scrollbar.css`，最早写在 `2c6b17b` 的 `index.css`）：原生滚动条隐藏、不占宽度；指针到滚动区上、滚动或拖动时淡入一条 4px 的 `--border-strong` 胶囊，没有轨道，悬停和拖动都不换色、不变粗，最短 24px；理由都没了以后停 480ms 再按 `transition: opacity .48s ease` 淡出。Vue 现在看不到这条滚动条，是缺陷，见下文「没照抄的 Vue 缺陷」。
+- 写在主题里，所有滚动区跟随，不逐个写（`appearance.rs`）：尺寸是 `ThemeMetrics::scrollbar`（12px 车道贴着滚动区的边、不内缩，4px 滑块，激活时也是 4px），颜色、动效和显隐策略是 `ScrollbarRecipe`（`AutoHide`；三态滑块都是 `--border-strong`，没有轨道；淡入淡出 480ms CSS `ease`，停 480ms）。
+- 滚动条叠在内容上，画在滚动区所有后代之上（NanaUI `7f94c925d`），不占布局。56 个场景升级前后的截图只有停用图标按钮的颜色变了，内容宽度、网格列数和列表右边距都没有变化；换上这份尺寸和配方前后，截图和节点清单逐张相同。静止时滚动条不显示，截图里也没有滚动条；指针停在滚动区上时的样子由 `live_visual` 的 `hovered_settings_page_paints_the_overlay_thumb` 在真像素里查。
+- 和 Vue 设计的差别：Vue 只在指针进到滚动区右边（底边）12px 以内时浮出，Nana 指针进到滚动区就显示（NanaUI 的 `AutoHide` 没有只认边缘的模式，见下文「NanaUI 缺口」）；NanaUI 把滑块放在车道正中，竖条离右边 4px（Vue 贴边）、横条离底边 4px（和 Vue 一样），两端不留空（Vue 各留 4px）；滑块在滚动区自己的层叠上下文里，后面的兄弟节点和视口固定的浮层仍能盖住它，Vue 的滑块是 `z-index` 最高的固定定位浮层。
 
 **关闭窗口。** 和 Vue/Tauri 一样直接退出，只有存在未保存修改时才先确认。
 
@@ -48,6 +58,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 - 添加菜单的 160px 宽被 `.ctx-menu` 的最小宽度覆盖。
 - 刷新文件夹树途中换了仓库，Vue 后半段的重读按当时的活动仓库读，会落到新仓库上；Nana 作废这一轮。
 - 换仓库时 Vue 不改当前面板：在回收站、智能文件夹或播放集面板上换仓库，面板留着，回收站面板接着显示新仓库的根目录（不是回收站），智能文件夹和播放集面板是空的。Nana 换仓库时这三个面板回到文件面板。
+- 看不到滚动条：原生滚动条被 Lilia 隐藏（`* { scrollbar-width: none }`、`::-webkit-scrollbar { width: 0 }`），本来由 overlay 滚动条代替。切到 LiliaUI（`613fa7d`）以后它的样式挪进了 Lilia 的 `global-scrollbar.css`，只有 Lilia 自己的 `installGlobalScrollbarVisibility` 会加载这份样式，MomoBako 调的是 `src/composables` 里自己那份旧实现，不加载。滚动和悬停边缘时浮层照样建出来、带上 `is-visible`，但没有定位和颜色：在 `tmp/vue-mock` 里滚动日志页，浮层的 `position` 是 `static`，`::before` 的 `content` 是 `none`、底色透明。所以 Vue 任何时候都看不到滚动条，也没法拖。Nana 按上文「滚动条」的设计意图画。
 
 ### 文件页
 - 导入菜单用了未定义的 `--panel-bg`，退回到 `#15171a` 深色底，字看不清。
@@ -153,7 +164,9 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 - 二维码按 `qrurl` 重新编码，内容和 Vue 相同，但模块排布不同。
 - 勾选框选中时是强调色底上的「✓」（Vue 是浅色底上强调色的小方块）。NanaUI 的勾用主题配方里「强调色上的字色」，浅底上看不见。
 - 日志页的仓库筛选按最长的选项（`acceptance-repo`）定宽以后，1200×800 下外框 206.5，Vue 是 188；插件筛选只有短选项，下拉框停在最小宽 122，外框 182（Vue 180）。多出来的是字宽：Vue 字体栈第一项 Noto Sans SC 在对照机上没装，Edge 用 Segoe UI 画拉丁字母，`acceptance-repo` 约 108；Nana 自带 Noto Sans SC，同一串约 130。箭头（16）和内边距（0）和 Vue 的原生下拉框相当。
-- 中文标点不挤压：NanaUI `55e86d454`（#211）起，文字的语言是中文、日文时默认按固定量挤压行首行尾和相邻的全角标点（`text-spacing-trim: normal`）。Nana 没有给文档声明语言（Vue 的 `index.html` 是 `lang="zh-CN"`），和升级前一样不挤压，现有场景里也没有相邻的全角标点。试过声明 `zh-CN`：数字和拉丁字母改按简体中文挑字形，122 张截图有细小变化，标点没有可见差别，所以没有声明。
+- 文档语言：照 Vue `index.html` 的 `lang="zh-CN"`，壳层挂树之前给文档声明应用语言 `zh-CN`（`view_host.rs` 的 `ShellView::mount`；真实窗口、测试 harness 和截图场景都从这里挂，测试 `every_mount_shapes_text_in_simplified_chinese`）。效果和 Chrome 用同一份字体画 `lang="zh-CN"` 一样（NanaUI `docs/reference/look.md`）：
+  - 中文的标点按 NanaUI #211 挤压行首行尾和相邻的全角标点（`text-spacing-trim: normal`），换行按中文的避头尾规则。现有场景里没有相邻的全角标点，换行也没有变化（56 个场景的节点清单逐行相同）。
+  - 拉丁文字和数字按简体中文挑 Noto Sans SC 自己的字形：拉丁文字里的数字（`track-01.mp3`、`2400000 B`、`v0.2.0`、`#3fa796`、`step: 2`……）不再换成默认语言系统的矮字形，和字母一样高，直引号升高。122 张截图因此有细小变化，都是这类数字变高，和 Vue 一致。只有数字和标点的一段（`0:00 / 0:00`、日期）本来就是原样的字形，等宽字体（文本预览）不受影响。
 
 ### 数据
 - 标签菜单没有仓库级标签组；智能文件夹的摘要行省略了。
@@ -186,5 +199,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 | 滚动范围按全部后代的盒子合并，不在里层的滚动区或裁剪盒处停下 | 上游 `941df646d` 已修：范围只算到最近的裁剪盒，里层滚动区只贡献自己的盒子。日志页主体恢复成滚动区（`route_admin.rs` 走 `home_scroll`），不滚的裁剪盒 `route_home::home_fixed` 和撑满它的 `fill_panel` 已删，矮窗口里日志页也能滚 |
 | `RadiusTier` 没有 2xl 档 | 已补：上游 `8541a2f8d` 的 `RadiusTier::Xxl` / `ThemeMetrics::radius_xxl`。`corner_metrics` 按两倍基数给，原来按像素给的 `theme_map::radius_2xl` 已删，插件、日志和搜索页的面板也从 Xl 改回 2xl，见上文「圆角」 |
 | 线性空间混合 | 设计如此，见上文「颜色合成」 |
-| `IconButton` 停用时整枚淡到 50%（`88f659bb4`），没有退出口：`colors_from_style` 或自绘的按钮已经画了停用色，还会再淡一层，而且是线性空间合成，和 CSS `opacity` 不同 | 未补。播放条的传输按钮改用没有可见文字的 `Button` 承载自绘（见上文「颜色合成」）；侧栏标题工具和弹层关闭钮交给它淡化。修法：`colors_from_style` 的按钮不淡，或者给 `IconButton` 一个关掉淡化的开关 |
+| 滚动条颜色写死成共享的主题角色，显隐瞬切、滚动时不出现，滑块被内容盖住 | 上游 `7f94c925d` 已补：`ScrollbarRecipe`（颜色、动效、应用级显隐策略）和 `ThemeMetrics::scrollbar` 的激活粗细、车道内缩；滚动条叠在内容上。`appearance.rs` 照 Vue 的 overlay 滚动条写进主题，见上文「滚动条」 |
+| `AutoHide` 指针进到滚动区就显示，没有 Vue 那样只认右边、底边 12px 热区的模式 | 未补。Nana 的滚动条比 Vue 的设计更常出现（指针在列表上就显示），显隐时机以外的样子和 Vue 一致。要对齐得在 `ScrollbarRecipe` 里加一种只在车道附近悬停才显示的策略 |
+| `IconButton` 停用时整枚淡到 50%（`88f659bb4`），没有退出口：`colors_from_style` 或自绘的按钮已经画了停用色，还会再淡一层，而且是线性空间合成，和 CSS `opacity` 不同 | 上游 `cfc484ac7` 已修：`colors_from_style` 的按钮（包括按 `PaintState::disabled` 自绘的）照 `style.interaction.disabled` 画、不淡，节点上写的不透明度照写的来，只有按种类配色的按钮还淡到 50%。播放条的传输按钮改回 `IconButton`，侧栏标题工具和两处关闭钮按所在底色写停用色，见上文「颜色合成」 |
 | 任务工作线程不接 panic（`b02eaa231` 的 `spawn_task_workers` 在 `pollster::block_on` 外面没有 `catch_unwind`：任务 panic 时工作线程退出，四个都退出以后之后的 `run_task` 一律报「runtime host task executor has stopped」） | 上游 `d0486cf37` 已修：每个任务在 `catch_unwind` 里跑，panic 的任务丢掉自己的消息、记一条 `host.task_panicked` 故障，工作线程接着处理队列。结果消息仍然不交回，`Task` 也不能带一条出 panic 时交回的消息，所以 `task_guard` 照样在任务里接住 panic、按失败交回；它还负责任务排不进去和服务没起来时交回失败 |

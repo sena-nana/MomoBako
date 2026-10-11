@@ -89,13 +89,12 @@ fn fill_circle(cx: &mut PaintContext<'_>, center_x: f32, center_y: f32, radius: 
 }
 
 /// 只有图标的按钮：悬停铺 bg-hover、按下铺 bg-active，图标按给定像素居中。
-/// 对应 Vue `.ui-icon-button` 和全局 `button:hover`。
+/// 对应 Vue `.ui-icon-button` 和全局 `button:hover`。停用（`PaintState::disabled`）时不铺底，图标按 Vue 的
+/// 0.45 不透明度和卡片底色混；状态变了框架会重录，不进 `paint_key`。
 pub(super) struct GlyphButton {
     pub icon: Icon,
     pub size: f32,
     pub color: SemanticColorRole,
-    /// 禁用时按 Vue 的 0.45 不透明度和卡片底色混。
-    pub dim: bool,
 }
 
 impl Painter for GlyphButton {
@@ -104,7 +103,7 @@ impl Painter for GlyphButton {
         let [width, height] = cx.size();
         let size = self.size.min(width).min(height);
         let rect = LayoutBox { x: (width - size) / 2.0, y: (height - size) / 2.0, width: size, height: size };
-        let color = dim_on_surface(cx, cx.color(self.color), self.dim);
+        let color = dim_on_surface(cx, cx.color(self.color), cx.state().disabled);
         cx.icon(rect, self.icon, color);
     }
 
@@ -113,7 +112,6 @@ impl Painter for GlyphButton {
         self.icon.hash(&mut hasher);
         self.size.to_bits().hash(&mut hasher);
         (self.color as u32).hash(&mut hasher);
-        self.dim.hash(&mut hasher);
         hasher.finish()
     }
 }

@@ -38,7 +38,7 @@ pub(super) fn title_bar(signals: TitleSignals, query: Signal<String>, initial_qu
             .center_width(460.0),
     )
     .leading(
-        widget(chrome_button(LAYOUT_SIDEBAR_LEFT_COLLAPSE, "折叠侧边栏", false))
+        widget(chrome_button(LAYOUT_SIDEBAR_LEFT_COLLAPSE, "折叠侧边栏"))
             .prop::<bool, SidebarToggleField>(signals.collapsed)
             .key("sidebar-toggle")
             .on_cx(|_, _: &Activate, cx| {
@@ -85,8 +85,10 @@ impl FieldWrite<IconButton, bool> for SidebarToggleField {
 }
 
 /// 标题栏图标按钮：28×28、`--radius-sm`、`--text-muted`，悬停 `--bg-hover`。对应 `.titlebar__btn`。
-fn chrome_button(icon: Icon, label: &'static str, disabled: bool) -> IconButton {
-    let mut button = IconButton::new(icon, label).size(ControlSize::Large).disabled(disabled).with_tooltip(label);
+/// 和 Vue 的侧栏开关一样从不停用，所以没有停用的样子；要停用时得照所在底色写 `interaction.disabled`，
+/// `colors_from_style` 的按钮 NanaUI 不会替它淡化。
+fn chrome_button(icon: Icon, label: &'static str) -> IconButton {
+    let mut button = IconButton::new(icon, label).size(ControlSize::Large).with_tooltip(label);
     button.style = parts::icon_button_style(CONTROL_EDGE, RadiusTier::Sm, SemanticColorRole::Muted, None);
     button.colors_from_style()
 }
