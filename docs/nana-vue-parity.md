@@ -152,6 +152,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 - 二维码按 `qrurl` 重新编码，内容和 Vue 相同，但模块排布不同。
 - 勾选框选中时是强调色底上的「✓」（Vue 是浅色底上强调色的小方块）。NanaUI 的勾用主题配方里「强调色上的字色」，浅底上看不见。
 - 日志页的仓库筛选按最长的选项（`acceptance-repo`）定宽以后，1200×800 下外框 206.5，Vue 是 188；插件筛选只有短选项，下拉框停在最小宽 122，外框 182（Vue 180）。多出来的是字宽：Vue 字体栈第一项 Noto Sans SC 在对照机上没装，Edge 用 Segoe UI 画拉丁字母，`acceptance-repo` 约 108；Nana 自带 Noto Sans SC，同一串约 130。箭头（16）和内边距（0）和 Vue 的原生下拉框相当。
+- 中文标点不挤压：NanaUI `e062d098a` 起，文字的语言是中文、日文时默认按固定量挤压行首行尾和相邻的全角标点（`text-spacing-trim: normal`）。Nana 没有给文档声明语言（Vue 的 `index.html` 是 `lang="zh-CN"`），和升级前一样不挤压，现有场景里也没有相邻的全角标点。试过声明 `zh-CN`：数字和拉丁字母改按简体中文挑字形，122 张截图有细小变化，标点没有可见差别，所以没有声明。
 
 ### 数据
 - 标签菜单没有仓库级标签组；智能文件夹的摘要行省略了。
@@ -184,4 +185,5 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 | 滚动范围按全部后代的盒子合并，不在里层的滚动区或裁剪盒处停下 | 上游 `941df646d` 已修：范围只算到最近的裁剪盒，里层滚动区只贡献自己的盒子。日志页主体恢复成滚动区（`route_admin.rs` 走 `home_scroll`），不滚的裁剪盒 `route_home::home_fixed` 和撑满它的 `fill_panel` 已删，矮窗口里日志页也能滚 |
 | `RadiusTier` 没有 2xl 档 | 已补：上游 `8541a2f8d` 的 `RadiusTier::Xxl` / `ThemeMetrics::radius_xxl`。`corner_metrics` 按两倍基数给，原来按像素给的 `theme_map::radius_2xl` 已删，插件、日志和搜索页的面板也从 Xl 改回 2xl，见上文「圆角」 |
 | 线性空间混合 | 设计如此，见上文「颜色合成」 |
+| `IconButton` 停用时整枚淡到 50%（`88f659bb4`），没有退出口：`colors_from_style` 或自绘的按钮已经画了停用色，还会再淡一层，而且是线性空间合成，和 CSS `opacity` 不同 | 未补。播放条的传输按钮改用没有可见文字的 `Button` 承载自绘（见上文「颜色合成」）；侧栏标题工具和弹层关闭钮交给它淡化。修法：`colors_from_style` 的按钮不淡，或者给 `IconButton` 一个关掉淡化的开关 |
 | 任务工作线程不接 panic（`b02eaa231` 的 `spawn_task_workers` 在 `pollster::block_on` 外面没有 `catch_unwind`：任务 panic 时工作线程退出，四个都退出以后之后的 `run_task` 一律报「runtime host task executor has stopped」） | 上游 `e062d098a` 已修：每个任务在 `catch_unwind` 里跑，panic 的任务丢掉自己的消息、记一条 `host.task_panicked` 故障，工作线程接着处理队列。结果消息仍然不交回，`Task` 也不能带一条出 panic 时交回的消息，所以 `task_guard` 照样在任务里接住 panic、按失败交回；它还负责任务排不进去和服务没起来时交回失败 |
