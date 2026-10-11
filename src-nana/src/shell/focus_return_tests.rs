@@ -5,7 +5,7 @@
 
 use nana_ui::runtime::StableNodeId;
 
-use crate::backend::services::repository::{FileBrowserSnapshot, FileTreeNode, RepositoryStructureCacheState};
+use crate::backend::services::repository::{FileBrowserEntry, FileBrowserSnapshot, FileTreeNode, RepositoryStructureCacheState};
 use crate::shell::files::{FileDialog, FilesMessage};
 use crate::shell::sidebar::{PopoverMode, SidebarSmartFolder, SidebarTree};
 use crate::shell::sidebar_view::folder_row_key;
@@ -32,6 +32,17 @@ fn press_on(harness: &mut ShellHarness, label: &str, key: &'static str) {
     let id = harness.node(label);
     harness.focus(id);
     harness.press_key(key);
+}
+
+/// 在键盘打开的菜单里往下走到无障碍名是 `label` 的项（菜单首尾相接，走一圈还没有就失败）。
+fn walk_to(harness: &mut ShellHarness, label: &str) {
+    for _ in 0..20 {
+        if harness.focused_label().as_deref() == Some(label) {
+            return;
+        }
+        harness.press_key("ArrowDown");
+    }
+    panic!("菜单里走不到「{label}」");
 }
 
 /// 按 Escape，再把开合动效走完、照生产准备帧的收尾还焦点。
@@ -65,9 +76,7 @@ fn a_dialog_from_the_entry_menu_returns_focus_to_the_entry() {
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
     let card = harness.node("cover.png");
     press_on(&mut harness, "cover.png", "ContextMenu");
-    while harness.focused_label().as_deref() != Some("复制到…") {
-        harness.press_key("ArrowDown");
-    }
+    walk_to(&mut harness, "复制到…");
     harness.press_key("Enter");
     assert_eq!(harness.model.files.dialog, FileDialog::Copy);
     harness.finish_motion();
@@ -233,6 +242,59 @@ fn a_deleted_folder_hands_focus_to_its_tree() {
     harness.frame();
     assert!(harness.keyed(&covers_key).is_none(), "covers 已经不在树里");
     assert_eq!(harness.focused(), harness.keyed(&folder_row_key("assets")), "焦点落在同一棵树里还在的文件夹行上");
+}
+
+/// 文件条目的重命名：保存以后这张卡片换成新名字的一张，焦点落在文件列表里的条目上。
+#[test]
+fn a_renamed_entry_hands_focus_to_the_file_list() {
+    let mut harness = ShellHarness::mount(scene("live-files-plain"));
+    press_on(&mut harness, "cover.png", "ContextMenu");
+    walk_to(&mut harness, "重命名");
+    harness.press_key("Enter");
+    harness.finish_motion();
+    assert_eq!(harness.model.files.dialog, FileDialog::Rename);
+    harness.apply(ShellMessage::Files(FilesMessage::DraftChanged("poster.png".into())));
+    harness.click_label("保存");
+    assert!(harness.model.files.mutating, "交给文件服务改名");
+    let mut renamed = root_snapshot();
+    renamed.entries = vec![entry("assets", "directory"), entry("poster.png", "file"), entry("notes/page.pdf", "file")];
+    renamed.total_entries = renamed.entries.len();
+    renamed.loaded_count = renamed.entries.len();
+    harness.apply(ShellMessage::Files(FilesMessage::MutationSnapshot { result: Ok(renamed), created_name: None }));
+    harness.finish_motion();
+    assert_eq!(harness.model.files.dialog, FileDialog::Closed);
+    assert!(harness.find("cover.png").is_none(), "原来那张卡片已经没了");
+    assert!(on_card(&harness), "焦点落在文件条目上，实际是 {:?}", harness.focused_label());
+}
+
+/// 根目录里的一条。
+fn entry(path: &str, kind: &str) -> FileBrowserEntry {
+    let name = path.rsplit('/').next().unwrap_or(path).to_string();
+    let file = kind == "file";
+    FileBrowserEntry {
+        path: path.into(),
+        extension: file.then(|| name.rsplit_once('.').map(|(_, extension)| extension.to_string())).flatten(),
+        name,
+        kind: kind.into(),
+        size_bytes: None,
+        size_label: None,
+        modified_at: None,
+        asset_id: file.then(|| path.replace('/', "-")),
+        status: None,
+        thumbnail_path: None,
+        thumbnail_custom: false,
+        hardlink_group_id: None,
+        hardlink_state: None,
+        tags: Vec::new(),
+        alias_paths: Vec::new(),
+        folder_metadata: None,
+        metadata: Default::default(),
+        is_virtual: false,
+        provider_id: None,
+        provider_item_id: None,
+        source_payload: None,
+        local_absolute_path: None,
+    }
 }
 
 /// 删掉 covers 以后读回的根目录。
