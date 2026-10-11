@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -33,6 +33,12 @@ function expectWorkspaceRustCache(workflow: string, cachePrefixes: string[]) {
     expect(step).toContain(`key: ${restoreKey}\${{ hashFiles('Cargo.lock') }}`);
     expect(step.match(/restore-keys: \|\n\s+(.+)/)?.[1]).toBe(restoreKey);
   });
+}
+
+/** 取根 Cargo.toml 里 workspace members 的显式路径；改成通配写法时成员目录校验会先失败。 */
+function cargoWorkspaceMembers(manifest: string) {
+  const members = manifest.match(/^members\s*=\s*\[([^\]]*)\]/m)?.[1] ?? "";
+  return [...members.matchAll(/"([^"]+)"/g)].map((match) => match[1]);
 }
 
 describe("MomoBako 工具链", () => {
@@ -176,6 +182,17 @@ describe("MomoBako 工具链", () => {
   it("GitHub workflow 的 Rust 缓存跟随根 Cargo workspace 并按 rustc 版本分代", () => {
     expectWorkspaceRustCache(read(".github/workflows/ci.yml"), ["cargo", "external-plugins-cargo"]);
     expectWorkspaceRustCache(read(".github/workflows/release.yml"), ["cargo"]);
+  });
+
+  it("Cargo workspace 成员共用根 Cargo.lock，成员目录不再各带一份", () => {
+    const members = cargoWorkspaceMembers(read("Cargo.toml"));
+
+    expect(existsSync(resolve("Cargo.lock"))).toBe(true);
+    expect(members).toEqual(expect.arrayContaining(["src-tauri", "src-backend", "External/Plugins/_sdk/mutsuki-rust"]));
+    for (const member of members) {
+      expect(existsSync(resolve(member, "Cargo.toml")), `${member} 不是 Cargo 包目录`).toBe(true);
+      expect(existsSync(resolve(member, "Cargo.lock")), `${member}/Cargo.lock 不会被 cargo 读取，应删除`).toBe(false);
+    }
   });
 
   it("GitHub Pages 使用文档产物和 Pages 权限", () => {
