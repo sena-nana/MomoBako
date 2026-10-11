@@ -349,6 +349,8 @@ fn plugin_settings_toggle_route_and_directory() {
     send(&mut model, AdminMessage::OpenDataDirectory("user.one".into()));
     assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::OpenDataDirectory { name, .. }) if name == "user.one"));
     send(&mut model, AdminMessage::DataDirectoryFinished { name: "user.one".into(), result: Ok("C:/plugin".into()) });
+    assert!(model.admin.action_message.is_empty(), "宿主打开以后才写已打开");
+    crate::host_bridge::perform(&mut model, |_, _| Ok(()), |_| Ok(()), || Ok(()));
     assert_eq!(model.admin.action_message, "已打开“user.one”设置目录。");
     send(&mut model, AdminMessage::DataDirectoryFinished { name: "user.one".into(), result: Err(String::new()) });
     assert_eq!(model.admin.action_error, "插件设置目录打开失败。");

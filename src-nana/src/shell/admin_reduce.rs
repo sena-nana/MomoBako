@@ -91,35 +91,49 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
             model.task_progress = progress;
             None
         }
+        // 读的这段时间里改过设置、或者有保存在写时，读到的可能是旧内容，不换上（`SettingsSync`）。
         ShellMessage::SettingsLoaded(Ok((settings, diagnostic))) => {
             if let Some(diagnostic) = diagnostic {
                 eprintln!("Nana {diagnostic}");
             }
-            model.settings = settings;
+            if model.admin.settings_sync.finish_load() {
+                model.settings = settings;
+            } else {
+                eprintln!("Nana 读设置文件的这段时间里改过设置，读到的旧内容不换上");
+            }
             None
         }
         ShellMessage::SettingsLoaded(Err(error)) => {
+            model.admin.settings_sync.finish_load();
             eprintln!("Nana 应用设置读取失败：{error}");
             model.status.fail(FailureSource::Settings, format!("无法读取应用设置：{error}"));
             None
         }
+        // 主题：暗色、浅色和跟随系统，改了立即生效并写进设置文件；和现在一样时不写。
         ShellMessage::SettingsThemeChanged(theme) => {
             if theme != "light" && theme != "dark" && theme != "system" {
                 eprintln!("Nana 忽略未知主题：{theme}");
                 return None;
             }
+            if model.settings.theme == theme {
+                return None;
+            }
             model.settings.theme = theme;
-            model.admin.push_effect(AdminEffect::SaveSettings);
+            if model.admin.settings_sync.note_change() {
+                model.admin.push_effect(AdminEffect::SaveSettings);
+            }
             None
         }
-        // 主题改动后宿主直接写设置文件，这里只收结果；结果不切页面。
-        ShellMessage::SettingsSaved(Ok(settings)) => {
-            model.settings = settings;
-            None
-        }
-        ShellMessage::SettingsSaved(Err(error)) => {
-            eprintln!("Nana 应用设置保存失败：{error}");
-            model.status.fail(FailureSource::Settings, format!("保存应用设置失败：{error}"));
+        // 写设置文件的结果。内存里的设置不跟着结果改（它总比这次写的新或者一样）；写的时候又改过，接着把
+        // 最新的写一次。结果不切页面。
+        ShellMessage::SettingsSaved(result) => {
+            if let Err(error) = &result {
+                eprintln!("Nana 应用设置保存失败：{error}");
+                model.status.fail(FailureSource::Settings, format!("保存应用设置失败：{error}"));
+            }
+            if model.admin.settings_sync.note_saved() {
+                model.admin.push_effect(AdminEffect::SaveSettings);
+            }
             None
         }
         other => Some(other),
@@ -309,6 +323,7 @@ fn apply_config(model: &mut ShellViewModel, config: &PluginConfigSnapshot) {
 pub(crate) fn open_settings_page(model: &mut ShellViewModel, plugin_id: Option<&str>) {
     model.page = ShellPage::Settings;
     model.admin.begin_settings_load();
+    model.admin.settings_sync.begin_load();
     model.admin.push_effect(AdminEffect::LoadAppSettings);
     if let Some(plugin_id) = plugin_id {
         open_route(model, plugin_id);
@@ -476,21 +491,44 @@ fn replace_plugins(model: &mut ShellViewModel, result: Result<Vec<PluginManifest
     }
 }
 
+/// 查到了插件的设置目录：交给宿主打开，打开的结果回来（[`settle_directory_open`]）才写提示，和 Vue
+/// `openPluginDataDirectoryInWorkspace` 等 `openRepositoryPath` 完成一样。查不到时写错误。
 fn finish_directory(model: &mut ShellViewModel, name: &str, result: Result<String, String>) {
     model.admin.managing = false;
     match result {
         Ok(path) => {
+            model.admin.pending_directory = Some((path.clone(), name.to_string()));
             model.input.host_requests.push(crate::host_api::HostRequest::OpenExternal(
                 crate::host_api::ExternalOpenRequest { target: path, reveal: true },
             ));
             model.admin.action_error.clear();
-            model.admin.action_message = format!("已打开“{name}”设置目录。");
         }
         Err(error) => {
             eprintln!("Nana 插件设置目录读取失败：{error}");
             model.admin.action_error = if error.is_empty() { "插件设置目录打开失败。".into() } else { error };
         }
     }
+}
+
+/// 宿主执行完一次外部打开（`host_bridge::perform`）。是插件「打开目录」等着的那一次：结果写在插件面板上，
+/// 交回 `None`；别的打开把结果原样交回，失败由宿主写进状态区。
+pub(crate) fn settle_directory_open(model: &mut ShellViewModel, target: &str, result: Result<(), String>) -> Option<Result<(), String>> {
+    let Some((_, name)) = model.admin.pending_directory.take_if(|(path, _)| path == target) else {
+        return Some(result);
+    };
+    match result {
+        Ok(()) => {
+            model.admin.action_error.clear();
+            model.admin.action_message = format!("已打开“{name}”设置目录。");
+        }
+        Err(error) => {
+            eprintln!("Nana 插件“{name}”的设置目录打不开：{target}：{error}");
+            model.admin.action_message.clear();
+            model.admin.action_error = format!("插件设置目录打开失败：{error}");
+        }
+    }
+    model.mark_surface_dirty();
+    None
 }
 
 /// 设置页五份数据。任何一份失败整批不写，只记下错误，和 Vue 的 `Promise.all` 一致。

@@ -69,7 +69,7 @@ pub(crate) use logs_view::logs_panel;
 pub(crate) use logs_view::LIST_FLOOR as LOG_LIST_FLOOR;
 pub(crate) use plugins_state::{PluginPanelSignals, PluginPanelView};
 pub(crate) use plugins_view::delete_dialog as plugin_delete_dialog;
-pub(crate) use reduce::{open_settings_page, reduce_message};
+pub(crate) use reduce::{open_settings_page, reduce_message, settle_directory_open};
 pub(crate) use settings_state::{SettingsSignals, SettingsView};
 pub(crate) use settings_view::settings_page;
 pub(crate) use source_provision::SourceAuthState;
@@ -81,6 +81,9 @@ pub(crate) use view::{task_fill_targets, task_popover};
 #[cfg(test)]
 #[path = "admin_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "admin_settings_tests.rs"]
+mod settings_tests;
 
 /// 插件配置、安装、日志筛选、任务弹层、来源登录和仓库动作消息。
 #[derive(Clone, Debug)]
@@ -294,6 +297,10 @@ pub struct AdminState {
     pub loading_settings: bool,
     pending_notice: Option<String>,
     pending_failure: Option<String>,
+    /// 插件「打开目录」查到了目录、等宿主打开：(目录, 插件名)。打开的结果由 `settle_directory_open` 写上。
+    pending_directory: Option<(String, String)>,
+    /// 应用设置在内存和设置文件之间的同步：保存一次只写一个，晚到的读写结果不盖掉刚改的值。
+    pub(crate) settings_sync: crate::settings::SettingsSync,
     /// 来源认证页的会话、缓存目录和提示。换插件或收起设置时重置。
     pub source_auth: SourceAuthState,
     /// 最近一次仓库列表的完整摘要。来源认证页要读登录状态和本地缓存路径。
@@ -354,6 +361,8 @@ impl Default for AdminState {
             loading_settings: false,
             pending_notice: None,
             pending_failure: None,
+            pending_directory: None,
+            settings_sync: crate::settings::SettingsSync::default(),
             source_auth: SourceAuthState::default(),
             repository_summaries: Vec::new(),
             logs: Vec::new(),

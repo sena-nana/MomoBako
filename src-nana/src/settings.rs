@@ -54,6 +54,70 @@ impl SettingsStore {
     }
 }
 
+/// 内存里的应用设置和设置文件之间怎么同步。写文件和读文件都在任务里跑，结果回来的先后不定。
+///
+/// - 同一时刻只有一次保存在写；写的时候又改了，记下来，等这次写完再把最新的写一次（中间的值不写）。
+///   这样文件最后一定是最新的值，两次写也不会同时改同一个临时文件。
+/// - 保存的结果不回写内存：内存里的值总比这次写的新或者一样，回写只会把刚改的值改回去。
+/// - 读文件的结果只在读的这段时间里没有改过、也没有保存在写时才换上，免得读到的旧内容盖掉刚改的值。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SettingsSync {
+    /// 有一次保存在写。
+    saving: bool,
+    /// 写的时候又改了，写完要再写一次。
+    resave: bool,
+    /// 在读的次数。
+    loads: u32,
+    /// 这几次读开始以后改过设置，或者读的时候有保存在写：读到的可能是旧内容。
+    loads_stale: bool,
+}
+
+impl SettingsSync {
+    /// 改了一项设置。返回要不要现在排一次保存：已经有保存在写时不排，等它写完再写最新的。
+    pub fn note_change(&mut self) -> bool {
+        if self.loads > 0 {
+            self.loads_stale = true;
+        }
+        if self.saving {
+            self.resave = true;
+            return false;
+        }
+        self.saving = true;
+        true
+    }
+
+    /// 一次保存写完（成功或失败）。返回要不要接着把写的时候的改动再写一次。
+    pub fn note_saved(&mut self) -> bool {
+        if !self.saving {
+            eprintln!("Nana 应用设置的保存结果没有对应的保存，忽略");
+            return false;
+        }
+        if std::mem::take(&mut self.resave) {
+            return true;
+        }
+        self.saving = false;
+        false
+    }
+
+    /// 开始读设置文件。
+    pub fn begin_load(&mut self) {
+        self.loads += 1;
+        if self.saving {
+            self.loads_stale = true;
+        }
+    }
+
+    /// 读完一次。返回读到的内容能不能换上内存里的设置。
+    pub fn finish_load(&mut self) -> bool {
+        let fresh = !self.loads_stale && !self.saving;
+        self.loads = self.loads.saturating_sub(1);
+        if self.loads == 0 {
+            self.loads_stale = false;
+        }
+        fresh
+    }
+}
+
 /// 应用设置文件的位置：发布包在应用路径的 config 下，开发时照旧在 `%LOCALAPPDATA%\MomoBako`，见 `app_paths.rs`。
 /// 侧栏、展示方式、圆角、播放和上次资源库这些界面偏好都放在它旁边。
 pub fn default_path() -> PathBuf {
@@ -165,6 +229,37 @@ fn temporary_path(path: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 连着改三次：只有第一次当场写，写完再写一次最新的，之后没有改动就停。
+    #[test]
+    fn changes_while_saving_are_written_once_after_the_save() {
+        let mut sync = SettingsSync::default();
+        assert!(sync.note_change(), "没有保存在写，当场写");
+        assert!(!sync.note_change(), "有保存在写，等它写完");
+        assert!(!sync.note_change());
+        assert!(sync.note_saved(), "写完以后把最新的再写一次");
+        assert!(!sync.note_saved(), "没有新的改动，不再写");
+        assert!(!sync.note_saved(), "多出来的结果忽略");
+        assert!(sync.note_change(), "空闲时改了当场写");
+    }
+
+    /// 读的时候改过设置、或者有保存在写，读到的不换上；之后没有改动的读照常换上。
+    #[test]
+    fn loads_that_overlap_a_change_are_dropped() {
+        let mut sync = SettingsSync::default();
+        sync.begin_load();
+        assert!(sync.finish_load(), "读的时候没改过");
+
+        sync.begin_load();
+        assert!(sync.note_change());
+        assert!(!sync.finish_load(), "读的时候改过");
+        sync.begin_load();
+        assert!(!sync.finish_load(), "读的时候还有保存在写");
+        assert!(!sync.note_saved());
+        sync.begin_load();
+        assert!(sync.finish_load(), "保存写完以后的读照常换上");
+        assert!(sync.finish_load(), "没有在读时送来的结果照常换上");
+    }
 
     #[test]
     fn invalid_cache_limit_is_rejected() {

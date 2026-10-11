@@ -10,11 +10,10 @@ use std::sync::Arc;
 
 use nana_ui::runtime::view::{each, fields, node_ref, widget, AnyView, El, IntoProp, IntoView, NodeRef, Signal};
 use nana_ui::runtime::{
-    Activate, AlignSpec, BoxPaint, IconButton, InteractionStyle, LayoutBox, LengthSpec, NodeStyle, PaintContext, PaintText, Painter,
-    RangeChanged, RangeField, Select, SelectChanged, SelectOption, SemanticPaint, Stack, Text, TextHorizontalAlignment,
-    TextVerticalAlignment,
+    Activate, AlignSpec, InteractionStyle, LengthSpec, NodeStyle, RangeChanged, RangeField, Select, SelectChanged, SelectOption,
+    SemanticPaint, Stack, Text, TextHorizontalAlignment, TextVerticalAlignment,
 };
-use nana_ui_core::{GridTrack, Icon, RadiusTier, SemanticColorRole as Role, ThemeAppearance};
+use nana_ui_core::{GridTrack, Icon, RadiusTier, SemanticColorRole as Role};
 
 use super::super::ShellMessage;
 use super::bind::{ActionDisabled, StyleField};
@@ -153,10 +152,14 @@ fn audio_card(signals: SettingsSignals) -> AnyView {
     )
 }
 
-/// 外观：主题、圆角样式和圆角半径。
+/// 外观：主题、圆角样式和圆角半径。主题比 Vue 的暗色、浅色多一档「跟随系统」（默认）。
 fn appearance_card(signals: SettingsSignals) -> AnyView {
     let theme = segmented(
-        vec![theme_segment(ThemeAppearance::Dark, icons::MOON, "暗色"), theme_segment(ThemeAppearance::Light, icons::SUN, "浅色")],
+        vec![
+            theme_segment("dark", icons::MOON, "暗色", signals.theme),
+            theme_segment("light", icons::SUN, "浅色", signals.theme),
+            theme_segment("system", icons::MONITOR, "跟随系统", signals.theme),
+        ],
         "admin-theme",
     );
     let corners = segmented(
@@ -237,68 +240,18 @@ fn corner_segment(value: &'static str, icon: Icon, text: &'static str, current: 
         .into_any()
 }
 
-/// 主题分段。Vue 只有暗色和浅色两档，选中的是当前生效的主题，
-/// 所以选中态在绘制时按主题解析，而不是读构建期的设置值。
-fn theme_segment(mode: ThemeAppearance, icon: Icon, text: &'static str) -> AnyView {
-    let value = if mode == ThemeAppearance::Dark { "dark" } else { "light" };
-    let mut style = segment_style(false);
-    style.foreground = None;
-    style.interaction = InteractionStyle::default();
-    {
-        let layout = Arc::make_mut(&mut style.layout);
-        layout.width = Some(LengthSpec::Px(70.0));
-        layout.min_width = Some(LengthSpec::Px(70.0));
-    }
-    let style = style.painter(ThemeSegment { mode, icon, text });
-    let mut button = IconButton::new(icon, text);
-    button.colors_from_style = true;
-    button.style = style;
+/// 主题分段：暗色、浅色和跟随系统。选中的是设置里的那一档（跟随系统时选中「跟随系统」，不按系统现在
+/// 是深是浅去点亮暗色或浅色），点了立即生效并写进设置文件。
+fn theme_segment(value: &'static str, icon: Icon, text: &'static str, current: Signal<String>) -> AnyView {
+    let active = move || current.with(|current| current == value);
+    let button = nana_ui::runtime::Button::new(text).icon(icon).icon_size(14.0).icon_gap(6.0).style(segment_style(active()));
     widget(button)
+        .prop::<NodeStyle, StyleField>(move || segment_style(active()))
         .key(format!("settings-theme-{value}"))
         .on_cx(move |_, _: &Activate, cx| {
             cx.dispatch_program_all(ShellMessage::SettingsThemeChanged(value.into()));
         })
         .into_any()
-}
-
-/// 主题分段的绘制：当前主题就是选中态，`bg-active` 底、正文色；否则弱色。
-#[derive(Clone, Copy)]
-struct ThemeSegment {
-    mode: ThemeAppearance,
-    icon: Icon,
-    text: &'static str,
-}
-
-impl Painter for ThemeSegment {
-    fn paint(&self, cx: &mut PaintContext<'_>) {
-        let active = crate::theme_map::is_dark(cx.theme_appearance()) == crate::theme_map::is_dark(self.mode);
-        let state = cx.state();
-        let bounds = cx.bounds();
-        let background = if active {
-            Some(if state.hovered { Role::SelectedHover } else { Role::Active })
-        } else if state.hovered {
-            Some(Role::Hover)
-        } else {
-            None
-        };
-        if let Some(role) = background {
-            let radius = cx.radius(RadiusTier::Sm);
-            cx.rounded_rect(bounds, radius, BoxPaint::fill(role));
-        }
-        let color = if active || state.hovered { Role::Text } else { Role::Muted };
-        let icon_box = LayoutBox { x: 12.0, y: (bounds.height - 14.0) / 2.0, width: 14.0, height: 14.0 };
-        cx.icon(icon_box, self.icon, color);
-        let text_box = LayoutBox { x: 32.0, y: 0.0, width: (bounds.width - 32.0).max(0.0), height: bounds.height };
-        let mut text = PaintText::new(self.text).color(color).size(13.0).weight(500);
-        text.vertical = TextVerticalAlignment::Center;
-        text.horizontal = TextHorizontalAlignment::Start;
-        cx.text(text_box, text);
-    }
-
-    fn paint_key(&self) -> u64 {
-        let mode = if self.mode == ThemeAppearance::Dark { 1 } else { 2 };
-        mode * 1_000_003 + self.text.len() as u64
-    }
 }
 
 /// `.radius-control`：220 宽滑杆加 44 宽右对齐的「Npx」。滑杆的值和文字跟着已保存的半径。

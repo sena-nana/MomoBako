@@ -170,6 +170,7 @@ Vue 前端、Tauri 外壳和插件前端已经删掉（见 [迁移边界](./nana
   - 建文件、新建文件夹、移动和三种导入在 Vue 里没有对话框（工具栏输入框、拖放、原生选择器）。Nana 的这几个对话框用 `.modal-card` 的宽度，标题前的图标按动作取：建文件 file-plus、新建文件夹 folder-plus、移动和导入 folder-open、ZIP 导入 archive。
   - 新建播放集的两个字段之间留 12，和别的对话框一样；Vue 的 `.playlist-dialog` 没写样式，两个字段贴在一起。
 - 二维码按 `qrurl` 重新编码，内容和 Vue 相同，但模块排布不同。会话只有二维码图片（`qrImage` / `qrimg` 的 `data:image/` 图片）、没有扫码地址时照 Vue 直接画这张图；图片是网址时不联网取，不画。
+- 主题比 Vue 多一档「跟随系统」，也是默认：Vue 只有暗色、浅色两档，默认暗色（Lilia `useTheme` 的 `DEFAULT_THEME`）。外观卡里选中的是设置里的那一档，跟随系统时选中「跟随系统」，不按系统现在的深浅去点亮暗色或浅色；读不到系统外观时按暗色。
 - 勾选框选中时是强调色底上的「✓」（Vue 是浅色底上强调色的小方块）。NanaUI 的勾用主题配方里「强调色上的字色」，浅底上看不见。
 - 日志页的仓库筛选按最长的选项（`acceptance-repo`）定宽以后，1200×800 下外框 206.5，Vue 是 188；插件筛选只有短选项，下拉框停在最小宽 122，外框 182（Vue 180）。多出来的是字宽：Vue 字体栈第一项 Noto Sans SC 在对照机上没装，Edge 用 Segoe UI 画拉丁字母，`acceptance-repo` 约 108；Nana 自带 Noto Sans SC，同一串约 130。箭头（16）和内边距（0）和 Vue 的原生下拉框相当。
 - 文档语言：照 Vue `index.html` 的 `lang="zh-CN"`，壳层挂树之前给文档声明应用语言 `zh-CN`（`view_host.rs` 的 `ShellView::mount`；真实窗口、测试 harness 和截图场景都从这里挂，测试 `every_mount_shapes_text_in_simplified_chinese`）。效果和 Chrome 用同一份字体画 `lang="zh-CN"` 一样（NanaUI `docs/reference/look.md`）：
