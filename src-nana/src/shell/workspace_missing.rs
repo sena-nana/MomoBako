@@ -43,7 +43,9 @@ impl WorkspaceState {
         self.path_prompt = false;
         self.relocating = true;
         self.missing_error.clear();
-        self.operation.start(OperationStart::new("重定向资源库", "校验资源库位置", 12.0));
+        self.operation.start(
+            OperationStart::new("重定向资源库", "校验资源库位置", 12.0).runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_RELOCATE]),
+        );
         self.effects.push(WorkspaceEffect::RelocateRepository { repo_id, path });
     }
 

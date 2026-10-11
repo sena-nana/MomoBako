@@ -5,6 +5,9 @@
 //! （`mutating`）；空白名称和空白来源直接返回，不会把状态标成进行中。变更在任务弹层里的进度行见
 //! `files_operation.rs`，硬链接确认见 `files_hardlink.rs`。
 
+use crate::backend::services::mutsuki_runner::{
+    PROTOCOL_ARCHIVE_IMPORT, PROTOCOL_EAGLE_IMPORT, PROTOCOL_ENTRY_COPY, PROTOCOL_ENTRY_DELETE, PROTOCOL_ENTRY_MOVE,
+};
 use crate::backend::services::repository::FileBrowserSnapshot;
 
 use super::super::repo_operation::OperationPatch;
@@ -25,7 +28,7 @@ impl FilesState {
             eprintln!("Nana 拖放移动缺少仓库");
             return;
         }
-        self.begin(Some(FileOperation::step("移动文件", "移动到目标文件夹", 36.0, Some(82.0))));
+        self.begin(Some(FileOperation::step("移动文件", "移动到目标文件夹", 36.0, Some(82.0)).runs(&[PROTOCOL_ENTRY_MOVE])));
         self.effects.push(FilesEffect::Move { repo_id, sources, parent });
     }
 
@@ -241,7 +244,7 @@ impl FilesState {
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
         let parent = parent_path(&normalize_path(&self.target_draft));
         let sources = self.copy_sources.clone();
-        self.begin(Some(FileOperation::step("复制文件", "创建硬链接或复制文件", 32.0, Some(84.0))));
+        self.begin(Some(FileOperation::step("复制文件", "创建硬链接或复制文件", 32.0, Some(84.0)).runs(&[PROTOCOL_ENTRY_COPY])));
         self.effects.push(FilesEffect::Copy { repo_id, sources, parent });
         true
     }
@@ -273,7 +276,7 @@ impl FilesState {
         }
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
         let parent = parent_path(&self.current_path);
-        self.begin(Some(FileOperation::step("导入 ZIP", "预检压缩包条目", 24.0, Some(84.0))));
+        self.begin(Some(FileOperation::step("导入 ZIP", "预检压缩包条目", 24.0, Some(84.0)).runs(&[PROTOCOL_ARCHIVE_IMPORT])));
         self.effects.push(FilesEffect::ImportArchive { repo_id, parent, archive_path });
         true
     }
@@ -295,7 +298,7 @@ impl FilesState {
         let parent = parent_path(&self.current_path);
         let mode = self.eagle_mode.clone();
         let label = if mode == "move" { "剪切导入 Eagle" } else { "复制导入 Eagle" };
-        self.begin(Some(FileOperation::step(label, "转换 EagleLibrary", 24.0, Some(84.0))));
+        self.begin(Some(FileOperation::step(label, "转换 EagleLibrary", 24.0, Some(84.0)).runs(&[PROTOCOL_EAGLE_IMPORT])));
         self.effects.push(FilesEffect::ImportEagle { repo_id, parent, library_path, mode });
         true
     }
@@ -335,7 +338,8 @@ impl FilesState {
         let paths = self.selected.clone();
         let mode = if ctx.trash { Some("permanentDelete".to_string()) } else { None };
         // Vue 只有多选删除走 `deleteWorkspaceEntries` 出进度行，单条删除不出。
-        let operation = (paths.len() > 1).then(|| FileOperation::step("删除文件", format!("准备处理 {} 个条目", paths.len()), 10.0, None));
+        let operation = (paths.len() > 1)
+            .then(|| FileOperation::step("删除文件", format!("准备处理 {} 个条目", paths.len()), 10.0, None).runs(&[PROTOCOL_ENTRY_DELETE]));
         self.begin(operation);
         self.effects.push(FilesEffect::Delete { repo_id, paths, mode });
         true

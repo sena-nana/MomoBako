@@ -729,12 +729,47 @@ pub struct PopoverRow {
     pub updated_at_ms: i64,
 }
 
-/// Vue 进度条没有标题时的读屏名（`ProgressBar.vue` 的 `label || '进度'`）。任务快照没有标题时
-/// 标题位写它，不把协议 id 露给用户。
-pub const TASK_LABEL_FALLBACK: &str = "进度";
+/// 认不出协议的后台任务的标题。宿主的任务只跑下面 [`task_protocol_label`] 列出的协议，正常碰不到。
+pub const TASK_LABEL_FALLBACK: &str = "后台任务";
 
-/// 仓库操作和运行中的任务一起按更新时间倒序，和 Vue `TaskPopover.vue` 的排序一样。任务快照的更新时间
-/// 是 RFC 3339，换成毫秒再比；读不出的排在最后。
+/// 后台任务的协议写成用户看得懂的中文。仓库和文件操作沿用 Vue 进度行的叫法（`operationProgress` 的
+/// 「同步资源库」「复制文件」等），其余照后端协议说明（`docs/api-design.md`）。
+pub fn task_protocol_label(protocol_id: &str) -> Option<&'static str> {
+    use crate::backend::services::mutsuki_runner::{
+        PROTOCOL_ARCHIVE_IMPORT, PROTOCOL_EAGLE_IMPORT, PROTOCOL_ENTRY_COPY, PROTOCOL_ENTRY_DELETE, PROTOCOL_ENTRY_IMPORT,
+        PROTOCOL_ENTRY_MOVE, PROTOCOL_PLAYBACK_PREPARE, PROTOCOL_PLAYLIST_DOWNLOAD, PROTOCOL_REPOSITORY_ACTION_RUN,
+        PROTOCOL_REPOSITORY_ATTACH, PROTOCOL_REPOSITORY_CREATE, PROTOCOL_REPOSITORY_EXPORT, PROTOCOL_REPOSITORY_IMPORT,
+        PROTOCOL_REPOSITORY_RELOCATE, PROTOCOL_REPOSITORY_SYNC, PROTOCOL_THUMBNAIL_REQUEST,
+    };
+    let label = match protocol_id {
+        PROTOCOL_REPOSITORY_CREATE => "创建资源库",
+        PROTOCOL_REPOSITORY_IMPORT => "导入资源库",
+        PROTOCOL_REPOSITORY_ATTACH => "挂载资源库",
+        PROTOCOL_REPOSITORY_RELOCATE => "重定向资源库",
+        PROTOCOL_REPOSITORY_EXPORT => "导出资源库",
+        PROTOCOL_REPOSITORY_SYNC => "同步资源库",
+        PROTOCOL_ENTRY_IMPORT => "导入文件",
+        PROTOCOL_ARCHIVE_IMPORT => "导入 ZIP",
+        PROTOCOL_EAGLE_IMPORT => "导入 Eagle",
+        PROTOCOL_ENTRY_COPY => "复制文件",
+        PROTOCOL_ENTRY_MOVE => "移动文件",
+        PROTOCOL_ENTRY_DELETE => "删除文件",
+        PROTOCOL_REPOSITORY_ACTION_RUN => "执行仓库动作",
+        PROTOCOL_THUMBNAIL_REQUEST => "生成缩略图",
+        PROTOCOL_PLAYBACK_PREPARE => "准备播放",
+        PROTOCOL_PLAYLIST_DOWNLOAD => "下载歌单",
+        _ => return None,
+    };
+    Some(label)
+}
+
+/// 任务弹层的行：仓库操作那一行，加上排队、运行和取消中的后台任务，一起按更新时间倒序，和 Vue
+/// `TaskPopover.vue` 的排序一样。任务快照的更新时间是 RFC 3339，换成毫秒再比；读不出的排在最后。
+///
+/// Vue 只列仓库操作（和前端登记的任务）；Nana 多列宿主观察到的后台任务，规则是：
+/// - 标题是任务自己报的标题，没有时按协议写（[`task_protocol_label`]），不写泛泛的「进度」；
+/// - 仓库操作那一行已经表示的同一件事不再单列：这次操作在后台跑的协议（`OperationProgress::protocols`，
+///   例如加载资源库的同步、复制文件的复制）的任务不出行，侧栏「任务」的计数也只算剩下的行。
 pub fn popover_rows(tasks: &[TaskProgressSnapshot], operation: Option<&super::OperationProgress>) -> Vec<PopoverRow> {
     let mut rows = Vec::new();
     if let Some(operation) = operation {
@@ -748,9 +783,10 @@ pub fn popover_rows(tasks: &[TaskProgressSnapshot], operation: Option<&super::Op
             updated_at_ms: operation.updated_at_ms,
         });
     }
-    rows.extend(tasks.iter().map(|task| PopoverRow {
+    let covered = operation.map(|operation| operation.protocols).unwrap_or_default();
+    rows.extend(tasks.iter().filter(|task| !covered.iter().any(|protocol| *protocol == task.protocol_id)).map(|task| PopoverRow {
         id: task.task_id.clone(),
-        label: task.label.clone().filter(|label| !label.trim().is_empty()).unwrap_or_else(|| TASK_LABEL_FALLBACK.into()),
+        label: task_label(task),
         detail: task.error.clone().or(task.phase.clone()).unwrap_or_default(),
         value: f64::from(task.percent.unwrap_or(0.0)),
         indeterminate: task.percent.is_none(),
@@ -762,6 +798,15 @@ pub fn popover_rows(tasks: &[TaskProgressSnapshot], operation: Option<&super::Op
     }));
     rows.sort_by(|left, right| right.updated_at_ms.cmp(&left.updated_at_ms));
     rows
+}
+
+/// 一个后台任务的标题：任务自己报的标题，没有时按协议写，协议也认不出时写「后台任务」。弹层每次同步都
+/// 重算这一行，这里不记日志。
+fn task_label(task: &TaskProgressSnapshot) -> String {
+    if let Some(label) = task.label.as_deref().map(str::trim).filter(|label| !label.is_empty()) {
+        return label.to_string();
+    }
+    task_protocol_label(&task.protocol_id).unwrap_or(TASK_LABEL_FALLBACK).to_string()
 }
 
 pub fn action_status_label(status: &str, enabled: bool) -> &'static str {
@@ -835,3 +880,7 @@ pub fn tool_pages_from_plugins(plugins: &[PluginManifest]) -> Vec<super::ToolPag
     });
     pages.into_iter().map(|(_, page)| page).collect()
 }
+
+#[cfg(test)]
+#[path = "admin_tasks_tests.rs"]
+mod tasks_tests;

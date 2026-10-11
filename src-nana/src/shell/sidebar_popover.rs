@@ -231,13 +231,17 @@ impl SidebarState {
     /// Vue `attachRepository`：任务弹层「挂载资源库 · 检查文件夹并读取索引」8%。
     fn begin_attach(&mut self) {
         self.creating = false;
-        self.operation.start(OperationStart::new("挂载资源库", "检查文件夹并读取索引", 8.0));
+        self.operation.start(
+            OperationStart::new("挂载资源库", "检查文件夹并读取索引", 8.0).runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_ATTACH]),
+        );
     }
 
     /// Vue `createNewRepository`（会做首次扫描）：任务弹层「创建资源库 · 初始化资源库并扫描文件」8%。
     fn begin_create(&mut self) {
         self.creating = true;
-        self.operation.start(OperationStart::new("创建资源库", "初始化资源库并扫描文件", 8.0));
+        self.operation.start(
+            OperationStart::new("创建资源库", "初始化资源库并扫描文件", 8.0).runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_CREATE]),
+        );
     }
 
     /// 附加或创建结束。成功关弹层，新建的进度行走到「切换到新资源库」88%（随后换仓库接手这一行）；

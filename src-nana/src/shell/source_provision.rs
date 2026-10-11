@@ -439,7 +439,9 @@ fn provision(model: &mut ShellViewModel, plugin: &PluginManifest, result: Value)
             let scheme = provisioning(plugin, "sourceUriScheme").unwrap_or_else(|| plugin.kind.clone());
             let path = if cache.is_empty() { format!("{scheme}://account/{account}") } else { cache };
             // Vue `createNewRepository(.., { skipInitialSync: true })`：「创建资源库 · 初始化资源库」8%。
-            let operation = model.operation.start(OperationStart::new("创建资源库", "初始化资源库", 8.0));
+            let operation = model.operation.start(
+                OperationStart::new("创建资源库", "初始化资源库", 8.0).runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_CREATE]),
+            );
             model.admin.source_auth.create_operation = Some(operation);
             model.admin.push_effect(AdminEffect::CreateSourceRepository {
                 repo_id,

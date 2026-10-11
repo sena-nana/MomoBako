@@ -32,6 +32,9 @@ pub struct OperationProgress {
     pub indeterminate: bool,
     /// 上一次变化的墙钟毫秒。任务弹层按它和运行中的任务一起排先后（Vue 每次重算都取 `Date.now()`）。
     pub updated_at_ms: i64,
+    /// 这次操作在后台跑的任务协议（例如加载资源库跑同步）。任务弹层里这些协议的后台任务就是这一行表示的
+    /// 同一件事，不再单列（`admin_support::popover_rows`）。
+    pub protocols: &'static [&'static str],
 }
 
 /// 一次操作的编号。
@@ -45,16 +48,24 @@ pub struct OperationStart {
     pub detail: String,
     pub initial: f64,
     pub indeterminate: bool,
+    /// 这次操作在后台跑的任务协议，见 [`OperationProgress::protocols`]。
+    pub protocols: &'static [&'static str],
 }
 
 impl OperationStart {
     pub fn new(label: impl Into<String>, detail: impl Into<String>, initial: f64) -> Self {
-        Self { label: label.into(), detail: detail.into(), initial, indeterminate: false }
+        Self { label: label.into(), detail: detail.into(), initial, indeterminate: false, protocols: &[] }
     }
 
     /// 标成不确定进度（Vue `{ indeterminate: true }`）。
     pub fn indeterminate(mut self) -> Self {
         self.indeterminate = true;
+        self
+    }
+
+    /// 记下这次操作在后台跑的任务协议：任务弹层不再把这些任务单列一行。
+    pub fn runs(mut self, protocols: &'static [&'static str]) -> Self {
+        self.protocols = protocols;
         self
     }
 }
@@ -113,6 +124,7 @@ impl RepositoryOperation {
                 value: clamp_percent(start.initial),
                 indeterminate: start.indeterminate,
                 updated_at_ms: now_ms(),
+                protocols: start.protocols,
             },
             next_climb_ms: Some(self.clock_ms + CLIMB_INTERVAL_MS),
             hide_at_ms: None,
