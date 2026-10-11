@@ -5,6 +5,9 @@
 //! 子菜单照 `.ctx-menu__slot:hover` / `:focus-within`：指针或键盘焦点进到分组那一行（含子菜单）
 //! 就展开，都离开就收起，没有延迟；点分组本身不收起（按下时焦点落在分组上）。禁用的分组不展开。
 //! 菜单按指针落点放置，靠右或靠下放不下时夹回窗口内 4px。
+//! 菜单和每个子菜单各是一个方向键焦点组：上下键在本层的项之间走、首尾相接，Tab 从分组走进子菜单；
+//! 带子菜单的分组照 Vue 报成菜单按钮（`aria-haspopup="menu"`）。菜单键和 Shift+F10 打开的菜单，
+//! 焦点落在首项（`menu_focus.rs`）。
 //! 回收站里的「彻底删除」要点两次：第一次只把这一行变成待确认。点菜单外关闭。
 //! 来源插件的条目动作不能用时禁用，紧跟着一行弱色小字写原因（Vue 把原因放在禁用项的 `confirmLabel` 里，
 //! 禁用的按钮点不了，原因从来显示不出来）。
@@ -28,6 +31,7 @@ use super::super::admin::AdminMessage;
 use super::super::entry_actions::{self, FilePluginAction, FilePluginDispatch, SourceContext};
 use super::super::files::{BranchSource, FileContext, FileDialog, FileRow, FilesMessage};
 use super::super::input::{repository_absolute, InputMessage};
+use super::super::menu_focus::MENU_KEYS;
 use super::super::player::PlayerMessage;
 use super::super::view_part_overlay::session::Projected;
 use super::super::workspace::WorkspacePanel;
@@ -197,7 +201,8 @@ pub(super) fn entry_menu(model: &ShellViewModel) -> Option<AnyView> {
                 widget(surface)
                     .prop::<(f32, f32, f32, f32), MenuPlacement>(move || view.with(|view| (x, y, view.width, view.height)))
                     .children((rows,))
-                    .key("file-context-menu"),
+                    .key("file-context-menu")
+                    .roving_focus(MENU_KEYS),
             ))
             .key("file-context-layer")
             .into_any(),
@@ -303,7 +308,7 @@ fn submenu(view: Signal<EntryMenuView>, entry: &MenuEntry) -> AnyView {
     });
     widget(bridge)
         .visible(move || view.with(|view| view.branch.as_deref() == Some(id.as_str())))
-        .children((widget(style::with_shadows(panel, vec![style::shadow(10.0, 28.0, -10.0, 0.55)])).children(rows),))
+        .children((widget(style::with_shadows(panel, vec![style::shadow(10.0, 28.0, -10.0, 0.55)])).children(rows).roving_focus(MENU_KEYS),))
         .key(format!("file-menu-sub-{}", entry.id))
         .into_any()
 }
@@ -349,7 +354,7 @@ fn item(entry: &MenuEntry) -> AnyView {
         parts.push(widget(style::text("›", 13.0, 500, SemanticColorRole::Faint, 20.0)).into_any());
     }
     let content = widget(Stack::row(10.0).align(AlignSpec::Center)).children(parts);
-    let mut node = widget(ListItem::new(entry.label.clone()).disabled(entry.disabled).style(style))
+    let mut node = widget(ListItem::new(entry.label.clone()).disabled(entry.disabled).has_popup(!entry.children.is_empty()).style(style))
         .content(content)
         .key(format!("file-menu-{}", entry.id));
     // 分组没有自己的动作（Vue `selectContextMenuItem` 遇到 `children` 直接返回），子菜单由所在的那一行管。

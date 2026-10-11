@@ -87,7 +87,7 @@ impl FieldWrite<IconButton, bool> for SidebarToggleField {
 /// 标题栏图标按钮：28×28、`--radius-sm`、`--text-muted`，悬停 `--bg-hover`。对应 `.titlebar__btn`。
 fn chrome_button(icon: Icon, label: &'static str, disabled: bool) -> IconButton {
     let mut button = IconButton::new(icon, label).size(ControlSize::Large).disabled(disabled).with_tooltip(label);
-    button.style = parts::icon_button_style(CONTROL_EDGE, RadiusTier::Sm, SemanticColorRole::Muted, None, disabled);
+    button.style = parts::icon_button_style(CONTROL_EDGE, RadiusTier::Sm, SemanticColorRole::Muted, None);
     button.colors_from_style()
 }
 
@@ -98,7 +98,7 @@ fn filter_label(open: bool) -> &'static str {
 
 /// 筛选开关的样式：平时弱色，悬停和按下强调色；打开或有条件时强调色底。
 fn filter_style(active: bool) -> NodeStyle {
-    let mut style = parts::icon_button_style(CONTROL_EDGE, RadiusTier::Sm, SemanticColorRole::Muted, Some(SemanticColorRole::Subtle), false);
+    let mut style = parts::icon_button_style(CONTROL_EDGE, RadiusTier::Sm, SemanticColorRole::Muted, Some(SemanticColorRole::Subtle));
     let accent = SemanticPaint {
         background: Some(SemanticColorRole::AccentSoft),
         foreground: Some(SemanticColorRole::Accent),

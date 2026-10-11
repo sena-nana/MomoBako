@@ -21,6 +21,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 **颜色合成。**
 - NanaUI 在线性空间混合（见 NanaUI `docs/reference/text-engine.md`），Chromium 在 sRGB 空间混合。带透明度的主题角色（强调浅底、悬停底、浅红浅绿底）在 Nana 里更亮，深色主题下更明显。主题角色保留 NanaUI 的设计，不为对齐改动。
 - 例外：Vue 用整块 `opacity` 盖在已知不透明底色上的地方（禁用态、色块外圈、播放条淡化），改用 `SemanticColorMix::new(前景, 底色, 比例)` 直接在 sRGB 通道混。
+- 停用的图标按钮：NanaUI 的 `IconButton` 停用时整枚淡到 50%（线性空间合成）。侧栏标题工具、添加资源库表单的关闭钮交给它，不再自己写 0.45；播放条的传输按钮由自绘按上一条在 sRGB 里混好停用色，宿主是没有可见文字的 `Button`，不让 NanaUI 再淡一层（`disabled_fade_tests.rs`）。
 - 纯黑遮罩：线性空间里是把底色乘以 `1 - α`。要和 Vue 的 45% 黑一样暗，不透明度取 `linear_scrim_alpha(0.45) = 1 - 0.55^2.2 ≈ 0.732`。对话框的遮罩是主题的效果令牌 `modal_scrim`，`appearance.rs` 按这个换算写进去；背景模糊是 `modal_scrim_blur`，照 CSS 写 2。
 
 **按钮。**
@@ -106,6 +107,8 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 
 ### 交互
 - 右键子菜单照 Vue `.ctx-menu__slot:hover` / `:focus-within`：指针或键盘焦点进到分组那一行（含子菜单）就展开，都离开就收起，没有延迟；点分组不收起，按下时焦点落在分组上，指针移开也留着；Tab 进分组展开，再 Tab 走进子菜单。指针和焦点各在一个分组里时，Vue 两个子菜单叠着显示，Nana 只显示指针所在的那个。
+- 键盘打开菜单（`menu_focus.rs`）：仓库头和文件页的「导入」是菜单按钮（`has_popup`，仓库头照 Vue 的 `aria-haspopup="menu"`），焦点在上面时 ArrowDown 打开菜单、焦点落在首项，ArrowUp 落在末项；文件卡片上的菜单键和 Shift+F10 打开右键菜单，焦点落在首项。切换列表、添加菜单、导入菜单、右键菜单和它的每个子菜单各是一个方向键焦点组，上下键在本层的项之间走、首尾相接，带子菜单的分组照 Vue 报成菜单按钮，Tab 从分组走进子菜单。Escape 或点外面关掉菜单以后，焦点回到打开它的控件；选了一项打开对话框时焦点留在对话框里。仓库弹层从切换列表换到添加菜单时焦点跟进添加菜单的首项，整个弹层关掉才还给仓库头。指针打开的菜单不动焦点。Vue 的这些菜单没有方向键，也不把焦点放进菜单。
+- 文件夹行上的菜单键和 Shift+F10 不开文件夹菜单：它是 NanaUI `ContextMenu`，挂在浮层层里，没经 `OverlayHost` 的 `activate_overlay` 打开，方向键和 Enter 走不到它。Vue 的文件夹菜单也只能右键打开。
 - 所有对话框都响应 Escape、点外面和关闭位（处理中都不关）。Vue 手写的 `.modal-overlay` 对话框（删除资源库、文件夹、智能文件夹、播放集等）都不响应 Escape，只有删除插件用的 Lilia `ConfirmDialog` 响应；这里一致响应。
 - 对话框打开时框架把焦点放进对话框（第一个可聚焦的控件，确认框是「取消」），关掉后焦点回到打开前的位置。Vue 手写的对话框不管焦点；Lilia `ConfirmDialog` 有焦点陷阱，危险口气时先聚焦「取消」。
 - 正在用输入法组合时，新的对话框等组合结束再打开（一激活就会拿走焦点、打断组合）。
@@ -149,6 +152,7 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 - 二维码按 `qrurl` 重新编码，内容和 Vue 相同，但模块排布不同。
 - 勾选框选中时是强调色底上的「✓」（Vue 是浅色底上强调色的小方块）。NanaUI 的勾用主题配方里「强调色上的字色」，浅底上看不见。
 - 日志页的仓库筛选按最长的选项（`acceptance-repo`）定宽以后，1200×800 下外框 206.5，Vue 是 188；插件筛选只有短选项，下拉框停在最小宽 122，外框 182（Vue 180）。多出来的是字宽：Vue 字体栈第一项 Noto Sans SC 在对照机上没装，Edge 用 Segoe UI 画拉丁字母，`acceptance-repo` 约 108；Nana 自带 Noto Sans SC，同一串约 130。箭头（16）和内边距（0）和 Vue 的原生下拉框相当。
+- 中文标点不挤压：NanaUI `e062d098a` 起，文字的语言是中文、日文时默认按固定量挤压行首行尾和相邻的全角标点（`text-spacing-trim: normal`）。Nana 没有给文档声明语言（Vue 的 `index.html` 是 `lang="zh-CN"`），和升级前一样不挤压，现有场景里也没有相邻的全角标点。试过声明 `zh-CN`：数字和拉丁字母改按简体中文挑字形，122 张截图有细小变化，标点没有可见差别，所以没有声明。
 
 ### 数据
 - 标签菜单没有仓库级标签组；智能文件夹的摘要行省略了。
@@ -181,4 +185,5 @@ Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实�
 | 滚动范围按全部后代的盒子合并，不在里层的滚动区或裁剪盒处停下 | 上游 `941df646d` 已修：范围只算到最近的裁剪盒，里层滚动区只贡献自己的盒子。日志页主体恢复成滚动区（`route_admin.rs` 走 `home_scroll`），不滚的裁剪盒 `route_home::home_fixed` 和撑满它的 `fill_panel` 已删，矮窗口里日志页也能滚 |
 | `RadiusTier` 没有 2xl 档 | 已补：上游 `8541a2f8d` 的 `RadiusTier::Xxl` / `ThemeMetrics::radius_xxl`。`corner_metrics` 按两倍基数给，原来按像素给的 `theme_map::radius_2xl` 已删，插件、日志和搜索页的面板也从 Xl 改回 2xl，见上文「圆角」 |
 | 线性空间混合 | 设计如此，见上文「颜色合成」 |
-| 任务工作线程不接 panic（固定的 `b02eaa231` 里 `crates/nana-ui/src/scene_host.rs` 的 `spawn_task_workers`：四个工作线程循环 `pollster::block_on(task.into_future())`，外面没有 `catch_unwind`） | NanaUI 那边在修，MomoBako 升级 NanaUI 修订以前还在。现象：一个任务 panic，跑它的工作线程就退出、不补新的，结果消息永远不来；四个都退出以后接收端随最后一个线程一起丢掉，已经排队的任务不再执行、结果也不回来，之后的 `run_task` 一律报「runtime host task executor has stopped」。Nana 这边所有派发点都经 `task_guard` 在任务里接住 panic、按失败交回，工作线程不会因为 Nana 的任务退出；升级以后这层兜底照样留着，它还负责任务排不进去和服务没起来时交回失败。修法：工作线程在 `block_on` 外面包 `catch_unwind`，记下 panic、接着取下一个任务（线程不退出）；最好再让 `Task` 能带一个出 panic 时交回的消息，应用不用自己兜底也能收尾 |
+| `IconButton` 停用时整枚淡到 50%（`88f659bb4`），没有退出口：`colors_from_style` 或自绘的按钮已经画了停用色，还会再淡一层，而且是线性空间合成，和 CSS `opacity` 不同 | 未补。播放条的传输按钮改用没有可见文字的 `Button` 承载自绘（见上文「颜色合成」）；侧栏标题工具和弹层关闭钮交给它淡化。修法：`colors_from_style` 的按钮不淡，或者给 `IconButton` 一个关掉淡化的开关 |
+| 任务工作线程不接 panic（`b02eaa231` 的 `spawn_task_workers` 在 `pollster::block_on` 外面没有 `catch_unwind`：任务 panic 时工作线程退出，四个都退出以后之后的 `run_task` 一律报「runtime host task executor has stopped」） | 上游 `e062d098a` 已修：每个任务在 `catch_unwind` 里跑，panic 的任务丢掉自己的消息、记一条 `host.task_panicked` 故障，工作线程接着处理队列。结果消息仍然不交回，`Task` 也不能带一条出 panic 时交回的消息，所以 `task_guard` 照样在任务里接住 panic、按失败交回；它还负责任务排不进去和服务没起来时交回失败 |

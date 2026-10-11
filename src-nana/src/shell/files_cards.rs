@@ -21,6 +21,7 @@ use nana_ui::runtime::{
 use nana_ui_core::{Icon, LengthAtom, SemanticColorMix};
 
 use super::super::files::{hardlink_label, DisplayMode, FileRow, FilesMessage};
+use super::super::menu_focus::{focus_menu, MenuEdge, MenuSurface};
 use super::bind::StyleField;
 use super::file_message;
 use super::style::{self, PreviewPainter, Tone};
@@ -230,6 +231,7 @@ const LIST_META_MIN: f32 = 220.0;
 const LIST_TITLE_MIN: f32 = 80.0;
 
 /// 条目卡片。单击选中、连点进入或预览、右键打开菜单都挂在卡片上；处理器只带条目路径这个常量。
+/// 菜单键和 Shift+F10 也打开菜单（锚在卡片中心），焦点落在首项。
 pub(super) fn card(cell: &CardCell, mode: DisplayMode, cards: Cards) -> AnyView {
     let item = card_item(cards, &cell.key);
     let current = untrack(|| item.try_with(CardView::clone)).unwrap_or_else(|| {
@@ -253,6 +255,9 @@ pub(super) fn card(cell: &CardCell, mode: DisplayMode, cards: Cards) -> AnyView 
         .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(file_message(super::grid::row_activation(&path))))
         .on_cx(move |_, event: &SecondaryPress, cx| {
             cx.dispatch_program_all(file_message(FilesMessage::OpenEntryMenu { path: menu_path.clone(), x: event.x, y: event.y }));
+            if let Some(edge) = MenuEdge::of_press(event) {
+                cx.dispatch_program_all(focus_menu(MenuSurface::Entry, edge));
+            }
         })
         .into_any();
     let mut frame = Stack::column(0.0).grow(0.0).shrink(0.0).min_width(LengthSpec::Px(0.0));
