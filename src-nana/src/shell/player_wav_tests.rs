@@ -91,6 +91,41 @@ fn wav_session_loads_and_plays_then_pauses_seeks_and_sets_volume() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
+/// 24 位、浮点、WAVE_FORMAT_EXTENSIBLE（DAW 导出的 16 位也常是这种）和 5.1 声道的 WAV 都能装进游标播放：
+/// 8/16 位单双声道原样留下，其余换成 16 位，多声道下混成立体声，时长按帧算。ADPCM 这类压缩编码写明编码标签。
+#[test]
+fn deep_float_extensible_and_surround_wavs_play() {
+    use crate::shell::audio_decode::pcm::{fmt_chunk, wav_file};
+    let dir = temp_dir("wav-formats");
+    let cases = [
+        ("deep", wav_file(&fmt_chunk(1, 2, 8_000, 24, None), &vec![0; 8_000 * 2 * 3]), (2, 16)),
+        ("float", wav_file(&fmt_chunk(3, 1, 8_000, 32, None), &vec![0; 8_000 * 4]), (1, 16)),
+        ("extensible", wav_file(&fmt_chunk(0, 2, 8_000, 16, Some((1, 0x3))), &vec![0; 8_000 * 2 * 2]), (2, 16)),
+        ("surround", wav_file(&fmt_chunk(0, 6, 8_000, 32, Some((3, 0x3F))), &vec![0; 8_000 * 6 * 4]), (2, 16)),
+    ];
+    let mut model = shell(true);
+    model.player.repo_id = Some("repo".into());
+    for (name, bytes, layout) in cases {
+        let pcm = super::super::pcm_from_bytes(&bytes).unwrap_or_else(|error| panic!("{name}：{error}"));
+        assert_eq!((pcm.channels, pcm.bits_per_sample, pcm.duration_ms), (layout.0, layout.1, 1_000), "{name}");
+        let path = dir.join(format!("{name}.wav"));
+        std::fs::write(&path, &bytes).unwrap();
+        model.player.queue = vec![wav_queue_item(name, &path)];
+        model.player.current_id = None;
+        send(&mut model, PlayerMessage::PlayItem { item_id: name.into() });
+        assert_eq!(model.player.session.status, "playing", "{name}：{:?}", model.player.session.error);
+        assert_eq!(model.player.session.duration_ms, Some(1_000), "{name}");
+    }
+
+    let adpcm = dir.join("adpcm.wav");
+    std::fs::write(&adpcm, wav_file(&fmt_chunk(2, 1, 8_000, 4, None), &[0; 64])).unwrap();
+    model.player.queue = vec![wav_queue_item("adpcm", &adpcm)];
+    send(&mut model, PlayerMessage::PlayItem { item_id: "adpcm".into() });
+    assert_eq!(model.player.session.status, "failed");
+    assert_eq!(model.player.session.error.as_deref(), Some("不支持的 WAV 编码（0x0002）"));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
 #[test]
 fn wav_player_rejects_a_non_wav_header() {
     let dir = temp_dir("wav-bad");

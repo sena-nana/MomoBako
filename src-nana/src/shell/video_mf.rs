@@ -2,20 +2,24 @@
 //! Windows 媒体基础解码。
 //!
 //! 用源读取器把画面解成 RGB，把音轨解成 PCM。不创建播放会话，不打开窗口，也不把样本送进声卡。
+//! 音轨要 16-bit PCM，解码器给不了时退到浮点；样本经 `audio_pcm.rs` 取成 16-bit，三个以上声道下混成立体声。
 //! 正式播放仍走已有的内存游标；测试构建不会调用 winmm。
 
 use std::ptr;
 
+use windows::core::GUID;
 use windows::Win32::Media::MediaFoundation::{
-    IMFMediaBuffer, IMFSample, IMFSourceReader, MFAudioFormat_PCM, MFCreateMFByteStreamOnStream, MFCreateMediaType,
-    MFCreateSourceReaderFromByteStream, MFMediaType_Audio, MFMediaType_Video, MFShutdown, MFStartup, MFVideoFormat_RGB32,
-    MFSTARTUP_NOSOCKET, MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_NUM_CHANNELS, MF_MT_AUDIO_SAMPLES_PER_SECOND,
-    MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_SOURCE_READERF_ENDOFSTREAM,
-    MF_SOURCE_READERF_ERROR, MF_SOURCE_READER_FIRST_AUDIO_STREAM, MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_VERSION,
+    IMFMediaBuffer, IMFSample, IMFSourceReader, MFAudioFormat_Float, MFAudioFormat_PCM, MFCreateMFByteStreamOnStream,
+    MFCreateMediaType, MFCreateSourceReaderFromByteStream, MFMediaType_Audio, MFMediaType_Video, MFShutdown, MFStartup,
+    MFVideoFormat_RGB32, MFSTARTUP_NOSOCKET, MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_CHANNEL_MASK, MF_MT_AUDIO_NUM_CHANNELS,
+    MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE,
+    MF_SOURCE_READERF_ENDOFSTREAM, MF_SOURCE_READERF_ERROR, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
+    MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_VERSION,
 };
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 use windows::Win32::UI::Shell::SHCreateMemStream;
 
+use crate::shell::audio_decode::pcm::{Encoding, WaveFormat};
 use crate::shell::player::PreviewPcm;
 
 use super::{DecodedClip, VideoFrame, FRAME_BYTE_BUDGET, PCM_BYTE_BUDGET};
@@ -146,26 +150,45 @@ unsafe fn configure_video(reader: &IMFSourceReader, index: u32) -> Result<(), St
     reader.SetCurrentMediaType(index, None, &media_type).map_err(|error| error.to_string())
 }
 
+/// 音轨先要 16-bit PCM；有的解码器只出浮点，退到 32 位浮点，读出来以后再换成 16-bit。没有音轨时返回假。
 unsafe fn configure_audio(reader: &IMFSourceReader, index: u32) -> bool {
-    let media_type = match MFCreateMediaType() {
-        Ok(media_type) => media_type,
-        Err(error) => {
-            eprintln!("Nana 视频音轨类型创建失败：{error}");
-            return false;
+    if let Err(error) = reader.GetNativeMediaType(index, 0) {
+        eprintln!("Nana 媒体没有可解的音轨：{error}");
+        return false;
+    }
+    for (subtype, bits, label) in [(MFAudioFormat_PCM, 16, "16 位 PCM"), (MFAudioFormat_Float, 32, "32 位浮点")] {
+        match set_audio_type(reader, index, &subtype, bits) {
+            Ok(()) => return true,
+            Err(error) => eprintln!("Nana 音轨不能输出{label}：{error}"),
         }
+    }
+    false
+}
+
+unsafe fn set_audio_type(reader: &IMFSourceReader, index: u32, subtype: &GUID, bits: u32) -> Result<(), String> {
+    let media_type = MFCreateMediaType().map_err(|error| error.to_string())?;
+    media_type.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio).map_err(|error| error.to_string())?;
+    media_type.SetGUID(&MF_MT_SUBTYPE, subtype).map_err(|error| error.to_string())?;
+    media_type.SetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE, bits).map_err(|error| error.to_string())?;
+    reader.SetCurrentMediaType(index, None, &media_type).map_err(|error| error.to_string())
+}
+
+/// 音轨当前输出的格式：整数 PCM 或浮点、声道数、采样率、位深和声道掩码。
+unsafe fn audio_format(reader: &IMFSourceReader, index: u32) -> Result<WaveFormat, String> {
+    let media_type = reader.GetCurrentMediaType(index).map_err(|error| error.to_string())?;
+    let subtype = media_type.GetGUID(&MF_MT_SUBTYPE).map_err(|error| error.to_string())?;
+    let encoding = if subtype == MFAudioFormat_PCM {
+        Encoding::Integer
+    } else if subtype == MFAudioFormat_Float {
+        Encoding::Float
+    } else {
+        return Err("音轨输出的不是 PCM 或浮点".into());
     };
-    if media_type.SetGUID(&MF_MT_MAJOR_TYPE, &MFMediaType_Audio).is_err()
-        || media_type.SetGUID(&MF_MT_SUBTYPE, &MFAudioFormat_PCM).is_err()
-        || media_type.SetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE, 16).is_err()
-    {
-        eprintln!("Nana 视频音轨无法指定 PCM");
-        return false;
-    }
-    if let Err(error) = reader.SetCurrentMediaType(index, None, &media_type) {
-        eprintln!("Nana 视频没有可解的音轨：{error}");
-        return false;
-    }
-    true
+    let channels = u16::try_from(media_type.GetUINT32(&MF_MT_AUDIO_NUM_CHANNELS).unwrap_or(0)).unwrap_or(0);
+    let sample_rate = media_type.GetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND).unwrap_or(0);
+    let bits = u16::try_from(media_type.GetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE).unwrap_or(0)).unwrap_or(0);
+    let mask = media_type.GetUINT32(&MF_MT_AUDIO_CHANNEL_MASK).ok().map(u64::from);
+    WaveFormat::interleaved(encoding, channels, sample_rate, bits, mask)
 }
 
 unsafe fn video_layout(reader: &IMFSourceReader, index: u32) -> Result<(u32, u32, i32), String> {
@@ -263,13 +286,9 @@ fn scale_bgra(width: u32, height: u32, stride: usize, bottom_up: bool, bytes: &[
 }
 
 unsafe fn read_audio(reader: &IMFSourceReader, index: u32, limit_ms: u64) -> Result<PreviewPcm, String> {
-    let media_type = reader.GetCurrentMediaType(index).map_err(|error| error.to_string())?;
-    let sample_rate = media_type.GetUINT32(&MF_MT_AUDIO_SAMPLES_PER_SECOND).unwrap_or(0);
-    let channels = media_type.GetUINT32(&MF_MT_AUDIO_NUM_CHANNELS).unwrap_or(0) as u16;
-    let bits = media_type.GetUINT32(&MF_MT_AUDIO_BITS_PER_SAMPLE).unwrap_or(0) as u16;
-    if sample_rate == 0 || (channels != 1 && channels != 2) || bits != 16 {
-        return Err("音轨不是 16-bit 立体声或单声道".into());
-    }
+    let format = audio_format(reader, index)?;
+    let (channels, bits) = format.output();
+    let block = usize::from(format.block_align);
     let mut pcm = Vec::new();
     for _ in 0..200_000 {
         if pcm.len() > PCM_BYTE_BUDGET {
@@ -280,27 +299,28 @@ unsafe fn read_audio(reader: &IMFSourceReader, index: u32, limit_ms: u64) -> Res
             Sample::End => break,
             Sample::Empty => {}
             Sample::Data { time_ms, bytes } => {
-                pcm.extend_from_slice(&bytes);
+                let whole = bytes.len() - bytes.len() % block;
+                if whole != bytes.len() {
+                    eprintln!("Nana 音轨样本不是整帧，丢掉末尾 {} 字节", bytes.len() - whole);
+                }
+                format.convert_into(&bytes[..whole], &mut pcm)?;
                 if limit_ms > 0 && time_ms > limit_ms.saturating_add(1_000) {
                     break;
                 }
             }
         }
     }
-    let frame_bytes = usize::from(channels) * 2;
+    let frame_bytes = usize::from(channels) * usize::from(bits / 8);
     if frame_bytes == 0 || pcm.len() < frame_bytes {
         return Err("音轨没有样本".into());
     }
-    let usable = pcm.len() - pcm.len() % frame_bytes;
-    pcm.truncate(usable);
-    let frame_count = pcm.len() as u64 / frame_bytes as u64;
-    let duration_ms = frame_count.saturating_mul(1_000) / u64::from(sample_rate);
+    let frame_count = (pcm.len() / frame_bytes) as u64;
     Ok(PreviewPcm {
-        sample_rate,
+        sample_rate: format.sample_rate,
         channels,
-        bits_per_sample: 16,
+        bits_per_sample: bits,
         frame_count,
-        duration_ms,
+        duration_ms: frame_count.saturating_mul(1_000) / u64::from(format.sample_rate),
         pcm,
     })
 }

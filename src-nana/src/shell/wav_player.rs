@@ -1,6 +1,7 @@
 //! 内置 WAV 播放贡献，以及解成 PCM 后共用同一游标的 mp3、flac、ogg；Windows 上还有媒体基础解出的 m4a、aac、opus。
 //!
-//! WAV 只解析标准 PCM（RIFF/WAVE、`fmt `、`data`，8-bit 或 16-bit，单声道或双声道）。
+//! WAV 读 RIFF/WAVE 的 `fmt ` 和 `data`：整数 PCM（8/16/24/32 位）、浮点（32/64 位）和 WAVE_FORMAT_EXTENSIBLE，
+//! 8/16-bit 单双声道原样进游标，其余换成 16-bit，三个以上声道下混成立体声（`audio_pcm.rs`）。
 //! 压缩格式先解成 16-bit 小端 PCM，再放进这份游标。播放头和音量留在内存里。
 //! 正式 Windows 构建在播放成功后用 winmm 异步出声。测试构建不打开设备，单元测试不会出声。
 
@@ -9,6 +10,7 @@ use std::rc::Rc;
 
 use crate::backend::services::repository::PlaybackSessionState;
 use crate::host_api::{PlaybackMediaPlugin, PlaybackSessionController};
+use crate::shell::audio_decode::pcm::WaveFormat;
 
 use super::PlayerCandidate;
 
@@ -93,15 +95,6 @@ struct Cursor {
     sounding: Option<(u64, f32)>,
 }
 
-struct ParsedWav {
-    sample_rate: u32,
-    channels: u16,
-    bits_per_sample: u16,
-    frame_count: u64,
-    duration_ms: u64,
-    pcm: Vec<u8>,
-}
-
 /// 预览装进内存游标的 PCM。正式 Windows 构建播放时才交给 winmm，测试构建不打开设备。
 #[derive(Clone, PartialEq)]
 pub struct PreviewPcm {
@@ -127,14 +120,6 @@ impl std::fmt::Debug for PreviewPcm {
     }
 }
 
-struct FmtChunk {
-    audio_format: u16,
-    channels: u16,
-    sample_rate: u32,
-    block_align: u16,
-    bits_per_sample: u16,
-}
-
 impl Default for WavPlayer {
     fn default() -> Self {
         Self {
@@ -154,14 +139,7 @@ impl WavPlayer {
     /// 预览字节已经在内存里，直接装进和播放列表相同的游标。这里不出声。
     pub(super) fn install_preview(&mut self, audio: PreviewPcm) {
         self.clear();
-        *self.inner.borrow_mut() = Cursor::from_parsed(ParsedWav {
-            sample_rate: audio.sample_rate,
-            channels: audio.channels,
-            bits_per_sample: audio.bits_per_sample,
-            frame_count: audio.frame_count,
-            duration_ms: audio.duration_ms,
-            pcm: audio.pcm,
-        });
+        *self.inner.borrow_mut() = Cursor::from_pcm(audio);
     }
 
     #[cfg(test)]
@@ -275,14 +253,14 @@ impl Cursor {
         }
     }
 
-    fn from_parsed(parsed: ParsedWav) -> Self {
+    fn from_pcm(audio: PreviewPcm) -> Self {
         Self {
             loaded: true,
-            sample_rate: parsed.sample_rate,
-            channels: parsed.channels,
-            bits_per_sample: parsed.bits_per_sample,
-            frame_count: parsed.frame_count,
-            pcm: parsed.pcm,
+            sample_rate: audio.sample_rate,
+            channels: audio.channels,
+            bits_per_sample: audio.bits_per_sample,
+            frame_count: audio.frame_count,
+            pcm: audio.pcm,
             #[cfg(all(windows, not(test)))]
             playback_wav: Vec::new(),
             frame: 0,
@@ -376,19 +354,10 @@ impl PlaybackMediaPlugin for ClockOnly {
 
 /// WAV 优先。失败后再解 mp3、flac、ogg。两种都不是时返回错误，由调用方记日志。
 pub(crate) fn pcm_from_bytes(bytes: &[u8]) -> Result<PreviewPcm, String> {
-    let parsed = if let Ok(parsed) = parse_wav(bytes) {
-        parsed
-    } else {
-        parsed_from_decoded(crate::shell::audio_decode::decode_compressed(bytes)?)?
-    };
-    Ok(PreviewPcm {
-        sample_rate: parsed.sample_rate,
-        channels: parsed.channels,
-        bits_per_sample: parsed.bits_per_sample,
-        frame_count: parsed.frame_count,
-        duration_ms: parsed.duration_ms,
-        pcm: parsed.pcm,
-    })
+    match parse_wav(bytes) {
+        Ok(audio) => Ok(audio),
+        Err(_) => pcm_from_decoded(crate::shell::audio_decode::decode_compressed(bytes)?),
+    }
 }
 
 /// 按扩展名说明解不开的原因：wav 报 WAV 头的问题，mp3、flac、ogg 报压缩音频解码的问题。
@@ -415,12 +384,12 @@ pub(crate) fn sound_device_compiled_in() -> bool {
     cfg!(all(windows, not(test)))
 }
 
-fn parsed_from_decoded(decoded: crate::shell::audio_decode::DecodedPcm) -> Result<ParsedWav, String> {
+fn pcm_from_decoded(decoded: crate::shell::audio_decode::DecodedPcm) -> Result<PreviewPcm, String> {
     let frame_bytes = usize::from(decoded.channels) * 2;
     if frame_bytes == 0 || decoded.pcm.len() % frame_bytes != 0 {
         return Err("压缩音频没有整帧样本".into());
     }
-    Ok(ParsedWav {
+    Ok(PreviewPcm {
         sample_rate: decoded.sample_rate,
         channels: decoded.channels,
         bits_per_sample: 16,
@@ -430,9 +399,9 @@ fn parsed_from_decoded(decoded: crate::shell::audio_decode::DecodedPcm) -> Resul
     })
 }
 
-/// 时长按帧计算。一帧是同一时刻全部声道的样本，单声道时帧数就是样本数。
-/// 秒 = 帧数 / 采样率，`duration_ms` = 帧数 × 1000 / 采样率。
-fn parse_wav(bytes: &[u8]) -> Result<ParsedWav, String> {
+/// 按块读出 `fmt ` 和第一个 `data`，样本经 `audio_pcm.rs` 换成游标能放的 PCM。
+/// 时长按帧计算：一帧是同一时刻全部声道的样本，`duration_ms` = 帧数 × 1000 / 采样率。
+fn parse_wav(bytes: &[u8]) -> Result<PreviewPcm, String> {
     if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
         return Err("不是 WAV 头".into());
     }
@@ -458,8 +427,8 @@ fn parse_wav(bytes: &[u8]) -> Result<ParsedWav, String> {
             return Err("WAV 块超出文件".into());
         }
         match id {
-            id if id == *b"fmt " => fmt = Some(parse_fmt(&bytes[start..end])?),
-            id if id == *b"data" && data.is_none() => data = Some(bytes[start..end].to_vec()),
+            id if id == *b"fmt " => fmt = Some(WaveFormat::parse(&bytes[start..end])?),
+            id if id == *b"data" && data.is_none() => data = Some(&bytes[start..end]),
             _ => {}
         }
         offset = end;
@@ -468,50 +437,8 @@ fn parse_wav(bytes: &[u8]) -> Result<ParsedWav, String> {
         }
     }
     let fmt = fmt.ok_or("WAV 缺少 fmt 块")?;
-    let pcm = data.ok_or("WAV 缺少 data 块")?;
-    if fmt.audio_format != 1 {
-        return Err("只支持 PCM WAV".into());
-    }
-    if fmt.channels != 1 && fmt.channels != 2 {
-        return Err("只支持单声道或双声道 WAV".into());
-    }
-    if fmt.bits_per_sample != 8 && fmt.bits_per_sample != 16 {
-        return Err("只支持 8-bit 或 16-bit WAV".into());
-    }
-    if fmt.sample_rate == 0 {
-        return Err("WAV 采样率无效".into());
-    }
-    let frame_bytes = fmt.channels * (fmt.bits_per_sample / 8);
-    if frame_bytes == 0 || fmt.block_align != frame_bytes {
-        return Err("WAV 帧长无效".into());
-    }
-    let frame_bytes = u64::from(frame_bytes);
-    if pcm.len() as u64 % frame_bytes != 0 {
-        return Err("WAV 数据长度不是整帧".into());
-    }
-    let frame_count = pcm.len() as u64 / frame_bytes;
-    let duration_ms = frame_count.saturating_mul(1000) / u64::from(fmt.sample_rate);
-    Ok(ParsedWav {
-        sample_rate: fmt.sample_rate,
-        channels: fmt.channels,
-        bits_per_sample: fmt.bits_per_sample,
-        frame_count,
-        duration_ms,
-        pcm,
-    })
-}
-
-fn parse_fmt(chunk: &[u8]) -> Result<FmtChunk, String> {
-    if chunk.len() < 16 {
-        return Err("WAV fmt 块不完整".into());
-    }
-    Ok(FmtChunk {
-        audio_format: u16::from_le_bytes([chunk[0], chunk[1]]),
-        channels: u16::from_le_bytes([chunk[2], chunk[3]]),
-        sample_rate: u32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]),
-        block_align: u16::from_le_bytes([chunk[12], chunk[13]]),
-        bits_per_sample: u16::from_le_bytes([chunk[14], chunk[15]]),
-    })
+    let data = data.ok_or("WAV 缺少 data 块")?;
+    fmt.preview_pcm(data)
 }
 
 /// 正式 Windows 构建用 winmm `PlaySoundW` 异步播放。测试构建不编译本模块，因此不打开设备。

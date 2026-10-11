@@ -170,6 +170,28 @@ mod tests {
         assert_eq!(decode(b"not-video").expect_err("plain"), "没有原生解码器");
     }
 
+    /// 交错的 16 位小端样本。
+    #[cfg(windows)]
+    fn le16(samples: &[i16]) -> Vec<u8> {
+        samples.iter().flat_map(|sample| sample.to_le_bytes()).collect()
+    }
+
+    /// 媒体基础解出的 5.1 音轨下混成立体声。拿 WAV 当容器在真实的源读取器上走一遍音轨读取；产品里 WAV 由自有
+    /// 解析接手，不经媒体基础。
+    #[cfg(windows)]
+    #[test]
+    fn media_foundation_downmixes_a_surround_track() {
+        use crate::shell::audio_decode::pcm::{fmt_chunk, wav_file};
+        let frames = le16(&[1_000, -1_000, 0, 20_000, 0, 0].repeat(8_000));
+        let bytes = wav_file(&fmt_chunk(0, 6, 8_000, 16, Some((1, 0x3F))), &frames);
+        let clip = super::mf::decode(&bytes, "WAV").expect("媒体基础解 5.1 WAV");
+        assert!(clip.frames.is_empty());
+        let pcm = clip.pcm.expect("音轨");
+        assert_eq!((pcm.channels, pcm.bits_per_sample, pcm.duration_ms), (2, 16, 1_000));
+        let side = (1_000.0 / (1.0 + std::f32::consts::SQRT_2)).round() as i16;
+        assert_eq!(&pcm.pcm[..4], le16(&[side, -side]).as_slice());
+    }
+
     #[test]
     fn aac_and_opus_headers_fail_clearly_without_symphonia() {
         let aac = [0xFF, 0xF1, 0x50, 0x80, 0x00, 0x1F, 0xFC];

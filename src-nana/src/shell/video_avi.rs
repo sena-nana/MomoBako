@@ -1,8 +1,9 @@
 //! 纯 Rust 的 AVI 画面和音轨。
 //!
-//! 只解未压缩 BI_RGB 和 MJPEG。其它压缩交给系统媒体基础。
-//! 这里不出声，也不打开窗口。
+//! 只解未压缩 BI_RGB 和 MJPEG。其它压缩交给系统媒体基础。音轨的 `strf` 就是 WAVE 格式块，和 WAV 一样经
+//! `audio_pcm.rs` 换成游标能放的 PCM。这里不出声，也不打开窗口。
 
+use crate::shell::audio_decode::pcm::WaveFormat;
 use crate::shell::player::PreviewPcm;
 
 use super::{DecodedClip, VideoFrame};
@@ -110,30 +111,16 @@ fn decode_dib(stream: &Stream, payload: &[u8]) -> Result<VideoFrame, String> {
     Ok(VideoFrame { time_ms: 0, width: width as u32, height: height as u32, rgba })
 }
 
+/// 音轨换成游标能放的 PCM。没有音轨格式、没有样本或换不了时没有声音，画面照常放。
 fn pcm_of(stream: &Stream, pcm: Vec<u8>) -> Option<PreviewPcm> {
-    if stream.audio_format != 1 || stream.sample_rate == 0 {
+    let format = stream.wave.as_ref()?;
+    if pcm.is_empty() {
         return None;
     }
-    if stream.channels != 1 && stream.channels != 2 {
-        return None;
-    }
-    if stream.bits != 8 && stream.bits != 16 {
-        return None;
-    }
-    let frame_bytes = usize::from(stream.channels) * usize::from(stream.bits / 8);
-    if frame_bytes == 0 || pcm.len() % frame_bytes != 0 || pcm.is_empty() {
-        return None;
-    }
-    let frame_count = pcm.len() as u64 / frame_bytes as u64;
-    let duration_ms = frame_count.saturating_mul(1_000) / u64::from(stream.sample_rate);
-    Some(PreviewPcm {
-        sample_rate: stream.sample_rate,
-        channels: stream.channels,
-        bits_per_sample: stream.bits,
-        frame_count,
-        duration_ms,
-        pcm,
-    })
+    format
+        .preview_pcm(&pcm)
+        .map_err(|error| eprintln!("Nana AVI 音轨换算失败，按没有声音处理：{error}"))
+        .ok()
 }
 
 struct Stream {
@@ -146,10 +133,8 @@ struct Stream {
     compression: u32,
     scale: u32,
     rate: u32,
-    audio_format: u16,
-    channels: u16,
-    sample_rate: u32,
-    bits: u16,
+    /// 音轨的 WAVE 格式。不是音轨，或者格式块认不出时为空。
+    wave: Option<WaveFormat>,
 }
 
 struct Avi {
@@ -220,10 +205,7 @@ fn parse_strl(data: &[u8]) -> Option<Stream> {
         compression: 0,
         scale: scale.max(1),
         rate: rate.max(1),
-        audio_format: 0,
-        channels: 0,
-        sample_rate: 0,
-        bits: 0,
+        wave: None,
     };
     if stream.video && format.len() >= 20 {
         let height = i32::from_le_bytes(format[8..12].try_into().ok()?);
@@ -233,11 +215,8 @@ fn parse_strl(data: &[u8]) -> Option<Stream> {
         stream.bit_count = u16::from_le_bytes(format[14..16].try_into().ok()?);
         stream.compression = u32::from_le_bytes(format[16..20].try_into().ok()?);
     }
-    if stream.audio && format.len() >= 16 {
-        stream.audio_format = u16::from_le_bytes(format[0..2].try_into().ok()?);
-        stream.channels = u16::from_le_bytes(format[2..4].try_into().ok()?);
-        stream.sample_rate = u32::from_le_bytes(format[4..8].try_into().ok()?);
-        stream.bits = u16::from_le_bytes(format[14..16].try_into().ok()?);
+    if stream.audio {
+        stream.wave = WaveFormat::parse(&format).map_err(|error| eprintln!("Nana AVI 音轨格式认不出：{error}")).ok();
     }
     Some(stream)
 }
