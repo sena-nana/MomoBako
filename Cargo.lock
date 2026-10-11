@@ -4067,6 +4067,7 @@ name = "momobako-nana"
 version = "0.1.0"
 dependencies = [
  "drag",
+ "embed-resource",
  "flate2",
  "image",
  "momobako-backend",

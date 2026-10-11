@@ -11,6 +11,7 @@ use nana_ui::{
 };
 
 pub mod shell;
+mod app_icon;
 mod app_dispatch;
 mod files_dispatch;
 mod inspect_dispatch;
@@ -391,7 +392,7 @@ pub fn run() -> Result<(), nana_ui::HostedRunError> {
     NanaApplication::builder(identity)
         .diagnostics(DiagnosticsConfig::default())
         .run::<RuntimeApplication<MomoBakoApplication>>(
-            window_state::main_window_descriptor(),
+            app_icon::with_window_icon(window_state::main_window_descriptor()),
         )
 }
 

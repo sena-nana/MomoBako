@@ -58,7 +58,7 @@ fn queue_windows(window: &nana_ui::WindowHandle, files: Vec<std::path::PathBuf>)
         let result = drag::start_drag(
             &handle,
             drag::DragItem::Files(files),
-            drag::Image::Raw(include_bytes!("../../src-tauri/icons/32x32.png").to_vec()),
+            drag::Image::Raw(crate::app_icon::SMALL_PNG.to_vec()),
             |result, cursor| {
                 eprintln!("Nana 文件拖出结束：{result:?} @ {},{}", cursor.x, cursor.y);
             },

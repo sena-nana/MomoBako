@@ -117,7 +117,7 @@ fn dispatch(window: &Mutex<nana_ui::WindowHandle>, action: TrayAction) {
 
 #[cfg(windows)]
 fn app_icon() -> Result<tray_icon::Icon, String> {
-    let image = image::load_from_memory(include_bytes!("../../src-tauri/icons/32x32.png"))
+    let image = image::load_from_memory(crate::app_icon::SMALL_PNG)
         .map_err(|error| format!("托盘图标解码失败：{error}"))?;
     let rgba = image.to_rgba8();
     let (width, height) = rgba.dimensions();
