@@ -348,6 +348,7 @@ fn wav_item(path: &std::path::Path) -> QueueItem {
         player_label: "WAV".into(),
         file_class: "audio".into(),
         thumbnail_path: None,
+        is_virtual: false,
     }
 }
 

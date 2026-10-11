@@ -8,7 +8,6 @@ use nana_ui::RuntimeProgramContext;
 use crate::backend::services::repository::{RepositorySnapshot, RepositorySummary};
 use crate::MomoBakoApplication;
 
-use super::sidebar::{ShortcutAsset, SidebarShortcut};
 use super::{ShellMessage, ShellViewModel, WorkspaceRepository};
 
 /// 静默列表或摘要的服务结果。失败只记日志，不把页面改成错误。
@@ -85,28 +84,7 @@ pub(super) fn apply_snapshot(model: &mut ShellViewModel, result: Result<Reposito
     }
     model.repository_name = snapshot.repository.name.clone();
     model.repository_id = Some(snapshot.repository.repo_id.clone());
-    let assets = snapshot
-        .assets
-        .iter()
-        .map(|asset| ShortcutAsset {
-            path: asset.path.clone(),
-            untagged: asset.tags.is_empty(),
-            accessed: asset.last_accessed_at.is_some(),
-            deleted: asset.status == "deleted",
-        })
-        .collect::<Vec<_>>();
-    let quick_access = snapshot
-        .quick_access
-        .iter()
-        .map(|shortcut| SidebarShortcut {
-            id: shortcut.shortcut_id.clone(),
-            label: shortcut.label.clone(),
-            target_kind: shortcut.target_kind.clone(),
-            target_path: shortcut.target_path.clone(),
-            target_id: shortcut.target_id.clone(),
-        })
-        .collect();
-    model.sidebar.apply_snapshot(&assets, snapshot.overview.trash_count, quick_access);
+    model.note_library_snapshot(&snapshot);
 }
 
 /// 后台读取仓库列表。失败（含服务没起来、任务排不进去和 panic，`task_guard.rs`）交回静默归约，不增加列表代次。

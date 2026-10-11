@@ -369,6 +369,12 @@ impl SidebarState {
         self.quick_access = quick_access;
     }
 
+    /// 访问记录改了素材：只重算前四项计数，回收站和快捷访问不动。
+    pub(super) fn recount(&mut self, assets: &[ShortcutAsset]) {
+        let trash = i64::try_from(self.counts.trash).unwrap_or(i64::MAX);
+        self.counts = count_shortcuts(assets, trash);
+    }
+
     /// 缺失仓库时快捷方式、快捷访问和目录打开都直接返回。
     pub fn select_shortcut(&mut self, workspace: &mut WorkspaceState, id: ShortcutId, locked: bool) -> bool {
         if locked {

@@ -331,6 +331,7 @@ pub fn queue_item_from_playlist(item: &PlaylistItem, playlist: &PlaylistSummary)
         player_label: playlist.player_label.clone(),
         file_class: playlist.file_class.clone(),
         thumbnail_path: item.thumbnail_path.clone(),
+        is_virtual: item.is_virtual,
     }
 }
 

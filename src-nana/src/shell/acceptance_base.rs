@@ -310,11 +310,11 @@ fn asset(entry: &FileBrowserEntry) -> AssetSummary {
         thumbnail_path: entry.thumbnail_path.clone(),
         hardlink_group_id: None,
         hardlink_state: None,
-        is_virtual: false,
-        provider_id: None,
-        provider_item_id: None,
-        source_payload: None,
-        local_absolute_path: None,
+        is_virtual: entry.is_virtual,
+        provider_id: entry.provider_id.clone(),
+        provider_item_id: entry.provider_item_id.clone(),
+        source_payload: entry.source_payload.clone(),
+        local_absolute_path: entry.local_absolute_path.clone(),
     }
 }
 

@@ -42,6 +42,9 @@ pub mod host_events;
 mod player_view;
 mod sidebar;
 mod sidebar_view;
+pub(crate) mod library;
+mod playback_prep;
+pub use playback_prep::SourcePrep;
 mod workspace;
 pub(crate) mod workspace_refresh;
 pub(crate) mod tree_sync;
@@ -154,6 +157,8 @@ pub enum ShellMessage {
     TreeSync(tree_sync::TreeSyncMessage),
     /// 键盘打开的菜单：焦点放进菜单的首项或末项，见 `menu_focus.rs`。
     FocusMenu(menu_focus::MenuFocusRequest),
+    /// 一次访问记录（`record_entry_access`）的结果：成功时是后端写下的访问时间，见 `library.rs`。
+    EntryAccessRecorded { repo_id: String, path: String, result: Result<String, String> },
 }
 
 /// 已解码的 RGBA 预览帧；解码在服务任务中完成，窗口线程只负责上传 GPU 纹理。
@@ -238,6 +243,8 @@ pub struct ShellViewModel {
     pub acceptance_scene: bool,
     pub workspace: WorkspaceState,
     pub sidebar: sidebar::SidebarState,
+    /// 当前资源库摘要里的素材：侧栏快捷方式的计数和访问记录的当场更新，见 `library.rs`。
+    pub library: library::LibraryAssets,
     pub files: files::FilesState,
     pub inspect: inspect::InspectState,
     pub asmr: inspect_asmr::AsmrUi,
@@ -290,6 +297,7 @@ impl Default for ShellViewModel {
             acceptance_scene: false,
             workspace: WorkspaceState::default(),
             sidebar: sidebar::SidebarState::default(),
+            library: library::LibraryAssets::default(),
             files: files::FilesState::default(),
             inspect: inspect::InspectState::default(),
             asmr: inspect_asmr::AsmrUi::default(),
@@ -491,7 +499,9 @@ impl ShellViewModel {
             ShellMessage::AssetDetailLoaded(Ok(detail)) => {
                 self.page = ShellPage::SelectedFile;
                 self.selected_path = Some(detail.summary.path.clone());
-                self.inspect.note_detail(&detail);
+                // 单击只在右侧详情里看（Vue 不挂预览插件）：不读预览内容，不准备播放源，也不记访问。
+                let preview = self.files.preview_open(Some(detail.summary.path.as_str()));
+                self.inspect.note_selected_detail(&detail, preview);
                 if let Some(session) = self.inspect.media_session().cloned() {
                     self.player.adopt_session(session);
                 }
@@ -502,6 +512,10 @@ impl ShellViewModel {
                 self.inspect.note_detail_error(&error);
             }
             ShellMessage::PreviewPixelsLoaded { source, pixels } => {
+                // 预览源准备好时后端已经写下访问时间（`prepare_preview_file_source`），照 Vue 当场改「最近使用」。
+                if !source.token.is_empty() {
+                    self.note_entry_access(&source.repo_id, &source.path, &admin::support::now_iso8601());
+                }
                 let pixels_ok = pixels.is_ok();
                 let error_text = pixels.as_ref().err().cloned();
                 if !self.inspect.note_pixels(&source.path, pixels_ok, error_text.as_deref()) {
@@ -614,6 +628,7 @@ impl ShellViewModel {
             ShellMessage::TreeSync(_) => {}
             ShellMessage::Asmr(_) => {}
             ShellMessage::FocusMenu(request) => menu_focus::request(self, request),
+            ShellMessage::EntryAccessRecorded { repo_id, path, result } => self.note_access_recorded(&repo_id, &path, result),
         }
     }
 

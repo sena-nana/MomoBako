@@ -136,6 +136,7 @@ fn begin_load(player: &mut PlayerState, item: &QueueItem, still: bool) {
         extension: item.extension.clone(),
         still,
         generation: player.load_generation,
+        virtual_entry: item.is_virtual,
     });
 }
 
@@ -153,30 +154,39 @@ pub(crate) fn decode_media(repo_id: &str, extension: &str, bytes: &[u8]) -> Resu
     crate::shell::preview_media_parts(repo_id, bytes).map_err(|error| wav_player::pcm_error_for_extension(extension, bytes).unwrap_or(error))
 }
 
-/// 装进读取结果。过期的代次或已经换掉的条目不装。`still` 是请求时的类别，失败时据此写说明。
-pub(super) fn finish_load(player: &mut PlayerState, item_id: &str, generation: u64, still: bool, result: Result<LoadedItem, String>) {
+/// 装进读取结果。过期的代次或已经换掉的条目不装（切曲、停止、换仓库和预览接管都换了代次，在线条目晚到的
+/// 播放源不会串到新曲目上）。`still` 是请求时的类别，失败时据此写说明；`retryable` 是失败出在准备在线条目的
+/// 播放源上：原因照写来源交回的原话，播放条的「播放」留着可点，点了重新准备。返回结果装上了没有。
+pub(super) fn finish_load(player: &mut PlayerState, item_id: &str, generation: u64, still: bool, result: Result<LoadedItem, String>, retryable: bool) -> bool {
     if generation != player.load_generation || player.current_id.as_deref() != Some(item_id) {
         eprintln!("Nana 忽略过期的播放条目装载：{item_id}");
-        return;
+        return false;
     }
     let Some(item) = player.current_item().cloned() else {
         eprintln!("Nana 播放队列已经没有这个条目：{item_id}");
-        return;
+        return false;
     };
     match result {
         Ok(LoadedItem::Media(parts)) => install_clip(player, parts),
         Ok(LoadedItem::Still(pixels)) => install_still(player, &item, pixels),
-        Err(error) if still => fail_still(player, &item, &error),
+        Err(error) if still && !retryable => fail_still(player, &item, &error),
         Err(error) => {
             eprintln!("Nana 播放列表当前项装载失败：{}：{error}", item.path);
             player.clip_frames = None;
             player.clip_owned = true;
             player.wav.clear();
+            if still {
+                player.still = Some(StillShow { path: item.path.clone(), frame: None });
+            }
             player.fail_session(error);
+            if retryable {
+                player.retry_item = Some(item.id.clone());
+            }
         }
     }
     player.resume = None;
     player.persist_if_needed();
+    true
 }
 
 fn install_clip(player: &mut PlayerState, parts: crate::shell::MediaParts) {
@@ -304,14 +314,15 @@ pub(crate) fn fulfill_loads(model: &mut super::super::ShellViewModel) {
     let effects = model.player.take_effects();
     let mut kept = Vec::new();
     for effect in effects {
-        let PlayerEffect::LoadItem { repo_id, item_id, path, extension, still, generation } = effect else {
+        let PlayerEffect::LoadItem { repo_id, item_id, path, extension, still, generation, .. } = effect else {
             kept.push(effect);
             continue;
         };
         let result = std::fs::read(&path)
             .map_err(|error| format!("无法读取当前项：{error}"))
             .and_then(|bytes| decode_loaded(&repo_id, still, &extension, &bytes));
-        model.reduce(super::super::ShellMessage::Player(super::PlayerMessage::ItemLoaded { item_id, generation, still, result }));
+        let prep = super::super::SourcePrep::default();
+        model.reduce(super::super::ShellMessage::Player(super::PlayerMessage::ItemLoaded { item_id, generation, still, result, prep }));
         kept.extend(model.player.take_effects());
     }
     model.player.requeue_effects(kept);

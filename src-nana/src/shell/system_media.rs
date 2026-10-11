@@ -463,6 +463,7 @@ mod tests {
             player_label: "音频".into(),
             file_class: "audio".into(),
             thumbnail_path: None,
+            is_virtual: false,
         });
         player.listed = Some(detail);
         let display = now_playing(&player, Some("other.png"));

@@ -192,6 +192,7 @@ impl ShellViewModel {
     /// 换仓库还在走时侧栏先清空，读完摘要（同步以后）再绑定新仓库；缺失、空库和启动以后的直接绑定。
     fn reset_repository_content(&mut self) {
         self.files.reset_for_repository();
+        self.library.clear();
         self.inspect.clear();
         self.inspect.reset_search();
         self.player.disarm_preview_audio();

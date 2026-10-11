@@ -84,8 +84,18 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) {
                 &mut model.inspect,
             );
         }
-        PlayerMessage::ItemLoaded { item_id, generation, still, result } => {
-            super::clip::finish_load(&mut model.player, &item_id, generation, still, result);
+        PlayerMessage::ItemLoaded { item_id, generation, still, result, prep } => {
+            let loaded = result.is_ok();
+            let local = model.player.queue.iter().find(|item| item.id == item_id && !item.is_virtual).map(|item| item.path.clone());
+            let applied = super::clip::finish_load(&mut model.player, &item_id, generation, still, result, prep.retryable);
+            // 访问记录照 Vue：在线条目的播放源准备好时后端已经写下，当场改「最近使用」；本地文件直接读的字节，
+            // 装上了才补一次访问记录。
+            if let Some(access) = &prep.accessed {
+                model.note_entry_access(&access.repo_id, &access.path, &access.at);
+            } else if let (true, true, Some(path)) = (applied, loaded, local) {
+                let repo_id = model.player.repo_id.clone().unwrap_or_default();
+                model.request_entry_access(&repo_id, &path);
+            }
             model.player.publish(&mut model.inspect);
         }
         PlayerMessage::RestoreDetail(Ok(detail)) => {

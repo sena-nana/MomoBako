@@ -29,6 +29,8 @@ pub(crate) struct BarProps {
     pub supports_seek: bool,
     pub supports_volume: bool,
     pub can_play: bool,
+    /// 当前项的播放源准备失败过：「播放」可点，点了重新准备（上一首、下一首照旧不可点）。
+    pub retry: bool,
     pub playing: bool,
     pub mode: PlaybackMode,
     pub current_ms: u64,
@@ -58,6 +60,7 @@ impl BarProps {
             supports_seek: definition.as_ref().is_some_and(|value| value.supports_seek),
             supports_volume: definition.as_ref().is_some_and(|value| value.supports_volume),
             can_play: player.can_play,
+            retry: player.retry_pending(),
             // 图标跟实际状态走：失败的会话不显示暂停。
             playing: session.status == "playing",
             mode: player.mode,
@@ -388,7 +391,7 @@ fn transport(props: &BarProps) -> AnyView {
             widget(glyph_button(icons::SKIP_BACK, "上一首", 16.0, 32.0, skip_disabled))
                 .key("player-previous")
                 .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(player_message(PlayerMessage::PlayPrevious))),
-            widget(glyph_button(play_icon, play_label, 17.0, 36.0, skip_disabled))
+            widget(glyph_button(play_icon, play_label, 17.0, 36.0, skip_disabled && !props.retry))
                 .key("player-play")
                 .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(player_message(PlayerMessage::SetPlaying(!playing)))),
             widget(glyph_button(icons::SKIP_FORWARD, "下一首", 16.0, 32.0, skip_disabled))

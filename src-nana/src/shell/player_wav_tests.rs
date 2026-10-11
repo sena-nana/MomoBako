@@ -168,7 +168,8 @@ fn preview_play_drives_the_shared_cursor_without_opening_a_device() {
     let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().unwrap() else {
         panic!("没有音视频请求");
     };
-    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(session), pcm, frames: None }));
+    let prep = crate::shell::SourcePrep::default();
+    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(session), pcm, frames: None, prep }));
     assert!(model.player.preview_owns_bar());
     assert!(!model.player.cursor_playing());
     send(&mut model, PlayerMessage::SetPlaying(true));
@@ -226,7 +227,8 @@ fn m4a_preview_takes_over_the_bar_without_the_audio_plugin() {
         let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().unwrap() else {
             panic!("没有音视频请求");
         };
-        let loaded = InspectMessage::MediaLoaded { path, generation, result: Ok(parts.session), pcm: parts.pcm, frames: None };
+        let prep = crate::shell::SourcePrep::default();
+        let loaded = InspectMessage::MediaLoaded { path, generation, result: Ok(parts.session), pcm: parts.pcm, frames: None, prep };
         model.reduce(ShellMessage::Inspect(loaded));
         model
     };

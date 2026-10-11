@@ -139,6 +139,7 @@ fn queue_item(id: &str, class: &str) -> QueueItem {
         player_label: "音频".into(),
         file_class: class.into(),
         thumbnail_path: None,
+        is_virtual: false,
     }
 }
 
@@ -563,7 +564,7 @@ fn preview_takeover_keeps_the_other_repository_session() {
     });
     let mut session = super::fresh_session("repo-b");
     session.status = "paused".into();
-    let entry = super::PreviewEntry { repo_id: "repo-b", path: "b.mp3", extension: "mp3", asset_id: "asset-b" };
+    let entry = super::PreviewEntry { repo_id: "repo-b", path: "b.mp3", extension: "mp3", asset_id: "asset-b", is_virtual: false };
     assert!(model.player.take_over_preview(entry, session, None, &mut model.inspect), "有能放 mp3 的内置候选时接管");
     assert!(model.player.stored.contains_key("repo-a"), "不删别的仓库存下的会话");
     assert_eq!(model.player.repo_id.as_deref(), Some("repo-b"));
@@ -571,7 +572,7 @@ fn preview_takeover_keeps_the_other_repository_session() {
     assert!(!model.player.take_effects().iter().any(|effect| matches!(effect, PlayerEffect::PersistSessions)), "临时条目不写会话");
 
     model.player.candidates.clear();
-    let entry = super::PreviewEntry { repo_id: "repo-b", path: "c.mp3", extension: "mp3", asset_id: "asset-c" };
+    let entry = super::PreviewEntry { repo_id: "repo-b", path: "c.mp3", extension: "mp3", asset_id: "asset-c", is_virtual: false };
     assert!(!model.player.take_over_preview(entry, super::fresh_session("repo-b"), None, &mut model.inspect), "没有播放器时不接管");
 }
 
@@ -720,6 +721,7 @@ fn preview_and_player_share_one_media_session() {
         result: Err("没有原生解码器".into()),
         pcm: None,
         frames: None,
+        prep: crate::shell::SourcePrep::default(),
     }));
     // 读不出来的预览不接管播放条，播放器那份会话不受影响；预览页只显示自己的失败。
     assert_eq!(model.inspect.media_session().map(|session| session.status.as_str()), Some("failed"));

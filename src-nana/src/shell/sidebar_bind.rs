@@ -4,7 +4,7 @@ use crate::backend::services::repository::PlaylistSummary;
 
 use super::super::workspace::{LibraryCategory, MainRegion, WorkspaceEffect};
 use super::super::{ShellPage, ShellViewModel};
-use super::{ShortcutAsset, ShortcutId, SidebarEffect, SidebarPlaylist, SidebarShortcut, WorkspacePanel};
+use super::{ShortcutId, SidebarEffect, SidebarPlaylist, WorkspacePanel};
 
 impl ShellViewModel {
     pub(crate) fn navigation_locked(&self) -> bool {
@@ -198,20 +198,7 @@ impl ShellViewModel {
 
     pub(crate) fn apply_snapshot_sidebar(&mut self, snapshot: &crate::backend::services::repository::RepositorySnapshot) {
         self.bind_sidebar_repository();
-        let assets = snapshot.assets.iter().map(|asset| ShortcutAsset {
-            path: asset.path.clone(),
-            untagged: asset.tags.is_empty(),
-            accessed: asset.last_accessed_at.is_some(),
-            deleted: asset.status == "deleted",
-        }).collect::<Vec<_>>();
-        let quick_access = snapshot.quick_access.iter().map(|shortcut| SidebarShortcut {
-            id: shortcut.shortcut_id.clone(),
-            label: shortcut.label.clone(),
-            target_kind: shortcut.target_kind.clone(),
-            target_path: shortcut.target_path.clone(),
-            target_id: shortcut.target_id.clone(),
-        }).collect();
-        self.sidebar.apply_snapshot(&assets, snapshot.overview.trash_count, quick_access);
+        self.note_library_snapshot(snapshot);
     }
 
     /// 只在最近使用视图、有记录且未锁定时清空访问历史。
@@ -234,7 +221,8 @@ impl ShellViewModel {
         self.sidebar.effects.push(SidebarEffect::ClearRecent { repo_id });
     }
 
-    /// 清空成功后计数归零，并静默重读仓库摘要。目录列表不在这里清空。
+    /// 清空成功后照 Vue `clearActiveSnapshotRecentAccess` 当场清掉素材的访问时间（计数归零、最近使用视图变空），
+    /// 再静默重读仓库摘要。目录列表不在这里清空。
     pub(crate) fn note_recent_cleared(&mut self, repo_id: &str, result: Result<usize, String>) {
         if self.workspace.active_repo_id.as_deref() != Some(repo_id) {
             eprintln!("Nana 忽略过期的最近使用清空：{repo_id}");
@@ -242,6 +230,7 @@ impl ShellViewModel {
         }
         match result {
             Ok(_) => {
+                self.clear_library_access(repo_id);
                 self.sidebar.counts.recent = 0;
                 self.workspace.effects.push(WorkspaceEffect::LoadSnapshotSilent { repo_id: repo_id.to_string() });
             }

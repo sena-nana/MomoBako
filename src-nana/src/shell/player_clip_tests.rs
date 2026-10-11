@@ -26,6 +26,7 @@ fn item(id: &str, path: &str, extension: &str) -> QueueItem {
         player_label: "视频".into(),
         file_class: "video".into(),
         thumbnail_path: None,
+        is_virtual: false,
     }
 }
 
@@ -202,11 +203,13 @@ fn relative_item_paths_load_through_the_repository() {
         generation: generation + 1,
         still: false,
         result: Err("过期".into()),
+        prep: crate::shell::SourcePrep::default(),
     }));
     assert_eq!(model.player.session.status, "loading", "过期的读取结果不装");
 
     let loaded = super::decode_loaded("repo", false, "mp3", crate::shell::audio_decode::fixture_mp3()).expect("解码");
-    model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded { item_id: "a".into(), generation, still: false, result: Ok(loaded) }));
+    let prep = crate::shell::SourcePrep::default();
+    model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded { item_id: "a".into(), generation, still: false, result: Ok(loaded), prep }));
     assert_eq!(model.player.session.status, "playing");
     assert!(model.player.session.duration_ms.is_some_and(|duration| duration > 0));
     assert!(model.player.can_play);
