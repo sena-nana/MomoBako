@@ -83,7 +83,9 @@ describe("MomoBako 工具链", () => {
       "tsconfig.json",
       "tsconfig.node.json",
       "app.config.json",
-      "src-tauri",
+      // 旧检出可能在 src-tauri 下留着被忽略的本地开发数据（.service-data），按外壳自己的文件判断。
+      "src-tauri/Cargo.toml",
+      "src-tauri/tauri.conf.json",
       "scripts/tauri-dev.ts",
       "scripts/stage-external-plugins.mjs",
       "External/Plugins/scripts/stage-dev.mjs",
