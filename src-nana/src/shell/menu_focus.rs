@@ -1,4 +1,4 @@
-//! 键盘打开的菜单：把焦点放进菜单的首项或末项，菜单关掉时还给打开它的控件。
+//! 键盘打开的菜单：把焦点放进菜单的首项或末项。菜单关掉以后焦点还给打开它的控件，见 `focus_return.rs`。
 //!
 //! NanaUI 把菜单按钮（`has_popup`）上的 ArrowDown / ArrowUp、任意焦点上的 `ContextMenu` 键和 Shift+F10
 //! 都派发成 `keyboard: true` 的 `SecondaryPress`。处理函数照常发打开菜单的消息，再发
@@ -21,8 +21,6 @@ pub(crate) const MENU_KEYS: RovingFocusGroup = RovingFocusGroup::vertical().wrap
 pub(crate) enum MenuSurface {
     /// 侧栏仓库头打开的切换弹层。
     RepositorySwitcher,
-    /// 仓库弹层从「添加资源库」换到的添加菜单。
-    RepositoryAddMenu,
     /// 文件页工具条「导入」的菜单。
     Import,
     /// 文件条目的右键菜单。
@@ -36,24 +34,9 @@ impl MenuSurface {
     pub(crate) fn group_key(self) -> &'static str {
         match self {
             Self::RepositorySwitcher => "repository-switcher-popover",
-            Self::RepositoryAddMenu => "repository-add-menu",
             Self::Import => "file-import-menu",
             Self::Entry => "file-context-menu",
             Self::Folder => "folder-context-menu",
-        }
-    }
-
-    /// 仓库弹层的一页：切换列表和添加菜单换页时弹层还开着，焦点跟着换页走。
-    pub(crate) fn in_repository_popover(self) -> bool {
-        matches!(self, Self::RepositorySwitcher | Self::RepositoryAddMenu)
-    }
-
-    /// 仓库弹层现在显示的菜单页；关着或者是后端表单时为 `None`。
-    pub(crate) fn repository_page(model: &ShellViewModel) -> Option<Self> {
-        match model.sidebar.popover {
-            PopoverMode::Switcher => Some(Self::RepositorySwitcher),
-            PopoverMode::AddMenu => Some(Self::RepositoryAddMenu),
-            PopoverMode::BackendForm | PopoverMode::Closed => None,
         }
     }
 
@@ -61,7 +44,6 @@ impl MenuSurface {
     pub(crate) fn is_open(self, model: &ShellViewModel) -> bool {
         match self {
             Self::RepositorySwitcher => model.sidebar.popover == PopoverMode::Switcher,
-            Self::RepositoryAddMenu => model.sidebar.popover == PopoverMode::AddMenu,
             Self::Import => {
                 let ctx = FileContext::from_model(model);
                 RouteKey::of(model) == RouteKey::Files

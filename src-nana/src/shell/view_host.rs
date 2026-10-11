@@ -10,11 +10,13 @@
 //! 不放绑定。
 //!
 //! 数据流：`ShellMessage → reduce → 服务副作用 → ShellView::sync`。同步先写热信号和标题栏字段，
-//! 再让每一块写自己的信号、按需重挂，最后把焦点放进键盘打开的菜单（`menu_focus_view.rs`）。
+//! 再让每一块写自己的信号、按需重挂，最后处理焦点：浮层开合时按统一的规则交还焦点
+//! （`focus_return.rs`），再把焦点放进键盘打开的菜单（`menu_focus_view.rs`）。
 //! 焦点在某块里、输入法还有预编辑时，这块的重挂延后，`prepare`
 //! 每帧经 [`ShellView::retry_deferred`] 检查，组合结束后补挂；`prepare` 每帧还经
-//! [`ShellView::settle_overlays`] 卸掉放完退场的对话框。动效帧和播放推进只走
-//! [`ShellView::sync_hot`]。这里只写信号，不刷新绑定，刷新由输入路由和帧开头完成。
+//! [`ShellView::settle_overlays`] 卸掉放完退场的对话框。每帧画完以后（`presented`）经
+//! [`ShellView::settle_focus`] 补还刷新时才落定的焦点（对话框关上、控件卸掉）。
+//! 动效帧和播放推进只走 [`ShellView::sync_hot`]。这里只写信号，不刷新绑定，刷新由输入路由和帧开头完成。
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -27,6 +29,7 @@ use nana_ui::runtime::{
 };
 use nana_ui::RegionId;
 
+use super::focus_return::{Before, FocusReturn, Regions};
 use super::hot::{self, HotSignals, ModelField, MotionFrame, PlaybackView, TaskFills, TitleBarView, TitleSignals};
 use super::menu_focus_view::MenuFocusView;
 use super::view_part::{body_mode, BodyMode, PartCx, PartId, ShellPart, Swap};
@@ -65,8 +68,10 @@ pub(crate) struct ShellView {
     overlay: OverlayPart,
     /// 等输入法组合结束才重挂的块。
     deferred: Vec<PartId>,
-    /// 键盘打开的菜单：焦点放进去，关掉时还回去。
+    /// 键盘打开的菜单：焦点放进去。
     menu_focus: MenuFocusView,
+    /// 浮层关掉以后把焦点还回去。
+    focus_return: FocusReturn,
     /// 最近一次整体同步时 ViewModel 的版本。
     revision: u64,
     /// 上次收集挂着的缩略图时文档的变更代次。
@@ -121,6 +126,7 @@ impl ShellView {
             overlay: OverlayPart::new(overlay),
             deferred: Vec::new(),
             menu_focus: MenuFocusView::new(model),
+            focus_return: FocusReturn::default(),
             revision: model.revision,
             thumbnails_scanned: None,
             stats: ViewStats::default(),
@@ -135,6 +141,7 @@ impl ShellView {
         }
         view.place(document.context_mut(), mode)?;
         swap.finish(document);
+        view.focus_return = FocusReturn::new(model, view.overlay.identity());
         error.map_or(Ok(view), Err)
     }
 
@@ -172,12 +179,15 @@ impl ShellView {
     }
 
     /// 整体同步：写热信号和标题栏；排法变了时侧栏和主区挪到新槽位（第一次排成工作台时才建侧栏）；
-    /// 再让每一块写信号、按需重挂。正在组合输入的块延后重挂。最后照键盘打开的菜单放焦点。
+    /// 再让每一块写信号、按需重挂。正在组合输入的块延后重挂。最后按浮层的开合交还焦点，再照键盘
+    /// 打开的菜单放焦点。
     pub(crate) fn sync(&mut self, document: &mut RuntimeDocument, model: &ShellViewModel) -> Result<(), FrameworkError> {
         if !self.alive() {
             eprintln!("Nana 壳层骨架已随文档回收，跳过同步");
             return Err(FrameworkError::MissingView(self.shell.stable_id()));
         }
+        let document_id = document.document();
+        let before = Before::capture(document.context(), document_id, self.overlay.layer_id());
         self.write_signals(document, model)?;
         let mode = body_mode(model);
         let mut swap = Swap::default();
@@ -194,7 +204,7 @@ impl ShellView {
         }
         self.settle(document, mode, swap, error)?;
         self.overlay.sweep(document.context_mut());
-        let document_id = document.document();
+        self.return_focus(document, model, before);
         self.menu_focus.sync(document.context_mut(), document_id, model);
         self.revision = model.revision;
         Ok(())
@@ -205,6 +215,31 @@ impl ShellView {
         if self.alive() {
             self.overlay.sweep(document.context_mut());
         }
+    }
+
+    /// 一帧刷新以后：对话框在刷新时才真正关上，控件也可能在刷新时才卸掉。这时照焦点归还的规则补还
+    /// 焦点（`focus_return.rs`），焦点动了返回真，调用方再画一帧。
+    pub(crate) fn settle_focus(&mut self, document: &mut RuntimeDocument, model: &ShellViewModel) -> bool {
+        if !self.alive() {
+            return false;
+        }
+        let regions = self.regions();
+        let document_id = document.document();
+        let before = document.context().world().focused(document_id);
+        self.focus_return.settle(document.context_mut(), document_id, model, regions);
+        document.context().world().focused(document_id) != before
+    }
+
+    /// 页面的几块：侧栏和主区的根、浮层层和它现在显示的那一块。
+    fn regions(&self) -> Regions {
+        Regions { sidebar: self.sidebar.root(), primary: self.primary.root(), layer: self.overlay.layer_id(), overlay: self.overlay.root() }
+    }
+
+    /// 按浮层现在显示的那一层交还焦点（`focus_return.rs`）。`before` 是这次同步开始前焦点在哪。
+    fn return_focus(&mut self, document: &mut RuntimeDocument, model: &ShellViewModel, before: Before) {
+        let regions = self.regions();
+        let document_id = document.document();
+        self.focus_return.sync(document.context_mut(), document_id, model, self.overlay.identity(), before, regions);
     }
 
     /// 还有对话框在放退场：准备帧要一直要帧，放完以后才卸得掉。
@@ -253,6 +288,7 @@ impl ShellView {
         if self.deferred.is_empty() || !self.alive() {
             return Ok(());
         }
+        let before = Before::capture(document.context(), document.document(), self.overlay.layer_id());
         let mut swap = Swap::default();
         let mut error = None;
         {
@@ -267,7 +303,9 @@ impl ShellView {
                 absorb(&mut swap, &mut error, id, result);
             }
         }
-        self.settle(document, self.mode, swap, error)
+        let settled = self.settle(document, self.mode, swap, error);
+        self.return_focus(document, model, before);
+        settled
     }
 
     /// 写热投影和标题栏投影；搜索框草稿只在 ViewModel 的值变了时写。侧栏呈现宽度变了时写进工作区。

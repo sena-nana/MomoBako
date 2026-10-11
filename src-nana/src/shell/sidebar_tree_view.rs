@@ -87,6 +87,10 @@ fn folder_icon(branch: bool) -> Icon {
     if branch { FOLDER_OPEN } else { FOLDER }
 }
 
+/// 文件夹行卡片的键。
+pub(crate) fn folder_row_key(path: &str) -> String {
+    format!("folder-row-{}", key_part(path))
+}
 
 /// 一个目录：开合三角（没有子级时留空位）和行卡片。点卡片打开目录，右键打开目录菜单。
 fn folder_row(item: FolderItem) -> AnyView {
@@ -113,7 +117,7 @@ fn folder_row(item: FolderItem) -> AnyView {
         .prop::<String, fields::list_item::label>(item.label())
         .prop::<bool, fields::list_item::selected>(item.active())
         .content(content)
-        .key(format!("folder-row-{}", key_part(&path)))
+        .key(folder_row_key(&path))
         .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenFolder(open_path.clone()))))
         .on_cx(move |_, event: &SecondaryPress, cx| {
             let label = item.try_with(|row| row.label.clone()).unwrap_or_default();

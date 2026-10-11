@@ -114,6 +114,12 @@ impl OverlayKey {
         };
         Some(key)
     }
+
+    /// 模态的对话框（NanaUI `Dialog` / `ConfirmDialog`）：打开时框架把焦点拿进去、关上时还到打开前的
+    /// 位置。弹层和右键菜单不是。
+    pub(crate) fn modal(self) -> bool {
+        !matches!(self, Self::RepositoryPopover | Self::FolderMenu | Self::TaskPopover | Self::EntryMenu)
+    }
 }
 
 /// 浮层块的身份：哪一种浮层，加上必须换块才跟得上的结构。身份不变时浮层常驻。
@@ -249,6 +255,16 @@ impl OverlayPart {
     /// 还有换下来、没放完退场的块。准备帧据此一直要帧，直到卸掉它们。
     pub(crate) fn leaving(&self) -> bool {
         !self.leaving.is_empty()
+    }
+
+    /// 现在显示的是哪一层；没有浮层时为 `None`。输入法组合延后换块时还是换块前的那一层。
+    pub(crate) fn identity(&self) -> Option<&OverlayIdentity> {
+        self.identity.as_ref()
+    }
+
+    /// 浮层层节点；骨架还没挂上时为 `None`。
+    pub(crate) fn layer_id(&self) -> Option<StableNodeId> {
+        self.layer.get_untracked()
     }
 
     /// 浮层层的子节点排成：还在放退场的块在前，现在这块在最后、画在最上面。省掉的子节点（换下就卸的

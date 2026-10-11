@@ -48,24 +48,13 @@ fn press(harness: &mut ShellHarness, key: &'static str) -> Vec<&'static str> {
 fn press_with(harness: &mut ShellHarness, key: &'static str, modifiers: InputModifiers) -> Vec<&'static str> {
     let messages = harness.key_messages_with(key, modifiers);
     let sent = messages.iter().map(kind).collect();
-    let mut pending = messages;
-    for _ in 0..4 {
-        if pending.is_empty() {
-            break;
-        }
-        for message in pending {
-            harness.apply(message);
-        }
-        pending = harness.take_messages();
-    }
-    harness.flush();
+    harness.settle(messages);
     sent
 }
 
 /// 焦点所在控件的无障碍名。
 fn focused(harness: &ShellHarness) -> Option<String> {
-    let id: StableNodeId = harness.focused()?;
-    harness.nodes().into_iter().find(|node| node.id == id).and_then(|node| node.label.map(|label| label.to_string()))
+    harness.focused_label()
 }
 
 #[test]
