@@ -268,6 +268,48 @@ fn extension_panels_need_the_asmr_plugin() {
     assert!(!super::candidates_view(&model, &super::display_custom(&model)).shown, "补全候选跟着插件停用");
 }
 
+/// L6：文件列表上的 ASMR 摘要（Vue `fileSummary`）：RJ 号、作品名、收听状态、进度和「歌词」用「 · 」连起来；
+/// 后端种下的标题就是文件名，不当作品名；不是 ASMR 条目没有。
+#[test]
+fn file_summary_joins_the_work_fields() {
+    let summary = |name: &str, metadata: Meta| super::super::inspect_library::file_summary(&row(name, &metadata));
+    let full = audio(
+        None,
+        &[
+            ("rjCode", json!("RJ01234567")),
+            ("workTitle", json!("夜曲")),
+            ("listeningStatus", json!("listening")),
+            ("listeningProgress", json!(40.4)),
+            ("lyricStatus", json!("local")),
+        ],
+    );
+    assert_eq!(summary("01.mp3", full), "RJ01234567 · 夜曲 · 收听中 · 40% · 歌词");
+    assert_eq!(summary("01.mp3", audio(None, &[("title", json!("01.mp3"))])), "", "标题就是文件名时不算作品名");
+    assert_eq!(summary("01.mp3", audio(None, &[("workId", json!("RJ1")), ("title", json!("夜曲 01"))])), "RJ1 · 夜曲 01");
+    assert_eq!(summary("01.mp3", Meta::from([("workTitle".to_string(), json!("夜曲"))])), "", "不是 ASMR 条目");
+}
+
+/// L6：列表里的 ASMR 文件卡片在标题下多一行摘要，不看当前选中的是哪个文件；ASMR 资源库插件停用时不画。
+#[test]
+fn asmr_cards_carry_the_summary_line_while_the_plugin_is_on() {
+    let mut model = ShellViewModel::for_page(ShellPage::FileList);
+    let metadata = audio(None, &[("rjCode", json!("RJ01234567")), ("listeningStatus", json!("listening"))]);
+    model.files.rows = vec![row("01.mp3", &metadata)];
+    // 列表是虚拟的：排一次版以后才按视口建出卡片。
+    let labels = |model: &ShellViewModel| {
+        let mut harness = crate::shell::view_harness::ShellHarness::mount(model.clone());
+        harness.frame();
+        harness.nodes().into_iter().filter_map(|node| node.label.map(|label| label.to_string())).collect::<Vec<_>>()
+    };
+    let shown = labels(&model);
+    assert!(shown.iter().any(|label| label == "01"), "卡片建出来了：{shown:?}");
+    assert!(shown.iter().any(|label| label == "RJ01234567 · 收听中"), "{shown:?}");
+    for plugin in model.admin.plugins.iter_mut().filter(|plugin| plugin.plugin_id == "momobako.library.asmr") {
+        plugin.enabled = false;
+    }
+    assert!(!labels(&model).iter().any(|label| label.contains("RJ01234567")), "插件停用后不画摘要");
+}
+
 /// L7：作品队列按音轨路径的自然序排，`2.mp3` 在 `10.mp3` 前面。
 #[test]
 fn work_queue_sorts_tracks_naturally() {

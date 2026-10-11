@@ -426,6 +426,32 @@ fn present(custom: &BTreeMap<String, String>, key: &str) -> Option<String> {
     custom.get(key).map(|value| value.trim().to_string()).filter(|value| !value.is_empty())
 }
 
+/// 文件列表上一行的 ASMR 摘要（Vue `fileSummary(entry).inline`）：RJ 号（没有时是作品 ID）、作品名（没有时是标题）、
+/// 收听状态、进度、有歌词状态时「歌词」，用「 · 」连起来。不是 ASMR 条目时是空串；扩展插件开没开由调用方看。
+///
+/// 标题和文件名一样时不算作品名：后端给每个素材种下的 `title` 就是文件名，卡片上已经有了，不再重复一遍。
+pub(super) fn file_summary(row: &super::files::FileRow) -> String {
+    if row.kind == "directory" || !super::inspect_shortcuts::matches_entry("asmr", &row.metadata) {
+        return String::new();
+    }
+    let text = |key: &str| match row.metadata.get(key) {
+        Some(Value::String(text)) => text.trim().to_string(),
+        Some(Value::Number(number)) => number.to_string(),
+        Some(Value::Bool(flag)) => flag.to_string(),
+        _ => String::new(),
+    };
+    let first = |keys: &[&str]| keys.iter().map(|key| text(key)).find(|value| !value.is_empty()).unwrap_or_default();
+    let title = Some(text("title")).filter(|title| *title != row.name).unwrap_or_default();
+    let work = Some(text("workTitle")).filter(|work| !work.is_empty()).unwrap_or(title);
+    let progress = text("listeningProgress").parse::<f64>().ok().filter(|progress| progress.is_finite()).map(|progress| format!("{}%", progress.round()));
+    let lyric = if text("lyricStatus").is_empty() { String::new() } else { "歌词".to_string() };
+    [first(&["rjCode", "workId"]), work, listening_label(&text("listeningStatus")), progress.unwrap_or_default(), lyric]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
 /// 收听状态的标签（Vue `listeningStatusLabel`）：认得的三种翻成中文，别的原样。
 pub(super) fn listening_label(status: &str) -> String {
     match status {

@@ -108,6 +108,8 @@ pub(super) struct CardFace {
     pub size: String,
     /// 修改时间，没有记录时写「未记录」。
     pub modified: String,
+    /// 资源库扩展的一行摘要（ASMR 的 RJ 号、作品名、收听状态这些，Vue `fileSummary(entry).inline`），没有时为空。
+    pub library: String,
     /// 缩略图盒；宽高比也在这里，自适应和瀑布流按它算卡片尺寸。
     pub preview: PreviewLook,
 }
@@ -136,8 +138,17 @@ impl CardFace {
             kind_label,
             size,
             modified: super::super::files::local_time::format_or(&row.modified_at, "未记录"),
+            library: String::new(),
             preview: PreviewLook::of(row),
         }
+    }
+
+    /// 带上资源库扩展的摘要（文件夹不带）。
+    pub(super) fn with_library(mut self, library: String) -> Self {
+        if !self.directory() {
+            self.library = library;
+        }
+        self
     }
 
     fn directory(&self) -> bool {
@@ -149,9 +160,9 @@ impl CardFace {
         self.preview.aspect
     }
 
-    /// 网格类卡片标题下的小字行数：文件有硬链接状态时一行。
+    /// 网格类卡片标题下的小字行数：文件有硬链接状态时一行，有资源库摘要时再一行。
     pub(super) fn body_lines(&self) -> usize {
-        usize::from(!self.directory() && !self.hardlink.is_empty())
+        usize::from(!self.directory() && !self.hardlink.is_empty()) + usize::from(!self.library.is_empty())
     }
 }
 
@@ -280,6 +291,7 @@ fn placeholder(cell: &CardCell) -> CardView {
         kind_label: String::new(),
         size: String::new(),
         modified: String::new(),
+        library: String::new(),
         preview: PreviewLook::default(),
     };
     CardView { face: Arc::new(face), selected: false, drop_target: false }
@@ -349,6 +361,12 @@ fn tile_content(cell: &CardCell, mode: DisplayMode, item: CardItem, current: &Ca
                 .key(format!("{}-0", view_key("file-line", &cell.key)))
                 .into_any(),
         );
+        lines.push(
+            widget(style::centered(library_text(face.library.clone())))
+                .prop::<String, HiddenWhenEmpty<fields::text::value>>(move || item.try_with(|card| card.face.library.clone()).unwrap_or_default())
+                .key(format!("{}-library", view_key("file-line", &cell.key)))
+                .into_any(),
+        );
     }
     let body = widget(Stack::column(4.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)).justify(JustifySpec::Center))
         .children(lines)
@@ -389,14 +407,27 @@ fn list_content(cell: &CardCell, item: CardItem, current: &CardView) -> AnyView 
     ))
     .into_any();
     let meta_key = view_key("file-meta", &cell.key);
-    let mut meta = vec![
+    let mut meta = Vec::new();
+    if !face.directory() {
+        let mut label = library_text(face.library.clone());
+        let layout = Arc::make_mut(&mut label.style.layout);
+        layout.min_width = Some(LengthSpec::Px(0.0));
+        layout.flex_shrink = Some(1.0);
+        meta.push(
+            widget(label)
+                .prop::<String, HiddenWhenEmpty<fields::text::value>>(move || item.try_with(|card| card.face.library.clone()).unwrap_or_default())
+                .key(format!("{meta_key}-library"))
+                .into_any(),
+        );
+    }
+    meta.extend([
         meta_text(face.kind_label.clone(), &format!("{meta_key}-0"))
             .prop::<String, fields::text::value>(move || item.try_with(|card| card.face.kind_label.clone()).unwrap_or_default())
             .into_any(),
         meta_text(face.size.clone(), &format!("{meta_key}-1"))
             .prop::<String, fields::text::value>(move || item.try_with(|card| card.face.size.clone()).unwrap_or_default())
             .into_any(),
-    ];
+    ]);
     if !face.directory() {
         meta.push(
             meta_text(face.hardlink.to_string(), &format!("{meta_key}-2"))
@@ -435,6 +466,11 @@ fn list_content(cell: &CardCell, item: CardItem, current: &CardView) -> AnyView 
     widget(Stack::row(12.0).align(AlignSpec::Start).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
         .children((preview, body, meta))
         .into_any()
+}
+
+/// 资源库摘要（`files-list__library-line`）：12px 强调色，一行放不下用省略号截断。
+fn library_text(text: String) -> Text {
+    style::text(text, 12.0, 400, SemanticColorRole::Accent, 12.0 * 1.55).truncating()
 }
 
 /// 列表右侧的一段：一行放不下时每段可以缩到 0，用省略号截断，不伸出元信息列。

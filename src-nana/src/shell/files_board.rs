@@ -82,15 +82,18 @@ impl BoardSignals {
         let rows = visible_rows(&model.files, &ctx);
         let picked = picked_paths(&model.files);
         let drop_folder = (model.input.internal_active || model.input.dragging_files).then(|| model.input.hover_folder.as_deref()).flatten();
+        // ASMR 资源库插件开着时，ASMR 文件的卡片多一行摘要；它跟着元数据变，算进卡片指纹。
+        let asmr = super::super::inspect_library::asmr_enabled(&model.admin.plugins);
         let mut faces = HashMap::with_capacity(rows.len());
         let cards = rows
             .iter()
             .map(|row| {
-                let print = fingerprint(row);
+                let library = if asmr { super::super::inspect_library::file_summary(row) } else { String::new() };
+                let print = fingerprint(row, &library);
                 let key = row.key();
                 let face = match cache.faces.get(key.as_str()) {
                     Some((known, face)) if *known == print => face.clone(),
-                    _ => Arc::new(CardFace::of(row)),
+                    _ => Arc::new(CardFace::of(row).with_library(library)),
                 };
                 faces.insert(face.key.clone(), (print, face.clone()));
                 CardView {
@@ -162,8 +165,9 @@ fn picked_paths(files: &FilesState) -> HashSet<&str> {
 }
 
 /// 卡片读到的字段的指纹。像素按缓冲区地址和长度认：缩略图像素整份替换，不原地改。
-fn fingerprint(row: &FileRow) -> u64 {
+fn fingerprint(row: &FileRow, library: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
+    library.hash(&mut hasher);
     row.kind.hash(&mut hasher);
     row.path.hash(&mut hasher);
     row.name.hash(&mut hasher);
