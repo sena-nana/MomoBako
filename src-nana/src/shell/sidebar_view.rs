@@ -47,6 +47,7 @@ pub use dialogs::{
 };
 pub use popover::repository_popover;
 pub use tree::folder_menu;
+pub(crate) use tree::folder_row_key;
 
 use parts::{bound_hint, footer_button, group_header, group_title, nav_row, tree_action, FooterLook, NavLook};
 

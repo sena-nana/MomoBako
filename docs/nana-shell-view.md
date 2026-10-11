@@ -26,7 +26,7 @@
 
 并行改区域时各改各的文件：
 
-- 浮层和对话框：`view_part_overlay.rs`（`overlay_branch` 里自己那种浮层的分支，身份的结构见 `OverlayIdentity`），对话框框架 `overlay_dialog.rs`、`overlay_dialog_fields.rs`，会话 `overlay_session.rs`，以及 `sidebar_dialogs.rs`、`sidebar_smart_dialog.rs`、`sidebar_popover_view.rs`、`sidebar_tree_view.rs` 的菜单、`admin_view.rs` 的任务弹层、`files_menu.rs`、`workspace_dialogs.rs`、`workspace_export_dialog.rs` 等浮层视图。
+- 浮层和对话框：`view_part_overlay.rs`（`overlay_branch` 里自己那种浮层的分支，身份的结构见 `OverlayIdentity`），对话框框架 `overlay_dialog.rs`、`overlay_dialog_fields.rs`，会话 `overlay_session.rs`，以及 `sidebar_dialogs.rs`、`sidebar_smart_dialog.rs`、`sidebar_popover_view.rs`、`admin_view.rs` 的任务弹层、文件和文件夹两种右键菜单（共用 `context_menu.rs`，条目在 `files_menu.rs`、`sidebar_tree_view.rs`）、`workspace_dialogs.rs`、`workspace_export_dialog.rs` 等浮层视图。
 - 文件页和详情：`route_files.rs` 和 `files_*.rs`、`inspect_*.rs`。
 - 侧栏和其余路由：`view_part_sidebar.rs`、`sidebar_*.rs`，以及 `route_search.rs`、`route_playlists.rs`、`route_settings.rs`、`route_admin.rs`、`route_startup.rs`、`route_missing.rs`、`route_empty.rs`；首页外框和滚动主体在 `route_home.rs`。
 
@@ -195,7 +195,7 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 // 确认框：.confirm(message, intent_button(..), intent_button(..), || confirm_message())
 ```
 
-- 对话框是 NanaUI `Dialog` / `ConfirmDialog`，常驻在自己的 `OverlayHost` 下，靠 `open` 开合；焦点陷阱、焦点归还、无障碍角色、初始焦点和开合动效都归框架。距顶、最高、圆角、三段内边距和分隔线、遮罩和进退场归主题配方（`appearance.rs`），对话框上只写宽度、口气和标题图标。
+- 对话框是 NanaUI `Dialog` / `ConfirmDialog`，常驻在自己的 `OverlayHost` 下，靠 `open` 开合；焦点陷阱、无障碍角色、初始焦点和开合动效都归框架；关上以后框架把焦点还到打开前的位置，这个位置由焦点归还（见下文）在对话框打开前放好。距顶、最高、圆角、三段内边距和分隔线、遮罩和进退场归主题配方（`appearance.rs`），对话框上只写宽度、口气和标题图标。
 - 关闭策略是 `DialogClosePolicy::requests_only()`：Escape、点外面、关闭位只在对话框上发一次 `DialogCloseRequested`，框架换成 `new` 给的关闭消息；处理中（`busy`）什么也不发。确认框的取消和确认由框架变成 `ConfirmIntent`，按钮自己不发消息。开合仍然只由归约决定。
 - 开合信号：对话框 `.model(open)`，`open` 由会话 `Presence` 写。新块挂出来时是假；放进浮层层以后浮层块调 `show()` 写真，下一次刷新时对话框、宿主和插槽都在树上，框架打开它。建的时候不写真：那样插进树的那一刻就打开，排在换下的对话框关上之前，新对话框记下的「打开前的焦点」会落在旧对话框里。
 - 换块：旧块的会话 `hide()` 写假，框架连退场一起关上它、把焦点还给打开前的位置；这块留在浮层层里放退场。新块在同一次同步里放进来、`show()` 写真。旧的先写、新的后写，刷新时先关旧的再开新的，焦点一路按打开的先后还回去（关闭确认压在新建文件夹上、取消以后新建文件夹回来，再关掉时焦点回到最初的搜索框）。
@@ -203,7 +203,31 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 - 宿主自己关掉对话框（被同一宿主上别的浮层顶替、所在的块被停放）时发 `DialogToggled { open: false }`，`.model` 把开合信号写回假。不同步回 ViewModel：这不是用户的意思，开合只听归约。这块还是现在显示的块（ViewModel 还要它开着）时，下一帧 `sweep` 调 `show()` 再写真，放回树上以后重新打开，不发消息。只用 `.open(信号)` 不听回写的话，信号一直是真，再写真不算变化，就打不开了。
 - 字段、按钮、底栏、错误行用框架里的 `text_field` / `text_area_field` / `select_field` / `two_columns` / `action` / `footer` / `error_line` / `busy_note`，照 Vue `.dialog-field` 和 `.dialog-card__actions`。
 
-**先后和 Escape。** `OverlayKey` 的顺序就是同时打开时谁显示：关闭确认最先；其后是原来浮层槽位里的对话框、弹层和菜单；文件页的导出和文件对话框原来画在主区、压在浮层槽位下面，排在最后。Escape 先关显示着的那一层：显示着的对话框已经打开，由运行时拿到 Escape、发自己的关闭请求（`prevent_default` 为真，全局 Escape 不再发）；在放退场的对话框已经关上，运行时不再把 Escape 交给它；显示着的是弹层或菜单时走全局 Escape，`escape_layer` 里弹层和菜单都排在文件页的导出和文件对话框前面，等着的对话框不会先被关掉。`escape_layer` 里文件夹菜单排在仓库弹层前面、和 `OverlayKey` 相反，但两者都由点击打开，开着一个时浮层槽位挡住另一个的入口，不会同时开着。
+**先后和 Escape。** `OverlayKey` 的顺序就是同时打开时谁显示：关闭确认最先；其后是原来浮层槽位里的对话框、弹层和菜单；文件页的导出和文件对话框原来画在主区、压在浮层槽位下面，排在最后。Escape 先关显示着的那一层：显示着的对话框已经打开，由运行时拿到 Escape、发自己的关闭请求（`prevent_default` 为真，全局 Escape 不再发）；在放退场的对话框已经关上，运行时不再把 Escape 交给它；显示着的是弹层或菜单时走全局 Escape，`escape_layer` 里弹层和菜单都排在文件页的导出和文件对话框前面，等着的对话框不会先被关掉。`escape_layer` 里弹层和菜单的先后和 `OverlayKey` 一致：菜单能用键盘打开，焦点可以从开着的文件夹菜单走回页面、再打开仓库弹层，两层同时开着时显示的和 Escape 先关的都是仓库弹层。
+
+**焦点归还。** `focus_return.rs` 照 WAI-ARIA 对话框给所有浮层定一条规则：关掉以后回到打开它的控件。它跟着浮层块显示的那一层（`OverlayPart::identity`）和页面里的「导入」菜单走：
+- 一层打开时记下打开它的控件：右键菜单是它所属的条目或文件夹行；别的层是这次同步开始前焦点所在的页面控件（`Before`，换块会卸掉旧块，事后查不到焦点原来在哪）。从刚关掉的上一层里打开的（弹层换页、菜单项打开对话框、排在后面的对话框接着显示）接着用上一层记下的控件。菜单项打开对话框分两条消息：先关菜单，焦点还给菜单的主人，再开对话框，记下的就是这个主人。
+- 对话框打开前焦点没了（菜单项随菜单卸掉）时，先把焦点放回打开它的控件，框架激活对话框时记下它，关上以后还回来。弹层换页时焦点跟进新的一页：第一个输入框，没有输入框时菜单的首项。
+- 一层关掉、焦点随它没了（对话框总算；菜单和弹层要焦点本来在里面）时还给打开它的控件；控件不在了或者不能聚焦，从它原来的上层往外找第一层还在的容器，取里面选中的项，没有就取第一个能聚焦的控件，最远到侧栏或主区的根。还不上（整个区域藏着）就留着，等区域回来再还，期间焦点被放到别处就作罢。焦点还在换下来、没关上的对话框里时等着。
+- 还到的控件随后被删掉或换掉、焦点还在它上面时，再在它那一片里找一次；焦点被放到别处以后不再管。
+- 对话框在刷新时才关上，列表里的行也在刷新时才卸掉，所以除了同步收尾，每帧画完以后 `MomoBakoApplication::presented` 也经 `ShellView::settle_focus` 补还，焦点动了再画一帧。测试支撑的 `flush` 照做。
+
+| 浮层 | 从哪打开 | 关掉以后焦点 |
+| --- | --- | --- |
+| 文件右键菜单 | 文件条目（右键、菜单键、Shift+F10） | 那个条目 |
+| 复制到…、重命名、选择目标资源库 | 文件右键菜单的项 | 那个条目；重命名以后条目换了键，落在文件列表里选中的或第一个条目 |
+| 导入（文件夹、ZIP、Eagle） | 「导入」菜单的项 | 「导入」 |
+| 文件夹右键菜单 | 文件夹行 | 那一行 |
+| 新建子文件夹、重命名、处理文件夹 | 文件夹右键菜单的项 | 那一行；删掉、改名以后目录树重读，落在树里选中的或第一个文件夹 |
+| 新建文件夹、新建智能文件夹、新建播放集 | 侧栏的按钮 | 那个按钮 |
+| 编辑、删除智能文件夹 | 智能文件夹行上的按钮 | 那个按钮；删掉以后落在树里还在的智能文件夹 |
+| 切换列表、添加菜单、后端表单 | 仓库头（换页都在弹层里） | 仓库头 |
+| 删除资源库 | 仓库弹层的「删除当前资源库」，或缺失页的「删除资源库」 | 仓库头或那个按钮；删掉以后换仓库期间侧栏收起、缺失页换掉，等侧栏回来还给仓库头，缺失页的按钮没了时落在主区里 |
+| 删除插件 | 插件卡片的「删除」 | 那个按钮；删掉以后落在同一组里还在的插件 |
+| 任务弹层 | 「任务」 | 「任务」 |
+| 硬链接确认 | 读到候选时自己弹出 | 打开前焦点在页面上时回到那里，否则文件列表里选中的或第一个条目 |
+| 导出 | 没有界面入口（和 Vue 一样） | 同硬链接确认 |
+| 关闭确认 | 标题栏的关闭或系统关窗 | 打开前的控件；打开前没有焦点时不放 |
 
 **组合输入。** 浮层换块会换掉输入框，新开的对话框一激活还会把焦点从别处的输入框拿走，所以文档里任何获得焦点的输入框还有预编辑时，浮层块都把换块延后到组合结束（`composing`）。打开期间的变化只写信号，不受影响。
 

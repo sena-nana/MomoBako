@@ -209,6 +209,23 @@ impl ApplicationState for MomoBakoApplication {
         appearance::sync(self, &mut window.document);
     }
 
+    /// 一帧画完以后：对话框在这一帧的刷新里才关上、控件也可能刚卸掉，照焦点归还的规则补还焦点；
+    /// 焦点动了再画一帧，焦点环跟着显示。
+    fn presented(
+        &mut self,
+        window: &mut ApplicationWindow,
+        context: &RuntimeProgramContext<Self::Message>,
+    ) -> RuntimeProgramUpdate {
+        let Some(view) = self.view.as_mut().filter(|view| view.owns(&window.document)) else {
+            return RuntimeProgramUpdate::default();
+        };
+        if view.settle_focus(&mut window.document, &self.shell) {
+            RuntimeProgramUpdate::redraw(context.window_id())
+        } else {
+            RuntimeProgramUpdate::default()
+        }
+    }
+
     fn update(
         &mut self,
         mut message: ShellMessage,

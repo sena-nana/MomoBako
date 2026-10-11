@@ -83,9 +83,10 @@ impl ShellHarness {
         self.flush();
     }
 
-    /// 跑一帧：刷新绑定、排版、布局。
+    /// 跑一帧：刷新绑定、排版、布局，再照生产画完一帧以后（`presented`）那样补还焦点。
     pub fn flush(&mut self) {
         self.window.document.flush(self.viewport, &mut self.shaper).expect("布局");
+        self.view.settle_focus(&mut self.window.document, &self.model);
     }
 
     /// 视图的同步计数。
@@ -130,6 +131,48 @@ impl ShellHarness {
     /// 文档焦点。
     pub fn focused(&self) -> Option<StableNodeId> {
         self.document().context().world().focused(self.document().document())
+    }
+
+    /// 焦点所在控件的无障碍名。
+    pub fn focused_label(&self) -> Option<String> {
+        let id = self.focused()?;
+        self.nodes().into_iter().find(|node| node.id == id).and_then(|node| node.label.map(|label| label.to_string()))
+    }
+
+    /// 归约这些消息，每条归约后同步；同步里挪焦点又发的消息（分组展开）照生产下一帧那样接着归约，
+    /// 最多四轮，最后刷新一帧。
+    pub fn settle(&mut self, messages: Vec<ShellMessage>) {
+        let mut pending = messages;
+        for _ in 0..4 {
+            if pending.is_empty() {
+                break;
+            }
+            for message in pending {
+                self.apply(message);
+            }
+            pending = self.take_messages();
+        }
+        self.flush();
+    }
+
+    /// 在现在的焦点上按一下 `key`，归约发出的消息（见 [`Self::settle`]）。
+    pub fn press_key(&mut self, key: &'static str) {
+        let messages = self.key_messages(key);
+        self.settle(messages);
+    }
+
+    /// 点一下无障碍名是 `label` 的第一个控件，归约发出的消息。
+    pub fn click_label(&mut self, label: &str) {
+        let (x, y) = self.center(self.node(label));
+        let messages = self.click_messages(x, y);
+        self.settle(messages);
+    }
+
+    /// 右键一下 `id` 的中心，归约发出的消息。
+    pub fn right_click(&mut self, id: StableNodeId) {
+        let (x, y) = self.center(id);
+        let messages = self.secondary_click_messages(x, y);
+        self.settle(messages);
     }
 
     /// 把焦点放到 `id` 上。
@@ -256,6 +299,19 @@ impl ShellHarness {
         crate::window_host::note_modifiers(&mut self.model, &payload);
     }
 
+    /// 在 `(x, y)` 按下再松开副键（右键），返回这次点击发出的消息，不归约。之前排着的消息留给调用方。
+    pub fn secondary_click_messages(&mut self, x: f32, y: f32) -> Vec<ShellMessage> {
+        let earlier = self.take_messages();
+        self.held = earlier;
+        for (phase, buttons) in [(nana_ui::PointerPhase::Down, 2), (nana_ui::PointerPhase::Up, 0)] {
+            let pointer = nana_ui::PointerInput { button: 2, buttons, is_primary: false, ..nana_ui::PointerInput::mouse(phase, x, y) };
+            let payload = nana_ui::InputPayload::Pointer(pointer);
+            self.input.route(self.window.document.context_mut(), payload.clone()).expect("右键");
+            crate::window_host::note_modifiers(&mut self.model, &payload);
+        }
+        self.queued()
+    }
+
     /// 在 `(x, y)` 滚一下滚轮，`delta_y` 按像素，负数往下滚。滚动后要 [`Self::frame`] 或 [`Self::flush`]
     /// 才会按新的视口建行、卸行。
     pub fn wheel(&mut self, x: f32, y: f32, delta_y: f32) {
@@ -291,12 +347,17 @@ impl ShellHarness {
 
     /// 按一下名为 `key` 的键（例如 `"Enter"`），返回控件因此发出的消息，不归约，不走全局 Escape。
     pub fn key_messages(&mut self, key: &'static str) -> Vec<ShellMessage> {
+        self.key_messages_with(key, nana_ui::InputModifiers::default())
+    }
+
+    /// 按着 `modifiers` 按一下名为 `key` 的键（例如 Shift+`"F10"`），同 [`Self::key_messages`]。
+    pub fn key_messages_with(&mut self, key: &'static str, modifiers: nana_ui::InputModifiers) -> Vec<ShellMessage> {
         let input = nana_ui::KeyInput {
             physical: nana_ui_platform::PhysicalKey(key.into()),
             logical: nana_ui_platform::LogicalKey(key.into()),
             state: nana_ui::KeyState::Pressed,
             repeat: false,
-            modifiers: nana_ui::InputModifiers::default(),
+            modifiers,
         };
         let earlier = self.take_messages();
         self.held = earlier;

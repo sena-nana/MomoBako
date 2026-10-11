@@ -52,6 +52,14 @@ pub(super) fn entry_menu(model: &ShellViewModel) -> Option<AnyView> {
     menu::entry_menu(model)
 }
 
+/// 右键菜单所属的文件条目卡片的键；菜单没开或条目已经不在列表里时为 `None`。
+pub(super) fn entry_menu_card_key(model: &ShellViewModel) -> Option<String> {
+    let path = &model.files.entry_menu.as_ref()?.path;
+    let ctx = super::files::FileContext::from_model(model);
+    let row = model.files.visible_rows(&ctx).into_iter().find(|row| &row.path == path)?;
+    Some(cards::view_key("file-row", &row.key()))
+}
+
 /// 文件列的样子：在不在预览、排法和外部文件拖入。
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ColumnLook {

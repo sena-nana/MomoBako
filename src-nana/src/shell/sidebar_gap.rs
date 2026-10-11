@@ -182,7 +182,6 @@ pub(super) fn reduce(model: &mut super::super::ShellViewModel, message: GapMessa
 pub enum EscapeLayer {
     /// 关闭确认。
     CloseConfirm,
-    FolderMenu,
     FolderDelete,
     FolderDialog,
     SmartDelete,
@@ -191,6 +190,7 @@ pub enum EscapeLayer {
     /// 来源下载的「选择目标资源库」。
     DownloadTarget,
     RepositoryPopover,
+    FolderMenu,
     TaskPopover,
     TagMenu,
     /// 文件页的浮层：右键菜单 → 导入菜单 → 导出对话框 → 硬链接确认 → 文件对话框，文件操作进行中不关。
@@ -202,8 +202,6 @@ pub fn escape_layer(model: &super::super::ShellViewModel) -> Option<EscapeLayer>
     let sidebar = &model.sidebar;
     let layer = if model.input.pending_close {
         EscapeLayer::CloseConfirm
-    } else if sidebar.folder_menu.is_some() {
-        EscapeLayer::FolderMenu
     } else if !sidebar.folder_delete_path.is_empty() {
         EscapeLayer::FolderDelete
     } else if sidebar.folder_dialog.open {
@@ -218,6 +216,8 @@ pub fn escape_layer(model: &super::super::ShellViewModel) -> Option<EscapeLayer>
         EscapeLayer::DownloadTarget
     } else if sidebar.popover != super::PopoverMode::Closed {
         EscapeLayer::RepositoryPopover
+    } else if sidebar.folder_menu.is_some() {
+        EscapeLayer::FolderMenu
     } else if model.admin.popover_open {
         EscapeLayer::TaskPopover
     } else if model.inspect.tag_menu_open() {

@@ -38,9 +38,9 @@ use session::OverlaySession;
 ///
 /// Escape 先关显示着的那一层：显示着的对话框已经激活，运行时把 Escape 交给它、发它自己的关闭
 /// 请求，全局 Escape 不再发；显示着的是弹层或菜单时走全局 Escape（`escape_layer`），那里弹层和
-/// 菜单都排在文件页的导出和文件对话框前面，等着的对话框不会先被关掉。`escape_layer` 里文件夹
-/// 菜单排在仓库弹层前面，和这里相反，但两者都由点击打开，开着一个时浮层槽位挡住另一个的入口，
-/// 不会同时开着。
+/// 菜单的先后和这里一样，都排在文件页的导出和文件对话框前面，等着的对话框不会先被关掉。菜单能用
+/// 键盘打开以后，焦点可以从开着的菜单走回页面、再打开仓库弹层，两层同时开着时 Escape 先关显示着的
+/// 仓库弹层。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum OverlayKey {
     /// 关闭确认。
@@ -113,6 +113,12 @@ impl OverlayKey {
             return None;
         };
         Some(key)
+    }
+
+    /// 模态的对话框（NanaUI `Dialog` / `ConfirmDialog`）：打开时框架把焦点拿进去、关上时还到打开前的
+    /// 位置。弹层和右键菜单不是。
+    pub(crate) fn modal(self) -> bool {
+        !matches!(self, Self::RepositoryPopover | Self::FolderMenu | Self::TaskPopover | Self::EntryMenu)
     }
 }
 
@@ -249,6 +255,16 @@ impl OverlayPart {
     /// 还有换下来、没放完退场的块。准备帧据此一直要帧，直到卸掉它们。
     pub(crate) fn leaving(&self) -> bool {
         !self.leaving.is_empty()
+    }
+
+    /// 现在显示的是哪一层；没有浮层时为 `None`。输入法组合延后换块时还是换块前的那一层。
+    pub(crate) fn identity(&self) -> Option<&OverlayIdentity> {
+        self.identity.as_ref()
+    }
+
+    /// 浮层层节点；骨架还没挂上时为 `None`。
+    pub(crate) fn layer_id(&self) -> Option<StableNodeId> {
+        self.layer.get_untracked()
     }
 
     /// 浮层层的子节点排成：还在放退场的块在前，现在这块在最后、画在最上面。省掉的子节点（换下就卸的

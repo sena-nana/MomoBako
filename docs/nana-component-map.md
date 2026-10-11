@@ -23,8 +23,7 @@
 | 组件 | 用在哪里 |
 | --- | --- |
 | `app-shell`、`app-title-bar`、`workspace` | 骨架、标题栏和工作区（`view_host.rs`、`title_bar.rs`、`render.rs`） |
-| `sidebar-frame`、`list-item` | 侧栏外框和侧栏、弹层、对话框里的行（`sidebar_view.rs`、`sidebar_tree_view.rs`、`sidebar_popover_view.rs`） |
-| `context-menu` | 侧栏文件夹树的右键菜单（`sidebar_tree_view.rs`）。文件右键菜单是自绘的（`files_menu.rs`） |
+| `sidebar-frame`、`list-item` | 侧栏外框和侧栏、弹层、对话框里的行（`sidebar_view.rs`、`sidebar_tree_view.rs`、`sidebar_popover_view.rs`），以及文件和文件夹两种右键菜单的项（自绘，`context_menu.rs`） |
 | `dialog`、`confirm-dialog`、`overlay-host` | 全部对话框（`overlay_dialog.rs`） |
 | `button`、`icon-button`、`text-input`、`textarea`、`checkbox`、`range-field`、`select` | 各页控件；`textarea` 的类型是 `TextArea` |
 | `reorder-list` | 播放集条目（`player_playlist_page.rs`） |
@@ -37,7 +36,7 @@
 
 目录外的公开类型用到 `SettingsCard`（`inspect_library.rs`、`inspect_metadata_parts.rs`）和 `List`（压缩包文件列表，`inspect_library.rs`）。文件列表用视图层的 `each_virtual` 按视口建行（`files_virtual.rs`），不用 `VirtualListLayout`。
 
-其余已编译组件产品里没有用到，包括 `tree-view`、`sidebar-row`、`sidebar-section`、`sidebar-footer`、`native-markdown`、`selectable-rich-text`、`image-viewer`、`gpu-view`、`progress`、`spinner`、`settings`、`settings-collapsible-card`、`appearance-section`。设置页、日志页、插件页和播放条由 `Stack`、`Text`、`Button`、`RangeField` 等拼成（`admin_*.rs`、`player_bar*.rs`）。
+其余已编译组件产品里没有用到，包括 `context-menu`、`tree-view`、`sidebar-row`、`sidebar-section`、`sidebar-footer`、`native-markdown`、`selectable-rich-text`、`image-viewer`、`gpu-view`、`progress`、`spinner`、`settings`、`settings-collapsible-card`、`appearance-section`。设置页、日志页、插件页和播放条由 `Stack`、`Text`、`Button`、`RangeField` 等拼成（`admin_*.rs`、`player_bar*.rs`）。
 
 ## 探针结论
 

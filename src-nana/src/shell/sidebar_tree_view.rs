@@ -2,7 +2,8 @@
 //!
 //! 行结构照 Vue `FolderTreeNode.vue` / `SmartFolderTreeNode.vue`：最左 10px 的折叠三角，
 //! 然后是 24px 高的行卡片（文件夹图标、名称、右侧计数），子级每层缩进 20px，行距 3px。
-//! 当前目录的卡片是 `--bg-active` 灰底。文件夹行右键打开「打开 / 新建子文件夹 / 重命名 / 删除」菜单；
+//! 当前目录的卡片是 `--bg-active` 灰底。文件夹行右键打开「打开 / 新建子文件夹 / 重命名 / 删除」菜单，
+//! 菜单键和 Shift+F10 也打开它、焦点落在首项（和文件右键菜单同一份实现，`context_menu.rs`）；
 //! 智能文件夹行右侧常驻新建子级、编辑和删除三个小按钮。
 //!
 //! 两棵树按显示顺序展开成一列行，放在按键对照的 Store 里，用带键的 `each` 建：展开一个目录只插入
@@ -12,15 +13,14 @@
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{CARET_DOWN, CARET_RIGHT, FOLDER, FOLDER_OPEN, FOLDER_PLUS, PENCIL, PLUS, TRASH};
-use nana_ui::runtime::view::{signal, widget, AnyView, FieldWrite, IntoView};
-use nana_ui::runtime::{
-    Activate, AlignSpec, ContextMenu, ContextMenuEvent, ContextMenuItem, IconButton, LengthSpec, ListItem, SecondaryPress,
-    SemanticColorRole, Stack,
-};
+use nana_ui::runtime::view::{signal, widget, AnyView, IntoView};
+use nana_ui::runtime::{Activate, AlignSpec, IconButton, LengthSpec, ListItem, SecondaryPress, SemanticColorRole, Stack};
 use nana_ui::ControlSize;
 use nana_ui::runtime::view::{fields, Item, Signal, Store, StoreList, StorePath};
 use nana_ui::Icon;
 
+use super::super::context_menu::{context_menu, MenuAction, MenuChrome, MenuEntry, MenuView};
+use super::super::menu_focus::{focus_menu, MenuEdge, MenuSurface};
 use super::super::sidebar::GapMessage;
 use super::super::view_part_sidebar::project::{
     folder_key, smart_key, FolderGroup, FolderRow, FolderRowStoreFields, SmartGroup, SmartRow, SmartRowStoreFields,
@@ -87,6 +87,11 @@ fn folder_icon(branch: bool) -> Icon {
     if branch { FOLDER_OPEN } else { FOLDER }
 }
 
+/// 文件夹行卡片的键。
+pub(crate) fn folder_row_key(path: &str) -> String {
+    format!("folder-row-{}", key_part(path))
+}
+
 /// 一个目录：开合三角（没有子级时留空位）和行卡片。点卡片打开目录，右键打开目录菜单。
 fn folder_row(item: FolderItem) -> AnyView {
     let row = item.get_untracked();
@@ -112,14 +117,9 @@ fn folder_row(item: FolderItem) -> AnyView {
         .prop::<String, fields::list_item::label>(item.label())
         .prop::<bool, fields::list_item::selected>(item.active())
         .content(content)
-        .key(format!("folder-row-{}", key_part(&path)))
+        .key(folder_row_key(&path))
         .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenFolder(open_path.clone()))))
         .on_cx(move |_, event: &SecondaryPress, cx| {
-            // 菜单键和 Shift+F10 不开：文件夹菜单是挂在浮层层里的普通 `ContextMenu`，没有经 `OverlayHost`
-            // 的 `activate_overlay` 打开，方向键和 Enter 走不到它，键盘打开了也操作不了。
-            if event.keyboard {
-                return;
-            }
             let label = item.try_with(|row| row.label.clone()).unwrap_or_default();
             cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(GapMessage::OpenFolderMenu {
                 path: menu_path.clone(),
@@ -127,6 +127,9 @@ fn folder_row(item: FolderItem) -> AnyView {
                 x: event.x,
                 y: event.y,
             })));
+            if let Some(edge) = MenuEdge::of_press(event) {
+                cx.dispatch_program_all(focus_menu(MenuSurface::Folder, edge));
+            }
         });
     tree_row(row.depth, toggle, card.into_any())
 }
@@ -246,74 +249,46 @@ fn smart_row(item: SmartItem, state: Signal<SmartGroup>) -> AnyView {
     tree_row(row.depth, toggle, card.into_any())
 }
 
-/// 文件夹右键菜单要显示的东西：文件服务是否在处理（处理中时后三项禁用）。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct FolderMenuView {
-    pub mutating: bool,
-}
+/// 文件夹右键菜单的键前缀和关闭消息。没有分组，也没有要点两次的项。
+const FOLDER_MENU: MenuChrome = MenuChrome {
+    prefix: "folder",
+    close: || ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::CloseFolderMenu)),
+    branch: None,
+    arm: None,
+};
+
+/// 文件夹右键菜单的投影。
+pub(crate) struct FolderMenuView;
 
 impl FolderMenuView {
-    pub(crate) fn project(model: &ShellViewModel) -> Option<Self> {
-        model.sidebar.folder_menu.as_ref()?;
-        Some(Self { mutating: model.files.mutating })
+    /// 照 Vue `FolderTreeNode.vue` 的 `contextMenuItems`：打开、新建子文件夹、重命名和删除，
+    /// 文件服务处理中时后三项禁用。
+    pub(crate) fn project(model: &ShellViewModel) -> Option<MenuView> {
+        let menu = model.sidebar.folder_menu.as_ref()?;
+        let mutating = model.files.mutating;
+        let (path, label) = (menu.path.clone(), menu.label.clone());
+        let entries = vec![
+            MenuEntry::new("open", "打开", Some(FOLDER_OPEN)).message(MenuAction::OpenFolder(path.clone())),
+            MenuEntry::new("create", "新建子文件夹", Some(FOLDER_PLUS))
+                .disabled(mutating)
+                .message(MenuAction::Gap(GapMessage::OpenFolderCreate(path.clone()))),
+            MenuEntry::new("rename", "重命名", Some(PENCIL))
+                .disabled(mutating)
+                .message(MenuAction::Gap(GapMessage::OpenFolderRename { path: path.clone(), label: label.clone() })),
+            MenuEntry::new("delete", "删除", Some(TRASH))
+                .disabled(mutating)
+                .danger()
+                .message(MenuAction::Gap(GapMessage::OpenFolderDelete { path, label })),
+        ];
+        Some(MenuView::new(entries, None))
     }
 }
 
-/// 菜单项：打开、新建子文件夹、重命名和删除。
-fn folder_menu_items(mutating: bool) -> Vec<ContextMenuItem> {
-    vec![
-        ContextMenuItem::new("open", "打开").icon(FOLDER_OPEN),
-        ContextMenuItem::new("create", "新建子文件夹").icon(FOLDER_PLUS).disabled(mutating),
-        ContextMenuItem::new("rename", "重命名").icon(PENCIL).disabled(mutating),
-        ContextMenuItem::new("delete", "删除").icon(TRASH).disabled(mutating).danger(true),
-    ]
-}
-
-/// 菜单项的禁用跟着文件服务走：变了才换条目。
-struct MenuItemsBusy;
-
-impl FieldWrite<ContextMenu, bool> for MenuItemsBusy {
-    const FIELD: &'static str = "ContextMenu.items(mutating)";
-
-    fn write(target: &mut ContextMenu, mutating: bool) {
-        target.items = folder_menu_items(mutating);
-    }
-
-    fn differs(target: &ContextMenu, mutating: &bool) -> bool {
-        target.items != folder_menu_items(*mutating)
-    }
-}
-
-/// 文件夹行右键菜单：打开、新建子文件夹、重命名和删除。文件服务处理中时后三项禁用。
-/// 常驻：同一行同一落点的菜单打开期间只改条目的禁用，换一行或换落点时浮层块换块。
+/// 文件夹行右键菜单，和文件右键菜单是同一份实现（`context_menu.rs`）。常驻：同一行同一落点的菜单
+/// 打开期间只重建变了的那几行（处理中切换禁用），换一行或换落点时浮层块换块。
 pub fn folder_menu(model: &ShellViewModel) -> Option<AnyView> {
     let menu = model.sidebar.folder_menu.clone()?;
     let view = signal(FolderMenuView::project(model)?);
     Projected::register(view, FolderMenuView::project);
-    let path = menu.path.clone();
-    let label = menu.label.clone();
-    Some(
-        widget(ContextMenu::new(menu.x, menu.y).items(folder_menu_items(view.with_untracked(|view| view.mutating))))
-            .key("folder-context-menu")
-            .prop::<bool, MenuItemsBusy>(move || view.with(|view| view.mutating))
-            .on_cx(move |_, event: &ContextMenuEvent, cx| match event {
-                ContextMenuEvent::Search(_) => {}
-                ContextMenuEvent::Dismiss => cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(GapMessage::CloseFolderMenu))),
-                ContextMenuEvent::Select(value) => {
-                    cx.dispatch_program_all(sidebar_message(SidebarMessage::Gap(GapMessage::CloseFolderMenu)));
-                    let message = match value.as_ref() {
-                        "open" => SidebarMessage::OpenFolder(path.clone()),
-                        "create" => SidebarMessage::Gap(GapMessage::OpenFolderCreate(path.clone())),
-                        "rename" => SidebarMessage::Gap(GapMessage::OpenFolderRename { path: path.clone(), label: label.clone() }),
-                        "delete" => SidebarMessage::Gap(GapMessage::OpenFolderDelete { path: path.clone(), label: label.clone() }),
-                        other => {
-                            eprintln!("Nana 文件夹菜单没有这一项：{other}");
-                            return;
-                        }
-                    };
-                    cx.dispatch_program_all(sidebar_message(message));
-                }
-            })
-            .into_any(),
-    )
+    Some(context_menu(view, menu.x, menu.y, FOLDER_MENU))
 }
