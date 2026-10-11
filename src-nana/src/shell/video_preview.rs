@@ -2,7 +2,10 @@
 //!
 //! 未压缩和 MJPEG 的 AVI 用纯 Rust 解出画面和 PCM。其余常见容器在 Windows 上交给系统媒体基础，
 //! 只拉取样本，不打开窗口、不拉起播放器、也不把声音送进声卡。没有画面时仍解音轨，PCM 进现有播放会话。
-//! 认不出的字节仍是「没有原生解码器」。解不开的具体文件返回「解码失败」。超过内存上限时失败。
+//! 认不出的字节仍是「没有原生解码器」。解不开的具体文件返回「解码失败」。
+//!
+//! 画面和音轨都整段放在内存里，有上限。超过上限时只留前面一段：会话照样能放，时长是解出的这一段，
+//! `error` 写明只解出了多少、全长多少（播放条第二行显示），不把半段当成整段。按播放时钟流式解码以后才能去掉上限。
 
 #[path = "video_avi.rs"]
 mod avi;
@@ -13,10 +16,18 @@ mod mf;
 use crate::backend::services::repository::PlaybackSessionState;
 use crate::shell::player::PreviewPcm;
 
-/// 预览里同时保留的画面字节上限。超过就失败，避免把半段当成整段。
+/// 视频画面同时保留的字节上限。长边 320 的 16:9 画面一帧约 225 KiB，大约能留前 5–7 秒。
 pub(super) const FRAME_BYTE_BUDGET: usize = 16 * 1024 * 1024;
-/// 音轨 PCM 上限。超过时会话时长停在已经解出的部分。
+/// 视频音轨的 PCM 上限。视频的音轨只读到最后一帧画面后 1 秒，平常碰不到。
 pub(super) const PCM_BYTE_BUDGET: usize = 32 * 1024 * 1024;
+/// 只有音轨（m4a、aac、opus）时的 PCM 上限：1 GiB，48 kHz 立体声 16 位约 93 分钟。
+pub(super) const AUDIO_PCM_BYTE_BUDGET: usize = 1024 * 1024 * 1024;
+
+/// 解码停在半路（内存上限、读样本的次数上限）。`total_ms` 是容器写的全长，读不到时为空。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct Cut {
+    pub total_ms: Option<u64>,
+}
 
 /// 一帧预览画面。时间是相对片头的毫秒。
 #[derive(Clone, Debug)]
@@ -27,17 +38,26 @@ pub struct VideoFrame {
     pub rgba: Vec<u8>,
 }
 
-/// 解出来的画面和可选音轨。
+/// 解出来的画面和可选音轨。`duration_ms` 是解出的这一段的长度；没解到结尾时 `cut` 有值。
 #[derive(Clone, Debug)]
 pub struct DecodedClip {
     pub duration_ms: u64,
     pub frames: Vec<VideoFrame>,
     pub pcm: Option<PreviewPcm>,
+    pub cut: Option<Cut>,
 }
 
 /// 解视频容器。成功时会话处于 paused，并能跳转。
 pub(super) fn open_clip(repo_id: &str, bytes: &[u8]) -> Result<(PlaybackSessionState, Option<PreviewPcm>, Vec<VideoFrame>), String> {
-    let clip = decode(bytes)?;
+    session_for(repo_id, decode(bytes)?)
+}
+
+/// 解出的片段换成会话：没有画面时只用音轨。没解到结尾时会话照样能放，`error` 写明只解出了多少（[`cut_note`]）。
+fn session_for(repo_id: &str, clip: DecodedClip) -> Result<(PlaybackSessionState, Option<PreviewPcm>, Vec<VideoFrame>), String> {
+    let note = clip.cut.map(|cut| cut_note(clip.duration_ms, cut.total_ms));
+    if let Some(note) = &note {
+        eprintln!("Nana 媒体没有解到结尾：{note}");
+    }
     if clip.frames.is_empty() {
         let Some(pcm) = clip.pcm else {
             eprintln!("Nana 媒体解码没有画面，也没有音轨");
@@ -52,7 +72,7 @@ pub(super) fn open_clip(repo_id: &str, bytes: &[u8]) -> Result<(PlaybackSessionS
             duration_ms: Some(pcm.duration_ms.max(1)),
             can_seek: true,
             can_volume: true,
-            error: None,
+            error: note,
             ..fresh_session(repo_id)
         };
         return Ok((session, Some(pcm), Vec::new()));
@@ -66,10 +86,22 @@ pub(super) fn open_clip(repo_id: &str, bytes: &[u8]) -> Result<(PlaybackSessionS
         duration_ms: Some(clip.duration_ms),
         can_seek: true,
         can_volume: clip.pcm.is_some(),
-        error: None,
+        error: note,
         ..fresh_session(repo_id)
     };
     Ok((session, clip.pcm, clip.frames))
+}
+
+/// 没解到结尾时写在会话里的说明：「只解出前 0:05（全长 2:31），之后的部分暂不能播放」。全长读不到时不写括号。
+pub(super) fn cut_note(decoded_ms: u64, total_ms: Option<u64>) -> String {
+    let total = total_ms.filter(|total| *total > decoded_ms).map(|total| format!("（全长 {}）", clock(total))).unwrap_or_default();
+    format!("只解出前 {}{total}，之后的部分暂不能播放", clock(decoded_ms))
+}
+
+/// 和播放条一样写成「分:秒」。
+fn clock(ms: u64) -> String {
+    let seconds = ms / 1000;
+    format!("{}:{:02}", seconds / 60, seconds % 60)
 }
 
 fn decode(bytes: &[u8]) -> Result<DecodedClip, String> {
@@ -190,6 +222,66 @@ mod tests {
         assert_eq!((pcm.channels, pcm.bits_per_sample, pcm.duration_ms), (2, 16, 1_000));
         let side = (1_000.0 / (1.0 + std::f32::consts::SQRT_2)).round() as i16;
         assert_eq!(&pcm.pcm[..4], le16(&[side, -side]).as_slice());
+    }
+
+    /// 只有音轨的媒体（m4a、aac、opus 走这条路）整段解出来：48 kHz 立体声 200 秒约 37 MiB，不在 3 分钟左右截断。
+    #[cfg(windows)]
+    #[test]
+    fn media_foundation_audio_is_not_cut_at_three_minutes() {
+        use crate::shell::audio_decode::pcm::{fmt_chunk, wav_file};
+        let bytes = wav_file(&fmt_chunk(1, 2, 48_000, 16, None), &vec![0; 48_000 * 4 * 200]);
+        let clip = super::mf::decode(&bytes, "WAV").expect("媒体基础解 200 秒的音轨");
+        assert_eq!(clip.pcm.as_ref().map(|pcm| pcm.duration_ms), Some(200_000));
+        assert_eq!(clip.duration_ms, 200_000);
+    }
+
+    /// 只有一项上限很小的解码上限，其余照常。
+    #[cfg(windows)]
+    fn tight(frames: usize, audio_only: usize) -> super::mf::Budget {
+        super::mf::Budget { frames, video_audio: super::PCM_BYTE_BUDGET, audio_only }
+    }
+
+    /// 音轨到了上限：只留前面一段，会话照样能放，时长是解出的这一段，`error` 写明只解出了多少、全长多少。
+    #[cfg(windows)]
+    #[test]
+    fn a_cut_audio_track_says_how_much_was_decoded() {
+        use crate::shell::audio_decode::pcm::{fmt_chunk, wav_file};
+        let bytes = wav_file(&fmt_chunk(1, 1, 8_000, 16, None), &vec![0; 16_000 * 10]);
+        let clip = super::mf::decode_within(&bytes, "WAV", &tight(super::FRAME_BYTE_BUDGET, 32_000)).expect("解出前一段");
+        assert_eq!(clip.cut, Some(super::Cut { total_ms: Some(10_000) }));
+        assert!(clip.duration_ms > 0 && clip.duration_ms <= 2_000, "{}", clip.duration_ms);
+        let decoded = clip.duration_ms;
+        let (session, pcm, frames) = super::session_for("repo", clip).expect("会话");
+        assert!(frames.is_empty() && pcm.is_some());
+        assert_eq!((session.status.as_str(), session.duration_ms, session.can_seek), ("paused", Some(decoded), true));
+        assert_eq!(session.error, Some(super::cut_note(decoded, Some(10_000))));
+    }
+
+    /// 视频画面到了上限：只留前几帧，时长停在解出的这一段，同样写明只解出了多少、全长多少。
+    #[cfg(windows)]
+    #[test]
+    fn a_cut_video_says_how_much_was_decoded() {
+        let bytes = super::avi::sample_frames(30, 64, 36, 10);
+        let whole = super::mf::decode(&bytes, "AVI").expect("媒体基础解 AVI");
+        assert_eq!((whole.frames.len(), whole.cut), (30, None), "上限够时整段解完");
+        let clip = super::mf::decode_within(&bytes, "AVI", &tight(40_000, super::AUDIO_PCM_BYTE_BUDGET)).expect("解出前几帧");
+        assert_eq!(clip.frames.len(), 4);
+        assert_eq!(clip.cut, Some(super::Cut { total_ms: Some(3_000) }));
+        assert!(clip.duration_ms < 1_000, "{}", clip.duration_ms);
+        let decoded = clip.duration_ms;
+        let (session, _, _) = super::session_for("repo", clip).expect("会话");
+        assert_eq!((session.status.as_str(), session.duration_ms), ("paused", Some(decoded)));
+        assert_eq!(session.error, Some(super::cut_note(decoded, Some(3_000))));
+    }
+
+    /// 说明写成「分:秒」；全长读不到、或者不比解出的长时不写括号。
+    #[test]
+    fn the_cut_note_names_the_decoded_part_and_the_whole() {
+        assert_eq!(super::cut_note(5_400, Some(151_000)), "只解出前 0:05（全长 2:31），之后的部分暂不能播放");
+        assert_eq!(super::cut_note(5_400, None), "只解出前 0:05，之后的部分暂不能播放");
+        assert_eq!(super::cut_note(5_400, Some(5_000)), "只解出前 0:05，之后的部分暂不能播放");
+        let clip = super::DecodedClip { duration_ms: 5_400, frames: Vec::new(), pcm: None, cut: Some(super::Cut { total_ms: Some(151_000) }) };
+        assert!(super::session_for("repo", clip).is_err(), "没有画面也没有音轨仍是解码失败");
     }
 
     #[test]

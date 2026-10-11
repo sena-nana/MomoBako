@@ -3,6 +3,7 @@
 //!
 //! 用源读取器把画面解成 RGB，把音轨解成 PCM。不创建播放会话，不打开窗口，也不把样本送进声卡。
 //! 音轨要 16-bit PCM，解码器给不了时退到浮点；样本经 `audio_pcm.rs` 取成 16-bit，三个以上声道下混成立体声。
+//! 画面和音轨各有内存上限，到上限时停在半路，结果里带上「没解完整」和容器写的全长（`video_preview.rs` 的 `Cut`）。
 //! 正式播放仍走已有的内存游标；测试构建不会调用 winmm。
 
 use std::ptr;
@@ -12,9 +13,9 @@ use windows::Win32::Media::MediaFoundation::{
     IMFMediaBuffer, IMFSample, IMFSourceReader, MFAudioFormat_Float, MFAudioFormat_PCM, MFCreateMFByteStreamOnStream,
     MFCreateMediaType, MFCreateSourceReaderFromByteStream, MFMediaType_Audio, MFMediaType_Video, MFShutdown, MFStartup,
     MFVideoFormat_RGB32, MFSTARTUP_NOSOCKET, MF_MT_AUDIO_BITS_PER_SAMPLE, MF_MT_AUDIO_CHANNEL_MASK, MF_MT_AUDIO_NUM_CHANNELS,
-    MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE,
+    MF_MT_AUDIO_SAMPLES_PER_SECOND, MF_MT_DEFAULT_STRIDE, MF_MT_FRAME_SIZE, MF_MT_MAJOR_TYPE, MF_MT_SUBTYPE, MF_PD_DURATION,
     MF_SOURCE_READERF_ENDOFSTREAM, MF_SOURCE_READERF_ERROR, MF_SOURCE_READER_FIRST_AUDIO_STREAM,
-    MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_VERSION,
+    MF_SOURCE_READER_FIRST_VIDEO_STREAM, MF_SOURCE_READER_MEDIASOURCE, MF_VERSION,
 };
 use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITHREADED};
 use windows::Win32::UI::Shell::SHCreateMemStream;
@@ -22,12 +23,29 @@ use windows::Win32::UI::Shell::SHCreateMemStream;
 use crate::shell::audio_decode::pcm::{Encoding, WaveFormat};
 use crate::shell::player::PreviewPcm;
 
-use super::{DecodedClip, VideoFrame, FRAME_BYTE_BUDGET, PCM_BYTE_BUDGET};
+use super::{Cut, DecodedClip, VideoFrame, AUDIO_PCM_BYTE_BUDGET, FRAME_BYTE_BUDGET, PCM_BYTE_BUDGET};
+
+/// 解码各部分的内存上限（字节），见 `video_preview.rs` 的同名常量。
+pub(super) struct Budget {
+    pub frames: usize,
+    pub video_audio: usize,
+    pub audio_only: usize,
+}
+
+const BUDGET: Budget = Budget { frames: FRAME_BYTE_BUDGET, video_audio: PCM_BYTE_BUDGET, audio_only: AUDIO_PCM_BYTE_BUDGET };
+
+/// 连着读到空样本的次数上限：读不到样本又读不到结尾时不死等，按没解完整收尾。
+const MAX_EMPTY_READS: u32 = 10_000;
 
 /// 解一种已经认出的容器。失败文案带容器名和「解码失败」，不再把所有视频都说成没有解码器。
 pub(super) fn decode(bytes: &[u8], kind: &str) -> Result<DecodedClip, String> {
+    decode_within(bytes, kind, &BUDGET)
+}
+
+/// 按给定的上限解码。测试用很小的上限走「只解出前一段」的路径。
+pub(super) fn decode_within(bytes: &[u8], kind: &str, budget: &Budget) -> Result<DecodedClip, String> {
     let mut apartment = Apartment::enter();
-    let outcome = unsafe { pull(bytes, kind) };
+    let outcome = unsafe { pull(bytes, kind, budget) };
     apartment.leave();
     outcome
 }
@@ -66,10 +84,14 @@ impl Apartment {
     }
 }
 
-unsafe fn pull(bytes: &[u8], kind: &str) -> Result<DecodedClip, String> {
+/// 算法：先读画面，每 ≥80 ms 留一帧、长边缩到 320，画面字节到上限就停；有画面时音轨读到最后一帧后 1 秒，
+/// 没有画面时整条音轨都读，到音轨上限才停。画面没读到结尾、或者音轨停在半路，都算没解完整，结果带上容器写的全长；
+/// 时长按解出的这一段算。
+unsafe fn pull(bytes: &[u8], kind: &str, budget: &Budget) -> Result<DecodedClip, String> {
     let stream = SHCreateMemStream(Some(bytes)).ok_or_else(|| failed(kind, "无法建立内存字节流"))?;
     let byte_stream = MFCreateMFByteStreamOnStream(&stream).map_err(|error| failed(kind, &error.to_string()))?;
     let reader = MFCreateSourceReaderFromByteStream(&byte_stream, None).map_err(|error| failed(kind, &error.to_string()))?;
+    let total_ms = total_duration(&reader);
     let video_index = MF_SOURCE_READER_FIRST_VIDEO_STREAM.0 as u32;
     let audio_index = MF_SOURCE_READER_FIRST_AUDIO_STREAM.0 as u32;
     let video_ready = match configure_video(&reader, video_index) {
@@ -107,8 +129,8 @@ unsafe fn pull(bytes: &[u8], kind: &str) -> Result<DecodedClip, String> {
                     }
                     let frame = rgba_frame(time_ms, width, height, stride, &bytes).map_err(|error| failed(kind, &error))?;
                     stored = stored.saturating_add(frame.rgba.len());
-                    if stored > FRAME_BYTE_BUDGET {
-                        eprintln!("Nana 视频画面在 {time_ms} ms 达到内存上限，会话时长按已解出的部分");
+                    if stored > budget.frames {
+                        eprintln!("Nana {kind} 画面在 {time_ms} ms 到了 {} 字节的内存上限，只留前面一段", budget.frames);
                         break;
                     }
                     frames.push(frame);
@@ -118,25 +140,51 @@ unsafe fn pull(bytes: &[u8], kind: &str) -> Result<DecodedClip, String> {
     }
     if frames.is_empty() {
         if audio_ready {
-            match read_audio(&reader, audio_index, 0) {
-                Ok(pcm) if !pcm.pcm.is_empty() => {
+            match read_audio(&reader, audio_index, None, budget.audio_only, total_ms) {
+                Ok(track) => {
                     eprintln!("Nana {kind} 没有画面，改用音轨");
-                    return Ok(DecodedClip { duration_ms: pcm.duration_ms.max(1), frames, pcm: Some(pcm) });
+                    let cut = (!track.complete).then_some(Cut { total_ms });
+                    return Ok(DecodedClip { duration_ms: track.pcm.duration_ms.max(1), frames, pcm: Some(track.pcm), cut });
                 }
-                Ok(_) => eprintln!("Nana {kind} 音轨没有样本"),
                 Err(error) => eprintln!("Nana {kind} 音轨解码失败：{error}"),
             }
         }
         eprintln!("Nana {kind} 没有解出画面");
         return Err(failed(kind, "没有解出画面"));
     }
-    let pcm = if audio_ready { read_audio(&reader, audio_index, last_time).ok() } else { None };
+    let track = if audio_ready {
+        read_audio(&reader, audio_index, Some(last_time), budget.video_audio, None)
+            .map_err(|error| eprintln!("Nana {kind} 视频音轨解码失败，按没有声音处理：{error}"))
+            .ok()
+    } else {
+        None
+    };
+    let audio_cut = track.as_ref().is_some_and(|track| !track.complete);
+    let pcm = track.map(|track| track.pcm);
     let duration_ms = last_time.max(frames.last().map(|frame| frame.time_ms).unwrap_or(0)).max(pcm.as_ref().map(|audio| audio.duration_ms).unwrap_or(0));
     if !reached_end {
-        eprintln!("Nana {kind} 解码停在 {duration_ms} ms，播放时长按已解出的画面");
+        eprintln!("Nana {kind} 画面解码停在 {duration_ms} ms");
     }
-    let _ = reached_end;
-    Ok(DecodedClip { duration_ms: duration_ms.max(1), frames, pcm })
+    let cut = (!reached_end || audio_cut).then_some(Cut { total_ms });
+    Ok(DecodedClip { duration_ms: duration_ms.max(1), frames, pcm, cut })
+}
+
+/// 容器写的全长（毫秒）。读不到时为空，只用来说明没解完整的片段一共多长。
+unsafe fn total_duration(reader: &IMFSourceReader) -> Option<u64> {
+    let value = match reader.GetPresentationAttribute(MF_SOURCE_READER_MEDIASOURCE.0 as u32, &MF_PD_DURATION) {
+        Ok(value) => value,
+        Err(error) => {
+            eprintln!("Nana 媒体没有写全长：{error}");
+            return None;
+        }
+    };
+    match u64::try_from(&value) {
+        Ok(hundred_ns) => Some(hundred_ns / 10_000),
+        Err(error) => {
+            eprintln!("Nana 媒体全长读不出：{error}");
+            None
+        }
+    }
 }
 
 fn failed(kind: &str, detail: &str) -> String {
@@ -285,42 +333,77 @@ fn scale_bgra(width: u32, height: u32, stride: usize, bottom_up: bool, bytes: &[
     (out_w, out_h, rgba)
 }
 
-unsafe fn read_audio(reader: &IMFSourceReader, index: u32, limit_ms: u64) -> Result<PreviewPcm, String> {
+/// 读出的音轨。`complete` 为假时停在了半路：到了内存上限、过了 `limit_ms`，或者一直读不到样本。
+struct Track {
+    pcm: PreviewPcm,
+    complete: bool,
+}
+
+/// 读音轨。`limit_ms` 有值时读到它之后 1 秒为止（视频的音轨只跟到最后一帧画面）；PCM 再放一段就超过 `budget`
+/// 字节时停下。`total_ms` 有值时按它先留好空间，长音轨不用边读边翻倍扩容；内存分配不到时同样停在半路，按没解完整
+/// 收尾，不让进程因为分配失败退出。
+unsafe fn read_audio(reader: &IMFSourceReader, index: u32, limit_ms: Option<u64>, budget: usize, total_ms: Option<u64>) -> Result<Track, String> {
     let format = audio_format(reader, index)?;
     let (channels, bits) = format.output();
     let block = usize::from(format.block_align);
+    let frame_bytes = usize::from(channels) * usize::from(bits / 8);
     let mut pcm = Vec::new();
-    for _ in 0..200_000 {
-        if pcm.len() > PCM_BYTE_BUDGET {
-            eprintln!("Nana 视频音轨达到内存上限，播放时长按已解出的部分");
-            break;
+    if let Some(total_ms) = total_ms {
+        // 多留一秒，容器写的全长略短时也不用再扩。
+        let expected = total_ms.saturating_add(1_000).saturating_mul(u64::from(format.sample_rate)) / 1_000 * frame_bytes as u64;
+        let expected = usize::try_from(expected).unwrap_or(budget).min(budget);
+        if let Err(error) = pcm.try_reserve_exact(expected) {
+            eprintln!("Nana 音轨预留 {expected} 字节失败，边读边扩：{error}");
         }
+    }
+    let mut complete = false;
+    let mut empty_reads = 0u32;
+    loop {
         match read_sample(reader, index)? {
-            Sample::End => break,
-            Sample::Empty => {}
+            Sample::End => {
+                complete = true;
+                break;
+            }
+            Sample::Empty => {
+                empty_reads += 1;
+                if empty_reads > MAX_EMPTY_READS {
+                    eprintln!("Nana 音轨连续 {MAX_EMPTY_READS} 次读不到样本，停在 {} 字节", pcm.len());
+                    break;
+                }
+            }
             Sample::Data { time_ms, bytes } => {
+                empty_reads = 0;
                 let whole = bytes.len() - bytes.len() % block;
                 if whole != bytes.len() {
                     eprintln!("Nana 音轨样本不是整帧，丢掉末尾 {} 字节", bytes.len() - whole);
                 }
+                let size = whole / block * frame_bytes;
+                if pcm.len().saturating_add(size) > budget {
+                    eprintln!("Nana 音轨在 {time_ms} ms 到了 {budget} 字节的内存上限，只留前面一段");
+                    break;
+                }
+                if let Err(error) = pcm.try_reserve(size) {
+                    eprintln!("Nana 音轨在 {time_ms} ms 分配不到内存，只留前面一段：{error}");
+                    break;
+                }
                 format.convert_into(&bytes[..whole], &mut pcm)?;
-                if limit_ms > 0 && time_ms > limit_ms.saturating_add(1_000) {
+                if limit_ms.is_some_and(|limit| time_ms > limit.saturating_add(1_000)) {
                     break;
                 }
             }
         }
     }
-    let frame_bytes = usize::from(channels) * usize::from(bits / 8);
     if frame_bytes == 0 || pcm.len() < frame_bytes {
         return Err("音轨没有样本".into());
     }
     let frame_count = (pcm.len() / frame_bytes) as u64;
-    Ok(PreviewPcm {
+    let pcm = PreviewPcm {
         sample_rate: format.sample_rate,
         channels,
         bits_per_sample: bits,
         frame_count,
         duration_ms: frame_count.saturating_mul(1_000) / u64::from(format.sample_rate),
         pcm,
-    })
+    };
+    Ok(Track { pcm, complete })
 }

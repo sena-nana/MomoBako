@@ -52,7 +52,7 @@ pub(super) fn try_decode(bytes: &[u8]) -> Result<Option<DecodedClip>, String> {
         pcm_of(stream, pcm)
     });
     let duration_ms = duration_ms.max(pcm.as_ref().map(|audio| audio.duration_ms).unwrap_or(0));
-    Ok(Some(DecodedClip { duration_ms, frames, pcm }))
+    Ok(Some(DecodedClip { duration_ms, frames, pcm, cut: None }))
 }
 
 fn supported_video(stream: &Stream) -> bool {
@@ -276,6 +276,55 @@ pub(crate) fn sample_uncompressed() -> Vec<u8> {
     let mut body = Vec::new();
     push_list(&mut body, b"hdrl", &hdrl);
     push_list(&mut body, b"movi", &movi);
+    let mut file = Vec::new();
+    file.extend_from_slice(b"RIFF");
+    file.extend_from_slice(&(body.len() as u32 + 4).to_le_bytes());
+    file.extend_from_slice(b"AVI ");
+    file.extend_from_slice(&body);
+    file
+}
+
+/// `count` 帧 `width`×`height` 的未压缩 32 位画面，每秒 `fps` 帧，带完整的主头、流头和 `idx1` 索引，
+/// 系统媒体基础也读得了。测试用，画面是逐帧变亮的灰。
+#[cfg(test)]
+pub(crate) fn sample_frames(count: u32, width: u32, height: u32, fps: u32) -> Vec<u8> {
+    let frame_bytes = width * height * 4;
+    let mut avih = Vec::new();
+    for value in [1_000_000 / fps, frame_bytes * fps, 0, 0x10, count, 0, 1, frame_bytes, width, height, 0, 0, 0, 0] {
+        avih.extend_from_slice(&value.to_le_bytes());
+    }
+    let mut strh = Vec::new();
+    strh.extend_from_slice(b"vids");
+    strh.extend_from_slice(b"DIB ");
+    for value in [0u32, 0, 0, 1, fps, 0, count, frame_bytes, u32::MAX, 0] {
+        strh.extend_from_slice(&value.to_le_bytes());
+    }
+    for value in [0i16, 0, width as i16, height as i16] {
+        strh.extend_from_slice(&value.to_le_bytes());
+    }
+    let mut strf = dib_format(width as i32, height as i32, 32);
+    strf[20..24].copy_from_slice(&frame_bytes.to_le_bytes());
+    let mut strl = Vec::new();
+    push_chunk(&mut strl, b"strh", &strh);
+    push_chunk(&mut strl, b"strf", &strf);
+    let mut hdrl = Vec::new();
+    push_chunk(&mut hdrl, b"avih", &avih);
+    push_list(&mut hdrl, b"strl", &strl);
+    let mut movi = Vec::new();
+    let mut index = Vec::new();
+    for ordinal in 0..count {
+        // 索引里的偏移从 `movi` 这四个字节算起，第一块在 4。
+        index.extend_from_slice(b"00db");
+        index.extend_from_slice(&0x10u32.to_le_bytes());
+        index.extend_from_slice(&(movi.len() as u32 + 4).to_le_bytes());
+        index.extend_from_slice(&frame_bytes.to_le_bytes());
+        let shade = (ordinal * 255 / count.max(1)) as u8;
+        push_chunk(&mut movi, b"00db", &solid(width as usize, height as usize, [shade, shade, shade, 255]));
+    }
+    let mut body = Vec::new();
+    push_list(&mut body, b"hdrl", &hdrl);
+    push_list(&mut body, b"movi", &movi);
+    push_chunk(&mut body, b"idx1", &index);
     let mut file = Vec::new();
     file.extend_from_slice(b"RIFF");
     file.extend_from_slice(&(body.len() as u32 + 4).to_le_bytes());

@@ -185,7 +185,8 @@ fn install_clip(player: &mut PlayerState, parts: crate::shell::MediaParts) {
     player.session.duration_ms = parts.session.duration_ms;
     player.session.can_seek = parts.session.can_seek;
     player.session.can_volume = parts.session.can_volume;
-    player.session.error = None;
+    // 没解到结尾的片段，解码时写的说明（只解出了多少、全长多少）跟着会话进播放条第二行。
+    player.session.error = parts.session.error;
     player.session.current_time_ms = 0;
     player.session.status = parts.session.status;
     player.loaded_item = player.current_id.clone();

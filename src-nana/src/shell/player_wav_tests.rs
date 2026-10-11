@@ -279,6 +279,54 @@ fn m4a_preview_takes_over_the_bar_without_the_audio_plugin() {
     assert_eq!(bar.subtitle(), "没有可用于播放此媒体的插件", "和 Vue 一样写在播放条次行，没有条目时也写");
 }
 
+/// 没解到结尾的片段：解码时写的说明（只解出了多少、全长多少）跟着会话进播放条第二行，播放集的当前项和预览接管
+/// 都一样；会话照样能放，预览框不当成失败。
+#[test]
+fn a_cut_clip_keeps_its_note_on_the_bar() {
+    let note = "只解出前 0:05（全长 2:31），之后的部分暂不能播放";
+    let bytes = pcm_wav(8_000, 1, 8, &[128u8; 8_000]);
+    let parts = || {
+        let mut parts = crate::shell::preview_media_parts("repo", &bytes).expect("预览");
+        parts.session.error = Some(note.into());
+        parts
+    };
+    let subtitle = |model: &super::super::super::ShellViewModel| super::super::super::player_view::bar::BarProps::from_model(model).subtitle();
+
+    let dir = temp_dir("wav-cut");
+    let path = dir.join("voice.wav");
+    std::fs::write(&path, &bytes).unwrap();
+    let mut model = shell(true);
+    model.player.repo_id = Some("repo".into());
+    model.player.queue = vec![wav_queue_item("voice", &path)];
+    model.reduce(ShellMessage::Player(PlayerMessage::PlayItem { item_id: "voice".into() }));
+    let generation = model
+        .player
+        .take_effects()
+        .into_iter()
+        .find_map(|effect| match effect {
+            PlayerEffect::LoadItem { generation, .. } => Some(generation),
+            _ => None,
+        })
+        .expect("当前项的读取请求");
+    let loaded = super::super::LoadedItem::Media(parts());
+    model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded { item_id: "voice".into(), generation, still: false, result: Ok(loaded) }));
+    assert_eq!(model.player.session.status, "playing");
+    assert_eq!(model.player.session.error.as_deref(), Some(note));
+    assert_eq!(subtitle(&model), note);
+    let _ = std::fs::remove_dir_all(dir);
+
+    let mut preview = shell(true);
+    preview.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("audio/voice.wav", "wav"))));
+    let InspectEffect::LoadMedia { path, generation, .. } = preview.inspect.take_effects().pop().unwrap() else {
+        panic!("没有音视频请求");
+    };
+    let parts = parts();
+    preview.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(parts.session), pcm: parts.pcm, frames: None }));
+    assert!(preview.player.preview_owns_bar());
+    assert_eq!(preview.inspect.media_session().map(|session| session.status.as_str()), Some("paused"));
+    assert_eq!(subtitle(&preview), note);
+}
+
 /// 播放时钟只有一份：每帧往前拨，到头按自然结束切到下一项并接着放。
 #[test]
 fn the_clock_advances_and_a_natural_end_moves_to_the_next_item() {
