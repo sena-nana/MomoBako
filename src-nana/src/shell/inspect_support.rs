@@ -272,23 +272,56 @@ pub(super) fn metadata_rating(metadata: &[MetadataEntry]) -> i64 {
         .unwrap_or(0)
 }
 
+/// 元数据 `tagGroups` 展平成标签，和 Vue `metadataTagGroups` 一样：字符串项直接用；旧格式的对象项
+/// `{ label, tags }` 取它 `tags` 里的字符串，`tags` 里没有字符串时取 `label`。去空白、去重，保持原顺序。
+/// 不是数组时返回 `None`，由调用方退回索引标签。
 pub(super) fn metadata_tags(metadata: &[MetadataEntry]) -> Option<Vec<String>> {
     let value = metadata.iter().find(|entry| entry.key == "tagGroups")?.value.as_array()?;
-    let mut tags = Vec::new();
+    let mut tags: Vec<String> = Vec::new();
     for item in value {
-        if let Some(tag) = item.as_str() {
-            let tag = tag.trim();
-            if !tag.is_empty() && !tags.iter().any(|existing| existing == tag) {
-                tags.push(tag.to_string());
+        for tag in tag_group_item(item) {
+            if !tags.iter().any(|existing| *existing == tag) {
+                tags.push(tag);
             }
         }
     }
     Some(tags)
 }
 
-pub(super) fn value_text(value: &Value) -> String {
+/// `tagGroups` 的一项展平出来的标签。认不出的项（数字、空对象）记日志后不出标签。
+fn tag_group_item(item: &Value) -> Vec<String> {
+    let trimmed = |value: &Value| value.as_str().map(str::trim).filter(|text| !text.is_empty()).map(str::to_string);
+    match item {
+        Value::String(_) => trimmed(item).into_iter().collect(),
+        Value::Object(group) => {
+            let nested = group.get("tags").and_then(Value::as_array).map(|tags| tags.iter().filter_map(trimmed).collect::<Vec<_>>()).unwrap_or_default();
+            if !nested.is_empty() {
+                return nested;
+            }
+            let label = group.get("label").and_then(trimmed);
+            if label.is_none() {
+                eprintln!("Nana 旧格式标签组没有标签也没有名称：{item}");
+            }
+            label.into_iter().collect()
+        }
+        other => {
+            eprintln!("Nana 标签组里有认不出的项：{other}");
+            Vec::new()
+        }
+    }
+}
+
+/// 元数据值画成一行字：字符串去掉首尾空白；数字、布尔原样；全是标量的数组照 Vue `formatList` 用「，」连起来
+/// （空的项跳过）；含对象的数组和对象写紧凑 JSON；null 是空串。
+pub(in crate::shell) fn display_value(value: &Value) -> String {
     match value {
-        Value::String(text) => text.clone(),
+        Value::Null => String::new(),
+        Value::String(text) => text.trim().to_string(),
+        Value::Number(number) => number.to_string(),
+        Value::Bool(flag) => flag.to_string(),
+        Value::Array(items) if items.iter().all(|item| !item.is_array() && !item.is_object()) => {
+            items.iter().map(display_value).filter(|text| !text.is_empty()).collect::<Vec<_>>().join("，")
+        }
         other => other.to_string(),
     }
 }

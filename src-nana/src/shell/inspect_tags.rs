@@ -32,9 +32,7 @@ pub(super) fn clock_hint(message: &InspectMessage) -> ClockHint {
         | InspectMessage::SetLink(_)
         | InspectMessage::SetRating(_)
         | InspectMessage::AddTag(_)
-        | InspectMessage::RemoveTag(_)
-        | InspectMessage::SetCustom { .. }
-        | InspectMessage::RemoveCustom(_) => ClockHint::Metadata,
+        | InspectMessage::RemoveTag(_) => ClockHint::Metadata,
         InspectMessage::SaveMetadata => ClockHint::ClearMetadata,
         _ => ClockHint::None,
     }

@@ -18,11 +18,15 @@ pub(super) use bridge::rgba_png_data_url;
 
 /// 元数据编辑器自己画的通用字段，即 Vue `FileMetadataEditor.vue` 读的键，覆盖 `docs/api-design.md` 的
 /// Generic file metadata keys：评分、注释（含旧键 note）、链接和标签组四个输入，以及入库、创建、修改时间、
-/// 尺寸、原始大小、调色板、来源标题和来源链接的只读行。自定义草稿不收这些键，免得和编辑器字段互相覆盖。
+/// 尺寸、原始大小、调色板、来源标题和来源链接的只读行。自定义行不再重复画这些键。
 const EDITOR_METADATA: &[&str] = &[
     "rating", "comment", "note", "link", "tagGroups", "addedToLibraryAt", "fileCreatedAt", "fileModifiedAt", "width",
     "height", "originalSizeBytes", "thumbnailPalette", "palette", "originTitle", "sourceUrl",
 ];
+
+/// 编辑器的四个输入（评分、注释和旧键 note、链接、标签组）。草稿单独存它们；元数据补丁不写这几个键，
+/// 免得和输入框互相覆盖。只读行的键（例如来源链接）补丁可以写。
+const EDITABLE_METADATA: &[&str] = &["rating", "comment", "note", "link", "tagGroups"];
 
 /// 后端给每个素材种下、编辑器不单独画的系统字段（`sync_metadata.rs::ensure_default_metadata` 和 Eagle 导入种子）：
 /// 标题是文件名，类型是扩展名，主色是调色板第一色，收藏是 Eagle 的旧标记。插件补全仍可写入，只是不另起一行。
@@ -66,13 +70,25 @@ pub use search::{
 #[cfg(test)]
 pub(crate) use search::AssetFacet;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 struct MetadataDraft {
     rating: i64,
     comment: String,
     link: String,
     tags: Vec<String>,
-    custom: BTreeMap<String, String>,
+    /// 编辑器四个输入以外的元数据，保留原始 JSON 类型：数组、数字、布尔照原样存，写回时也照原样。
+    /// ASMR 候选的应用、导入和抓取结果作为补丁写在这里（[`InspectState::apply_metadata_patch`]）。
+    custom: BTreeMap<String, Value>,
+}
+
+/// 发出去、还没回来的一次保存。同一时刻只有一次（`saving` 挡住第二次），结果按它认是哪个素材的。
+#[derive(Clone, Debug)]
+struct SaveInFlight {
+    asset_id: String,
+    /// 发出时的草稿。结果回来时，发出以后才写进草稿的改动按它挑出来，留在新草稿里。
+    sent: MetadataDraft,
+    /// 请求里写了标签组：后端会重排这个素材的索引标签，侧栏计数和标签候选要跟着重读摘要。
+    tags_written: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -96,8 +112,6 @@ pub enum InspectMessage {
     SetRating(i64),
     AddTag(String),
     RemoveTag(String),
-    SetCustom { key: String, value: String },
-    RemoveCustom(String),
     SaveMetadata,
     AdoptConflict,
     MetadataSaved(Result<(String, AssetDetail), String>),
@@ -174,6 +188,7 @@ pub struct InspectState {
     draft: MetadataDraft,
     conflict_detail: Option<AssetDetail>,
     saving: bool,
+    in_flight: Option<SaveInFlight>,
     pub(super) query: String,
     pub(super) filters: SearchFilters,
     /// 筛选栏草稿、仓库摘要候选和待打开的命中，见 `inspect_search`。
@@ -214,6 +229,7 @@ impl Default for InspectState {
             draft: MetadataDraft::default(),
             conflict_detail: None,
             saving: false,
+            in_flight: None,
             query: String::new(),
             filters: SearchFilters::default(),
             search_ui: search::SearchUi::default(),
@@ -267,6 +283,11 @@ impl InspectState {
         self.asset_id.as_deref()
     }
 
+    /// 正在看的素材所在的仓库（素材详情读回时记下的）。
+    pub(super) fn current_repo_id(&self) -> Option<&str> {
+        self.repo_id.as_deref()
+    }
+
     pub(super) fn draft_rating(&self) -> i64 {
         self.draft.rating
     }
@@ -283,13 +304,15 @@ impl InspectState {
         &self.draft.tags
     }
 
-    pub(super) fn draft_custom(&self) -> &BTreeMap<String, String> {
+    /// 当前素材编辑器四个输入以外的元数据（含还没存完的补丁），原始 JSON 类型。素材详情读回之前是空的。
+    pub(super) fn draft_custom(&self) -> &BTreeMap<String, Value> {
         &self.draft.custom
     }
 
-    /// 选择新文件时清掉上一份预览，等元数据到达后再分派。
+    /// 选择新文件时清掉上一份预览和元数据草稿，等元数据到达后再分派。上一个文件没存的改动先写出去。
     pub(super) fn begin_selection(&mut self, path: &str) {
         self.flush_pending_metadata();
+        self.reset_draft();
         self.palette.clear();
         self.generation += 1;
         self.target_path = Some(path.to_string());
@@ -298,15 +321,16 @@ impl InspectState {
         self.loading = true;
         self.error.clear();
         bridge::clear_deck(self);
-        self.conflict.clear();
-        self.conflict_detail = None;
         self.asset_id = None;
         self.virtual_asset = false;
         self.media_retry = false;
         self.facts = FileFacts::default();
     }
 
+    /// 不再看任何文件（回到目录、换仓库、打开搜索结果之前）。等着自动保存的改动先写出去，不随预览一起丢掉。
     pub(super) fn clear(&mut self) {
+        self.flush_pending_metadata();
+        self.reset_draft();
         self.generation += 1;
         self.target_path = None;
         self.kind = None;
@@ -321,7 +345,21 @@ impl InspectState {
         bridge::clear_deck(self);
     }
 
-    /// 按扩展名打开预览，并用水合后的元数据草稿替换上一份。
+    /// 草稿和基线回到空白，冲突一起清掉：它们属于上一个素材，不能留到下一个素材的编辑器里。
+    /// 先调 [`Self::flush_pending_metadata`]；还剩没写出的改动（上一次保存还没回来时补进来的）只能丢下，记日志。
+    fn reset_draft(&mut self) {
+        let sent = self.in_flight.as_ref().filter(|flight| self.asset_id.as_deref() == Some(flight.asset_id.as_str()));
+        if self.dirty() && sent.is_none_or(|flight| flight.sent != self.draft) {
+            eprintln!("Nana 换选时丢下还没写出的元数据改动：{}", self.asset_id.as_deref().unwrap_or("没有素材"));
+        }
+        self.baseline = MetadataDraft::default();
+        self.draft = MetadataDraft::default();
+        self.conflict.clear();
+        self.conflict_detail = None;
+    }
+
+    /// 测试用：按扩展名打开预览，并用水合后的元数据草稿替换上一份（等于双击打开）。
+    #[cfg(test)]
     pub(super) fn note_detail(&mut self, detail: &AssetDetail) {
         self.note_selected_detail(detail, true);
     }
@@ -341,7 +379,7 @@ impl InspectState {
         self.error.clear();
         self.conflict.clear();
         self.conflict_detail = None;
-        self.saving = false;
+        // 上一个素材的保存还在路上时 `saving` 留着：同一时刻只发一次保存，结果按 `in_flight` 认素材。
         let draft = MetadataDraft::from_detail(detail);
         self.baseline = draft.clone();
         self.draft = draft;
@@ -438,25 +476,18 @@ impl InspectState {
                 self.close_tag_menu();
             }
             InspectMessage::RemoveTag(tag) => self.draft.tags.retain(|item| item != &tag),
-            InspectMessage::SetCustom { key, value } => {
-                let key = key.trim().to_string();
-                if key.is_empty() || EDITOR_METADATA.contains(&key.as_str()) {
-                    eprintln!("Nana 忽略无效的自定义字段：{key}");
-                    return;
-                }
-                self.draft.custom.insert(key, value);
-            }
-            InspectMessage::RemoveCustom(key) => {
-                self.draft.custom.remove(&key);
-            }
             InspectMessage::SaveMetadata => {
                 self.save_metadata();
             }
             InspectMessage::AdoptConflict => self.adopt_conflict(),
-            InspectMessage::MetadataSaved(result) => match result {
-                Ok((outcome, detail)) => self.note_metadata_result(&outcome, detail),
-                Err(error) => self.note_metadata_error(error),
-            },
+            InspectMessage::MetadataSaved(result) => {
+                // `error` 归约完以后由状态区报成「保存元数据失败」，先清掉预览留下的失败，免得冒充这次保存的原因。
+                self.error.clear();
+                match result {
+                    Ok((outcome, detail)) => self.note_metadata_result(&outcome, detail),
+                    Err(error) => self.note_metadata_error(error),
+                }
+            }
             InspectMessage::BodyLoaded { path, markdown, generation, result } => {
                 self.note_body(path, markdown, generation, result);
             }
@@ -507,14 +538,49 @@ impl InspectState {
             return;
         };
         let asset_id = self.asset_id.clone().unwrap_or_default();
+        let metadata = self.draft.to_metadata_map(&self.baseline);
         self.saving = true;
         self.error.clear();
-        self.effects.push(InspectEffect::SaveMetadata {
-            repo_id,
-            asset_id,
-            expected_version: self.expected_version,
-            metadata: self.draft.to_metadata_map(&self.baseline),
+        self.in_flight = Some(SaveInFlight {
+            asset_id: asset_id.clone(),
+            sent: self.draft.clone(),
+            tags_written: metadata.contains_key("tagGroups"),
         });
+        self.effects.push(InspectEffect::SaveMetadata { repo_id, asset_id, expected_version: self.expected_version, metadata });
+    }
+
+    /// 按原始 JSON 类型给当前素材写一组元数据（ASMR 候选的应用、导入和抓取结果），并立刻保存，
+    /// 编辑器里还没存的改动一起写出去。
+    ///
+    /// `asset_id` 必须还是正在看的素材，补丁不会落到别的文件上。编辑器四个输入的键不收（记日志跳过）。
+    /// 上一次保存还在路上时补丁先进草稿，结果回来以后接着保存（见 [`MetadataDraft::rebase`]）。
+    /// 拒绝写入时返回给用户看的原因。
+    pub(super) fn apply_metadata_patch(&mut self, asset_id: &str, patch: BTreeMap<String, Value>) -> Result<(), String> {
+        if self.asset_id.as_deref() != Some(asset_id) {
+            eprintln!("Nana 元数据补丁的素材已经不是当前文件：{asset_id}");
+            return Err("当前文件已经换了，没有写入".into());
+        }
+        if self.virtual_asset {
+            eprintln!("Nana 虚拟素材不能写元数据补丁：{asset_id}");
+            return Err("虚拟条目不能写元数据".into());
+        }
+        if !self.conflict.is_empty() {
+            eprintln!("Nana 元数据冲突未处理，补丁不写入：{asset_id}");
+            return Err("版本冲突，先采用服务器版本再写入".into());
+        }
+        for (key, value) in patch {
+            let key = key.trim().to_string();
+            if key.is_empty() || EDITABLE_METADATA.contains(&key.as_str()) {
+                eprintln!("Nana 元数据补丁跳过编辑器自己的字段：{key}");
+                continue;
+            }
+            self.draft.custom.insert(key, value);
+        }
+        self.timers.clear_metadata();
+        if !self.saving {
+            self.save_metadata();
+        }
+        Ok(())
     }
 
     fn adopt_conflict(&mut self) {
@@ -530,36 +596,76 @@ impl InspectState {
         self.error.clear();
     }
 
+    /// 保存结果。结果按 `in_flight` 认素材：
+    /// - 是正在看的素材：成功时换上服务器的版本和元数据，发出以后才写进草稿的改动留着并接着保存；冲突时留住草稿、
+    ///   给「采用服务器版本」。
+    /// - 换选前写出去的上一个素材：不动当前素材的草稿、冲突和预览，当前素材等着写的补丁接着保存；
+    ///   上一个素材的冲突写进 `error`，由状态区报出来。
     fn note_metadata_result(&mut self, outcome: &str, detail: AssetDetail) {
         self.saving = false;
+        let asset_id = detail.summary.asset_id.clone();
+        let flight = self.in_flight.take().filter(|flight| flight.asset_id == asset_id);
+        if outcome != "success" && outcome != "conflict" {
+            self.note_metadata_error(format!("元数据结果无法识别：{outcome}"));
+            return;
+        }
+        if self.asset_id.as_deref() != Some(asset_id.as_str()) {
+            eprintln!("Nana 收到别的素材的元数据保存结果：{asset_id}（{outcome}）");
+            self.save_pending();
+            if outcome == "conflict" {
+                self.error = format!("「{}」版本冲突，修改没有写入", detail.summary.filename);
+            }
+            return;
+        }
         if outcome == "conflict" {
-            eprintln!("Nana 元数据版本冲突：{}", detail.summary.asset_id);
+            eprintln!("Nana 元数据版本冲突：{asset_id}");
             self.conflict = "版本冲突，未写入".into();
             self.conflict_detail = Some(detail);
             return;
         }
-        if outcome != "success" {
-            self.note_metadata_error(format!("元数据结果无法识别：{outcome}"));
-            return;
-        }
-        if self.target_path.as_deref() == Some(detail.summary.path.as_str()) {
-            self.expected_version = detail.summary.version;
-            self.virtual_asset = detail.summary.is_virtual;
-            let draft = MetadataDraft::from_detail(&detail);
-            self.baseline = draft.clone();
-            self.draft = draft;
-            self.conflict.clear();
-            self.conflict_detail = None;
-            self.error.clear();
-            return;
-        }
-        self.note_detail(&detail);
+        let server = MetadataDraft::from_detail(&detail);
+        self.draft = match flight {
+            Some(flight) => self.draft.rebase(&flight.sent, &server),
+            None => server.clone(),
+        };
+        self.baseline = server;
+        self.expected_version = detail.summary.version;
+        self.virtual_asset = detail.summary.is_virtual;
+        self.conflict.clear();
+        self.conflict_detail = None;
+        self.error.clear();
+        self.save_pending();
     }
 
+    /// 保存失败。失败的是换选前的上一个素材时，当前素材等着写的补丁照常写出去；失败的是当前素材时
+    /// 草稿留着，不立刻重试（同样的原因多半还会失败），下一次编辑再自动保存。
     fn note_metadata_error(&mut self, error: String) {
         eprintln!("Nana 保存元数据失败：{error}");
         self.saving = false;
+        let flight = self.in_flight.take();
+        if flight.is_some_and(|flight| self.asset_id.as_deref() != Some(flight.asset_id.as_str())) {
+            self.save_pending();
+        }
         self.error = error;
+    }
+
+    /// 上一次保存回来以后，当前素材的草稿里还有没写出去的改动（保存期间补进来的补丁或编辑）时接着保存。
+    /// 冲突没处理时不发，免得带着旧版本号再撞一次。
+    fn save_pending(&mut self) {
+        if self.dirty() && self.conflict.is_empty() {
+            self.save_metadata();
+        }
+    }
+
+    /// 这条保存结果回来以后要重读哪个仓库的摘要：成功写进了标签组的保存，后端重排了这个素材的索引标签，
+    /// 侧栏「未标签」计数、筛选栏和标签菜单的候选都要跟着变。要在归约这条结果之前问，归约会收掉 `in_flight`。
+    pub(super) fn retagged_repository(&self, message: &InspectMessage) -> Option<String> {
+        let InspectMessage::MetadataSaved(Ok((outcome, detail))) = message else {
+            return None;
+        };
+        let retagged = outcome == "success"
+            && self.in_flight.as_ref().is_some_and(|flight| flight.asset_id == detail.summary.asset_id && flight.tags_written);
+        retagged.then(|| detail.summary.repo_id.clone())
     }
 
     fn note_body(&mut self, path: String, markdown: bool, generation: u64, result: Result<support::PreviewText, String>) {
@@ -622,26 +728,59 @@ impl MetadataDraft {
             tags: support::metadata_tags(metadata).unwrap_or_else(|| detail.summary.tags.clone()),
             custom: metadata
                 .iter()
-                .filter(|entry| !EDITOR_METADATA.contains(&entry.key.as_str()))
-                .map(|entry| (entry.key.clone(), support::value_text(&entry.value)))
+                .filter(|entry| !EDITABLE_METADATA.contains(&entry.key.as_str()))
+                .map(|entry| (entry.key.clone(), entry.value.clone()))
                 .collect(),
         }
     }
 
-    /// 保存请求的元数据。编辑器的评分、注释、链接和标签组照 Vue 每次都写；自定义字段只写和 `baseline`
-    /// 不同的，也就是这次改过的。后端按键覆盖写入，没动过的字段若按文本回写，数字、布尔和数组都会变成字符串。
+    /// 保存请求的元数据：只写和 `baseline` 不同的，也就是这次改过的。后端按键覆盖写入，没动过的不回写：
+    /// 旧格式的标签组（`{ label, tags }`）不会因为只改了评分就被改写成展平的字符串，小数评分、只有旧键 note 的注释
+    /// 也照原样留着；补丁写进来的字段按原始 JSON 类型写，数组和数字不会变成字符串。
     fn to_metadata_map(&self, baseline: &MetadataDraft) -> BTreeMap<String, Value> {
         let mut metadata = BTreeMap::new();
-        metadata.insert("rating".into(), Value::from(self.rating));
-        metadata.insert("comment".into(), Value::String(self.comment.trim().to_string()));
-        metadata.insert("link".into(), Value::String(self.link.trim().to_string()));
-        metadata.insert("tagGroups".into(), Value::Array(self.tags.iter().cloned().map(Value::String).collect()));
+        if self.rating != baseline.rating {
+            metadata.insert("rating".into(), Value::from(self.rating));
+        }
+        if self.comment != baseline.comment {
+            metadata.insert("comment".into(), Value::String(self.comment.trim().to_string()));
+        }
+        if self.link != baseline.link {
+            metadata.insert("link".into(), Value::String(self.link.trim().to_string()));
+        }
+        if self.tags != baseline.tags {
+            metadata.insert("tagGroups".into(), Value::Array(self.tags.iter().cloned().map(Value::String).collect()));
+        }
         for (key, value) in &self.custom {
             if baseline.custom.get(key) != Some(value) {
-                metadata.insert(key.clone(), Value::String(value.clone()));
+                metadata.insert(key.clone(), value.clone());
             }
         }
         metadata
+    }
+
+    /// 保存成功以后的新草稿：以服务器读回的 `server` 为底，只留下发出（`sent`）以后草稿里又改过的字段。
+    ///
+    /// 算法：评分、注释、链接、标签组逐个比，现在的值和发出时不同就用现在的，否则用服务器的；补丁字段按键同样比，
+    /// 发出以后新写的键或改过的值留下。这样保存期间补进来的候选不会被这次结果冲掉，也不会把服务器整理过的值
+    /// （例如去掉首尾空白的注释）换回旧的。
+    fn rebase(&self, sent: &MetadataDraft, server: &MetadataDraft) -> MetadataDraft {
+        fn pick<T: Clone + PartialEq>(now: &T, sent: &T, server: &T) -> T {
+            if now != sent { now.clone() } else { server.clone() }
+        }
+        let mut custom = server.custom.clone();
+        for (key, value) in &self.custom {
+            if sent.custom.get(key) != Some(value) {
+                custom.insert(key.clone(), value.clone());
+            }
+        }
+        MetadataDraft {
+            rating: pick(&self.rating, &sent.rating, &server.rating),
+            comment: pick(&self.comment, &sent.comment, &server.comment),
+            link: pick(&self.link, &sent.link, &server.link),
+            tags: pick(&self.tags, &sent.tags, &server.tags),
+            custom,
+        }
     }
 }
 
@@ -663,6 +802,7 @@ pub(super) fn reduce_message(model: &mut ShellViewModel, message: super::ShellMe
     let access = preview_access(&model.inspect, &message);
     // 元数据保存的失败没有就近显示，交给状态区。
     let saving = matches!(message, InspectMessage::MetadataSaved(_));
+    let retagged = model.inspect.retagged_repository(&message);
     model.inspect.reduce(writable, repo_id.as_deref(), message);
     if saving && !model.inspect.error.is_empty() {
         let failure = format!("保存元数据失败：{}", model.inspect.error);
@@ -675,6 +815,11 @@ pub(super) fn reduce_message(model: &mut ShellViewModel, message: super::ShellMe
             let repo = model.inspect.repo_id.clone().or(repo_id).unwrap_or_default();
             model.request_entry_access(&repo, &path);
         }
+    }
+    // 标签变了：静默重读仓库摘要，侧栏计数、筛选栏和标签菜单的候选跟着换（Vue `applyAssetResponse` 换掉摘要里这项素材）。
+    // 文件行上的元数据和索引标签由文件表面就地换（`files_reduce.rs`）。
+    if let Some(repo_id) = retagged.filter(|repo_id| model.workspace.active_repo_id.as_deref() == Some(repo_id.as_str())) {
+        model.workspace.effects.push(super::WorkspaceEffect::LoadSnapshotSilent { repo_id });
     }
     bridge::apply(model, follow);
     search::settle(model);

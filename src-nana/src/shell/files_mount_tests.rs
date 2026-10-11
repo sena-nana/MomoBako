@@ -354,13 +354,14 @@ fn has_value(window: &ApplicationWindow, value: &str) -> bool {
 }
 
 /// 15 页的「冲突」：冲突说明排在注释前面、落在 800 高的窗口里，本地草稿还在注释框；
-/// 点「采用服务器版本」换成服务器上的注释，冲突说明收起。
+/// 点「采用服务器版本」换成服务器上的注释，冲突说明收起。详情卡片顶上的「注释」导语写的是服务器上现在的注释
+/// （冲突应答带回的素材已经换进文件行），这里比的是元数据编辑里的注释框。
 #[test]
 fn conflict_notice_sits_above_the_fields_and_adopts_the_server_version() {
     let mut model = ShellViewModel::for_page(ShellPage::Conflict);
     let mut window = laid_out(&model);
     let (_, notice_y) = labeled_center(&window, "版本冲突，未写入");
-    let (_, comment_y) = labeled_center(&window, "注释");
+    let comment_y = keyed_bounds(&window, "inspect-comment-field").y;
     assert!(notice_y < comment_y && notice_y < 800.0, "冲突说明应在注释前面、在窗口里：{notice_y} / {comment_y}");
     assert!(has_value(&window, "封面改用暖色版本。"), "冲突时本地草稿留在注释框");
     let (x, y) = labeled_center(&window, "采用服务器版本");
@@ -370,6 +371,19 @@ fn conflict_notice_sits_above_the_fields_and_adopts_the_server_version() {
     let window = laid_out(&model);
     assert!(!has_label(&window, "版本冲突，未写入"), "采用后冲突说明收起");
     assert!(has_value(&window, "封面定稿，沿用冷色版本。"), "注释框换成服务器上的注释");
+}
+
+/// 键路径最后一段是 `key` 的节点的布局盒。
+fn keyed_bounds(window: &ApplicationWindow, key: &str) -> nana_ui::runtime::LayoutBox {
+    let document = window.document.document();
+    let context = window.document.context();
+    context
+        .world()
+        .document_order(document)
+        .into_iter()
+        .find(|id| context.assembly_path(*id).is_some_and(|path| path.rsplit('/').next() == Some(key)))
+        .and_then(|id| context.world().layout_box(id))
+        .unwrap_or_else(|| panic!("没有 {key} 的布局盒"))
 }
 
 /// 文档里有没有键路径最后一段是 `key` 的节点。

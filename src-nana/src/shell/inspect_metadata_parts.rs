@@ -1,6 +1,6 @@
 //! 元数据编辑区里结构会变的两块：可折叠的标签组，以及 ASMR 条目的「补全候选」。
 //!
-//! 两块都常驻：展开、菜单、导入框按 `.visible` 显隐；标签片、已有标签和候选是带键的 `each`，
+//! 两块都常驻：展开、菜单、导入框按 `.visible` 显隐；标签片、标签分组、已有标签和候选是带键的 `each`，
 //! 只有变了的那一片重建；输入框受控，处理器只发消息，要用到当前值时现读信号。
 
 use std::sync::Arc;
@@ -21,7 +21,7 @@ use super::super::files_view::style::{self, ButtonLook};
 use super::super::inspect::InspectMessage;
 use super::super::inspect_asmr::{self, AsmrMessage, CandidateCard};
 use super::super::ShellMessage;
-use super::{inspect_message, MetadataSignals};
+use super::{inspect_message, MetadataSignals, TagGroupOption};
 
 /// 标签区一行里的一片：标签，或者末尾的「+」。
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -179,13 +179,24 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
     .on_cx(move |_, _: &Activate, cx| {
         cx.dispatch_program_all(ShellMessage::Files(FilesMessage::SubmitTagDraft(draft.current().trim().to_string())));
     });
+    let groups = computed(move || tags.with(|view| view.groups.clone()));
+    let group_locked = locked.clone();
+    let grouped = widget(Stack::column(8.0).width(LengthSpec::Fill))
+        .visible(move || tags.with(|view| !view.groups.is_empty()))
+        .children((
+            widget(style::row_label("标签分组")).key("inspect-tag-groups-label"),
+            each(groups, TagGroupOption::clone, move |group| tag_group(group, group_locked.clone())).gap(8.0).key("inspect-tag-groups-list"),
+        ))
+        .key("inspect-tag-groups");
     let options = computed(move || tags.with(|view| view.options.iter().cloned().enumerate().collect::<Vec<_>>()));
     let option_locked = locked.clone();
     let existing = widget(Stack::column(8.0).width(LengthSpec::Fill))
         .visible(move || tags.with(|view| !view.options.is_empty()))
         .children((
             widget(style::row_label("已有标签")).key("inspect-tag-existing-label"),
-            each(options, |option: &(usize, String)| option.clone(), move |(index, tag)| option_chip(index, &tag, option_locked.clone()))
+            each(options, |option: &(usize, String)| option.clone(), move |(index, tag)| {
+                option_chip(&format!("inspect-tag-choice-{index}"), &tag, option_locked.clone())
+            })
                 .horizontal(8.0)
                 .css(css! { flex-wrap: wrap; row-gap: 8px; })
                 .key("inspect-tag-existing-chips"),
@@ -213,14 +224,36 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
             .radius(RadiusTier::Xl),
     )
     .visible(move || tags.with(|view| view.menu_open))
-    .children((draft_group, create, existing))
+    .children((draft_group, create, grouped, existing))
     .key("inspect-tag-menu-panel")
     .into_any()
 }
 
-/// `workspace-filter-chip`：26 高的描边药丸，12px 弱化色，点一下加进草稿。
+/// 一个仓库标签分组（Vue `file-metadata-card__tag-group`）：11px 半粗的分组名，下面是可加的标签片，行距 5。
+fn tag_group(group: TagGroupOption, locked: impl Fn() -> bool + Send + Clone + 'static) -> AnyView {
+    let key = format!("inspect-tag-group-{}", style::key_part(&group.id));
+    let chips = group
+        .tags
+        .iter()
+        .enumerate()
+        .map(|(index, tag)| option_chip(&format!("{key}-{index}"), tag, locked.clone()))
+        .collect::<Vec<_>>();
+    widget(Stack::column(5.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
+        .children((
+            widget(style::text(group.name.clone(), 11.0, 600, SemanticColorRole::Muted, 11.0 * 1.55)).key(format!("{key}-name")),
+            widget(Stack::row(8.0).wrap(true).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)).with_layout(|layout| {
+                layout.row_gap = Some(LengthSpec::Px(8.0));
+            }))
+            .children(chips)
+            .key(format!("{key}-chips")),
+        ))
+        .key(key)
+        .into_any()
+}
+
+/// `workspace-filter-chip`：26 高的描边药丸，12px 弱化色，点一下加进草稿。键是 `{prefix}-{标签}`。
 /// Vue 的全局 `button { height: 32px }` 会把它顶到 32，这里按组件声明的 26 画。
-fn option_chip(index: usize, tag: &str, locked: impl Fn() -> bool + Send + Clone + 'static) -> AnyView {
+fn option_chip(prefix: &str, tag: &str, locked: impl Fn() -> bool + Send + Clone + 'static) -> AnyView {
     let look = ButtonLook {
         height: 26.0,
         padding_x: 9.0,
@@ -236,7 +269,7 @@ fn option_chip(index: usize, tag: &str, locked: impl Fn() -> bool + Send + Clone
     let add = tag.to_string();
     widget(button.style(outlined))
         .prop::<bool, fields::button::disabled>(locked)
-        .key(format!("inspect-tag-choice-{index}-{}", style::key_part(tag)))
+        .key(format!("{prefix}-{}", style::key_part(tag)))
         .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(inspect_message(InspectMessage::AddTag(add.clone()))))
         .into_any()
 }
@@ -272,32 +305,36 @@ pub(super) fn candidate_section(signals: MetadataSignals) -> AnyView {
 }
 
 /// 导入框：来源、作品 ID 和「抓取候选」，候选 JSON 和「导入候选」，出错时多一行原因。
+/// 抓取进行中，来源、作品 ID 和抓取按钮不能动，按钮写「抓取中」（Vue `lookup.isLoading`）。
 fn import_form(signals: MetadataSignals) -> AnyView {
     let view = signals.candidates;
     let locked = move || view.with(|view| view.locked);
+    let fetching = move || view.with(|view| view.locked || view.looking_up);
     let current = view.get_untracked();
     let select = Select::new(Some(current.provider.clone()))
         .options(inspect_asmr::provider_options())
         .placeholder("ASMR Provider")
         .size(ControlSize::Small)
-        .disabled(current.locked);
+        .disabled(current.locked || current.looking_up);
     let lookup = signals.lookup_id;
     let json = signals.import_json;
+    let lookup_label = move || view.with(|view| if view.looking_up { "抓取中" } else { "抓取候选" }.to_string());
     let body = (
         widget(select)
             .prop::<Option<Arc<str>>, fields::select::value>(move || Some(Arc::from(view.with(|view| view.provider.clone()))))
-            .prop::<bool, fields::select::disabled>(locked)
+            .prop::<bool, fields::select::disabled>(fetching)
             .key("inspect-asmr-provider")
             .on_cx(|_, event: &SelectChanged, cx| {
                 cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::SetProvider(event.value.to_string())));
             }),
-        widget(TextInput::new(lookup.current()).placeholder("RJ123456").size(ControlSize::Small).disabled(current.locked))
+        widget(TextInput::new(lookup.current()).placeholder("RJ123456").size(ControlSize::Small).disabled(current.locked || current.looking_up))
             .model(lookup.signal())
-            .prop::<bool, fields::text_input::disabled>(locked)
+            .prop::<bool, fields::text_input::disabled>(fetching)
             .key("inspect-asmr-work-id")
             .on_cx(|_, event: &TextChanged, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::SetLookupId(event.value.to_string())))),
-        widget(Button::new("抓取候选").kind(ButtonKind::Ghost).disabled(current.locked))
-            .prop::<bool, fields::button::disabled>(locked)
+        widget(Button::new(untrack(&lookup_label)).kind(ButtonKind::Ghost).disabled(current.locked || current.looking_up))
+            .prop::<String, fields::button::label>(lookup_label)
+            .prop::<bool, fields::button::disabled>(fetching)
             .key("inspect-asmr-lookup")
             .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::Lookup))),
         widget(TextInput::new(json.current()).placeholder("ASMR 候选 JSON").disabled(current.locked))

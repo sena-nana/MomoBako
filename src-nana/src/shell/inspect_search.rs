@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use crate::backend::services::repository::{FileBrowserSnapshot, RepositorySnapshot, SearchHit};
+use crate::backend::services::repository::{FileBrowserSnapshot, RepositorySnapshot, RepositoryTagGroup, SearchHit};
 
 use super::super::workspace::{LibraryCategory, WorkspacePanel};
 use super::super::workspace_refresh::SilentMessage;
@@ -272,6 +272,8 @@ pub struct SearchUi {
     /// 摘要所属的仓库。和活动仓库不同时不参与候选。
     pub facets_repo: Option<String>,
     pub facets: Vec<AssetFacet>,
+    /// 摘要里仓库级的标签分组（例如 Eagle 迁过来的分组），元数据标签菜单的「标签分组」用。和 `facets` 同属 `facets_repo`。
+    pub tag_groups: Vec<RepositoryTagGroup>,
     reveal_panel: bool,
     reveal_hit: Option<HitReveal>,
     /// 命中在别的仓库：等换仓库走完再读它所在的目录（Vue `openSearchHit` 先 `await selectRepository`）。
@@ -542,6 +544,7 @@ fn note_snapshot(inspect: &mut InspectState, snapshot: &RepositorySnapshot) {
         .iter()
         .map(|asset| AssetFacet { tags: asset.tags.clone(), extension: asset.extension.clone() })
         .collect();
+    inspect.search_ui.tag_groups = snapshot.tag_groups.clone();
 }
 
 /// Vue `openSearchHit`：关掉预览、回到全部文件，必要时先切换资源库，再读命中所在目录。
