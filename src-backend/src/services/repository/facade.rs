@@ -441,7 +441,8 @@ impl RepositoryState {
 
         if kind == "directory" {
             let response = match action {
-                "ensure" => {
+                // 文件夹只有自定义缩略图，没有可重新生成的：刷新和 ensure 一样交回现有的，不清掉自定义。
+                "ensure" | "refresh" => {
                     let record = load_entry_thumbnail_record(
                         &connection,
                         &request.repo_id,
@@ -481,11 +482,6 @@ impl RepositoryState {
                     (Some(thumbnail_path), true)
                 }
                 "clear" => {
-                    remove_entry_thumbnail_record(&connection, &request.repo_id, &entry_path, kind)
-                        .map_err(db_error)?;
-                    (None, false)
-                }
-                "refresh" => {
                     remove_entry_thumbnail_record(&connection, &request.repo_id, &entry_path, kind)
                         .map_err(db_error)?;
                     (None, false)
@@ -585,17 +581,21 @@ impl RepositoryState {
                     )
                 }
             }
-            "refresh" => (
-                ensure_thumbnail_for_file(
+            // 重新生成源文件的缩略图；有自定义缩略图时列表显示的还是它，交回的也是它。
+            "refresh" => {
+                let generated = ensure_thumbnail_for_file(
                     &repo,
                     &repo_root,
                     &thumbnail_root,
                     &file,
                     existing_thumbnail_path,
                     true,
-                )?,
-                false,
-            ),
+                )?;
+                match custom_record {
+                    Some(record) => (Some(record.path), true),
+                    None => (generated, false),
+                }
+            }
             "save" => {
                 let bytes = thumbnail_bytes_from_request(&request)?;
                 let thumbnail_path =

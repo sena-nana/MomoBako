@@ -3,54 +3,90 @@
 use super::*;
 use crate::services::external_tools;
 
-pub(super) fn generate_thumbnail_for_file(
+/// 能不能为这个文件生成缩略图：仓库能本地读，扩展名是图片、视频或音频（音频取内嵌封面）。
+fn thumbnail_generator_supports(repo: &RepositoryRecord, file: &DiscoveredFile) -> bool {
+    let extension = file.extension.to_lowercase();
+    repository_supports_local_read_access(repo)
+        && (is_image_extension(&extension)
+            || is_video_extension(&extension)
+            || is_audio_extension(&extension))
+}
+
+/// 这个文件生成的缩略图写在哪：仓库缩略图目录下，按仓库、路径和「generated」取 sha256 文件名。
+fn generated_thumbnail_path(
     repo: &RepositoryRecord,
-    repo_root: &Path,
     thumbnail_root: &Path,
     file: &DiscoveredFile,
-) -> Result<Option<String>, String> {
-    if !repository_supports_local_read_access(repo) {
-        return Ok(None);
-    }
-
-    let extension = file.extension.to_lowercase();
-    if !is_image_extension(&extension)
-        && !is_video_extension(&extension)
-        && !is_audio_extension(&extension)
-    {
-        return Ok(None);
-    }
-
-    let source_path = resolve_repository_relative_path(repo_root, &file.relative_path)?;
+) -> Result<PathBuf, String> {
     let thumbnail_dir = thumbnail_root.join(thumbnail_repository_dir_name(
         &repo.summary.repo_id,
         &repo.summary.path,
     ));
     fs::create_dir_all(&thumbnail_dir).map_err(io_error)?;
-    let thumbnail_path = thumbnail_dir.join(thumbnail_file_name(
+    Ok(thumbnail_dir.join(thumbnail_file_name(
         &repo.summary.repo_id,
         &repo.summary.path,
         &file.relative_path,
         "file",
         "generated",
-    ));
+    )))
+}
 
+/// 从源文件生成缩略图。返回 `Ok(None)` 表示源文件本身没有画面（没有内嵌封面的音频），这时已有的缩略图也删掉。
+///
+/// 先写到同目录的临时文件，成功以后再替换缓存里的那张：生成失败时旧的缩略图原样留着，失败交给调用方决定
+/// 报错还是跳过。只在 [`thumbnail_generator_supports`] 为真时调用。
+fn write_generated_thumbnail(
+    repo: &RepositoryRecord,
+    repo_root: &Path,
+    thumbnail_root: &Path,
+    file: &DiscoveredFile,
+) -> Result<Option<String>, String> {
+    let extension = file.extension.to_lowercase();
+    let source_path = resolve_repository_relative_path(repo_root, &file.relative_path)?;
+    let thumbnail_path = generated_thumbnail_path(repo, thumbnail_root, file)?;
+    // 临时文件仍以 .jpg 结尾，ffmpeg 按扩展名选输出格式。
+    let partial_path = thumbnail_path.with_extension("partial.jpg");
     let generated = if is_image_extension(&extension) {
-        generate_image_thumbnail(&source_path, &thumbnail_path).map(|_| true)
+        generate_image_thumbnail(&source_path, &partial_path).map(|_| true)
     } else if is_audio_extension(&extension) {
-        generate_audio_thumbnail(&source_path, &thumbnail_path)
+        generate_audio_thumbnail(&source_path, &partial_path)
     } else {
-        generate_video_thumbnail(&source_path, &thumbnail_path).map(|_| true)
+        generate_video_thumbnail(&source_path, &partial_path).map(|_| true)
     };
-
     match generated {
-        Ok(true) => Ok(Some(thumbnail_path.to_string_lossy().to_string())),
+        Ok(true) => {
+            if let Err(error) = fs::rename(&partial_path, &thumbnail_path) {
+                let _ = fs::remove_file(&partial_path);
+                return Err(format!("thumbnail replace error: {error}"));
+            }
+            Ok(Some(thumbnail_path.to_string_lossy().to_string()))
+        }
         Ok(false) => {
+            let _ = fs::remove_file(&partial_path);
             let _ = fs::remove_file(&thumbnail_path);
             Ok(None)
         }
         Err(error) => {
-            let _ = fs::remove_file(&thumbnail_path);
+            let _ = fs::remove_file(&partial_path);
+            Err(error)
+        }
+    }
+}
+
+/// 浏览时生成缩略图：不支持的类型和生成失败都不算错，失败记日志、交回没有缩略图。
+fn generate_thumbnail_for_file(
+    repo: &RepositoryRecord,
+    repo_root: &Path,
+    thumbnail_root: &Path,
+    file: &DiscoveredFile,
+) -> Result<Option<String>, String> {
+    if !thumbnail_generator_supports(repo, file) {
+        return Ok(None);
+    }
+    match write_generated_thumbnail(repo, repo_root, thumbnail_root, file) {
+        Ok(path) => Ok(path),
+        Err(error) => {
             crate::app_log!(
                 "warn",
                 "thumbnail",
@@ -66,6 +102,11 @@ pub(super) fn generate_thumbnail_for_file(
     }
 }
 
+/// `ensure` 和 `refresh` 共用的生成逻辑。
+///
+/// - `ensure`：已有的有效缩略图直接用，没有才生成；生成失败不算错。
+/// - `refresh`：按源文件重新生成并替换缓存。没有生成器的类型（PDF、Office、文本、模型……）刷新不了，已有的
+///   缩略图留着，不清掉；重新生成失败时旧的也留着，把失败原因交回调用方。
 pub(super) fn ensure_thumbnail_for_file(
     repo: &RepositoryRecord,
     repo_root: &Path,
@@ -74,19 +115,33 @@ pub(super) fn ensure_thumbnail_for_file(
     existing_thumbnail_path: Option<String>,
     refresh: bool,
 ) -> Result<Option<String>, String> {
+    let expected_dir = thumbnail_root.join(thumbnail_repository_dir_name(
+        &repo.summary.repo_id,
+        &repo.summary.path,
+    ));
+    let existing = existing_thumbnail_path.filter(|path| thumbnail_path_is_valid(&expected_dir, path));
     if !refresh {
-        if let Some(path) = existing_thumbnail_path {
-            let expected_dir = thumbnail_root.join(thumbnail_repository_dir_name(
-                &repo.summary.repo_id,
-                &repo.summary.path,
-            ));
-            if thumbnail_path_is_valid(&expected_dir, &path) {
-                return Ok(Some(path));
-            }
+        if existing.is_some() {
+            return Ok(existing);
         }
+        return generate_thumbnail_for_file(repo, repo_root, thumbnail_root, file);
     }
-
-    generate_thumbnail_for_file(repo, repo_root, thumbnail_root, file)
+    if !thumbnail_generator_supports(repo, file) {
+        return Ok(existing);
+    }
+    write_generated_thumbnail(repo, repo_root, thumbnail_root, file).map_err(|error| {
+        crate::app_log!(
+            "warn",
+            "thumbnail",
+            "refreshFailed",
+            "缩略图刷新失败，原来的缩略图留着。",
+            serde_json::json!({
+                "path": file.relative_path,
+                "error": error,
+            })
+        );
+        format!("thumbnail refresh failed: {error}")
+    })
 }
 
 pub(super) fn thumbnail_path_is_valid(thumbnail_root: &Path, path: &str) -> bool {

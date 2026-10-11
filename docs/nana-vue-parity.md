@@ -72,6 +72,7 @@ Vue 前端、Tauri 外壳和插件前端已经删掉（见 [迁移边界](./nana
 - 列表模式在 960 宽下标题列被压到 0、内容溢出卡片；Nana 给标题至少留 80px。
 - 右键子菜单离分组 4px，中间是父菜单的内边距，不属于 `.ctx-menu__slot`：指针慢慢移过去时 `:hover` 断一下，子菜单闪关。Nana 的子菜单连同这 4px 接缝整块接住指针，在分组和子菜单之间、子菜单里移动都不收起。
 - 回收站里的「缩略图」分组是禁用的，但 `.ctx-menu__slot:hover` 不看按钮禁用，悬停照样弹出子菜单，里面的项还能点。Nana 禁用的分组不展开。
+- 「刷新缩略图」照 Vue 调 `ensureThumbnail` 的 `refresh`，但后端原来的 `refresh` 有三处会丢图，改在后端（`api-design.md` 的 `thumbnails:ensure`），Vue 和 Nana 共用：文件夹的刷新直接删掉自定义缩略图，和「取消自定义」一样；有自定义缩略图的文件刷新以后交回生成的图、标成不是自定义，重读目录又变回自定义的那张；没有生成器的类型（PDF、Office、文本、模型，缩略图是 Vue 的插件生成的）和重新生成失败时把原来的缩略图清掉。现在刷新只换能重新生成的那张，自定义的一直留着，不支持的类型原样留着，失败报错、旧图留着。
 - 从仓库切换列表换仓库时，Vue 等 `selectRepository` 整个跑完才关弹层（`selectRepositoryFromList` 的 `.then`），侧栏收起、回到启动页以后，切换弹层还一直浮在启动页左上角（`repo-switch-startup`）。Nana 一选就关。
 - 来源条目动作的 operation：插件 SDK 只约定了五种（`SourceEntryActionOperation`，`docs/api-design.md` 写明是固定的几种、声明不能让宿主执行别的命令），随附插件（网易云音乐）也只声明这五种。Vue `actionsForDeclaration` 的最后一个分支把约定以外的值一律当成「创建播放列表」：不看声明的 method，拿单曲也会建播放集。Nana 原来对约定以外、写了 method 的声明直接调用这个插件方法，同样越出约定、宿主也不知道该出什么进度和刷新。现在约定以外的声明不出菜单、只记日志；没写 scope 的声明也不出（Vue 要求 scope 和条目类型相同，Nana 原来对所有条目都出）。
 - 来源条目的标识：Vue `sourceNumber(entry, key)` 在来源载荷和元数据都没有这个键时退回条目的 `providerItemId`（条目在来源里的标识，网易云的单曲是歌曲标识、歌单目录是歌单标识，`catalog.rs` 的 `track_entry` / `folder_entry`），但不分键：单曲没有 `playlistId` 时也填成歌曲的标识，歌单目录没有 `songId` 时也填成歌单的标识，插件会拿错的标识去取。Nana 原来完全不退回，第三方来源的条目没有这两个键时载荷就缺 `songId` / `playlistId`。现在按条目种类只退回对应的那个：文件（单曲）的 `songId`、目录（歌单目录）的 `playlistId`；老载荷没写条目种类时，照 Vue 用同一个标识认单曲和歌单目录。「创建播放列表」的歌单标识照 Vue 在不是数字时原样用目录的来源标识，空白的不算（Vue 也报「来源目录缺少播放列表标识」）。

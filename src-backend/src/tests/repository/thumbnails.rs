@@ -117,3 +117,133 @@ fn thumbnails_follow_the_photo_exif_orientation() {
 
     fs::remove_dir_all(root).expect("test temp root should be removed");
 }
+
+/// 写一张 8×8 的纯色 PNG。
+fn write_solid_png(path: &Path, color: [u8; 3]) {
+    image::RgbImage::from_pixel(8, 8, image::Rgb(color)).save(path).expect("test image should be saved");
+}
+
+/// 缩略图中心的颜色。缓存里的文件都叫 .jpg，从别处拷来的可能是 PNG，按内容认格式。
+fn thumbnail_center(path: &str) -> [u8; 3] {
+    let image = image::ImageReader::open(path)
+        .and_then(|reader| reader.with_guessed_format())
+        .expect("thumbnail should open")
+        .decode()
+        .expect("thumbnail should decode")
+        .to_rgb8();
+    image.get_pixel(image.width() / 2, image.height() / 2).0
+}
+
+/// JPEG 有损，颜色差在 24 以内算同一种。
+fn close_to(left: [u8; 3], right: [u8; 3]) -> bool {
+    left.iter().zip(right).all(|(left, right)| left.abs_diff(right) <= 24)
+}
+
+/// 「刷新缩略图」按源文件重新生成：源图换了颜色以后，`ensure` 还用缓存里的旧图，`refresh` 换成新的，缓存路径不变。
+#[test]
+fn refresh_regenerates_the_thumbnail_from_the_source_file() {
+    let (state, root, repo_root, _thumbnail_root) = create_test_state("thumb-refresh-source");
+    write_solid_png(&repo_root.join("cover.png"), [220, 30, 30]);
+    let repo_id = create_synced_repository(&state, &repo_root);
+    let first = state
+        .ensure_thumbnail(thumbnail_request(&repo_id, "cover.png", "ensure", None))
+        .expect("thumbnail should be generated")
+        .thumbnail_path
+        .expect("thumbnail path should be returned");
+    assert!(close_to(thumbnail_center(&first), [220, 30, 30]));
+
+    write_solid_png(&repo_root.join("cover.png"), [30, 30, 220]);
+    let ensured = state
+        .ensure_thumbnail(thumbnail_request(&repo_id, "cover.png", "ensure", None))
+        .expect("thumbnail should be ensured");
+    assert!(close_to(thumbnail_center(ensured.thumbnail_path.as_deref().expect("path")), [220, 30, 30]), "ensure 复用缓存");
+
+    let refreshed = state
+        .ensure_thumbnail(thumbnail_request(&repo_id, "cover.png", "refresh", None))
+        .expect("thumbnail should be refreshed");
+    assert_eq!(refreshed.thumbnail_path.as_deref(), Some(first.as_str()), "缓存路径不变");
+    assert!(!refreshed.thumbnail_custom);
+    assert!(close_to(thumbnail_center(&first), [30, 30, 220]), "refresh 按源文件重画");
+
+    fs::remove_dir_all(root).expect("test temp root should be removed");
+}
+
+/// 源文件坏了时刷新报错，原来的缩略图原样留着，素材还指着它。
+#[test]
+fn a_failed_refresh_keeps_the_old_thumbnail() {
+    let (state, root, repo_root, _thumbnail_root) = create_test_state("thumb-refresh-failed");
+    write_solid_png(&repo_root.join("cover.png"), [220, 30, 30]);
+    let repo_id = create_synced_repository(&state, &repo_root);
+    let first = state
+        .ensure_thumbnail(thumbnail_request(&repo_id, "cover.png", "ensure", None))
+        .expect("thumbnail should be generated")
+        .thumbnail_path
+        .expect("thumbnail path should be returned");
+
+    fs::write(repo_root.join("cover.png"), b"not an image any more").expect("source should be broken");
+    let error = state
+        .ensure_thumbnail(thumbnail_request(&repo_id, "cover.png", "refresh", None))
+        .expect_err("refreshing a broken source should fail");
+    assert!(error.contains("thumbnail refresh failed"), "{error}");
+    assert!(close_to(thumbnail_center(&first), [220, 30, 30]), "旧的缩略图还在");
+    let again = state
+        .ensure_thumbnail(thumbnail_request(&repo_id, "cover.png", "ensure", None))
+        .expect("thumbnail should be ensured");
+    assert_eq!(again.thumbnail_path.as_deref(), Some(first.as_str()), "素材还指着旧的缩略图");
+
+    fs::remove_dir_all(root).expect("test temp root should be removed");
+}
+
+/// 没有生成器的类型（这里是文本，PDF、Office 也一样）刷新不了：原来记着的缩略图留着，不清掉。
+#[test]
+fn refresh_keeps_a_thumbnail_it_cannot_regenerate() {
+    let (state, root, repo_root, _thumbnail_root) = create_test_state("thumb-refresh-unsupported");
+    fs::write(repo_root.join("note.txt"), "plain text").expect("note should be written");
+    let repo_id = create_synced_repository(&state, &repo_root);
+    let legacy = root.join("legacy-note.png");
+    write_solid_png(&legacy, [40, 160, 90]);
+    let connection = rusqlite::Connection::open(repo_root.join(".momo").join("metadata.db"))
+        .expect("repository db should open");
+    connection
+        .execute(
+            "UPDATE assets SET thumbnail_path = ?2 WHERE repo_id = ?1 AND path = 'note.txt'",
+            rusqlite::params![repo_id, legacy.to_string_lossy().to_string()],
+        )
+        .expect("legacy thumbnail should be recorded");
+    drop(connection);
+
+    let refreshed = state
+        .ensure_thumbnail(thumbnail_request(&repo_id, "note.txt", "refresh", None))
+        .expect("refreshing an unsupported type should succeed");
+    let kept = refreshed.thumbnail_path.expect("刷新以后缩略图还在");
+    assert!(close_to(thumbnail_center(&kept), [40, 160, 90]));
+
+    fs::remove_dir_all(root).expect("test temp root should be removed");
+}
+
+/// 有自定义缩略图的文件和文件夹刷新以后交回的还是自定义的那张（列表显示的就是它），自定义不被清掉。
+#[test]
+fn refresh_keeps_custom_thumbnails_for_files_and_folders() {
+    let (state, root, repo_root, _thumbnail_root) = create_test_state("thumb-refresh-custom");
+    write_solid_png(&repo_root.join("cover.png"), [220, 30, 30]);
+    fs::create_dir_all(repo_root.join("Shots")).expect("folder should be created");
+    let repo_id = create_synced_repository(&state, &repo_root);
+    let mut custom_png = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(8, 8, image::Rgb([250, 200, 20])))
+        .write_to(&mut custom_png, image::ImageFormat::Png)
+        .expect("custom image should encode");
+    let custom_png = custom_png.into_inner();
+
+    for path in ["cover.png", "Shots"] {
+        let saved = state
+            .ensure_thumbnail(thumbnail_request(&repo_id, path, "save", Some(custom_png.clone())))
+            .expect("custom thumbnail should be saved");
+        let refreshed = state
+            .ensure_thumbnail(thumbnail_request(&repo_id, path, "refresh", None))
+            .expect("thumbnail should be refreshed");
+        assert!(refreshed.thumbnail_custom, "{path} 刷新以后还是自定义");
+        assert_eq!(refreshed.thumbnail_path, saved.thumbnail_path, "{path} 交回自定义的那张");
+    }
+
+    fs::remove_dir_all(root).expect("test temp root should be removed");
+}

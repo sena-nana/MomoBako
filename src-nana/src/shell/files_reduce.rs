@@ -57,7 +57,7 @@ impl FilesState {
                     self.effects.push(FilesEffect::CopyText(text));
                 }
             }
-            FilesMessage::RefreshThumbnail(path) => self.refresh_thumbnail(&path),
+            FilesMessage::RefreshThumbnail(path) => self.refresh_thumbnail(ctx, &path),
             FilesMessage::OpenPath(path) => {
                 self.select_only = None;
                 self.click_load = None;
@@ -122,7 +122,7 @@ impl FilesState {
             FilesMessage::HardlinksChecked { epoch, result: Err(error) } => self.note_hardlinks_check_failed(epoch, &error),
             FilesMessage::HardlinkConfirmed { result, .. } => self.note_hardlink_confirmed(result),
             FilesMessage::NoteError(error) => self.note_error(error),
-            FilesMessage::ThumbnailSaved { path, thumbnail_path, custom } => self.note_custom_thumbnail(&path, thumbnail_path, custom),
+            FilesMessage::ThumbnailSaved { path, thumbnail_path, custom } => self.note_thumbnail_saved(&path, thumbnail_path, custom),
             // 要读仓库和面板，在 `reduce_message` 里转成宿主拖放消息。
             FilesMessage::HostDrop(_) => {}
         }

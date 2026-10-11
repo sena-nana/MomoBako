@@ -107,7 +107,7 @@ pub fn dispatch_files_effects(app: &mut MomoBakoApplication, context: &RuntimePr
     }
 }
 
-/// 写入或清除自定义缩略图。清除后文件没有路径时再刷新，恢复默认图。
+/// 写入、清除自定义缩略图，或者请后端按源文件刷新缩略图。清除后文件没有路径时再刷新，恢复默认图。
 #[allow(clippy::too_many_arguments)]
 fn dispatch_thumbnail(
     app: &MomoBakoApplication,
@@ -119,8 +119,13 @@ fn dispatch_thumbnail(
     source_path: Option<String>,
     image_bytes: Option<Vec<u8>>,
 ) {
+    let what = match action.as_str() {
+        "refresh" => "刷新缩略图",
+        "clear" => "取消自定义缩略图",
+        _ => "自定义缩略图",
+    };
     let failed = |error| files_message(FilesMessage::NoteError(error));
-    spawn_service(app.services.as_ref(), context, "自定义缩略图", failed, |services| {
+    spawn_service(app.services.as_ref(), context, what, failed, |services| {
         let browser = services.file_browser.clone();
         let executor = services.executor.clone();
         move || {
@@ -128,7 +133,7 @@ fn dispatch_thumbnail(
             let saved = match executor.block_on(browser.ensure_thumbnail(request)) {
                 Ok(response) => response,
                 Err(error) => {
-                    eprintln!("Nana 自定义缩略图写入失败：{error}");
+                    eprintln!("Nana {what}失败：{path}：{error}");
                     return files_message(FilesMessage::NoteError(error));
                 }
             };
