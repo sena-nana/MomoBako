@@ -2,13 +2,13 @@
 
 ## Transport
 
-- Primary transport: Tauri commands backed by an in-process repository runtime
-- Runtime execution: blocking repository work runs on Tauri's blocking task pool
+- Primary transport: in-process calls. The Nana host (`src-nana`) starts one repository runtime (`RepositoryRuntime::start_at` on the service directory chosen in `src-nana/src/app_paths.rs`) and builds every ViewModel of `momobako-backend` on it (`NativeServices`, `src-nana/src/services.rs`). The UI reaches the domain only through these ViewModels; long-running operations are Mutsuki tasks submitted through `MutsukiTaskViewModel::execute` with a protocol id such as `momobako.entry.import`.
+- The paths in this document (`GET /repositories`, `POST /repositories/{repoId}/files:import`, …) name operations of a REST-like contract; the host calls them in process. Only the external API below (`/external/v1/*`) is served over HTTP.
+- Runtime execution: ViewModel methods are async. The host runs them on its own Tokio runtime (`NativeServices::executor`) from NanaUI task workers (`src-nana/src/task_guard.rs`); repository reads and writes run on that runtime's blocking pool, writes behind the runtime-wide write lock.
+- Host events: the runtime and the logger push `HostEvent` values (`LogRecorded`, `RepositoryStructureUpdated`) into a `HostEventSink` (`src-backend/src/services/host_events.rs`); the Nana host receives them from `host_event_channel` and turns them into shell messages.
 - External client transport: a loopback HTTP API bound to `127.0.0.1` with a startup-generated bearer token written to the service connection file. The external API is source-neutral; browser extensions, native tools and other local clients all call the same contract.
-- Rust backend layering:
-  - `lib.rs` acts as the View command facade and keeps only Tauri command entrypoints plus invoke registration.
-  - `app_shell.rs` owns desktop bootstrap, tray behavior, main-window lifecycle, ViewModel registration, and startup-only UI side effects such as thumbnail scope initialization.
-  - `viewmodels/repository/{management,query,browser,interaction,playback}.rs`, `viewmodels/plugin.rs`, and `viewmodels/system.rs` act as the ViewModel layer for repository management, read/query flows, file browsing, repository interactions, playback/download progress, plugin/cache commands, and desktop-system helpers.
+- Rust backend layering (`src-backend`, crate `momobako-backend`):
+  - `viewmodels/repository/{management,query,browser,interaction}.rs`, `viewmodels/plugin.rs`, `viewmodels/system.rs`, and `viewmodels/mutsuki_task.rs` act as the ViewModel layer for repository management, read/query flows, file browsing, repository interactions, plugin/cache operations, desktop-system helpers, and long-running tasks.
   - `services/repository/mod.rs` now acts as a stable facade over feature modules and compatibility re-exports.
   - `services/repository/state.rs` owns the `RepositoryState` shell, initialization, preview-source registration, and other cross-feature state entrypoints.
   - `services/repository/plugin.rs` now owns plugin manifest normalization, dependency resolution, plugin config storage, runtime plugin archive handling, native library loading, and plugin hook execution records.
@@ -49,12 +49,11 @@
 ## Repository API
 
 - Current repository-management implementation follows the backend MVVM split above:
-  - command entrypoints stay transport-stable
   - repository-management orchestration lives in the dedicated ViewModel
   - repository query, file-browser, playback/preview, plugin/cache, playlist/smart-folder/revision/action flows are routed through domain ViewModels before entering the repository runtime
   - create/import/attach/delete/relocate/backend-config/cache-config/export/sync logic lives in the repository-management service module
-  - snapshot/search/playback/file-browser logic now lives in dedicated `services/repository/*` modules instead of `lib.rs`
-  - repository-domain regression tests are being migrated out of the facade implementation into `src-tauri/src/tests/repository/*`; external asset import and playback preparation now run from the centralized test tree instead of `services/repository/mod.rs`
+  - snapshot/search/playback/file-browser logic lives in dedicated `services/repository/*` modules
+  - repository-domain regression tests live in `src-backend/src/tests/repository/*` and `src-backend/src/services/repository/internal_tests.rs`; external asset import and playback preparation run from the centralized test tree
 
 - `GET /repositories`
   - List registered repositories from `MetaHub/repositories.db`
@@ -67,12 +66,12 @@
 - `POST /repositories`
   - Create a new repository or import an existing folder with `.momo`
   - Request fields include `name`, `path`, optional `repoId`, optional `backendPluginId`, optional `backendConfig`, and optional `skipInitialSync`.
-  - 创建 Eagle Library 挂载仓库时，前端显式传 `backendPluginId: "momobako.source.eagle-library"`，`path` 直接指向 Eagle `.library` 目录；该流程不走通用本地文件夹后端推断。
+  - 创建 Eagle Library 挂载仓库时，宿主显式传 `backendPluginId: "momobako.source.eagle-library"`，`path` 直接指向 Eagle `.library` 目录；该流程不走通用本地文件夹后端推断。
   - `skipInitialSync: true` creates the repository metadata and registry entry without running an inline first sync. This is intended for account-backed or slow virtual sources such as 网易云音乐 so the desktop login flow can finish first and trigger sync in the background.
   - Creating a 网易云 repository uses the selected local cache directory as `path`; `backendConfig` keeps account credentials and defaults, and stores a non-secret `sourceUri: "netease-cloud-music://account/{accountId}"` for provenance.
-  - The frontend receives only repository summaries and must not depend on the full persisted `backendConfig`; authentication Sources persist only public account state plus `credentialRef`, never raw cookies or other account secrets.
+  - The UI receives only repository summaries and must not depend on the full persisted `backendConfig`; authentication Sources persist only public account state plus `credentialRef`, never raw cookies or other account secrets.
 - `POST /repositories/{repoId}:delete`
-  - Tauri command: `delete_repository`
+  - ViewModel: `RepositoryManagementViewModel::delete_repository`
   - Request includes `repoId` and `mode`.
   - `mode: "recordOnly"` only removes the registry entry and keeps the repository folder, `.momo`, and any app-managed state.
   - `mode: "deleteMetadata"` removes the registry entry and deletes the repository metadata directory. Local-root repositories delete `.momo` and legacy `.meta`; managed repositories delete the service-side metadata directory for that repo.
@@ -83,8 +82,8 @@
   - The selected folder must contain `.momo/repository.json` whose `repoId` matches the request; folders without metadata or with a different `repoId` are rejected.
   - A successful response returns the updated repository summary and preserves existing repository identity, metadata and smart folders.
 - `POST /repositories/{repoId}:configureNeteaseCache`
-  - Tauri command: `configure_netease_repository_cache`
-  - Request includes `repoId`, `path`, and optional `migrateLegacyCache` (default frontend flow uses `true`).
+  - ViewModel: `RepositoryManagementViewModel::configure_netease_repository_cache`
+  - Request includes `repoId`, `path`, and optional `migrateLegacyCache` (the settings flow sends `true`).
   - Creates the selected cache directory, initializes the normal local repository structure under `.momo`, updates the registry path and repository metadata, and preserves `sourceUri`/account backend config.
   - Response includes `{ repository, migration }`; `migration` reports moved host-managed state files and identifiable old playback cache files, plus skipped and failed playback cache counts.
   - Legacy `.momo` state that was stored under service-managed repository storage is merged into the new cache directory. Old downloader temp files are migrated only when they can be matched to current indexed 网易云 song IDs and cache keys; unrecognized files are left for the existing cleanup path.
@@ -120,14 +119,14 @@
 - File browser requests may include `specialLocation: "trash"` to browse `.momo/trash` without exposing internal repository directories in normal browsing.
 - Local filesystem `get_file_browser` responses are cache-first and include `cacheState: "warming" | "ready" | "refreshing"` plus `indexedAt`. Cold-cache reads return immediately and schedule background sync rather than blocking on filesystem tree scans.
 - File browser requests may include optional `offset` and `limit` for incremental directory loading. Desktop首屏默认先请求首批结构，后续滚动再追加更多条目。
-- File browser responses include `totalEntries`, `loadedCount`, optional `nextOffset`, and `hasMore` so the frontend can append later batches without losing current selection or tree state.
+- File browser responses include `totalEntries`, `loadedCount`, optional `nextOffset`, and `hasMore` so the UI can append later batches without losing current selection or tree state.
 - 网易云歌单目录在请求携带 `offset/limit` 时优先走分页链路：源插件内部方法 `filesystem.listDirectoryPage` 返回 `{ entries, totalEntries }`，仓库层继续输出既有 `FileBrowserSnapshot`。
 - 网易云分页目录缓存保存在仓库 `metadata.db` 的 `netease_directory_cache` 与 `netease_directory_entries` 表中，TTL 固定为 24 小时。缓存命中直接返回，缓存缺失、过期或当前页缺口会回源当前页并写回缓存。
 - 网易云分页回源与全量同步都会把 `songId`、`songName`、`artists`、`albumName`、`coverUrl`、`durationMs`、`playlistId`、`playlistName`、`playlistCategory`、`provider`、`accountId` 镜像到资产 metadata，并同步更新 `assets.source_payload_json`。用户字段如 `rating`、`comment`、`link`、`tagGroups` 保持原行为。
 - `get_repository_tree(repoId)` returns only `FileTreeNode[]`-style directory structure for background tree sync and does not include directory entries.
 - Local filesystem `get_repository_tree` responses also include `cacheState` and `indexedAt`, and the tree is sourced from the SQLite `directories` cache.
 - `RepositoryTreeSnapshot.tree[].fileCount` reports each directory's direct child file count and excludes nested descendants.
-- Runtime emits `repository://structure-updated` with `{ repoId, reason, indexedAt }` after watcher-driven or cold-cache refresh completes so the desktop can silently refresh the active directory and tree.
+- Runtime emits the host event `HostEvent::RepositoryStructureUpdated` with `{ repoId, reason, indexedAt }` after watcher-driven or cold-cache refresh completes so the desktop can silently refresh the active directory and tree.
 - The file watcher drains pending filesystem events as one batch and reads only the repository registry to map them to repositories; it never opens repository databases. Changes inside `.momo` (database and WAL writes) and events on a repository root itself do not queue a structure refresh, so a refresh cannot trigger itself again.
 - Trash browser entries include `metadata.deletedAt` and `metadata.originalPath` when they were moved by MomoBako.
 - `deleteEntry` moves files or recursive directory deletes to `.momo/trash` by default. Use `mode: "permanentDelete"` only for deleting entries already shown from the trash view.
@@ -135,7 +134,7 @@
 - Eagle imports map `isDeleted: true` assets into the same recoverable trash model: the file is written under `.momo/trash`, `.momo/trash.json` stores `originalPath`, `trashPath`, `deletedAt` and `kind`, and the asset row keeps its original repository path with `status: "deleted"`.
 - Eagle Library source mounts may keep deleted assets in the source itself. The host merges its local trash model with source-managed trash entries so Eagle `isDeleted` items appear in the existing trash UI without copying business data into `.momo/trash`.
 - `POST /repositories/{repoId}/files:import`
-  - Tauri command `import_entries`, Mutsuki protocol `momobako.entry.import`.
+  - Mutsuki protocol `momobako.entry.import`.
   - Request includes `repoId`, optional `parentPath`, absolute `sourcePaths`, and optional `skipExisting`.
   - By default a source whose name already exists in the target folder, or repeats within the batch, rejects the whole batch with `entry already exists: {name}` before anything is copied.
   - With `skipExisting: true` those sources are skipped and the rest are imported. Existing files are never overwritten or merged; a skipped directory is skipped as a whole.
@@ -212,8 +211,8 @@
   - Request body includes repository-relative `path`
   - Reuse an existing valid thumbnail cache entry or generate one for supported local image/video files
   - Optional `action`: `ensure`, `refresh`, `save`, `clear`
-  - `save` accepts local `sourcePath`, remote HTTP(S) `sourceUrl`, or `imageBytes` for custom file/folder thumbnails; `sourceUrl` is downloaded by the backend so provider cover candidates do not depend on frontend CORS
-  - 网易云歌曲条目会优先使用 `sourcePayload.coverUrl` 通过 `save + sourceUrl` 预取封面；当前页优先，下一页在空闲时预热
+  - `save` accepts local `sourcePath`, remote HTTP(S) `sourceUrl`, or `imageBytes` for custom file/folder thumbnails; `sourceUrl` is downloaded by the backend
+  - `save + sourceUrl` 也能预取来源封面，例如网易云歌曲条目的 `sourcePayload.coverUrl`。删掉的 Vue 宿主这样预取过（当前页优先，下一页在空闲时预热），Nana 宿主现在不预取
   - Thumbnail cache files live under repository `.momo/thumbnails/` and use sha256 hex filenames
   - File thumbnails also backfill derived metadata such as `thumbnailPalette`
   - Response fields: `repoId`, `path`, `assetId`, `kind`, `thumbnailPath`, `thumbnailCustom`, optional `metadata`
@@ -222,29 +221,27 @@
   - Response returns a session-scoped local preview `sourceUrl` backed by the in-process repository runtime, the `mediaType`, and may include `localPath`.
   - A successful preview-source preparation updates `assets.last_accessed_at` without creating a revision entry.
 - `POST /repositories/{repoId}/entries:preparePlayback`
+  - Mutsuki protocol `momobako.playback.prepare`.
   - Request body includes repository-relative `path`.
   - Real local assets reuse the existing local preview preparation path and may return a direct `localPath`.
   - Virtual assets delegate to their repository Source through `contributes.source.media.preparePlaybackMethod`; the Source may return `localPath`, optional `tempFilePath`, optional `expiresAt`, lyrics, and media metadata without exposing provider credentials to the player.
   - 网易云 virtual playback is rejected until `localCache.status === "ready"`. When ready, the core passes `managedCacheRoot` to `momobako.netease.source`, and all managed playback files are written under `{cacheRoot}/.momo/cache/netease-playback`.
-  - Response `sourceUrl` is the preferred browser-consumable playback URL. Temporary audio files and lyric files are registered with the in-process preview runtime; lyric files may also return `lyricSourceUrl` or `wordLyricSourceUrl`.
+  - Response `sourceUrl` is a loopback playback URL served by the in-process preview runtime. Temporary audio files and lyric files are registered with that runtime; lyric files may also return `lyricSourceUrl` or `wordLyricSourceUrl`.
   - A successful playback-source preparation updates `assets.last_accessed_at` without creating a revision entry.
+  - The task reports `EntryPlaybackProgressEvent` phases for resolving the entry, downloading or reusing the temporary audio, preparing the preview source, and readiness; `MutsukiTaskViewModel::execute` returns these events with the result, so a player can start only after the temporary source is ready.
   - Playback and virtual-source preview flows should prefer this endpoint over `files:preparePreviewSource` when a file may not exist locally.
 - `POST /repositories/{repoId}/files:recordAccess`
-  - Tauri command: `record_entry_access`
+  - ViewModel: `RepositoryInteractionViewModel::record_entry_access`
   - Request body includes repository-relative `path`
   - Response returns `{ repoId, path, recordedAt }`
   - Used by direct open flows that hand control to the host OS so the desktop can keep the "最近使用" category in sync without refreshing the whole snapshot.
 - `POST /repositories/{repoId}/files:clearRecentAccessHistory`
-  - Tauri command: `clear_recent_access_history`
+  - ViewModel: `RepositoryInteractionViewModel::clear_recent_access_history`
   - Request body includes `repoId`
   - Response returns `{ repoId, clearedCount }`
   - Clears every non-null `lastAccessedAt` in the current repository so the desktop "最近使用" view becomes empty immediately.
-- `POST /repositories/{repoId}/entries:preparePlaybackWithProgress`
-  - Request body matches `entries:preparePlayback` and includes a Tauri progress channel.
-  - Emits `EntryPlaybackProgressEvent` phases for resolving the entry, downloading or reusing the temporary audio, preparing the preview source, and readiness.
-  - The selected audio player or visual media preview waits for the command to finish before mounting media, so playback starts only after the temporary source is ready.
-- `POST /repositories/{repoId}/playlists:downloadWithProgress`
-  - Tauri command: `download_playlist_with_progress`
+- `POST /repositories/{repoId}/playlists:download`
+  - Mutsuki protocol `momobako.playlist.download`.
   - Request body includes:
     - `sourceRepositoryId`: the repository whose Source owns the entries and credentials
     - `playlistId`
@@ -254,7 +251,7 @@
     - optional `managedCacheRoot` for source repositories whose MomoBako-managed local state lives in a selected cache directory
     - optional playlist-level `sourcePayload`
     - optional `level`
-  - The desktop runtime sends progress events over a Tauri `Channel` with:
+  - The task reports `DownloaderPlaylistProgressEvent` progress events, returned with the result by `MutsukiTaskViewModel::execute`, with:
     - `phase`: `start` | `track` | `complete`
     - `playlistId`
     - optional `playlistName`
@@ -270,8 +267,8 @@
 
 - Desktop hosts expose one core-owned `PlaybackSessionState` for playlist playback. It carries the
   repository and playlist identity, current item, lifecycle status, position, duration, volume,
-  capability flags, and an optional user-facing error. Plugin players implement media operations;
-  the host owns session transitions and disposal.
+  capability flags, and an optional user-facing error. The host plays the media itself and owns
+  session transitions and disposal; plugins only declare the playlist types.
 - Long-running operations project `DomainEvent` progress into `TaskProgressSnapshot` values with a
   stable task ID, protocol, phase, label, current/total values, percentage, and terminal status.
   Cancellation remains `cancelling` until the worker exits; late events are ignored after the
@@ -398,7 +395,8 @@
 
 - 宿主维护统一日志总线，内存保留最近 500 条记录，同时把标准化日志落盘到 `<serviceRoot>/logs/system.current.jsonl`。
 - 当前日志文件超过 `8 MiB` 时会轮转为 `system.1.jsonl` 到 `system.5.jsonl`；`clear_system_logs` 会同时清空内存缓存与全部归档文件。
-- 磁盘文件固定使用 JSONL，不写 ANSI 颜色码；彩色级别、高亮来源和上下文展开都由前端日志中心负责渲染。
+- 磁盘文件固定使用 JSONL，不写 ANSI 颜色码；彩色级别、高亮来源和上下文展开都由宿主的日志页负责渲染。
+- 下面三个操作是 `SystemViewModel` 的同名方法。
 - `list_system_logs`
   - Request shape: `{ query }`
   - `query` 支持 `limit`, `before`, `levels`, `sourceKinds`, `pluginId`, `repoId`, `query`
@@ -408,9 +406,9 @@
   - 宿主补齐 `id`, `timestamp`, `source` 与 `location` 缺省字段
 - `clear_system_logs`
   - 清空 JSONL 文件、轮转归档和内存环形缓冲
-- `system://log-recorded`
+- 宿主事件 `HostEvent::LogRecorded`
   - Payload: `SystemLogRecord`
-  - 新日志写入后立即广播，供日志中心面板实时追加
+  - 新日志写入后立即经 `HostEventSink` 送给宿主，日志页实时追加
 - 标准日志字段：
   - `level`: `debug | info | warn | error`
   - `source.kind`: `host | backend-plugin | helper`. Records written before the Vue host and the frontend plugins were removed may also carry `frontend-host` or `frontend-plugin`; the log page still labels and filters them.
@@ -534,31 +532,31 @@
   - Runtime plugin calls resolve `requires` and `optional` before dispatch. Missing or disabled required dependencies reject the call with the plugin disable reason; missing or disabled optional dependencies keep the call usable and return `runtime.degraded`, `runtime.degradationReason`, and `runtime.dependencyStatus` alongside the plugin payload.
   - `momobako.netease.source` uses `ncm-api-rs` directly for login, playlists, song URLs, details, lyrics, downloads, and cache management; `momobako.service.downloader` remains provider-neutral.
 - `GET /plugins:hook-executions`
-  - Tauri command: `list_plugin_hook_executions`
+  - ViewModel: `PluginViewModel::list_plugin_hook_executions`
   - Returns host-side execution records for declared hook actions; the host only records calls whose method matches a manifest `hooks[].action`
   - Supports optional `pluginId` filtering and `limit`; records are returned newest-first and default to the most recent 50 entries
   - Each record includes `executionId`, `pluginId`, `hookSlot`, `hookAction`, `hookLabel`, `status`, `message`, `target`, `startedAt`, `finishedAt`, and optional `runtime`
 - `GET /plugins/{pluginId}:data-directory`
-  - Tauri command: `get_plugin_data_directory`
+  - ViewModel: `PluginViewModel::get_plugin_data_directory`
   - Creates and returns the plugin data directory as `{ pluginId, path }`
   - The plugin manager exposes this from the plugin settings entry and shows the returned directory in the system file manager.
 - `GET /plugins/{pluginId}:config`
-  - Tauri command: `get_plugin_config`
+  - ViewModel: `PluginViewModel::get_plugin_config`
   - Creates the plugin data directory if needed and returns `{ pluginId, dataDirectory, schema, values }`
   - `schema` mirrors `manifest.contributes.settings`; `values` contains only stored key-value entries from `config.json`.
 - `PUT /plugins/{pluginId}:config/{key}`
-  - Tauri command: `set_plugin_config_value`
+  - ViewModel: `PluginViewModel::set_plugin_config_value`
   - Request body includes `{ pluginId, key, value }`
   - The host validates primitive values against declared schema fields when a matching field exists, then writes the value to `config.json`.
 - `DELETE /plugins/{pluginId}:config/{key}`
-  - Tauri command: `delete_plugin_config_value`
+  - ViewModel: `PluginViewModel::delete_plugin_config_value`
   - Request body includes `{ pluginId, key }`
   - Removes the stored value from `config.json`; manifest defaults remain available to the plugin manager's schema form.
 - `GET /api-design:snapshot`
   - Returns the host API test contract consumed by API Playground
-  - Each endpoint includes `group`, `transport`, `method`, `path`, `summary`, and optional `command`, `pluginId`, `pluginMethod`, `requiresAuth`, and `requestTemplate`
-  - `transport` is `external-http` for loopback HTTP APIs, `tauri-command` for core desktop commands, or `plugin-call` for plugin-provided API tests
-  - Core command coverage is checked against the Tauri `generate_handler!` list so newly added commands are detected during tests
+  - Each endpoint includes `group`, `transport`, `method`, `path`, `summary`, and optional `pluginId`, `pluginMethod`, `requiresAuth`, and `requestTemplate`
+  - `transport` is `external-http` for loopback HTTP APIs or `plugin-call` for plugin-provided API tests. The in-process ViewModel operations are not listed: no client outside the host can call them.
+  - `tests/apiDesignContract.test.ts` checks that every external HTTP route in `external_api.rs` is listed and that the backend plugins' call methods are declared in their `apiTests`
 - `POST /files:writeBinary`
   - Request body includes absolute `path` and raw `bytes`
   - Used by host export flows such as saving `external-api.json` to a path chosen in a save dialog
