@@ -254,7 +254,6 @@ if (requestedPluginIds.size === 0) {
 
 function distributionExcludePaths(project) {
   const excluded = new Set([
-    ...(project.build?.excludePaths ?? []),
     "Cargo.lock",
     "Cargo.toml",
     "build.rs",
