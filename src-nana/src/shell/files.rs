@@ -765,7 +765,7 @@ impl FilesState {
 }
 
 /// 与 Vue `normalizeRepositoryRelativePath` 相同：去空白、反斜杠转正斜杠、去掉首尾斜杠。
-pub(super) fn normalize_path(path: &str) -> String {
+pub(in crate::shell) fn normalize_path(path: &str) -> String {
     path.trim().replace('\\', "/").trim_matches('/').to_string()
 }
 

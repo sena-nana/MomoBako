@@ -90,7 +90,7 @@ corepack yarn nana:package                             # 打包、校验、压 z
 5. 用 `gh release create --draft` 建草稿 Release 并上传两个 zip（同名草稿已经在时用 `gh release upload --clobber` 覆盖），说明里写两个 zip 的区别，后面接自动生成的更新记录；
 6. 照旧把 `.momoplug` 作为工作流产物上传。
 
-CI（`ci.yml`）跑 `yarn verify`（Node 脚本类型检查、vitest 和 `momobako-backend`、`momobako-nana` 的编译检查）和 `yarn test:backend`，另外构建并打包插件，不打主程序的发布包。
+CI（`ci.yml`）分开跑 `yarn verify`（Node 脚本类型检查、vitest 和 `momobako-backend`、`momobako-nana` 的编译检查）与 `yarn test:backend`，并在独立 job 构建、打包插件，编译 Nana dist 后运行 `yarn nana:package --dry-run`；不执行完整的主程序发布打包。
 
 ## 校验
 
@@ -118,5 +118,5 @@ dist 版主程序约 87 MB，两个 zip 各约 53 MiB。本机 16 核冷编译�
 - 安装程序、开始菜单快捷方式和卸载：等 NanaUI 的安装包后端。
 - 代码签名和发布者签名：没有证书和签名密钥；`nana-package.toml` 没有 `[signing]`。
 - 自动更新：NanaUI 的自更新还没实现，发布包里没有更新程序。
-- CI 不打包：`ci.yml` 不跑 `nana:build`、`nana:package`，打包脚本和配置的问题要到发布时才暴露。
+- CI 只做输入校验：`ci.yml` 会跑 `nana:build` 和 `nana:package --dry-run`，不生成或上传完整发布包；发布流程仍需执行完整的 `nana:package`，并由发布 job 做最终验收。
 - 只打 Windows x64。

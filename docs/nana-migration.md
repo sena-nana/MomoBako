@@ -14,7 +14,7 @@ yarn plugins:build && yarn plugins:package   # 第一次运行前：构建并打
 cargo run -p momobako-nana                   # 原生窗口
 ```
 
-原生窗口读写的本地文件。位置由 `src-nana/src/app_paths.rs` 按 NanaUI 的应用路径定：下表是开发时（从 `target/` 运行）的位置，和以前一样；安装版和便携版落在应用数据、配置和缓存目录，便携版全在 `<根>/data`，见 [Nana 发布包](./nana-packaging.md#数据写在哪)。
+原生窗口读写的本地文件。位置由 `src-nana/src/app_paths.rs` 按 NanaUI 的应用路径定：下表是开发时（从 `target/` 运行）的位置，和以前一样；开发时的 `<serviceRoot>` 是当前目录下的 `.service-data`。安装版的 `<serviceRoot>` 是 `<data>/service-data`，便携版是 `<根>/data/service-data`；两者都落在应用数据、配置和缓存目录，便携版全在 `<根>/data`，见 [Nana 发布包](./nana-packaging.md#数据写在哪)。
 
 | 内容 | 开发时的位置 | 代码 |
 | --- | --- | --- |
@@ -90,7 +90,7 @@ cargo run -p momobako-nana                   # 原生窗口
 - **托盘**：只在 Windows 上建；点击和菜单没有在真窗口里验收。
 - **出声**：暂停后继续、播放中改音量的出声位置和音量，测试只核对游标交给声卡的起点帧和音量（测试构建不开声卡）；多声道下混、24 位和浮点 WAV 在真声卡上的效果没有验收。媒体基础的音轨读取和截断说明有测试走真实的源读取器（WAV、AVI 当容器），m4a、mp4 这些真实容器没有验收；本机没有 Ogg 的字节流处理程序时 Opus 解不开。
 - **UIA/AccessKit**：`hosted` 带 AccessKit 平台适配器；测试只读 NanaUI 自己的无障碍树，读屏器看到的结果没有验收。
-- **发布包**：发布流程（`.github/workflows/release.yml`）改用 NanaUI 的 `nana-packager` 打 `momobako-nana`，不再调用 tauri-action：dist 配置编主程序，打安装版布局和便携版两个 zip，各自 `validate`，便携版再跑 `validate --run --tamper-suite`，发到草稿 Release。本地用 `yarn nana:build`、`yarn nana:package`，见 [Nana 发布包](./nana-packaging.md)。没有安装程序（NanaUI 还没有安装包后端）和代码签名；没在干净的 Windows 上验收：没装 VC++ 运行库时能不能启动、解压到只读目录（例如 `Program Files`）以后数据是不是都落在用户目录。CI（`ci.yml`）跑 `yarn verify`（含 `momobako-nana` 的编译检查）和 `yarn test:backend`，不打包、不跑 Nana 的测试。
+- **发布包**：发布流程（`.github/workflows/release.yml`）改用 NanaUI 的 `nana-packager` 打 `momobako-nana`，不再调用 tauri-action：dist 配置编主程序，打安装版布局和便携版两个 zip，各自 `validate`，便携版再跑 `validate --run --tamper-suite`，发到草稿 Release。本地用 `yarn nana:build`、`yarn nana:package`，见 [Nana 发布包](./nana-packaging.md)。没有安装程序（NanaUI 还没有安装包后端）和代码签名；没在干净的 Windows 上验收：没装 VC++ 运行库时能不能启动、解压到只读目录（例如 `Program Files`）以后数据是不是都落在用户目录。CI（`ci.yml`）分开跑 `yarn test:backend`、`yarn verify`、插件 build/package、`yarn nana:build` 和 `yarn nana:package --dry-run`；不跑 Nana 单测，也不执行完整发布打包。
 - **全局快捷键**：没有实现。删掉的 Vue 和 Tauri 端（提交 `7bc847c` 的 `src/`、`src-tauri/src`）也没有注册全局快捷键，宿主请求里不留占位变体。
 - **插件不带界面**：插件前端（设置页、工具页、预览、播放器的 Vue 组件）已经删掉，插件只剩后端形态，见 [API 设计](./api-design.md) 的 Plugin API。插件设置只画清单 `contributes.settings.fields` 声明的字段；工具页来自清单的 `contributes.toolPages`，三个内置页面画原生页面，宿主没有的工具页只画页头和「MomoBako 没有这个工具页：插件只能打开内置的工具页，不能自带页面。」（`admin_gap.rs`）；预览由内置视图按扩展名绘制（`native_preview::builtin_view`），认不出的扩展名照 Vue 没有预览插件时一样只画缩略图或类型图标；只有播放器贡献、扩展名又不是音视频或图片的条目写「暂不支持播放 {扩展名} 文件」（`player_clip.rs`）。
 

@@ -14,7 +14,7 @@ use std::cmp::Ordering;
 use crate::backend::services::repository::{AssetSummary, RepositorySnapshot};
 
 use super::ShellViewModel;
-use super::files::FileRow;
+use super::files::{FileRow, normalize_path};
 use super::search_collate::compare_zh;
 use super::sidebar::{ShortcutAsset, SidebarShortcut};
 use super::workspace::{LibraryCategory, WorkspacePanel};
@@ -150,11 +150,6 @@ fn compare_recent(left: &AssetSummary, right: &AssetSummary) -> Ordering {
         .cmp(left_access)
         .then_with(|| right.modified_at.cmp(&left.modified_at))
         .then_with(|| compare_zh(&left.filename, &right.filename))
-}
-
-/// 和摘要里的路径同一种写法：`/` 分隔、去掉首尾斜杠。
-fn normalize_path(path: &str) -> String {
-    path.trim().replace('\\', "/").trim_matches('/').to_string()
 }
 
 impl ShellViewModel {

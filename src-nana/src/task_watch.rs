@@ -6,15 +6,7 @@
 //! 没有时连快照都不读。弹层里每一行按任务协议写标题，仓库操作那一行已经表示的任务不再单列
 //! （`admin_support::popover_rows`）。
 
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
-
 use crate::backend::services::repository::TaskProgressSnapshot;
-use crate::backend::viewmodels::MutsukiTaskViewModel;
-
-/// 两次读快照之间隔多久。
-const POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 /// 还在进行的任务状态。完成、失败、取消完成的任务不进任务弹层。
 const ACTIVE_STATUSES: [&str; 3] = ["queued", "running", "cancelling"];
@@ -73,29 +65,6 @@ fn same_tasks(left: &[TaskProgressSnapshot], right: &[TaskProgressSnapshot]) -> 
                 && left.error == right.error
                 && left.updated_at == right.updated_at
         })
-}
-
-/// 起一个观察线程，任务有变化就调 `dispatch`。`stop` 为真时线程退出。
-pub(crate) fn spawn<F>(tasks: MutsukiTaskViewModel, stop: Arc<AtomicBool>, dispatch: F)
-where
-    F: Fn(Vec<TaskProgressSnapshot>) + Send + 'static,
-{
-    let started = std::thread::Builder::new()
-        .name("nana-task-watch".into())
-        .spawn(move || {
-            let mut watch = TaskWatch::default();
-            while !stop.load(Ordering::Acquire) {
-                if let Some(active) =
-                    watch.poll(&tasks.active_task_ids(), || tasks.progress_snapshots())
-                {
-                    dispatch(active);
-                }
-                std::thread::sleep(POLL_INTERVAL);
-            }
-        });
-    if let Err(error) = started {
-        eprintln!("Nana 任务观察线程启动失败，任务弹层不会更新：{error}");
-    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -15,6 +15,16 @@ function externalDefinitionRoutes() {
     .map((match) => `${match[1].toUpperCase()} ${match[2]}`);
 }
 
+function pluginDirs() {
+  return readdirSync(resolve("External/Plugins"), { withFileTypes: true })
+    .filter(
+      (entry) =>
+        entry.isDirectory() && existsSync(resolve("External/Plugins", entry.name, "manifest.json")),
+    )
+    .map((entry) => entry.name)
+    .sort();
+}
+
 function backendPluginMethods(pluginDir: string) {
   const sourcePath = resolve("External/Plugins", pluginDir, "src/lib.rs");
   if (!existsSync(sourcePath)) return [];
@@ -24,21 +34,30 @@ function backendPluginMethods(pluginDir: string) {
     .filter((method) => method.includes("."));
 }
 
+function manifestApiMethods(pluginDir: string) {
+  const manifest = JSON.parse(
+    readFileSync(resolve("External/Plugins", pluginDir, "manifest.json"), "utf-8"),
+  ) as {
+    contributes?: {
+      apiTests?: Array<{ method?: string }>;
+      provider?: { lookup?: { action?: string } };
+      metadataDefaults?: { action?: string };
+    };
+  };
+  const contributes = manifest.contributes;
+  return [
+    ...(contributes?.apiTests ?? []).map((test) => test.method),
+    contributes?.provider?.lookup?.action,
+    contributes?.metadataDefaults?.action,
+  ].filter((method): method is string => Boolean(method?.trim()));
+}
+
 function embeddedLocalFilesystemMethods() {
   const source = readFileSync(resolve("src-backend/src/services/repository/mod.rs"), "utf-8");
   const fallback = source.match(/fn call_builtin_local_filesystem\([\s\S]*?\n}\n\nfn list_backend_files/)?.[0] ?? "";
   return [...fallback.matchAll(/"([^"]+)"\s*=>/g)]
     .map((match) => match[1])
     .filter((method) => method.startsWith("filesystem."));
-}
-
-function apiTestMethods(pluginDir: string) {
-  const manifest = JSON.parse(
-    readFileSync(resolve("External/Plugins", pluginDir, "manifest.json"), "utf-8"),
-  ) as { contributes?: { apiTests?: Array<{ method?: string }> } };
-  return (manifest.contributes?.apiTests ?? [])
-    .map((test) => test.method)
-    .filter(Boolean);
 }
 
 describe("API design snapshot contract", () => {
@@ -57,24 +76,18 @@ describe("API design snapshot contract", () => {
     expect(expected.filter((route) => !covered.has(route))).toEqual([]);
   });
 
-  it("keeps backend plugin call methods represented in manifest apiTests", () => {
-    const pluginDirs = [
-      "local-filesystem",
-      "office-convert",
-      "parser-asmr-folder",
-      "service-downloader",
-      "service-provider-asmr-one",
-      "service-provider-dlsite",
-    ];
-
-    const missing = pluginDirs.flatMap((pluginDir) => {
-      const covered = new Set(apiTestMethods(pluginDir));
-      return backendPluginMethods(pluginDir)
-        .filter((method) => !covered.has(method))
+  it("keeps every backend manifest API declaration represented by its dispatch table", () => {
+    const missing = pluginDirs().flatMap((pluginDir) => {
+      const dispatchMethods = new Set(backendPluginMethods(pluginDir));
+      // Manifest-only plugins have no dispatch table; their declarations are still
+      // surfaced by api_design.rs and are intentionally not treated as missing.
+      if (dispatchMethods.size === 0) return [];
+      return manifestApiMethods(pluginDir)
+        .filter((method) => !dispatchMethods.has(method))
         .map((method) => `${pluginDir}:${method}`);
     });
 
-    const localFilesystemCovered = new Set(apiTestMethods("local-filesystem"));
+    const localFilesystemCovered = new Set(manifestApiMethods("local-filesystem"));
     const fallbackMissing = embeddedLocalFilesystemMethods()
       .filter((method) => !localFilesystemCovered.has(method))
       .map((method) => `embedded-local-filesystem:${method}`);
