@@ -1734,6 +1734,7 @@ pub(super) fn update_metadata_for_asset_in_transaction(
             params![repo_id, target_asset_id, target_version, now],
         )?;
         let after_map = load_metadata_map_from_transaction(tx, &target_asset_id)?;
+        let revision_id = format!("rev-{}-{}", target_asset_id, target_version);
         tx.execute(
             r#"
             INSERT INTO revisions (
@@ -1742,7 +1743,7 @@ pub(super) fn update_metadata_for_asset_in_transaction(
             VALUES (?1, ?2, ?3, ?4, 'metadata.updated', ?5, ?6, ?7)
             "#,
             params![
-                format!("rev-{}-{}", target_asset_id, target_version),
+                revision_id,
                 repo_id,
                 target_asset_id,
                 now,
@@ -1755,6 +1756,7 @@ pub(super) fn update_metadata_for_asset_in_transaction(
                 source
             ],
         )?;
+        save_revision_cursor(tx, repo_id, &target_asset_id, Some(&revision_id), None)?;
     }
     Ok(())
 }

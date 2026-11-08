@@ -3922,6 +3922,86 @@ mod tests {
     }
 
     #[test]
+    fn undo_and_redo_follow_revision_cursor_without_replaying_action_rows() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("revision-cursor");
+        fs::write(repo_root.join("note.txt"), "hello").expect("test file should be written");
+        let repo_id = create_repository_for_path(&state, &repo_root);
+        let asset_id = asset_id_for_test_path(&state, &repo_id, "note.txt");
+        let initial = state
+            .load_asset_detail(&repo_id, &asset_id)
+            .expect("initial asset detail should load");
+
+        let first = state
+            .update_asset_metadata(MetadataUpdateRequest {
+                repo_id: repo_id.clone(),
+                asset_id: asset_id.clone(),
+                expected_version: initial.summary.version,
+                metadata: BTreeMap::from([("rating".to_string(), serde_json::json!(1))]),
+                source: Some("test".to_string()),
+            })
+            .expect("first metadata update should succeed");
+        let second = state
+            .update_asset_metadata(MetadataUpdateRequest {
+                repo_id: repo_id.clone(),
+                asset_id: asset_id.clone(),
+                expected_version: first.asset.summary.version,
+                metadata: BTreeMap::from([("rating".to_string(), serde_json::json!(2))]),
+                source: Some("test".to_string()),
+            })
+            .expect("second metadata update should succeed");
+        assert_eq!(
+            second
+                .asset
+                .metadata
+                .iter()
+                .find(|entry| entry.key == "rating")
+                .map(|entry| &entry.value),
+            Some(&serde_json::json!(2))
+        );
+
+        let undone = state
+            .undo_last_revision(RevisionActionRequest {
+                repo_id: repo_id.clone(),
+                asset_id: asset_id.clone(),
+            })
+            .expect("undo should restore the first value");
+        assert_eq!(
+            undone
+                .asset
+                .metadata
+                .iter()
+                .find(|entry| entry.key == "rating")
+                .map(|entry| &entry.value),
+            Some(&serde_json::json!(1))
+        );
+
+        let redone = state
+            .redo_last_revision(RevisionActionRequest {
+                repo_id: repo_id.clone(),
+                asset_id: asset_id.clone(),
+            })
+            .expect("redo should restore the second value");
+        assert_eq!(
+            redone
+                .asset
+                .metadata
+                .iter()
+                .find(|entry| entry.key == "rating")
+                .map(|entry| &entry.value),
+            Some(&serde_json::json!(2))
+        );
+        assert!(state
+            .redo_last_revision(RevisionActionRequest {
+                repo_id: repo_id.clone(),
+                asset_id: asset_id.clone(),
+            })
+            .is_err());
+
+        drop(state);
+        fs::remove_dir_all(root).expect("test root should be removed");
+    }
+
+    #[test]
     fn plugin_metadata_defaults_preserve_existing_values() {
         let (state, root, repo_root, _thumbnail_root) =
             create_test_state("plugin-metadata-defaults");

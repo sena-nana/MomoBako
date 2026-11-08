@@ -58,6 +58,7 @@ pub(super) fn apply_revision_state(
             "UPDATE assets SET version = ?3, updated_at = ?4, modified_at = ?4 WHERE repo_id = ?1 AND asset_id = ?2",
             params![repo_id, target_asset_id, next_version, now],
         )?;
+        let revision_id = format!("rev-{}-{}", target_asset_id, next_version);
         tx.execute(
             r#"
             INSERT INTO revisions (
@@ -66,7 +67,7 @@ pub(super) fn apply_revision_state(
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
             "#,
             params![
-                format!("rev-{}-{}", target_asset_id, next_version),
+                revision_id,
                 repo_id,
                 target_asset_id,
                 now,
@@ -78,6 +79,7 @@ pub(super) fn apply_revision_state(
                 source
             ],
         )?;
+        save_revision_cursor(tx, repo_id, &target_asset_id, Some(&revision_id), None)?;
     }
 
     Ok(())
@@ -171,6 +173,79 @@ pub(super) fn rebuild_netease_directory_cache(
     Ok(())
 }
 
+#[derive(Debug, Clone)]
+pub(super) struct RevisionCursor {
+    pub(super) current_revision_id: Option<String>,
+    pub(super) redo_revision_id: Option<String>,
+}
+
+fn revision_from_row(row: &rusqlite::Row<'_>) -> Result<RevisionEntry, rusqlite::Error> {
+    let before_json: Option<String> = row.get(4)?;
+    let after_json: Option<String> = row.get(5)?;
+    Ok(RevisionEntry {
+        revision_id: row.get(0)?,
+        asset_id: row.get(1)?,
+        timestamp: row.get(2)?,
+        operation: row.get(3)?,
+        before: parse_json_column_optional(before_json)?,
+        after: parse_json_column_optional(after_json)?,
+        source: row.get(6)?,
+    })
+}
+
+pub(super) fn load_revision_cursor(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+    asset_id: &str,
+) -> Result<Option<RevisionCursor>, rusqlite::Error> {
+    tx.query_row(
+        "SELECT current_revision_id, redo_revision_id FROM revision_cursors WHERE repo_id = ?1 AND asset_id = ?2",
+        params![repo_id, asset_id],
+        |row| {
+            Ok(RevisionCursor {
+                current_revision_id: row.get(0)?,
+                redo_revision_id: row.get(1)?,
+            })
+        },
+    )
+    .optional()
+}
+
+pub(super) fn save_revision_cursor(
+    tx: &Transaction<'_>,
+    repo_id: &str,
+    asset_id: &str,
+    current_revision_id: Option<&str>,
+    redo_revision_id: Option<&str>,
+) -> Result<(), rusqlite::Error> {
+    tx.execute(
+        r#"
+        INSERT INTO revision_cursors (repo_id, asset_id, current_revision_id, redo_revision_id)
+        VALUES (?1, ?2, ?3, ?4)
+        ON CONFLICT(repo_id, asset_id) DO UPDATE SET
+          current_revision_id = excluded.current_revision_id,
+          redo_revision_id = excluded.redo_revision_id
+        "#,
+        params![repo_id, asset_id, current_revision_id, redo_revision_id],
+    )?;
+    Ok(())
+}
+
+pub(super) fn load_revision_by_id(
+    tx: &Transaction<'_>,
+    revision_id: &str,
+) -> Result<Option<RevisionEntry>, rusqlite::Error> {
+    tx.query_row(
+        r#"
+        SELECT revision_id, asset_id, timestamp, operation, before_json, after_json, source
+        FROM revisions WHERE revision_id = ?1
+        "#,
+        [revision_id],
+        revision_from_row,
+    )
+    .optional()
+}
+
 pub(super) fn load_latest_revision(
     tx: &Transaction<'_>,
     asset_id: &str,
@@ -179,24 +254,40 @@ pub(super) fn load_latest_revision(
         r#"
         SELECT revision_id, asset_id, timestamp, operation, before_json, after_json, source
         FROM revisions
-        WHERE asset_id = ?1
-        ORDER BY timestamp DESC
+        WHERE asset_id = ?1 AND operation NOT IN ('revision.undo', 'revision.redo')
+        ORDER BY timestamp DESC, revision_id DESC
         LIMIT 1
         "#,
         [asset_id],
-        |row| {
-            let before_json: Option<String> = row.get(4)?;
-            let after_json: Option<String> = row.get(5)?;
-            Ok(RevisionEntry {
-                revision_id: row.get(0)?,
-                asset_id: row.get(1)?,
-                timestamp: row.get(2)?,
-                operation: row.get(3)?,
-                before: parse_json_column_optional(before_json)?,
-                after: parse_json_column_optional(after_json)?,
-                source: row.get(6)?,
-            })
-        },
+        revision_from_row,
+    )
+    .optional()
+}
+
+pub(super) fn load_previous_revision(
+    tx: &Transaction<'_>,
+    revision: &RevisionEntry,
+) -> Result<Option<RevisionEntry>, rusqlite::Error> {
+    let before_json = serde_json::to_string(&revision.before)
+        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(Box::new(error)))?;
+    tx.query_row(
+        r#"
+        SELECT revision_id, asset_id, timestamp, operation, before_json, after_json, source
+        FROM revisions
+        WHERE asset_id = ?1
+          AND (timestamp < ?2 OR (timestamp = ?2 AND revision_id < ?4))
+          AND operation NOT IN ('revision.undo', 'revision.redo')
+          AND after_json = ?3
+        ORDER BY timestamp DESC, revision_id DESC
+        LIMIT 1
+        "#,
+        params![
+            revision.asset_id,
+            revision.timestamp,
+            before_json,
+            revision.revision_id
+        ],
+        revision_from_row,
     )
     .optional()
 }

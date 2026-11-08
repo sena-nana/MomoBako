@@ -819,9 +819,20 @@ impl RepositoryState {
         )?;
         let tx = connection.transaction().map_err(db_error)?;
 
-        let revision = load_latest_revision(&tx, &request.asset_id)
-            .map_err(db_error)?
-            .ok_or_else(|| format!("no revision found for asset: {}", request.asset_id))?;
+        let cursor =
+            load_revision_cursor(&tx, &request.repo_id, &request.asset_id).map_err(db_error)?;
+        let revision = match cursor {
+            Some(cursor) => cursor
+                .current_revision_id
+                .as_deref()
+                .map(|revision_id| load_revision_by_id(&tx, revision_id))
+                .transpose()
+                .map_err(db_error)?
+                .flatten(),
+            None => load_latest_revision(&tx, &request.asset_id).map_err(db_error)?,
+        }
+        .ok_or_else(|| format!("no previous revision found for asset: {}", request.asset_id))?;
+        let previous_revision = load_previous_revision(&tx, &revision).map_err(db_error)?;
         let previous_metadata =
             load_metadata_map_from_transaction(&tx, &request.asset_id).map_err(db_error)?;
         apply_revision_state(
@@ -831,6 +842,16 @@ impl RepositoryState {
             &revision.before,
             "revision.undo",
             "undo",
+        )
+        .map_err(db_error)?;
+        save_revision_cursor(
+            &tx,
+            &request.repo_id,
+            &request.asset_id,
+            previous_revision
+                .as_ref()
+                .map(|revision| revision.revision_id.as_str()),
+            Some(&revision.revision_id),
         )
         .map_err(db_error)?;
         let current_metadata =
@@ -872,9 +893,14 @@ impl RepositoryState {
         )?;
         let tx = connection.transaction().map_err(db_error)?;
 
-        let revision = load_latest_revision(&tx, &request.asset_id)
+        let cursor =
+            load_revision_cursor(&tx, &request.repo_id, &request.asset_id).map_err(db_error)?;
+        let revision_id = cursor
+            .and_then(|cursor| cursor.redo_revision_id)
+            .ok_or_else(|| format!("no redo revision found for asset: {}", request.asset_id))?;
+        let revision = load_revision_by_id(&tx, &revision_id)
             .map_err(db_error)?
-            .ok_or_else(|| format!("no revision found for asset: {}", request.asset_id))?;
+            .ok_or_else(|| format!("no redo revision found for asset: {}", request.asset_id))?;
         let previous_metadata =
             load_metadata_map_from_transaction(&tx, &request.asset_id).map_err(db_error)?;
         apply_revision_state(
@@ -884,6 +910,14 @@ impl RepositoryState {
             &revision.after,
             "revision.redo",
             "redo",
+        )
+        .map_err(db_error)?;
+        save_revision_cursor(
+            &tx,
+            &request.repo_id,
+            &request.asset_id,
+            Some(&revision.revision_id),
+            None,
         )
         .map_err(db_error)?;
         let current_metadata =

@@ -422,6 +422,18 @@ CREATE TABLE IF NOT EXISTS revisions (
 
 CREATE INDEX IF NOT EXISTS idx_revisions_asset_time ON revisions(asset_id, timestamp DESC);
 
+-- The cursor separates the current revision from the append-only audit trail.
+-- This keeps undo/redo deterministic after an action creates its own audit row.
+CREATE TABLE IF NOT EXISTS revision_cursors (
+  repo_id TEXT NOT NULL,
+  asset_id TEXT NOT NULL,
+  current_revision_id TEXT,
+  redo_revision_id TEXT,
+  PRIMARY KEY(repo_id, asset_id),
+  FOREIGN KEY(repo_id) REFERENCES repositories(repo_id),
+  FOREIGN KEY(asset_id) REFERENCES assets(asset_id)
+);
+
 CREATE TABLE IF NOT EXISTS events (
   event_id TEXT PRIMARY KEY,
   repo_id TEXT NOT NULL,
