@@ -10,27 +10,35 @@ use std::path::Path;
 use std::sync::Arc;
 
 use nana_ui::RuntimeProgramContext;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
+use crate::MomoBakoApplication;
 use crate::backend::services::mutsuki_runner::{PROTOCOL_ENTRY_IMPORT, PROTOCOL_REPOSITORY_SYNC};
 use crate::backend::services::repository::{
-    FileCreateRequest, FileImportRequest, PluginCallRequest, SyncRequest, SystemLogLocationInput, SystemLogWriteRequest,
+    FileCreateRequest, FileImportRequest, PluginCallRequest, SyncRequest, SystemLogLocationInput,
+    SystemLogWriteRequest,
 };
-use crate::backend::viewmodels::{FileBrowserViewModel, MutsukiTaskViewModel, PluginViewModel, SystemViewModel};
-use crate::download_staging::{staging_root, Cleanup, StagingDir};
-use crate::shell::admin::source_download::{DownloadOutcome, DownloadRun};
-use crate::shell::admin::source_target::{result_paths, TargetCandidate};
-use crate::shell::admin::AdminMessage;
+use crate::backend::viewmodels::{
+    FileBrowserViewModel, MutsukiTaskViewModel, PluginViewModel, SystemViewModel,
+};
+use crate::download_staging::{Cleanup, StagingDir, staging_root};
 use crate::shell::ShellMessage;
+use crate::shell::admin::AdminMessage;
+use crate::shell::admin::source_download::{DownloadOutcome, DownloadRun};
+use crate::shell::admin::source_target::{TargetCandidate, result_paths};
 use crate::task_guard::spawn_service;
-use crate::MomoBakoApplication;
 
 /// 下载到其他资源库要用的领域服务。产品里是 `NativeServices` 的 ViewModel（[`LiveServices`]），测试里换成假的。
 pub(crate) trait DownloadServices {
     /// 调用来源插件，交回插件结果的载荷。
     fn call_plugin(&self, request: PluginCallRequest) -> Result<Value, String>;
-    /// 在目标资源库的根目录下建一个文件夹。
-    fn create_folder(&self, repo_id: &str, name: &str) -> Result<(), String>;
+    /// 在目标资源库指定的父目录下建一个文件夹。
+    fn create_folder(
+        &self,
+        repo_id: &str,
+        parent_path: Option<&str>,
+        name: &str,
+    ) -> Result<(), String>;
     /// 把文件导入目标资源库，交回导入结果（`FileImportResponse` 的 JSON）。
     fn import(&self, request: FileImportRequest) -> Result<Value, String>;
     /// 同步目标资源库。
@@ -50,26 +58,37 @@ pub(crate) fn download_to_repository(
 ) {
     let Some(target) = run.target().cloned() else {
         eprintln!("Nana 下载到其他资源库没有目标资源库：{}", run.method);
-        app.shell.reduce(finished(run, Err("没有选定目标资源库。".into())));
+        app.shell
+            .reduce(finished(run, Err("没有选定目标资源库。".into())));
         return;
     };
     let failed_run = run.clone();
     let failed = move |error| finished(failed_run.clone(), Err(error));
-    spawn_service(app.services.as_ref(), context, "来源下载", failed, |services| {
-        let live = LiveServices {
-            plugin: services.plugin.clone(),
-            browser: services.file_browser.clone(),
-            tasks: services.tasks.clone(),
-            system: services.system.clone(),
-            executor: services.executor.clone(),
-        };
-        let managed_cache_root = payload.get("managedCacheRoot").and_then(Value::as_str);
-        let root = staging_root(managed_cache_root, &services.runtime.service_root(), &target.repo_id);
-        move || {
-            let result = self::run(&live, &run, &target, payload, parent_path, &root);
-            finished(run, result)
-        }
-    });
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "来源下载",
+        failed,
+        |services| {
+            let live = LiveServices {
+                plugin: services.plugin.clone(),
+                browser: services.file_browser.clone(),
+                tasks: services.tasks.clone(),
+                system: services.system.clone(),
+                executor: services.executor.clone(),
+            };
+            let managed_cache_root = payload.get("managedCacheRoot").and_then(Value::as_str);
+            let root = staging_root(
+                managed_cache_root,
+                &services.runtime.service_root(),
+                &target.repo_id,
+            );
+            move || {
+                let result = self::run(&live, &run, &target, payload, parent_path, &root);
+                finished(run, result)
+            }
+        },
+    );
 }
 
 fn finished(run: DownloadRun, result: Result<DownloadOutcome, String>) -> ShellMessage {
@@ -85,9 +104,16 @@ pub(crate) fn run(
     parent_path: Option<String>,
     staging_root: &Path,
 ) -> Result<DownloadOutcome, String> {
-    let staging = StagingDir::create(staging_root).inspect_err(|error| eprintln!("Nana {error}"))?;
-    if let Some(destination) = payload.get_mut("destination").and_then(Value::as_object_mut) {
-        destination.insert("stagingPath".into(), json!(staging.path().to_string_lossy()));
+    let staging =
+        StagingDir::create(staging_root).inspect_err(|error| eprintln!("Nana {error}"))?;
+    if let Some(destination) = payload
+        .get_mut("destination")
+        .and_then(Value::as_object_mut)
+    {
+        destination.insert(
+            "stagingPath".into(),
+            json!(staging.path().to_string_lossy()),
+        );
     }
     let call = PluginCallRequest {
         plugin_id: run.plugin_id.clone(),
@@ -105,7 +131,13 @@ pub(crate) fn run(
     let paths = result_paths(&response);
     if paths.is_empty() {
         eprintln!("Nana 来源下载没有交回文件，不导入：{}", run.method);
-        discard(services, run, &staging);
+        let staging_left = discard(services, run, &staging);
+        if staging_left {
+            return Err(format!(
+                "插件没有报告下载文件；未报告的文件留在暂存目录，位置见「日志」：{}",
+                staging.path().display()
+            ));
+        }
         return Ok(DownloadOutcome::plugin(response));
     }
     let imported = match import(services, target, &paths, parent_path) {
@@ -117,7 +149,11 @@ pub(crate) fn run(
     };
     let outcome = DownloadOutcome::imported(response, &imported);
     if !outcome.skipped.is_empty() {
-        eprintln!("Nana 目标资源库已有同名文件，跳过 {} 个：{}", outcome.skipped.len(), target.repo_id);
+        eprintln!(
+            "Nana 目标资源库已有同名文件，跳过 {} 个：{}",
+            outcome.skipped.len(),
+            target.repo_id
+        );
     }
     report_cleanup(services, run, &staging, staging.clear(&paths));
     services.sync(&target.repo_id).map_err(|error| {
@@ -135,32 +171,74 @@ fn import(
     parent_path: Option<String>,
 ) -> Result<Value, String> {
     if let Some(folder) = parent_path.as_deref() {
-        if !Path::new(&target.path).join(folder).is_dir() {
-            services.create_folder(&target.repo_id, folder).map_err(|error| {
-                eprintln!("Nana 在目标资源库建文件夹失败：{folder}：{error}");
-                format!("在目标资源库建文件夹失败：{error}")
-            })?;
+        // `parentPath` 是相对资源库根的完整路径；逐级创建，避免把 `a/b` 当作单个目录名
+        // 传给根目录。后端 create_directory 要求父目录已经存在。
+        let mut current_path = String::new();
+        for name in folder.split('/').filter(|name| !name.is_empty()) {
+            let path = if current_path.is_empty() {
+                name.to_string()
+            } else {
+                format!("{current_path}/{name}")
+            };
+            if !Path::new(&target.path).join(&path).is_dir() {
+                let parent = (!current_path.is_empty()).then_some(current_path.as_str());
+                services
+                    .create_folder(&target.repo_id, parent, name)
+                    .map_err(|error| {
+                        eprintln!("Nana 在目标资源库建文件夹失败：{path}：{error}");
+                        format!("在目标资源库建文件夹失败：{error}")
+                    })?;
+            }
+            current_path = path;
         }
     }
-    let request = FileImportRequest { repo_id: target.repo_id.clone(), parent_path, source_paths: paths.to_vec(), skip_existing: true };
+    let request = FileImportRequest {
+        repo_id: target.repo_id.clone(),
+        parent_path,
+        source_paths: paths.to_vec(),
+        skip_existing: true,
+    };
     services.import(request).map_err(|error| {
-        eprintln!("Nana 下载的文件导入目标资源库失败：{}：{error}", target.repo_id);
+        eprintln!(
+            "Nana 下载的文件导入目标资源库失败：{}：{error}",
+            target.repo_id
+        );
         format!("导入目标资源库失败：{error}")
     })
 }
 
 /// 插件失败或者什么也没下到：暂存目录是空的就收掉；还有东西（插件写了却没报告）就留着，写一条日志。
-fn discard(services: &impl DownloadServices, run: &DownloadRun, staging: &StagingDir) {
+fn discard(services: &impl DownloadServices, run: &DownloadRun, staging: &StagingDir) -> bool {
     let left = staging.discard_if_empty();
     if left {
-        let message = format!("{}「{}」的暂存目录里还有没交回的文件，没有清理：{}", run.progress.label, run.progress.subject, staging.path().display());
+        let message = format!(
+            "{}「{}」的暂存目录里还有没交回的文件，没有清理：{}",
+            run.progress.label,
+            run.progress.subject,
+            staging.path().display()
+        );
         eprintln!("Nana {message}");
-        services.log(log(run, "warn", "downloadStagingLeft", message, None, json!({ "stagingPath": staging.path() })));
+        services.log(log(
+            run,
+            "warn",
+            "downloadStagingLeft",
+            message,
+            None,
+            json!({ "stagingPath": staging.path() }),
+        ));
     }
+    left
 }
 
 /// 导入没有成功：暂存的文件留着，位置写进日志，方便用户找回。
-fn keep(services: &impl DownloadServices, run: &DownloadRun, target: &TargetCandidate, staging: &StagingDir, paths: &[String], error: &str) {
+fn keep(
+    services: &impl DownloadServices,
+    run: &DownloadRun,
+    target: &TargetCandidate,
+    staging: &StagingDir,
+    paths: &[String],
+    error: &str,
+) {
     let message = format!(
         "{}「{}」没有导入目标资源库「{}」，下载的 {} 个文件留在暂存目录 {}，可以从这里找回。",
         run.progress.label,
@@ -171,11 +249,23 @@ fn keep(services: &impl DownloadServices, run: &DownloadRun, target: &TargetCand
     );
     eprintln!("Nana {message}");
     let context = json!({ "stagingPath": staging.path(), "paths": paths, "error": error, "targetRepoId": target.repo_id });
-    services.log(log(run, "warn", "downloadStagingKept", message, Some(target.repo_id.clone()), context));
+    services.log(log(
+        run,
+        "warn",
+        "downloadStagingKept",
+        message,
+        Some(target.repo_id.clone()),
+        context,
+    ));
 }
 
 /// 清理暂存以后没清干净的写日志：插件报告了暂存目录以外的文件（不删），或者有删不掉的。
-fn report_cleanup(services: &impl DownloadServices, run: &DownloadRun, staging: &StagingDir, cleanup: Cleanup) {
+fn report_cleanup(
+    services: &impl DownloadServices,
+    run: &DownloadRun,
+    staging: &StagingDir,
+    cleanup: Cleanup,
+) {
     if !cleanup.outside.is_empty() {
         let message = format!(
             "{}「{}」交回的 {} 个文件不在这次下载的暂存目录里，宿主不清理它们。",
@@ -185,18 +275,48 @@ fn report_cleanup(services: &impl DownloadServices, run: &DownloadRun, staging: 
         );
         eprintln!("Nana {message}");
         let context = json!({ "stagingPath": staging.path(), "paths": cleanup.outside });
-        services.log(log(run, "warn", "downloadStagingOutside", message, None, context));
+        services.log(log(
+            run,
+            "warn",
+            "downloadStagingOutside",
+            message,
+            None,
+            context,
+        ));
     }
     if cleanup.left || !cleanup.failed.is_empty() {
-        let failed: Vec<Value> = cleanup.failed.iter().map(|(path, error)| json!({ "path": path, "error": error })).collect();
-        let message = format!("{}「{}」的暂存目录没有清干净：{}", run.progress.label, run.progress.subject, staging.path().display());
+        let failed: Vec<Value> = cleanup
+            .failed
+            .iter()
+            .map(|(path, error)| json!({ "path": path, "error": error }))
+            .collect();
+        let message = format!(
+            "{}「{}」的暂存目录没有清干净：{}",
+            run.progress.label,
+            run.progress.subject,
+            staging.path().display()
+        );
         eprintln!("Nana {message}");
-        services.log(log(run, "warn", "downloadStagingLeft", message, None, json!({ "stagingPath": staging.path(), "failed": failed })));
+        services.log(log(
+            run,
+            "warn",
+            "downloadStagingLeft",
+            message,
+            None,
+            json!({ "stagingPath": staging.path(), "failed": failed }),
+        ));
     }
 }
 
 /// 宿主写的一条暂存日志：分类 `source`，记在插件名下，资源库默认是来源资源库。
-fn log(run: &DownloadRun, level: &str, action: &str, message: String, repo_id: Option<String>, context: Value) -> SystemLogWriteRequest {
+fn log(
+    run: &DownloadRun,
+    level: &str,
+    action: &str,
+    message: String,
+    repo_id: Option<String>,
+    context: Value,
+) -> SystemLogWriteRequest {
     SystemLogWriteRequest {
         level: level.into(),
         category: "source".into(),
@@ -207,7 +327,11 @@ fn log(run: &DownloadRun, level: &str, action: &str, message: String, repo_id: O
         plugin_id: Some(run.plugin_id.clone()),
         source_kind: Some("host".into()),
         source_label: None,
-        location: Some(SystemLogLocationInput { module_path: Some(module_path!().into()), file: Some(file!().into()), line: Some(line!()) }),
+        location: Some(SystemLogLocationInput {
+            module_path: Some(module_path!().into()),
+            file: Some(file!().into()),
+            line: Some(line!()),
+        }),
     }
 }
 
@@ -222,26 +346,48 @@ struct LiveServices {
 
 impl DownloadServices for LiveServices {
     fn call_plugin(&self, request: PluginCallRequest) -> Result<Value, String> {
-        self.executor.block_on(self.plugin.call_plugin(request)).map(|response| response.payload)
+        self.executor
+            .block_on(self.plugin.call_plugin(request))
+            .map(|response| response.payload)
     }
 
-    fn create_folder(&self, repo_id: &str, name: &str) -> Result<(), String> {
-        let request = FileCreateRequest { repo_id: repo_id.to_string(), parent_path: None, name: name.to_string() };
-        self.executor.block_on(self.browser.create_directory(request)).map(|_| ())
+    fn create_folder(
+        &self,
+        repo_id: &str,
+        parent_path: Option<&str>,
+        name: &str,
+    ) -> Result<(), String> {
+        let request = FileCreateRequest {
+            repo_id: repo_id.to_string(),
+            parent_path: parent_path.map(str::to_string),
+            name: name.to_string(),
+        };
+        self.executor
+            .block_on(self.browser.create_directory(request))
+            .map(|_| ())
     }
 
     fn import(&self, request: FileImportRequest) -> Result<Value, String> {
-        self.executor.block_on(self.tasks.execute(PROTOCOL_ENTRY_IMPORT, request)).map(|(output, _)| output)
+        self.executor
+            .block_on(self.tasks.execute(PROTOCOL_ENTRY_IMPORT, request))
+            .map(|(output, _)| output)
     }
 
     fn sync(&self, repo_id: &str) -> Result<(), String> {
-        let request = SyncRequest { repo_id: repo_id.to_string() };
-        self.executor.block_on(self.tasks.execute(PROTOCOL_REPOSITORY_SYNC, request)).map(|_| ())
+        let request = SyncRequest {
+            repo_id: repo_id.to_string(),
+        };
+        self.executor
+            .block_on(self.tasks.execute(PROTOCOL_REPOSITORY_SYNC, request))
+            .map(|_| ())
     }
 
     fn log(&self, request: SystemLogWriteRequest) {
         let action = request.action.clone();
-        if let Err(error) = self.executor.block_on(self.system.write_system_log(request)) {
+        if let Err(error) = self
+            .executor
+            .block_on(self.system.write_system_log(request))
+        {
             eprintln!("Nana 写系统日志失败：{action}：{error}");
         }
     }

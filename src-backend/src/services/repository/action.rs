@@ -101,6 +101,19 @@ pub(super) fn run_repository_action(
     if !action.enabled {
         return Err("repository action is disabled".to_string());
     }
+    let has_target_paths = request
+        .target_paths
+        .as_ref()
+        .is_some_and(|paths| paths.iter().any(|path| !path.trim().is_empty()));
+    let has_asset_ids = request
+        .asset_ids
+        .as_ref()
+        .is_some_and(|ids| ids.iter().any(|id| !id.trim().is_empty()));
+    if !has_target_paths && !has_asset_ids {
+        return Err(
+            "repository action requires explicit non-empty targetPaths or assetIds".to_string(),
+        );
+    }
     let target_asset_ids = resolve_action_target_asset_ids(&connection, &request)?;
     if target_asset_ids.is_empty() {
         return Err("repository action requires at least one target".to_string());

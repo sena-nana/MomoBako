@@ -1649,7 +1649,10 @@ mod tests {
                 )],
             },
         );
-        write_test_plugin_archive(&runtime_root.join("good-plugin.momoplug"), "user.good-plugin");
+        write_test_plugin_archive(
+            &runtime_root.join("good-plugin.momoplug"),
+            "user.good-plugin",
+        );
 
         let state = RepositoryState::from_root(service_root);
         let plugins = state.list_plugins().expect("plugins should load");
@@ -4467,7 +4470,7 @@ mod tests {
                 asset_ids: None,
             })
             .expect_err("targetless action should be rejected");
-        assert!(missing_target_error.contains("at least one target"));
+        assert!(missing_target_error.contains("explicit non-empty targetPaths or assetIds"));
 
         let response = state
             .run_repository_action(RepositoryActionRunRequest {
