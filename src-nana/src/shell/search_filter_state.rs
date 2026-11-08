@@ -5,7 +5,7 @@
 //! 常驻首页路由嵌了常驻筛选栏，读到的都是同一份最新的值。筛选栏关着时不算候选和库类型快捷方式，
 //! 打开时再算；输入框的草稿走 [`ModelField`]，ViewModel 的草稿变了才写回，组合输入和刚打的字不被冲掉。
 
-use nana_ui::runtime::view::{signal, Signal};
+use nana_ui::runtime::view::{Signal, signal};
 
 use super::super::hot::ModelField;
 use super::super::inspect::{AdvancedField, MetadataInput, SortDirection};
@@ -78,16 +78,24 @@ impl FilterBarView {
     pub(crate) fn project(model: &ShellViewModel) -> Self {
         let inspect = &model.inspect;
         let filters = &inspect.filters;
-        let open = model.workspace.main_region() == MainRegion::HasRepository && inspect.filter_bar_open;
+        let open =
+            model.workspace.main_region() == MainRegion::HasRepository && inspect.filter_bar_open;
         let (options, shortcuts) = if open {
-            (presenter::filter_options(model), presenter::active_shortcuts(model))
+            (
+                presenter::filter_options(model),
+                presenter::active_shortcuts(model),
+            )
         } else {
             (FilterOptions::default(), Vec::new())
         };
         Self {
             open,
             head: FilterHead {
-                repository: model.workspace.active_repository().map(|item| item.name.clone()).unwrap_or_default(),
+                repository: model
+                    .workspace
+                    .active_repository()
+                    .map(|item| item.name.clone())
+                    .unwrap_or_default(),
                 count: inspect.active_filter_count(),
                 clear_disabled: !filters.has_active_filters() && inspect.query.trim().is_empty(),
             },
@@ -166,16 +174,22 @@ impl FilterBarSignals {
             sort_direction: signal(draft.sort_direction),
             color: ModelField::new(&draft.color),
             shape: ModelField::new(&draft.shape),
-            advanced: draft.advanced.each_ref().map(|value| ModelField::new(value)),
+            advanced: draft
+                .advanced
+                .each_ref()
+                .map(|value| ModelField::new(value)),
         }
     }
 
     /// 高级区某个输入框的草稿。
     pub(crate) fn advanced(&self, field: AdvancedField) -> ModelField {
-        let index = ADVANCED_FIELDS.iter().position(|item| *item == field).unwrap_or_else(|| {
-            eprintln!("Nana 筛选栏没有高级字段 {field:?}，改用第一个输入框");
-            0
-        });
+        let index = ADVANCED_FIELDS
+            .iter()
+            .position(|item| *item == field)
+            .unwrap_or_else(|| {
+                eprintln!("Nana 筛选栏没有高级字段 {field:?}，改用第一个输入框");
+                0
+            });
         self.advanced[index]
     }
 
@@ -190,7 +204,8 @@ impl FilterBarSignals {
         self.selected.try_set_if_changed(view.selected);
         self.min_rating.try_set_if_changed(view.min_rating);
         self.shortcuts.try_set_if_changed(view.shortcuts);
-        self.sort_direction.try_set_if_changed(view.draft.sort_direction);
+        self.sort_direction
+            .try_set_if_changed(view.draft.sort_direction);
         self.color.sync(&view.draft.color);
         self.shape.sync(&view.draft.shape);
         for (draft, value) in self.advanced.iter().zip(&view.draft.advanced) {
@@ -201,12 +216,16 @@ impl FilterBarSignals {
 
 #[cfg(test)]
 mod tests {
-    use super::{FilterBarView, ADVANCED_FIELDS};
+    use super::{ADVANCED_FIELDS, FilterBarView};
     use crate::shell::acceptance_gap_models;
     use crate::shell::inspect::AdvancedField;
 
     fn scene(name: &str) -> crate::shell::ShellViewModel {
-        acceptance_gap_models().into_iter().find(|(scene, _)| *scene == name).map(|(_, model)| model).expect("场景")
+        acceptance_gap_models()
+            .into_iter()
+            .find(|(scene, _)| *scene == name)
+            .map(|(_, model)| model)
+            .expect("场景")
     }
 
     #[test]
@@ -224,7 +243,10 @@ mod tests {
         model.inspect.filter_bar_open = false;
         let closed = FilterBarView::project(&model);
         assert!(!closed.open);
-        assert!(closed.options.formats.is_empty() && closed.shortcuts.is_empty(), "关着时不算候选");
+        assert!(
+            closed.options.formats.is_empty() && closed.shortcuts.is_empty(),
+            "关着时不算候选"
+        );
         assert_eq!(closed.selected, view.selected, "已选条件照常投影");
     }
 

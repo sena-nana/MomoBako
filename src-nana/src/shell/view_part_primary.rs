@@ -16,14 +16,18 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use nana_ui::runtime::view::{css, dynamic, on_mount, signal, widget, AnyView, IntoView, NodeRef, Signal};
+use nana_ui::runtime::view::{
+    AnyView, IntoView, NodeRef, Signal, css, dynamic, on_mount, signal, widget,
+};
 use nana_ui::runtime::{
-    AppContext, Entity, FrameworkError, LengthSpec, MountedView, MutationQueue, RadiusTier, RuntimeDocument,
-    SemanticColorRole, Stack, StableNodeId,
+    AppContext, Entity, FrameworkError, LengthSpec, MountedView, MutationQueue, RadiusTier,
+    RuntimeDocument, SemanticColorRole, StableNodeId, Stack,
 };
 
 use super::hot::HotSignals;
-use super::inspect_search_view::{FilterBarSignals, FilterBarView, SearchPanelSignals, SearchPanelView};
+use super::inspect_search_view::{
+    FilterBarSignals, FilterBarView, SearchPanelSignals, SearchPanelView,
+};
 use super::remount_state;
 use super::route_admin::AdminSignals;
 use super::route_empty::{EmptySignals, EmptyView};
@@ -31,7 +35,9 @@ use super::route_files::FilesRouteSignals;
 use super::route_missing::MissingSignals;
 use super::route_playlists::PlaylistRouteSignals;
 use super::route_startup::{StartupSignals, StartupView};
-use super::view_part::{composing_under, first_root, mount_detached, BodyMode, PartCx, PartId, ShellPart, Swap};
+use super::view_part::{
+    BodyMode, PartCx, PartId, ShellPart, Swap, composing_under, first_root, mount_detached,
+};
 use super::{MainRegion, ShellPage, ShellViewModel, WorkspacePanel};
 
 /// 主区显示哪一种页面。和对应 Vue 路由的取舍一致：启动未就绪（含启动失败）只显示启动页；
@@ -79,10 +85,15 @@ impl RouteKey {
                 WorkspacePanel::Logs => Self::Logs,
                 WorkspacePanel::Extensions => Self::Extensions,
                 WorkspacePanel::Actions => Self::Actions,
-                WorkspacePanel::Files | WorkspacePanel::Trash | WorkspacePanel::SmartFolder | WorkspacePanel::Playlist => Self::Empty,
+                WorkspacePanel::Files
+                | WorkspacePanel::Trash
+                | WorkspacePanel::SmartFolder
+                | WorkspacePanel::Playlist => Self::Empty,
             },
             MainRegion::HasRepository => match panel {
-                WorkspacePanel::Files | WorkspacePanel::Trash | WorkspacePanel::SmartFolder => Self::Files,
+                WorkspacePanel::Files | WorkspacePanel::Trash | WorkspacePanel::SmartFolder => {
+                    Self::Files
+                }
                 WorkspacePanel::Playlist => Self::Playlists,
                 WorkspacePanel::Logs => Self::Logs,
                 WorkspacePanel::Extensions => Self::Extensions,
@@ -146,7 +157,9 @@ impl RouteSignals {
             RouteKey::Startup => self.startup.write(StartupView::project(model)),
             RouteKey::Missing => self.missing.write(model),
             RouteKey::Empty => self.empty.write(EmptyView::project(model)),
-            RouteKey::Search | RouteKey::EmptySearch => self.search.write(SearchPanelView::project(model)),
+            RouteKey::Search | RouteKey::EmptySearch => {
+                self.search.write(SearchPanelView::project(model))
+            }
             RouteKey::Settings => self.admin.write_settings(model),
             RouteKey::Logs => self.admin.write_logs(model),
             RouteKey::Extensions => self.admin.write_extensions(model),
@@ -155,7 +168,10 @@ impl RouteSignals {
             RouteKey::Playlists => self.playlists.write(model),
         }
         // 筛选栏只在有仓库的首页上出现：启动、设置、缺失和空库页都不写。
-        if !matches!(route, RouteKey::Startup | RouteKey::Settings | RouteKey::Missing | RouteKey::Empty) {
+        if !matches!(
+            route,
+            RouteKey::Startup | RouteKey::Settings | RouteKey::Missing | RouteKey::Empty
+        ) {
             self.filter.write(FilterBarView::project(model));
         }
     }
@@ -248,7 +264,10 @@ impl ShellPart for PrimaryPart {
     type Signals = PrimarySignals;
 
     fn signals(model: &ShellViewModel) -> Self::Signals {
-        PrimarySignals { route: signal(RouteKey::of(model)), routes: RouteSignals::new(model) }
+        PrimarySignals {
+            route: signal(RouteKey::of(model)),
+            routes: RouteSignals::new(model),
+        }
     }
 
     fn new(signals: Self::Signals) -> Self {
@@ -256,7 +275,15 @@ impl ShellPart for PrimaryPart {
         let handoff = Rc::new(RefCell::new(Handoff::default()));
         HANDOFFS.with(|handoffs| handoffs.borrow_mut().insert(id, handoff.clone()));
         let route = signals.route.get_untracked();
-        Self { id, signals, handoff, stage: None, solo: None, mode: BodyMode::Workbench, route }
+        Self {
+            id,
+            signals,
+            handoff,
+            stage: None,
+            solo: None,
+            mode: BodyMode::Workbench,
+            route,
+        }
     }
 
     /// 放进槽位的根：有侧栏时是外框，主区独占时是包着外框的壳层底色。
@@ -270,11 +297,20 @@ impl ShellPart for PrimaryPart {
     /// 第一次挂载：挂外框和当前路由的分支，分支在外框挂载时同步建好，岛随即放进占位节点。
     /// 之后排法变了：外框、分支和岛都不重建，只在挪位置之前记下外框里的焦点、选区和滚动
     /// （外框离开工作区时会被停放，焦点随之清掉），交给调度方放好以后找回。
-    fn mount(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel, mode: BodyMode) -> Result<Swap, FrameworkError> {
+    fn mount(
+        &mut self,
+        cx: &mut PartCx<'_>,
+        model: &ShellViewModel,
+        mode: BodyMode,
+    ) -> Result<Swap, FrameworkError> {
         self.mode = mode;
         let document_id = cx.document.document();
         if mode == BodyMode::Solo && self.solo.is_none() {
-            self.solo = Some(cx.document.context_mut().mount_view_detached(document_id, solo_frame)?);
+            self.solo = Some(
+                cx.document
+                    .context_mut()
+                    .mount_view_detached(document_id, solo_frame)?,
+            );
         }
         if let Some(stage) = &self.stage {
             let roots = stage.roots().to_vec();
@@ -285,7 +321,11 @@ impl ShellPart for PrimaryPart {
         self.signals.routes.write(route, model);
         self.enter(cx, model, route)?;
         let (signals, hot, id) = (self.signals, cx.hot, self.id);
-        self.stage = Some(cx.document.context_mut().mount_view_detached(document_id, move || stage_frame(signals, hot, id))?);
+        self.stage = Some(
+            cx.document
+                .context_mut()
+                .mount_view_detached(document_id, move || stage_frame(signals, hot, id))?,
+        );
         Ok(Swap::default())
     }
 
@@ -299,7 +339,11 @@ impl ShellPart for PrimaryPart {
     }
 
     /// 换路由时写新的键，新路由的岛先挂好等着，真正换分支在下一次刷新。分支还在时只当场换岛。
-    fn remount(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel) -> Result<Swap, FrameworkError> {
+    fn remount(
+        &mut self,
+        cx: &mut PartCx<'_>,
+        model: &ShellViewModel,
+    ) -> Result<Swap, FrameworkError> {
         let route = RouteKey::of(model);
         if self.handoff.borrow().shown == Some(route) {
             // 同一路由里岛的版本变了，或者换走又在刷新前换了回来：把键写回来，当场换岛。
@@ -314,7 +358,9 @@ impl ShellPart for PrimaryPart {
     }
 
     fn composing(&self, document: &RuntimeDocument) -> bool {
-        self.stage.as_ref().is_some_and(|stage| composing_under(document, stage.roots()))
+        self.stage
+            .as_ref()
+            .is_some_and(|stage| composing_under(document, stage.roots()))
     }
 }
 
@@ -323,7 +369,10 @@ impl PrimaryPart {
     /// 样式和无障碍补丁，重新投影一次换回自己的。已经在底色里时什么都不做。调度方在工作区放下外框之后、
     /// 把底色放进 body 之前调。
     pub(crate) fn hold_solo(&self, context: &mut AppContext) -> Result<(), FrameworkError> {
-        let (Some(stage), Some(solo)) = (first_root(self.stage.as_ref()), first_root(self.solo.as_ref())) else {
+        let (Some(stage), Some(solo)) = (
+            first_root(self.stage.as_ref()),
+            first_root(self.solo.as_ref()),
+        ) else {
             eprintln!("Nana 主区独占时外框或壳层底色还没挂，跳过");
             return Ok(());
         };
@@ -339,7 +388,12 @@ impl PrimaryPart {
 
     /// 进 `route`：按当前 ViewModel 挂好它的岛，把路由写进键。分支在外框挂载或下一次刷新时建出，
     /// 挂好时把岛放进占位节点。
-    fn enter(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel, route: RouteKey) -> Result<(), FrameworkError> {
+    fn enter(
+        &mut self,
+        cx: &mut PartCx<'_>,
+        model: &ShellViewModel,
+        route: RouteKey,
+    ) -> Result<(), FrameworkError> {
         self.stage_islands(cx, model, route)?;
         self.signals.route.set(route);
         self.route = route;
@@ -348,12 +402,22 @@ impl PrimaryPart {
     }
 
     /// 换下上一批岛，按当前 ViewModel 挂好 `route` 的岛，等分支挂好时放进占位节点。
-    fn stage_islands(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel, route: RouteKey) -> Result<(), FrameworkError> {
+    fn stage_islands(
+        &mut self,
+        cx: &mut PartCx<'_>,
+        model: &ShellViewModel,
+        route: RouteKey,
+    ) -> Result<(), FrameworkError> {
         self.discard_islands(cx.document.context_mut());
         let mut fresh = Vec::new();
         for island in islands(route, &self.signals.routes) {
             let content = mount_detached(cx.document, cx.hot, Self::ID, || (island.build)(model))?;
-            fresh.push(IslandView { island, stamp: (island.stamp)(model), content, placed: false });
+            fresh.push(IslandView {
+                island,
+                stamp: (island.stamp)(model),
+                content,
+                placed: false,
+            });
         }
         let mut handoff = self.handoff.borrow_mut();
         handoff.islands = fresh;
@@ -372,17 +436,30 @@ impl PrimaryPart {
     /// 岛不是当前路由的，或者有岛的版本和 ViewModel 对不上。
     fn islands_stale(&self, model: &ShellViewModel) -> bool {
         let handoff = self.handoff.borrow();
-        handoff.islands_route != Some(self.route) || handoff.islands.iter().any(|view| view.stamp != (view.island.stamp)(model))
+        handoff.islands_route != Some(self.route)
+            || handoff
+                .islands
+                .iter()
+                .any(|view| view.stamp != (view.island.stamp)(model))
     }
 
     /// 分支还在时换岛：版本变了（或者还没放进去）的岛按当前 ViewModel 重建，当场放进占位节点；
     /// 旧内容和要找回的焦点、滚动交给调度方收尾。岛还是别的路由的（换走又换回来）时按登记从头建。
-    fn refresh_islands(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel) -> Result<Swap, FrameworkError> {
+    fn refresh_islands(
+        &mut self,
+        cx: &mut PartCx<'_>,
+        model: &ShellViewModel,
+    ) -> Result<Swap, FrameworkError> {
         if self.handoff.borrow().islands_route != Some(self.route) {
             self.discard_islands(cx.document.context_mut());
             let fresh = islands(self.route, &self.signals.routes)
                 .into_iter()
-                .map(|island| IslandView { island, stamp: 0, content: None, placed: false })
+                .map(|island| IslandView {
+                    island,
+                    stamp: 0,
+                    content: None,
+                    placed: false,
+                })
                 .collect();
             let mut handoff = self.handoff.borrow_mut();
             handoff.islands = fresh;
@@ -394,7 +471,10 @@ impl PrimaryPart {
             let (island, stale) = {
                 let handoff = self.handoff.borrow();
                 let view = &handoff.islands[index];
-                (view.island, !view.placed || view.stamp != (view.island.stamp)(model))
+                (
+                    view.island,
+                    !view.placed || view.stamp != (view.island.stamp)(model),
+                )
             };
             if stale {
                 swap.merge(self.refresh_island(cx, model, index, island)?);
@@ -404,13 +484,25 @@ impl PrimaryPart {
     }
 
     /// 重建第 `index` 个岛，放进占位节点。占位节点不在时只记日志，下次同步再放。
-    fn refresh_island(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel, index: usize, island: Island) -> Result<Swap, FrameworkError> {
-        let Some(target) = island.slot.get_untracked().filter(|id| cx.document.context().world().contains(*id)) else {
+    fn refresh_island(
+        &mut self,
+        cx: &mut PartCx<'_>,
+        model: &ShellViewModel,
+        index: usize,
+        island: Island,
+    ) -> Result<Swap, FrameworkError> {
+        let Some(target) = island
+            .slot
+            .get_untracked()
+            .filter(|id| cx.document.context().world().contains(*id))
+        else {
             eprintln!("Nana 主区岛的占位节点不在，岛 {index} 下次同步再放");
             return Ok(Swap::default());
         };
         let document_id = cx.document.document();
-        let kept = self.island_roots(index).map(|roots| remount_state::capture(cx.document.context(), document_id, &roots));
+        let kept = self
+            .island_roots(index)
+            .map(|roots| remount_state::capture(cx.document.context(), document_id, &roots));
         let fresh = mount_detached(cx.document, cx.hot, Self::ID, || (island.build)(model))?;
         if let Some(fresh) = &fresh
             && !place(cx.document.context_mut(), target, fresh)
@@ -431,15 +523,22 @@ impl PrimaryPart {
 
     /// 第 `index` 个岛现在内容的根。
     fn island_roots(&self, index: usize) -> Option<Vec<StableNodeId>> {
-        self.handoff.borrow().islands.get(index).and_then(|view| view.content.as_ref()).map(|content| content.roots().to_vec())
+        self.handoff
+            .borrow()
+            .islands
+            .get(index)
+            .and_then(|view| view.content.as_ref())
+            .map(|content| content.roots().to_vec())
     }
 }
 
 /// 主区外框：白底 `Lg` 圆角。里面的路由容器占满外框，样式和 `Stack::fill_column(0)` 相同。
 fn stage_frame(signals: PrimarySignals, hot: HotSignals, id: u64) -> AnyView {
-    let routes = dynamic(signals.route, move |route: &RouteKey| branch(*route, signals, hot, id))
-        .key(ROUTE_CONTAINER)
-        .css(css! { height: 100%; min-height: 0; flex-grow: 1; flex-shrink: 1; });
+    let routes = dynamic(signals.route, move |route: &RouteKey| {
+        branch(*route, signals, hot, id)
+    })
+    .key(ROUTE_CONTAINER)
+    .css(css! { height: 100%; min-height: 0; flex-grow: 1; flex-shrink: 1; });
     widget(
         Stack::fill_column(0.0)
             .min_height(LengthSpec::Px(0.0))
@@ -477,8 +576,17 @@ fn settle(cx: &mut AppContext, id: u64, route: RouteKey) {
 
 /// 分支挂好后把还没放的岛放进各自的占位节点。占位节点不在时记日志，下次同步再放。
 fn place_islands(cx: &mut AppContext, islands: &mut [IslandView]) {
-    for (index, view) in islands.iter_mut().enumerate().filter(|(_, view)| !view.placed) {
-        let Some(target) = view.island.slot.get_untracked().filter(|id| cx.world().contains(*id)) else {
+    for (index, view) in islands
+        .iter_mut()
+        .enumerate()
+        .filter(|(_, view)| !view.placed)
+    {
+        let Some(target) = view
+            .island
+            .slot
+            .get_untracked()
+            .filter(|id| cx.world().contains(*id))
+        else {
             eprintln!("Nana 主区分支里没有岛 {index} 的占位节点");
             continue;
         };

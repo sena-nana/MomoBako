@@ -17,8 +17,17 @@ pub(super) fn load(bytes: &[u8]) -> Result<NativeLoad, String> {
     } else if mesh.is_none() {
         eprintln!("Nana 模型没有可绘制的三角形，保留结构摘要");
     }
-    let frames = mesh.as_ref().map(|mesh| vec![raster(mesh, 0.0, 1.0)]).unwrap_or_default();
-    Ok(NativeLoad { text, frames, mesh, paged: false })
+    let frames = mesh
+        .as_ref()
+        .map(|mesh| vec![raster(mesh, 0.0, 1.0)])
+        .unwrap_or_default();
+    Ok(NativeLoad {
+        text,
+        frames,
+        mesh,
+        paged: false,
+        archive: None,
+    })
 }
 
 pub(super) fn raster(mesh: &MeshData, yaw: f32, zoom: f32) -> PageFrame {
@@ -32,14 +41,24 @@ pub(super) fn raster(mesh: &MeshData, yaw: f32, zoom: f32) -> PageFrame {
         put(&mut rgba, VIEW_W - 1, y, 30, 30, 30, 255);
     }
     let (min, max) = bounds(mesh);
-    let center = [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5, (min[2] + max[2]) * 0.5];
-    let span = (max[0] - min[0]).max(max[1] - min[1]).max(max[2] - min[2]).max(1e-4);
+    let center = [
+        (min[0] + max[0]) * 0.5,
+        (min[1] + max[1]) * 0.5,
+        (min[2] + max[2]) * 0.5,
+    ];
+    let span = (max[0] - min[0])
+        .max(max[1] - min[1])
+        .max(max[2] - min[2])
+        .max(1e-4);
     let scale = (VIEW_W.min(VIEW_H) as f32 * 0.72 / span) * zoom;
     let cos = yaw.cos();
     let sin = yaw.sin();
     let mut painted = Vec::new();
     for tri in &mesh.triangles {
-        let verts: Vec<[f32; 3]> = tri.iter().filter_map(|index| mesh.vertices.get(*index as usize).copied()).collect();
+        let verts: Vec<[f32; 3]> = tri
+            .iter()
+            .filter_map(|index| mesh.vertices.get(*index as usize).copied())
+            .collect();
         if verts.len() != 3 {
             continue;
         }
@@ -51,7 +70,11 @@ pub(super) fn raster(mesh: &MeshData, yaw: f32, zoom: f32) -> PageFrame {
                 let z = vertex[2] - center[2];
                 let xr = x * cos - z * sin;
                 let zr = x * sin + z * cos;
-                [VIEW_W as f32 * 0.5 + xr * scale, VIEW_H as f32 * 0.5 - y * scale, zr]
+                [
+                    VIEW_W as f32 * 0.5 + xr * scale,
+                    VIEW_H as f32 * 0.5 - y * scale,
+                    zr,
+                ]
             })
             .collect();
         let depth = (projected[0][2] + projected[1][2] + projected[2][2]) / 3.0;
@@ -80,7 +103,11 @@ fn parse_mesh(bytes: &[u8]) -> Option<MeshData> {
     if is_fbx(bytes) || is_blend(bytes) {
         return None;
     }
-    let head = bytes.iter().position(|byte| !byte.is_ascii_whitespace()).map(|index| &bytes[index..]).unwrap_or(bytes);
+    let head = bytes
+        .iter()
+        .position(|byte| !byte.is_ascii_whitespace())
+        .map(|index| &bytes[index..])
+        .unwrap_or(bytes);
     if head.first() == Some(&b'{') {
         return mesh_from_gltf(bytes, None);
     }
@@ -89,9 +116,12 @@ fn parse_mesh(bytes: &[u8]) -> Option<MeshData> {
 
 fn is_fbx(bytes: &[u8]) -> bool {
     bytes.starts_with(b"Kaydara FBX Binary")
-        || bytes.iter().position(|byte| !byte.is_ascii_whitespace()).is_some_and(|index| {
-            bytes[index..].starts_with(b";") || bytes[index..].starts_with(b"FBX")
-        })
+        || bytes
+            .iter()
+            .position(|byte| !byte.is_ascii_whitespace())
+            .is_some_and(|index| {
+                bytes[index..].starts_with(b";") || bytes[index..].starts_with(b"FBX")
+            })
 }
 
 fn is_blend(bytes: &[u8]) -> bool {
@@ -137,8 +167,16 @@ fn mesh_from_obj(bytes: &[u8]) -> Option<MeshData> {
 }
 
 fn obj_index(index: i32, len: usize) -> Option<u32> {
-    let resolved = if index > 0 { index as usize - 1 } else if index < 0 { len.wrapping_add(index as usize) } else { return None };
-    u32::try_from(resolved).ok().filter(|index| (*index as usize) < len)
+    let resolved = if index > 0 {
+        index as usize - 1
+    } else if index < 0 {
+        len.wrapping_add(index as usize)
+    } else {
+        return None;
+    };
+    u32::try_from(resolved)
+        .ok()
+        .filter(|index| (*index as usize) < len)
 }
 
 fn mesh_from_stl(bytes: &[u8]) -> Option<MeshData> {
@@ -217,13 +255,24 @@ fn mesh_from_gltf(json: &[u8], bin: Option<&[u8]>) -> Option<MeshData> {
     let value: serde_json::Value = serde_json::from_slice(json).ok()?;
     let primitive = value.pointer("/meshes/0/primitives/0")?;
     let position = primitive.pointer("/attributes/POSITION")?.as_u64()? as usize;
-    let indices = primitive.get("indices").and_then(|item| item.as_u64()).map(|item| item as usize);
+    let indices = primitive
+        .get("indices")
+        .and_then(|item| item.as_u64())
+        .map(|item| item as usize);
     let buffers = gltf_buffer(&value, bin)?;
     let vertices = read_vec3(&value, &buffers, position)?;
     let triangles = if let Some(indices) = indices {
         read_indices(&value, &buffers, indices, vertices.len())?
     } else {
-        (0..vertices.len() / 3).map(|index| [(index * 3) as u32, (index * 3 + 1) as u32, (index * 3 + 2) as u32]).collect()
+        (0..vertices.len() / 3)
+            .map(|index| {
+                [
+                    (index * 3) as u32,
+                    (index * 3 + 1) as u32,
+                    (index * 3 + 2) as u32,
+                ]
+            })
+            .collect()
     };
     finish(vertices, triangles)
 }
@@ -233,20 +282,30 @@ fn gltf_buffer(value: &serde_json::Value, bin: Option<&[u8]>) -> Option<Vec<u8>>
         return Some(bin.to_vec());
     }
     let uri = value.pointer("/buffers/0/uri")?.as_str()?;
-    let data = uri.strip_prefix("data:application/octet-stream;base64,").or_else(|| uri.strip_prefix("data:application/gltf-buffer;base64,"))?;
+    let data = uri
+        .strip_prefix("data:application/octet-stream;base64,")
+        .or_else(|| uri.strip_prefix("data:application/gltf-buffer;base64,"))?;
     base64_decode(data)
 }
 
-fn read_vec3(value: &serde_json::Value, buffer: &[u8], accessor_index: usize) -> Option<Vec<[f32; 3]>> {
+fn read_vec3(
+    value: &serde_json::Value,
+    buffer: &[u8],
+    accessor_index: usize,
+) -> Option<Vec<[f32; 3]>> {
     let accessor = value.pointer(&format!("/accessors/{accessor_index}"))?;
-    if accessor.get("type")?.as_str()? != "VEC3" || accessor.get("componentType")?.as_u64()? != 5126 {
+    if accessor.get("type")?.as_str()? != "VEC3" || accessor.get("componentType")?.as_u64()? != 5126
+    {
         eprintln!("Nana glTF 位置不是 32 位浮点 VEC3");
         return None;
     }
     let count = accessor.get("count")?.as_u64()? as usize;
     let view = accessor.get("bufferView")?.as_u64()? as usize;
     let (offset, length) = view_range(value, view)?;
-    let extra = accessor.get("byteOffset").and_then(|item| item.as_u64()).unwrap_or(0) as usize;
+    let extra = accessor
+        .get("byteOffset")
+        .and_then(|item| item.as_u64())
+        .unwrap_or(0) as usize;
     let start = offset + extra;
     if start + count * 12 > length.min(buffer.len()) && start + count * 12 > buffer.len() {
         return None;
@@ -266,13 +325,21 @@ fn read_vec3(value: &serde_json::Value, buffer: &[u8], accessor_index: usize) ->
     Some(vertices)
 }
 
-fn read_indices(value: &serde_json::Value, buffer: &[u8], accessor_index: usize, vertex_count: usize) -> Option<Vec<[u32; 3]>> {
+fn read_indices(
+    value: &serde_json::Value,
+    buffer: &[u8],
+    accessor_index: usize,
+    vertex_count: usize,
+) -> Option<Vec<[u32; 3]>> {
     let accessor = value.pointer(&format!("/accessors/{accessor_index}"))?;
     let component = accessor.get("componentType")?.as_u64()?;
     let count = accessor.get("count")?.as_u64()? as usize;
     let view = accessor.get("bufferView")?.as_u64()? as usize;
     let (offset, _) = view_range(value, view)?;
-    let extra = accessor.get("byteOffset").and_then(|item| item.as_u64()).unwrap_or(0) as usize;
+    let extra = accessor
+        .get("byteOffset")
+        .and_then(|item| item.as_u64())
+        .unwrap_or(0) as usize;
     let start = offset + extra;
     let width = match component {
         5121 => 1,
@@ -299,13 +366,19 @@ fn read_indices(value: &serde_json::Value, buffer: &[u8], accessor_index: usize,
         }
         indices.push(value);
     }
-    let triangles = indices.chunks_exact(3).map(|chunk| [chunk[0], chunk[1], chunk[2]]).collect();
+    let triangles = indices
+        .chunks_exact(3)
+        .map(|chunk| [chunk[0], chunk[1], chunk[2]])
+        .collect();
     Some(triangles)
 }
 
 fn view_range(value: &serde_json::Value, index: usize) -> Option<(usize, usize)> {
     let view = value.pointer(&format!("/bufferViews/{index}"))?;
-    let offset = view.get("byteOffset").and_then(|item| item.as_u64()).unwrap_or(0) as usize;
+    let offset = view
+        .get("byteOffset")
+        .and_then(|item| item.as_u64())
+        .unwrap_or(0) as usize;
     let length = view.get("byteLength")?.as_u64()? as usize;
     Some((offset, offset + length))
 }
@@ -328,7 +401,10 @@ fn mesh_from_3mf(bytes: &[u8]) -> Option<MeshData> {
     let mut vertices = Vec::new();
     let mut triangles = Vec::new();
     for tag in xml.split('<').skip(1) {
-        let token = tag.split(|ch: char| ch == '>' || ch.is_whitespace()).next().unwrap_or("");
+        let token = tag
+            .split(|ch: char| ch == '>' || ch.is_whitespace())
+            .next()
+            .unwrap_or("");
         let local = token.rsplit(':').next().unwrap_or(token);
         if local == "vertex" {
             let x = attr(tag, "x")?;
@@ -339,7 +415,10 @@ fn mesh_from_3mf(bytes: &[u8]) -> Option<MeshData> {
             let v1 = attr_u32(tag, "v1")?;
             let v2 = attr_u32(tag, "v2")?;
             let v3 = attr_u32(tag, "v3")?;
-            if (v1 as usize) < vertices.len() && (v2 as usize) < vertices.len() && (v3 as usize) < vertices.len() {
+            if (v1 as usize) < vertices.len()
+                && (v2 as usize) < vertices.len()
+                && (v3 as usize) < vertices.len()
+            {
                 triangles.push([v1, v2, v3]);
             }
         }
@@ -362,7 +441,43 @@ fn finish(vertices: Vec<[f32; 3]>, triangles: Vec<[u32; 3]>) -> Option<MeshData>
     if vertices.is_empty() || triangles.is_empty() {
         return None;
     }
-    Some(MeshData { vertices, triangles })
+    Some(MeshData {
+        vertices,
+        triangles,
+    })
+}
+
+/// Vue `Box3.getSize` 再 `toFixed(2)`：三轴跨度，每轴至少 0.01。
+///
+/// 只统计有限顶点。一个有限顶点都没有时记日志并返回空串，不编一个尺寸。
+pub(super) fn extent_label(mesh: &MeshData) -> String {
+    let mut min = [f32::INFINITY; 3];
+    let mut max = [f32::NEG_INFINITY; 3];
+    let mut finite = false;
+    for vertex in &mesh.vertices {
+        if vertex.iter().any(|axis| !axis.is_finite()) {
+            continue;
+        }
+        finite = true;
+        for axis in 0..3 {
+            min[axis] = min[axis].min(vertex[axis]);
+            max[axis] = max[axis].max(vertex[axis]);
+        }
+    }
+    if !finite {
+        eprintln!("Nana 模型顶点都不是有限数，不写尺寸");
+        return String::new();
+    }
+    let axis = |index: usize| {
+        let span = max[index] - min[index];
+        let span = if span.is_finite() {
+            span.max(0.01)
+        } else {
+            0.01
+        };
+        format!("{span:.2}")
+    };
+    format!("{} x {} x {}", axis(0), axis(1), axis(2))
 }
 
 fn bounds(mesh: &MeshData) -> ([f32; 3], [f32; 3]) {
@@ -381,9 +496,19 @@ fn fill_triangle(rgba: &mut [u8], tri: &[[f32; 3]]) {
     let xs = [tri[0][0], tri[1][0], tri[2][0]];
     let ys = [tri[0][1], tri[1][1], tri[2][1]];
     let min_x = xs.iter().cloned().fold(f32::MAX, f32::min).floor().max(0.0) as i32;
-    let max_x = xs.iter().cloned().fold(f32::MIN, f32::max).ceil().min(VIEW_W as f32 - 1.0) as i32;
+    let max_x = xs
+        .iter()
+        .cloned()
+        .fold(f32::MIN, f32::max)
+        .ceil()
+        .min(VIEW_W as f32 - 1.0) as i32;
     let min_y = ys.iter().cloned().fold(f32::MAX, f32::min).floor().max(0.0) as i32;
-    let max_y = ys.iter().cloned().fold(f32::MIN, f32::max).ceil().min(VIEW_H as f32 - 1.0) as i32;
+    let max_y = ys
+        .iter()
+        .cloned()
+        .fold(f32::MIN, f32::max)
+        .ceil()
+        .min(VIEW_H as f32 - 1.0) as i32;
     for y in min_y..=max_y {
         for x in min_x..=max_x {
             if inside(x as f32 + 0.5, y as f32 + 0.5, tri) {

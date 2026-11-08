@@ -100,7 +100,11 @@ impl FilesState {
             Err(error) => {
                 eprintln!("Nana 资源库导出失败：{error}");
                 self.export.notice.clear();
-                self.export.error = if error.is_empty() { "资源库导出失败。".into() } else { error };
+                self.export.error = if error.is_empty() {
+                    "资源库导出失败。".into()
+                } else {
+                    error
+                };
             }
         }
     }
@@ -108,7 +112,13 @@ impl FilesState {
     /// 只改导出对话框草稿。未知字段记日志，不改其它状态。
     pub(in crate::shell) fn set_export_field(&mut self, field: &str, value: String) {
         match field {
-            "target" => self.export.target = if value == "git" { "git".into() } else { "archive".into() },
+            "target" => {
+                self.export.target = if value == "git" {
+                    "git".into()
+                } else {
+                    "archive".into()
+                }
+            }
             "format" => self.export.format = value,
             "compression" => self.export.compression = value,
             "encrypt" => self.export.encrypt = value == "1",

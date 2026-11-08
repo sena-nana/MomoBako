@@ -36,11 +36,12 @@ fn embed_windows_resources() {
     let icon = manifest_dir.join("icons").join("icon.ico");
     println!("cargo:rerun-if-changed={}", icon.display());
     let version = env::var("CARGO_PKG_VERSION").expect("CARGO_PKG_VERSION");
-    let numeric = ["MAJOR", "MINOR", "PATCH"]
-        .map(|part| {
-            let value = env::var(format!("CARGO_PKG_VERSION_{part}")).expect("版本号");
-            value.parse::<u16>().unwrap_or_else(|_| panic!("版本号 {version} 的 {part} 段放不进版本资源"))
-        });
+    let numeric = ["MAJOR", "MINOR", "PATCH"].map(|part| {
+        let value = env::var(format!("CARGO_PKG_VERSION_{part}")).expect("版本号");
+        value
+            .parse::<u16>()
+            .unwrap_or_else(|_| panic!("版本号 {version} 的 {part} 段放不进版本资源"))
+    });
     let file_version = format!("{},{},{},0", numeric[0], numeric[1], numeric[2]);
     let icon_literal = icon.display().to_string().replace('\\', "/");
     let script = format!(

@@ -71,16 +71,24 @@ fn install_windows(window: nana_ui::WindowHandle) -> Result<TrayHost, String> {
     let open = MenuItem::with_id(TRAY_OPEN_ID, "打开 MomoBako", true, None);
     let quit_item = MenuItem::with_id(TRAY_QUIT_ID, "退出", true, None);
     let menu = Menu::new();
-    menu.append(&open).map_err(|error| format!("托盘菜单没有挂上：{error}"))?;
-    menu.append(&quit_item).map_err(|error| format!("托盘菜单没有挂上：{error}"))?;
+    menu.append(&open)
+        .map_err(|error| format!("托盘菜单没有挂上：{error}"))?;
+    menu.append(&quit_item)
+        .map_err(|error| format!("托盘菜单没有挂上：{error}"))?;
 
     let shared = Arc::new(Mutex::new(window));
     let clicks = Arc::clone(&shared);
     TrayIconEvent::set_event_handler(Some(move |event| {
         let show_window = matches!(
             event,
-            TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. }
-                | TrayIconEvent::DoubleClick { button: MouseButton::Left, .. }
+            TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } | TrayIconEvent::DoubleClick {
+                button: MouseButton::Left,
+                ..
+            }
         );
         if show_window {
             dispatch(&clicks, TrayAction::Show);
@@ -93,7 +101,8 @@ fn install_windows(window: nana_ui::WindowHandle) -> Result<TrayHost, String> {
         }
     }));
 
-    let icon = TrayIconBuilder::new().with_id("main-tray")
+    let icon = TrayIconBuilder::new()
+        .with_id("main-tray")
         .with_menu(Box::new(menu))
         .with_tooltip(TOOLTIP)
         .with_menu_on_left_click(false)
@@ -121,7 +130,8 @@ fn app_icon() -> Result<tray_icon::Icon, String> {
         .map_err(|error| format!("托盘图标解码失败：{error}"))?;
     let rgba = image.to_rgba8();
     let (width, height) = rgba.dimensions();
-    tray_icon::Icon::from_rgba(rgba.into_raw(), width, height).map_err(|error| format!("托盘图标无效：{error}"))
+    tray_icon::Icon::from_rgba(rgba.into_raw(), width, height)
+        .map_err(|error| format!("托盘图标无效：{error}"))
 }
 
 #[cfg(test)]

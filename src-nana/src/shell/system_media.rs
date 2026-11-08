@@ -7,8 +7,8 @@ use std::sync::Mutex;
 
 use crate::backend::services::repository::PlaylistItem;
 
-use super::player::{PlayerMessage, PlayerState};
 use super::ShellViewModel;
+use super::player::{PlayerMessage, PlayerState};
 
 /// 系统媒体键。和浏览器 `MediaSession` 的 play、pause、previoustrack、nexttrack、seekto、stop 对应。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,14 +49,20 @@ pub fn command_message(command: MediaCommand, repo_id: Option<String>) -> Player
         MediaCommand::Previous => PlayerMessage::PlayPrevious,
         MediaCommand::Next => PlayerMessage::PlayNext { natural_end: false },
         MediaCommand::Seek(position_ms) => PlayerMessage::Seek(position_ms),
-        MediaCommand::Stop => PlayerMessage::Stop { repo_id, clear_stored: false },
+        MediaCommand::Stop => PlayerMessage::Stop {
+            repo_id,
+            clear_stored: false,
+        },
     }
 }
 
 /// 从当前播放项和元数据拼出系统控件要显示的标题、艺人和专辑。
 pub fn now_playing(player: &PlayerState, file_thumbnail: Option<&str>) -> MediaNowPlaying {
     let listed = listed_item(player);
-    let filename = player.current_item().map(|item| item.filename.as_str()).filter(|name| !name.is_empty());
+    let filename = player
+        .current_item()
+        .map(|item| item.filename.as_str())
+        .filter(|name| !name.is_empty());
     let metadata = listed.and_then(|item| item.metadata.as_ref());
     let (title, artist, album) = media_text(filename, metadata);
     let thumbnail = listed
@@ -64,7 +70,12 @@ pub fn now_playing(player: &PlayerState, file_thumbnail: Option<&str>) -> MediaN
         .map(str::trim)
         .filter(|path| !path.is_empty())
         .map(str::to_string)
-        .or_else(|| file_thumbnail.map(str::trim).filter(|path| !path.is_empty()).map(str::to_string));
+        .or_else(|| {
+            file_thumbnail
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(str::to_string)
+        });
     let enabled = player.current_item().is_some();
     MediaNowPlaying {
         title,
@@ -92,7 +103,9 @@ pub fn poll(shell: &mut ShellViewModel) {
     }
     for command in commands {
         let repo_id = shell.player.repo_id.clone();
-        shell.reduce(super::ShellMessage::Player(command_message(command, repo_id)));
+        shell.reduce(super::ShellMessage::Player(command_message(
+            command, repo_id,
+        )));
     }
     shell.mark_surface_dirty();
 }
@@ -109,11 +122,19 @@ pub fn sync(window: &nana_ui::WindowHandle, shell: &ShellViewModel) {
 
 fn listed_item(player: &PlayerState) -> Option<&PlaylistItem> {
     let current = player.current_id.as_deref()?;
-    player.listed.as_ref()?.items.iter().find(|item| item.playlist_item_id == current)
+    player
+        .listed
+        .as_ref()?
+        .items
+        .iter()
+        .find(|item| item.playlist_item_id == current)
 }
 
 /// 标题、艺人、专辑。艺人优先用数组，其次用单个字符串。
-fn media_text(filename: Option<&str>, metadata: Option<&serde_json::Value>) -> (String, String, String) {
+fn media_text(
+    filename: Option<&str>,
+    metadata: Option<&serde_json::Value>,
+) -> (String, String, String) {
     let fields = metadata.and_then(|value| value.as_object());
     let title = fields
         .and_then(|fields| fields.get("title"))
@@ -128,11 +149,22 @@ fn media_text(filename: Option<&str>, metadata: Option<&serde_json::Value>) -> (
         .and_then(|fields| fields.get("artists"))
         .and_then(|value| value.as_array())
         .map(|items| {
-            items.iter().filter_map(|item| item.as_str()).map(str::trim).filter(|text| !text.is_empty()).collect::<Vec<_>>().join(", ")
+            items
+                .iter()
+                .filter_map(|item| item.as_str())
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join(", ")
         })
         .filter(|text| !text.is_empty())
         .or_else(|| {
-            fields.and_then(|fields| fields.get("artist")).and_then(|value| value.as_str()).map(str::trim).filter(|text| !text.is_empty()).map(str::to_string)
+            fields
+                .and_then(|fields| fields.get("artist"))
+                .and_then(|value| value.as_str())
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+                .map(str::to_string)
         })
         .unwrap_or_default();
     let album = fields
@@ -187,17 +219,18 @@ mod host {
     use std::sync::Mutex;
 
     use raw_window_handle::RawWindowHandle;
-    use windows::core::{factory, HSTRING};
     use windows::Foundation::{TimeSpan, TypedEventHandler};
     use windows::Media::{
-        MediaPlaybackStatus, MediaPlaybackType, PlaybackPositionChangeRequestedEventArgs, SystemMediaTransportControls,
-        SystemMediaTransportControlsButton, SystemMediaTransportControlsButtonPressedEventArgs,
+        MediaPlaybackStatus, MediaPlaybackType, PlaybackPositionChangeRequestedEventArgs,
+        SystemMediaTransportControls, SystemMediaTransportControlsButton,
+        SystemMediaTransportControlsButtonPressedEventArgs,
         SystemMediaTransportControlsTimelineProperties,
     };
     use windows::Win32::Foundation::HWND;
     use windows::Win32::System::WinRT::ISystemMediaTransportControlsInterop;
+    use windows::core::{HSTRING, factory};
 
-    use super::{enqueue, MediaCommand, MediaNowPlaying};
+    use super::{MediaCommand, MediaNowPlaying, enqueue};
 
     struct Session {
         controls: SystemMediaTransportControls,
@@ -260,21 +293,43 @@ mod host {
         Ok(())
     }
 
-    fn install(handle: raw_window_handle::WindowHandle<'_>, redraw: nana_ui::WindowHandle) -> Result<(), String> {
+    fn install(
+        handle: raw_window_handle::WindowHandle<'_>,
+        redraw: nana_ui::WindowHandle,
+    ) -> Result<(), String> {
         let hwnd = hwnd_of(handle)?;
         let controls = unsafe {
-            let interop = factory::<SystemMediaTransportControls, ISystemMediaTransportControlsInterop>().map_err(|error| error.to_string())?;
-            interop.GetForWindow::<SystemMediaTransportControls>(hwnd).map_err(|error| error.to_string())?
+            let interop =
+                factory::<SystemMediaTransportControls, ISystemMediaTransportControlsInterop>()
+                    .map_err(|error| error.to_string())?;
+            interop
+                .GetForWindow::<SystemMediaTransportControls>(hwnd)
+                .map_err(|error| error.to_string())?
         };
-        controls.SetIsEnabled(true).map_err(|error| error.to_string())?;
-        controls.SetIsPlayEnabled(true).map_err(|error| error.to_string())?;
-        controls.SetIsPauseEnabled(true).map_err(|error| error.to_string())?;
-        controls.SetIsStopEnabled(true).map_err(|error| error.to_string())?;
-        controls.SetIsNextEnabled(true).map_err(|error| error.to_string())?;
-        controls.SetIsPreviousEnabled(true).map_err(|error| error.to_string())?;
+        controls
+            .SetIsEnabled(true)
+            .map_err(|error| error.to_string())?;
+        controls
+            .SetIsPlayEnabled(true)
+            .map_err(|error| error.to_string())?;
+        controls
+            .SetIsPauseEnabled(true)
+            .map_err(|error| error.to_string())?;
+        controls
+            .SetIsStopEnabled(true)
+            .map_err(|error| error.to_string())?;
+        controls
+            .SetIsNextEnabled(true)
+            .map_err(|error| error.to_string())?;
+        controls
+            .SetIsPreviousEnabled(true)
+            .map_err(|error| error.to_string())?;
         let redraw_buttons = redraw.clone();
         controls
-            .ButtonPressed(&TypedEventHandler::<SystemMediaTransportControls, SystemMediaTransportControlsButtonPressedEventArgs>::new(move |_, args| {
+            .ButtonPressed(&TypedEventHandler::<
+                SystemMediaTransportControls,
+                SystemMediaTransportControlsButtonPressedEventArgs,
+            >::new(move |_, args| {
                 if let Some(args) = args.as_ref() {
                     if let Ok(button) = args.Button() {
                         if let Some(command) = command_of(button) {
@@ -288,7 +343,10 @@ mod host {
             .map_err(|error| error.to_string())?;
         let redraw_seek = redraw;
         controls
-            .PlaybackPositionChangeRequested(&TypedEventHandler::<SystemMediaTransportControls, PlaybackPositionChangeRequestedEventArgs>::new(move |_, args| {
+            .PlaybackPositionChangeRequested(&TypedEventHandler::<
+                SystemMediaTransportControls,
+                PlaybackPositionChangeRequestedEventArgs,
+            >::new(move |_, args| {
                 if let Some(args) = args.as_ref() {
                     if let Ok(position) = args.RequestedPlaybackPosition() {
                         let millis = (position.Duration / 10_000).max(0) as u64;
@@ -300,7 +358,12 @@ mod host {
             }))
             .map_err(|error| error.to_string())?;
         match SESSION.lock() {
-            Ok(mut slot) => *slot = Some(Session { controls, fingerprint: String::new() }),
+            Ok(mut slot) => {
+                *slot = Some(Session {
+                    controls,
+                    fingerprint: String::new(),
+                })
+            }
             Err(error) => return Err(error.to_string()),
         }
         Ok(())
@@ -317,8 +380,13 @@ mod host {
         }
     }
 
-    fn apply_display(controls: &SystemMediaTransportControls, display: &MediaNowPlaying) -> Result<(), String> {
-        controls.SetIsEnabled(display.enabled).map_err(|error| error.to_string())?;
+    fn apply_display(
+        controls: &SystemMediaTransportControls,
+        display: &MediaNowPlaying,
+    ) -> Result<(), String> {
+        controls
+            .SetIsEnabled(display.enabled)
+            .map_err(|error| error.to_string())?;
         let status = if !display.enabled {
             MediaPlaybackStatus::Closed
         } else if display.playing {
@@ -326,46 +394,93 @@ mod host {
         } else {
             MediaPlaybackStatus::Paused
         };
-        controls.SetPlaybackStatus(status).map_err(|error| error.to_string())?;
-        let updater = controls.DisplayUpdater().map_err(|error| error.to_string())?;
-        updater.SetType(MediaPlaybackType::Music).map_err(|error| error.to_string())?;
-        let music = updater.MusicProperties().map_err(|error| error.to_string())?;
-        music.SetTitle(&HSTRING::from(&display.title)).map_err(|error| error.to_string())?;
-        music.SetArtist(&HSTRING::from(&display.artist)).map_err(|error| error.to_string())?;
-        music.SetAlbumTitle(&HSTRING::from(&display.album)).map_err(|error| error.to_string())?;
+        controls
+            .SetPlaybackStatus(status)
+            .map_err(|error| error.to_string())?;
+        let updater = controls
+            .DisplayUpdater()
+            .map_err(|error| error.to_string())?;
+        updater
+            .SetType(MediaPlaybackType::Music)
+            .map_err(|error| error.to_string())?;
+        let music = updater
+            .MusicProperties()
+            .map_err(|error| error.to_string())?;
+        music
+            .SetTitle(&HSTRING::from(&display.title))
+            .map_err(|error| error.to_string())?;
+        music
+            .SetArtist(&HSTRING::from(&display.artist))
+            .map_err(|error| error.to_string())?;
+        music
+            .SetAlbumTitle(&HSTRING::from(&display.album))
+            .map_err(|error| error.to_string())?;
         if let Some(path) = display.thumbnail_path.as_deref() {
             if let Err(error) = set_thumbnail(&updater, path) {
                 eprintln!("Nana 系统媒体封面没有写上：{error}");
             }
         }
         if display.duration_ms > 0 {
-            let timeline = SystemMediaTransportControlsTimelineProperties::new().map_err(|error| error.to_string())?;
-            let end = TimeSpan { Duration: (display.duration_ms as i64).saturating_mul(10_000) };
-            let position = TimeSpan { Duration: (display.position_ms.min(display.duration_ms) as i64).saturating_mul(10_000) };
-            timeline.SetStartTime(TimeSpan { Duration: 0 }).map_err(|error| error.to_string())?;
-            timeline.SetEndTime(end).map_err(|error| error.to_string())?;
-            timeline.SetMinSeekTime(TimeSpan { Duration: 0 }).map_err(|error| error.to_string())?;
-            timeline.SetMaxSeekTime(end).map_err(|error| error.to_string())?;
-            timeline.SetPosition(position).map_err(|error| error.to_string())?;
-            controls.UpdateTimelineProperties(&timeline).map_err(|error| error.to_string())?;
+            let timeline = SystemMediaTransportControlsTimelineProperties::new()
+                .map_err(|error| error.to_string())?;
+            let end = TimeSpan {
+                Duration: (display.duration_ms as i64).saturating_mul(10_000),
+            };
+            let position = TimeSpan {
+                Duration: (display.position_ms.min(display.duration_ms) as i64)
+                    .saturating_mul(10_000),
+            };
+            timeline
+                .SetStartTime(TimeSpan { Duration: 0 })
+                .map_err(|error| error.to_string())?;
+            timeline
+                .SetEndTime(end)
+                .map_err(|error| error.to_string())?;
+            timeline
+                .SetMinSeekTime(TimeSpan { Duration: 0 })
+                .map_err(|error| error.to_string())?;
+            timeline
+                .SetMaxSeekTime(end)
+                .map_err(|error| error.to_string())?;
+            timeline
+                .SetPosition(position)
+                .map_err(|error| error.to_string())?;
+            controls
+                .UpdateTimelineProperties(&timeline)
+                .map_err(|error| error.to_string())?;
         }
         updater.Update().map_err(|error| error.to_string())?;
         Ok(())
     }
 
-    fn set_thumbnail(updater: &windows::Media::SystemMediaTransportControlsDisplayUpdater, path: &str) -> Result<(), String> {
+    fn set_thumbnail(
+        updater: &windows::Media::SystemMediaTransportControlsDisplayUpdater,
+        path: &str,
+    ) -> Result<(), String> {
         let bytes = std::fs::read(path).map_err(|error| format!("读取封面失败：{error}"))?;
         if bytes.is_empty() {
             return Err("封面文件是空的".into());
         }
-        let stream = windows::Storage::Streams::InMemoryRandomAccessStream::new().map_err(|error| error.to_string())?;
-        let writer = windows::Storage::Streams::DataWriter::CreateDataWriter(&stream).map_err(|error| error.to_string())?;
-        writer.WriteBytes(&bytes).map_err(|error| error.to_string())?;
-        writer.StoreAsync().map_err(|error| error.to_string())?.join().map_err(|error| error.to_string())?;
+        let stream = windows::Storage::Streams::InMemoryRandomAccessStream::new()
+            .map_err(|error| error.to_string())?;
+        let writer = windows::Storage::Streams::DataWriter::CreateDataWriter(&stream)
+            .map_err(|error| error.to_string())?;
+        writer
+            .WriteBytes(&bytes)
+            .map_err(|error| error.to_string())?;
+        writer
+            .StoreAsync()
+            .map_err(|error| error.to_string())?
+            .join()
+            .map_err(|error| error.to_string())?;
         writer.DetachStream().map_err(|error| error.to_string())?;
         stream.Seek(0).map_err(|error| error.to_string())?;
-        let reference = windows::Storage::Streams::RandomAccessStreamReference::CreateFromStream(&stream).map_err(|error| error.to_string())?;
-        updater.SetThumbnail(&reference).map_err(|error| error.to_string())?;
+        let reference =
+            windows::Storage::Streams::RandomAccessStreamReference::CreateFromStream(&stream)
+                .map_err(|error| error.to_string())?;
+        updater
+            .SetThumbnail(&reference)
+            .map_err(|error| error.to_string())?;
         Ok(())
     }
 
@@ -390,13 +505,31 @@ mod tests {
 
     #[test]
     fn media_commands_map_onto_existing_player_messages() {
-        assert!(matches!(command_message(MediaCommand::Play, None), PlayerMessage::SetPlaying(true)));
-        assert!(matches!(command_message(MediaCommand::Pause, None), PlayerMessage::SetPlaying(false)));
-        assert!(matches!(command_message(MediaCommand::Previous, None), PlayerMessage::PlayPrevious));
-        assert!(matches!(command_message(MediaCommand::Next, None), PlayerMessage::PlayNext { natural_end: false }));
-        assert!(matches!(command_message(MediaCommand::Seek(1500), None), PlayerMessage::Seek(1500)));
+        assert!(matches!(
+            command_message(MediaCommand::Play, None),
+            PlayerMessage::SetPlaying(true)
+        ));
+        assert!(matches!(
+            command_message(MediaCommand::Pause, None),
+            PlayerMessage::SetPlaying(false)
+        ));
+        assert!(matches!(
+            command_message(MediaCommand::Previous, None),
+            PlayerMessage::PlayPrevious
+        ));
+        assert!(matches!(
+            command_message(MediaCommand::Next, None),
+            PlayerMessage::PlayNext { natural_end: false }
+        ));
+        assert!(matches!(
+            command_message(MediaCommand::Seek(1500), None),
+            PlayerMessage::Seek(1500)
+        ));
         match command_message(MediaCommand::Stop, Some("repo".into())) {
-            PlayerMessage::Stop { repo_id, clear_stored } => {
+            PlayerMessage::Stop {
+                repo_id,
+                clear_stored,
+            } => {
                 assert_eq!(repo_id.as_deref(), Some("repo"));
                 assert!(!clear_stored);
             }
@@ -464,6 +597,7 @@ mod tests {
             file_class: "audio".into(),
             thumbnail_path: None,
             is_virtual: false,
+            local_absolute_path: None,
         });
         player.listed = Some(detail);
         let display = now_playing(&player, Some("other.png"));

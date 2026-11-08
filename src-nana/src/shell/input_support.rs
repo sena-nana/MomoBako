@@ -22,6 +22,12 @@ pub const DIALOG_THUMBNAIL_ID: u64 = 6;
 pub const DIALOG_SOURCE_CACHE_ID: u64 = 7;
 /// 资源库压缩包的保存路径。和外部连接 JSON 导出的编号分开。
 pub const DIALOG_REPOSITORY_EXPORT_ID: u64 = 8;
+/// Eagle 导入页选择 EagleLibrary 目录。和下载目录、添加资源库、缓存目录的编号分开。
+pub const DIALOG_EAGLE_LIBRARY_ID: u64 = 9;
+/// 实况「从文件夹导入」。离屏打不开系统对话框时仍用页内空路径框，编号和它分开。
+pub const DIALOG_IMPORT_FOLDER_ID: u64 = 10;
+/// 实况「从 ZIP 导入」。
+pub const DIALOG_IMPORT_ARCHIVE_ID: u64 = 11;
 
 /// 关闭按钮在三种设置下的决定。脏编辑只拦截真正退出。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -45,7 +51,12 @@ pub fn decide_close(behavior: &str, dirty: bool) -> CloseDecision {
 }
 
 /// 可写、不是回收站、不是智能文件夹，并且后端种类是 filesystem。
-pub fn can_drag_entries(writable: bool, trash: bool, smart_folder: bool, backend_kind: &str) -> bool {
+pub fn can_drag_entries(
+    writable: bool,
+    trash: bool,
+    smart_folder: bool,
+    backend_kind: &str,
+) -> bool {
     writable && !trash && !smart_folder && backend_kind == "filesystem"
 }
 
@@ -87,7 +98,11 @@ pub fn should_delegate_to_external_drag(
 }
 
 /// 文件夹命中优先。否则指针在文件区上时用当前目录。都没有则不能放下。
-pub fn resolve_drop_target(hover_folder: Option<&str>, over_browser: bool, current_directory: &str) -> Option<String> {
+pub fn resolve_drop_target(
+    hover_folder: Option<&str>,
+    over_browser: bool,
+    current_directory: &str,
+) -> Option<String> {
     if let Some(path) = hover_folder.map(str::trim).filter(|path| !path.is_empty()) {
         return Some(path.to_string());
     }
@@ -115,16 +130,26 @@ pub fn normalize_move_paths(source_paths: &[String], target_path: &str) -> Vec<S
 pub fn trim_trailing_separators(path: &str) -> String {
     let trimmed = path.trim();
     let bytes = trimmed.as_bytes();
-    if bytes.len() == 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/') {
+    if bytes.len() == 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/')
+    {
         return trimmed.to_string();
     }
     let cut = trimmed.trim_end_matches(['\\', '/']);
-    if cut.is_empty() { trimmed.to_string() } else { cut.to_string() }
+    if cut.is_empty() {
+        trimmed.to_string()
+    } else {
+        cut.to_string()
+    }
 }
 
 /// 比较外部路径时统一成小写反斜杠。
 pub fn normalize_filesystem_path(path: &str) -> String {
-    trim_trailing_separators(path).replace('/', "\\").to_lowercase()
+    trim_trailing_separators(path)
+        .replace('/', "\\")
+        .to_lowercase()
 }
 
 fn path_parts(path: &str) -> Vec<String> {
@@ -146,9 +171,16 @@ pub fn join_repository_path(root: &str, relative: &str, name: Option<&str>) -> S
     if parts.is_empty() {
         return normalized_root;
     }
-    let separator = if normalized_root.contains('\\') { "\\" } else { "/" };
+    let separator = if normalized_root.contains('\\') {
+        "\\"
+    } else {
+        "/"
+    };
     let bytes = normalized_root.as_bytes();
-    let drive = bytes.len() == 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && (bytes[2] == b'\\' || bytes[2] == b'/');
+    let drive = bytes.len() == 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'\\' || bytes[2] == b'/');
     if drive {
         format!("{normalized_root}{}", parts.join(separator))
     } else {
@@ -157,7 +189,11 @@ pub fn join_repository_path(root: &str, relative: &str, name: Option<&str>) -> S
 }
 
 /// 外部文件落到自己的绝对路径上时丢掉。空白和没有文件名的也丢掉。
-pub fn filter_external_import_paths(paths: &[String], repo_root: &str, target: &str) -> Vec<String> {
+pub fn filter_external_import_paths(
+    paths: &[String],
+    repo_root: &str,
+    target: &str,
+) -> Vec<String> {
     paths
         .iter()
         .filter(|source| {
@@ -194,19 +230,30 @@ pub fn absolute_drag_paths(paths: &[String], repo_root: &str) -> Vec<String> {
 
 /// 去掉空白的系统拖入路径。
 pub fn dropped_source_paths(paths: &[String]) -> Vec<String> {
-    paths.iter().map(|path| path.trim().to_string()).filter(|path| !path.is_empty()).collect()
+    paths
+        .iter()
+        .map(|path| path.trim().to_string())
+        .filter(|path| !path.is_empty())
+        .collect()
 }
 
 /// 保存外部连接 JSON 的系统对话框请求。
+///
+/// 标题和类型过滤照 Vue `Settings.vue` 的 `saveDialog`：「导出外部 API 连接 JSON」，只留 JSON。
 pub fn save_export_request() -> FileDialogRequest {
     FileDialogRequest::new(DIALOG_EXPORT_ID, FileDialogKind::SaveFile)
-        .title("导出外部连接")
+        .title("导出外部 API 连接 JSON")
         .file_name("external-api.json")
+        .filters([FileFilter::new("JSON", ["json"])])
 }
 
 /// 选择一个插件包的系统对话框请求。
+///
+/// 标题和类型过滤照 Vue `PluginManagerPanel.vue` 的 `choosePluginArchive`：「选择 .momoplug 插件包」，只留 momoplug。
 pub fn open_plugin_request() -> FileDialogRequest {
-    FileDialogRequest::new(DIALOG_PLUGIN_ID, FileDialogKind::OpenFile).title("选择插件包")
+    FileDialogRequest::new(DIALOG_PLUGIN_ID, FileDialogKind::OpenFile)
+        .title("选择 .momoplug 插件包")
+        .filters([FileFilter::new("MomoBako 插件", ["momoplug"])])
 }
 
 /// 选择一个文件夹来重定向缺失资源库。只构造请求，不打开系统对话框。
@@ -214,9 +261,45 @@ pub fn pick_folder_request() -> FileDialogRequest {
     FileDialogRequest::new(DIALOG_RELOCATE_ID, FileDialogKind::PickFolder).title("重定向资源库位置")
 }
 
-/// 选择一个本地文件夹来添加资源库。只构造请求，不打开系统对话框。
-pub fn attach_folder_request() -> FileDialogRequest {
-    FileDialogRequest::new(DIALOG_ATTACH_ID, FileDialogKind::PickFolder).title("添加资源库")
+/// 选择一个文件夹来添加资源库。只构造请求，不打开系统对话框。
+///
+/// 本地文件夹的标题照 Vue `chooseLocalFolderAndCreate`：「选择资源库文件夹」。
+/// Eagle 的标题照 Vue `chooseEagleLibraryAndCreate`：「选择 Eagle Library 目录」。
+/// 两者都是单选目录，没有类型过滤。不改导入页那一个对话框。
+pub fn attach_folder_request(eagle: bool) -> FileDialogRequest {
+    let title = if eagle {
+        "选择 Eagle Library 目录"
+    } else {
+        "选择资源库文件夹"
+    };
+    FileDialogRequest::new(DIALOG_ATTACH_ID, FileDialogKind::PickFolder).title(title)
+}
+
+/// 测试用的来源插件清单。启用、backend SDK、原生动态库、状态可用，添加菜单才认它。
+#[cfg(test)]
+pub(super) fn test_source_plugin(
+    id: &str,
+    name: &str,
+    capabilities: &[&str],
+) -> crate::backend::services::repository::PluginManifest {
+    serde_json::from_value(serde_json::json!({
+        "pluginId": id,
+        "name": name,
+        "version": "1.0.0",
+        "kind": "source",
+        "category": "source",
+        "description": "",
+        "capabilities": capabilities,
+        "enabled": true,
+        "sdk": "backend",
+        "entry": null,
+        "source": "builtin",
+        "runtime": "native-dylib",
+        "permissions": [],
+        "compat": {"sdkVersion": "1"},
+        "status": "ready"
+    }))
+    .expect("来源插件清单")
 }
 
 /// 选择下载目标目录。只构造请求，不打开系统对话框。
@@ -225,14 +308,49 @@ pub fn download_folder_request() -> FileDialogRequest {
 }
 
 /// 选择来源缓存目录。只构造请求，不打开系统对话框。
-pub fn source_cache_folder_request() -> FileDialogRequest {
-    FileDialogRequest::new(DIALOG_SOURCE_CACHE_ID, FileDialogKind::PickFolder).title("选择缓存目录")
+///
+/// 标题照 Vue `chooseCachePath`：`选择${manifest.name}缓存目录`。名称去掉首尾空白后为空时退回「选择缓存目录」。
+pub fn source_cache_folder_request(plugin_name: &str) -> FileDialogRequest {
+    let name = plugin_name.trim();
+    let title = if name.is_empty() {
+        "选择缓存目录".to_string()
+    } else {
+        format!("选择{name}缓存目录")
+    };
+    FileDialogRequest::new(DIALOG_SOURCE_CACHE_ID, FileDialogKind::PickFolder).title(title)
+}
+
+/// 选择 EagleLibrary 目录。只构造请求，不打开系统对话框。
+pub fn eagle_library_folder_request() -> FileDialogRequest {
+    FileDialogRequest::new(DIALOG_EAGLE_LIBRARY_ID, FileDialogKind::PickFolder)
+        .title("选择 EagleLibrary 目录")
+}
+
+/// 选择一个要导入的文件夹。只构造请求，不打开系统对话框。Vue 是单选目录。
+pub fn import_folder_request() -> FileDialogRequest {
+    FileDialogRequest::new(DIALOG_IMPORT_FOLDER_ID, FileDialogKind::PickFolder)
+        .title("选择导入文件夹")
+}
+
+/// 选择一个 ZIP 压缩包。只构造请求，不打开系统对话框。
+pub fn import_archive_request() -> FileDialogRequest {
+    FileDialogRequest::new(DIALOG_IMPORT_ARCHIVE_ID, FileDialogKind::OpenFile)
+        .title("选择 ZIP 压缩包")
+        .filters([FileFilter::new("ZIP", ["zip"])])
 }
 
 /// 选择资源库压缩包的保存路径。只构造请求，不打开系统对话框。
-pub fn repository_export_save_request(file_name: Option<String>, extension: &str) -> FileDialogRequest {
-    let mut request = FileDialogRequest::new(DIALOG_REPOSITORY_EXPORT_ID, FileDialogKind::SaveFile).title("导出资源库");
-    if let Some(name) = file_name.as_deref().map(str::trim).filter(|name| !name.is_empty()) {
+pub fn repository_export_save_request(
+    file_name: Option<String>,
+    extension: &str,
+) -> FileDialogRequest {
+    let mut request = FileDialogRequest::new(DIALOG_REPOSITORY_EXPORT_ID, FileDialogKind::SaveFile)
+        .title("导出资源库");
+    if let Some(name) = file_name
+        .as_deref()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
         request = request.file_name(name);
     }
     let extension = extension.trim();
@@ -246,5 +364,8 @@ pub fn repository_export_save_request(file_name: Option<String>, extension: &str
 pub fn thumbnail_file_request() -> FileDialogRequest {
     FileDialogRequest::new(DIALOG_THUMBNAIL_ID, FileDialogKind::OpenFile)
         .title("选择自定义缩略图")
-        .filters([FileFilter::new("图片", ["png", "jpg", "jpeg", "webp", "bmp"])])
+        .filters([FileFilter::new(
+            "图片",
+            ["png", "jpg", "jpeg", "webp", "bmp"],
+        )])
 }

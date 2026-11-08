@@ -11,12 +11,12 @@ use std::hash::{Hash, Hasher};
 use super::player::PlayerMessage;
 use super::{ShellMessage, ShellViewModel};
 
+#[path = "player_bar.rs"]
+pub(super) mod bar;
 #[path = "player_icons.rs"]
 pub(super) mod icons;
 #[path = "player_paint.rs"]
 pub(super) mod paint;
-#[path = "player_bar.rs"]
-pub(super) mod bar;
 #[path = "player_playlist_page.rs"]
 pub(super) mod playlist;
 
@@ -26,42 +26,117 @@ pub(crate) fn key_part(text: &str) -> String {
     text.replace('%', "%25").replace('/', "%2F")
 }
 
-/// 播放条岛的版本：播放条读到的状态（`player_bar.rs` 的 `BarProps`、窄排法）和岛该不该有内容
+/// 播放条岛的版本：播放条读到的状态（`player_bar.rs` 的 `BarProps`、窗口是否不宽于 1120px）和岛该不该有内容
 /// （在不在预览、显不显示播放表面、点开的播放集）。
 ///
-/// 播放条量到自己的宽度后会发 `BarResized`，每次归约都重建会量了又建、建了又量，所以这里不按 ViewModel
-/// 版本，只按它真正读到的值。播放进度和时间走热信号，不在里面。播放条改读别的字段时这里跟着加。
+/// 播放条量到自己的宽度后会发 `BarResized`。卡片宽窄不改变这一棵视图（窄卡片是音量挤出，不是另排三行），
+/// 所以宽度不进版本，避免量了又建、建了又量。这里不按 ViewModel 版本，只按它真正读到的值。
+/// 播放进度和时间走热信号，不在里面。播放条改读别的字段时这里跟着加。
 pub(super) fn bar_stamp(model: &ShellViewModel) -> u64 {
     let mut hasher = DefaultHasher::new();
     let player = &model.player;
     let session = &player.session;
-    (super::files_view::previewing(model), model.player_surface_visible()).hash(&mut hasher);
-    (&player.current_id, player.can_play, player.retry_pending(), player.queue_open, &player.repo_id).hash(&mut hasher);
+    (
+        super::files_view::previewing(model),
+        model.player_surface_visible(),
+    )
+        .hash(&mut hasher);
+    (
+        &player.current_id,
+        player.can_play,
+        player.retry_pending(),
+        player.queue_open,
+        &player.repo_id,
+    )
+        .hash(&mut hasher);
     format!("{:?}", player.mode).hash(&mut hasher);
-    (player.settings.image_duration_ms, player.settings.object_fit_cover).hash(&mut hasher);
-    (&session.status, &session.error, session.volume.to_bits(), session.duration_ms).hash(&mut hasher);
-    player.listed.as_ref().map(|detail| &detail.playlist.playlist_id).hash(&mut hasher);
+    (
+        player.settings.image_duration_ms,
+        player.settings.object_fit_cover,
+    )
+        .hash(&mut hasher);
+    (
+        &session.status,
+        &session.error,
+        session.volume.to_bits(),
+        session.duration_ms,
+    )
+        .hash(&mut hasher);
+    player
+        .listed
+        .as_ref()
+        .map(|detail| &detail.playlist.playlist_id)
+        .hash(&mut hasher);
     for item in &player.queue {
-        (&item.id, &item.playlist_id, &item.asset_id, &item.path, &item.filename, &item.extension, &item.status).hash(&mut hasher);
-        (&item.status_reason, item.transient, &item.player_type_id, &item.player_label, &item.file_class, &item.thumbnail_path).hash(&mut hasher);
+        (
+            &item.id,
+            &item.playlist_id,
+            &item.asset_id,
+            &item.path,
+            &item.filename,
+            &item.extension,
+            &item.status,
+        )
+            .hash(&mut hasher);
+        (
+            &item.status_reason,
+            item.transient,
+            &item.player_type_id,
+            &item.player_label,
+            &item.file_class,
+            &item.thumbnail_path,
+        )
+            .hash(&mut hasher);
     }
-    if let Some(item) = player.current_item() {
-        let contribution = player.contributions.iter().find(|entry| entry.player_type_id == item.player_type_id);
-        contribution.map(|entry| (&entry.file_class, entry.supports_seek, entry.supports_volume)).hash(&mut hasher);
-        let candidate = player.candidates.iter().find(|entry| entry.player_type_id == item.player_type_id);
-        candidate.map(|entry| (&entry.file_class, entry.supports_seek, entry.supports_volume)).hash(&mut hasher);
-        let thumbnail = item.thumbnail_path.as_deref();
-        let ready = model.files.rows.iter().any(|row| row.texture_ready && row.thumbnail_path.as_deref() == thumbnail);
-        (thumbnail, ready).hash(&mut hasher);
+    if let Some(type_id) = player.bar_player_type_id() {
+        let contribution = player
+            .contributions
+            .iter()
+            .find(|entry| entry.player_type_id == type_id);
+        contribution
+            .map(|entry| {
+                (
+                    &entry.file_class,
+                    entry.supports_seek,
+                    entry.supports_volume,
+                )
+            })
+            .hash(&mut hasher);
+        let candidate = player
+            .candidates
+            .iter()
+            .find(|entry| entry.player_type_id == type_id);
+        candidate
+            .map(|entry| {
+                (
+                    &entry.file_class,
+                    entry.supports_seek,
+                    entry.supports_volume,
+                )
+            })
+            .hash(&mut hasher);
     }
-    (player.bar_width.to_bits(), model.narrow_viewport()).hash(&mut hasher);
+    // 三行只看窗口断点。卡片变窄时音量溢出，树不用按卡片宽重建。
+    (
+        model.narrow_viewport(),
+        bar::volume_slider_width(model.viewport_width).to_bits(),
+    )
+        .hash(&mut hasher);
     hasher.finish()
 }
 
 /// 没有对应播放插件时，页眉和行上的播放都不可点。
 pub(super) fn playlist_plugin_missing(model: &ShellViewModel, player_type_id: &str) -> bool {
-    let ready = model.player.candidates.iter().any(|candidate| candidate.player_type_id == player_type_id)
-        || model.player.contributions.iter().any(|player| player.player_type_id == player_type_id);
+    let ready = model
+        .player
+        .candidates
+        .iter()
+        .any(|candidate| candidate.player_type_id == player_type_id)
+        || model
+            .player
+            .contributions
+            .iter()
+            .any(|player| player.player_type_id == player_type_id);
     !ready
 }
 

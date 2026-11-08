@@ -28,14 +28,20 @@ pub(crate) struct ThumbnailCache<T> {
 
 impl<T> Default for ThumbnailCache<T> {
     fn default() -> Self {
-        Self { entries: HashMap::new(), round: 0 }
+        Self {
+            entries: HashMap::new(),
+            round: 0,
+        }
     }
 }
 
 impl<T> ThumbnailCache<T> {
     /// 记下新登记的纹理；同一个文件重新解码时换掉旧句柄，返回旧的。
     pub(crate) fn insert(&mut self, path: String, handle: T) -> Option<T> {
-        let entry = Entry { handle, last_used: self.round };
+        let entry = Entry {
+            handle,
+            last_used: self.round,
+        };
         self.entries.insert(path, entry).map(|old| old.handle)
     }
 
@@ -53,7 +59,12 @@ impl<T> ThumbnailCache<T> {
     ///
     /// 算法：轮次加一，在用的记成这一轮用过；不在用又不在 `listed` 里的全部卸掉；剩下的超过 `capacity`
     /// 时，把不在用的按最后使用的轮次从早到晚（同一轮按文件名）卸，直到不超过上限或没有不在用的。
-    pub(crate) fn sweep(&mut self, in_use: &HashSet<String>, listed: &HashSet<String>, capacity: usize) -> Vec<String> {
+    pub(crate) fn sweep(
+        &mut self,
+        in_use: &HashSet<String>,
+        listed: &HashSet<String>,
+        capacity: usize,
+    ) -> Vec<String> {
         self.round += 1;
         let round = self.round;
         for (path, entry) in &mut self.entries {
@@ -123,11 +134,26 @@ mod tests {
         let mut thumbs = cache(&["a", "b", "c", "d"]);
         let listed = set(&["a", "b", "c", "d", "e"]);
         assert!(thumbs.sweep(&set(&["a", "b"]), &listed, 4).is_empty());
-        assert!(thumbs.sweep(&set(&["c"]), &listed, 4).is_empty(), "不超过上限时滚出视口的留作缓存");
+        assert!(
+            thumbs.sweep(&set(&["c"]), &listed, 4).is_empty(),
+            "不超过上限时滚出视口的留作缓存"
+        );
         thumbs.insert("e".into(), 4);
-        assert_eq!(thumbs.sweep(&set(&["e"]), &listed, 4), ["d"], "d 从登记以后没再在用，最早");
-        assert_eq!(thumbs.sweep(&set(&["e"]), &listed, 2), ["a", "b"], "a、b 比 c 早一轮");
-        assert_eq!(thumbs.sweep(&set(&["c", "e"]), &listed, 1), Vec::<String>::new(), "在用的超过上限也不卸");
+        assert_eq!(
+            thumbs.sweep(&set(&["e"]), &listed, 4),
+            ["d"],
+            "d 从登记以后没再在用，最早"
+        );
+        assert_eq!(
+            thumbs.sweep(&set(&["e"]), &listed, 2),
+            ["a", "b"],
+            "a、b 比 c 早一轮"
+        );
+        assert_eq!(
+            thumbs.sweep(&set(&["c", "e"]), &listed, 1),
+            Vec::<String>::new(),
+            "在用的超过上限也不卸"
+        );
         assert_eq!(thumbs.len(), 2);
     }
 

@@ -57,8 +57,14 @@ mod tests {
         let (sink, receiver) = host_event_channel();
         sink.emit(structure_event("first")).unwrap();
         sink.emit(structure_event("second")).unwrap();
-        assert_eq!(structure_repo_id(receiver.recv().unwrap()).as_deref(), Some("first"));
-        assert_eq!(structure_repo_id(receiver.recv().unwrap()).as_deref(), Some("second"));
+        assert_eq!(
+            structure_repo_id(receiver.recv().unwrap()).as_deref(),
+            Some("first")
+        );
+        assert_eq!(
+            structure_repo_id(receiver.recv().unwrap()).as_deref(),
+            Some("second")
+        );
     }
 
     #[test]

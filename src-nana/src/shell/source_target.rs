@@ -13,11 +13,11 @@
 
 use serde_json::Value;
 
+use super::super::ShellViewModel;
 use super::super::entry_actions::DownloadProgress;
 use super::super::workspace::WorkspaceState;
-use super::super::ShellViewModel;
-use super::source_download::{DownloadDestination, DownloadRun};
 use super::AdminEffect;
+use super::source_download::{DownloadDestination, DownloadRun};
 
 /// 等着选目标资源库的下载：调用插件要的东西，加上导入到目标资源库的哪个文件夹。
 #[derive(Clone, Debug, PartialEq)]
@@ -52,8 +52,15 @@ pub fn target_candidates(workspace: &WorkspaceState) -> Vec<TargetCandidate> {
     workspace
         .repositories
         .iter()
-        .filter(|repository| repository.accepts_downloads() && workspace.active_repo_id.as_deref() != Some(repository.repo_id.as_str()))
-        .map(|repository| TargetCandidate { repo_id: repository.repo_id.clone(), name: repository.name.clone(), path: repository.path.clone() })
+        .filter(|repository| {
+            repository.accepts_downloads()
+                && workspace.active_repo_id.as_deref() != Some(repository.repo_id.as_str())
+        })
+        .map(|repository| TargetCandidate {
+            repo_id: repository.repo_id.clone(),
+            name: repository.name.clone(),
+            path: repository.path.clone(),
+        })
         .collect()
 }
 
@@ -69,7 +76,12 @@ pub(super) fn begin(model: &mut ShellViewModel, download: RepositoryDownload) {
             let target = candidates.remove(0);
             start(model, download, &target);
         }
-        _ => model.admin.download_target = Some(TargetPick { download, candidates }),
+        _ => {
+            model.admin.download_target = Some(TargetPick {
+                download,
+                candidates,
+            })
+        }
     }
 }
 
@@ -79,7 +91,11 @@ pub(super) fn choose(model: &mut ShellViewModel, repo_id: &str) {
         eprintln!("Nana 没有等着选目标资源库的下载：{repo_id}");
         return;
     };
-    let Some(target) = pick.candidates.iter().find(|candidate| candidate.repo_id == repo_id) else {
+    let Some(target) = pick
+        .candidates
+        .iter()
+        .find(|candidate| candidate.repo_id == repo_id)
+    else {
         eprintln!("Nana 目标资源库不在候选里：{repo_id}");
         model.admin.download_target = Some(pick);
         return;
@@ -98,15 +114,36 @@ pub(crate) fn cancel(model: &mut ShellViewModel) {
 /// 带着目标资源库开始下载（任务弹层的进度行见 [`DownloadRun::begin`]）：载荷的 `destination` 写成目标资源库，
 /// 交给宿主调用、导入和同步。
 fn start(model: &mut ShellViewModel, download: RepositoryDownload, target: &TargetCandidate) {
-    let RepositoryDownload { plugin_id, method, mut payload, repository_id, progress, parent_path } = download;
+    let RepositoryDownload {
+        plugin_id,
+        method,
+        mut payload,
+        repository_id,
+        progress,
+        parent_path,
+    } = download;
     let Some(object) = payload.as_object_mut() else {
         eprintln!("Nana 下载载荷不是对象，不能写目标资源库：{method}");
         model.files.error = format!("{method} 的载荷不是对象。");
         return;
     };
-    object.insert("destination".into(), serde_json::json!({ "kind": "repository", "repoId": target.repo_id, "path": target.path }));
-    let run = DownloadRun::begin(model, progress, plugin_id, method, repository_id, DownloadDestination::Repository(target.clone()));
-    model.admin.push_effect(AdminEffect::DownloadToRepository { run, payload, parent_path });
+    object.insert(
+        "destination".into(),
+        serde_json::json!({ "kind": "repository", "repoId": target.repo_id, "path": target.path }),
+    );
+    let run = DownloadRun::begin(
+        model,
+        progress,
+        plugin_id,
+        method,
+        repository_id,
+        DownloadDestination::Repository(target.clone()),
+    );
+    model.admin.push_effect(AdminEffect::DownloadToRepository {
+        run,
+        payload,
+        parent_path,
+    });
 }
 
 /// 插件下载结果里要导入的文件（Vue `resultPaths`）：`paths` 和 `completed[].paths`，去掉空白和重复，顺序不变。
@@ -116,7 +153,11 @@ pub(crate) fn result_paths(payload: &Value) -> Vec<String> {
 
 /// 插件下载结果里的一种路径列表：顶层的 `key` 和每一项 `completed[].key`，去掉空白和重复，顺序不变。
 pub(crate) fn listed_paths(payload: &Value, key: &str) -> Vec<String> {
-    let direct = payload.get(key).and_then(Value::as_array).into_iter().flatten();
+    let direct = payload
+        .get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten();
     let completed = payload
         .get("completed")
         .and_then(Value::as_array)

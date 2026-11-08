@@ -324,7 +324,10 @@ pub(crate) fn fetch_binary(url: &str) -> Result<Vec<u8>, String> {
         .map_err(describe)?
         .error_for_status()
         .map_err(describe)?;
-    response.bytes().map(|bytes| bytes.to_vec()).map_err(describe)
+    response
+        .bytes()
+        .map(|bytes| bytes.to_vec())
+        .map_err(describe)
 }
 
 fn lyric_text(field: Option<LyricField>) -> Option<String> {

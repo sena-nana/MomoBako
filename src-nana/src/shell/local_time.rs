@@ -52,12 +52,20 @@ fn parse_epoch_seconds(raw: &str) -> Option<i64> {
     let mut clock_parts = clock.split(':');
     let hour: u32 = clock_parts.next()?.parse().ok()?;
     let minute: u32 = clock_parts.next()?.parse().ok()?;
-    let second: u32 = clock_parts.next().map(str::parse).transpose().ok()?.unwrap_or(0);
+    let second: u32 = clock_parts
+        .next()
+        .map(str::parse)
+        .transpose()
+        .ok()?
+        .unwrap_or(0);
     if hour > 23 || minute > 59 || second > 60 {
         return None;
     }
     let days = days_from_civil(year, month, day);
-    Some(days * 86_400 + i64::from(hour) * 3_600 + i64::from(minute) * 60 + i64::from(second) - offset_seconds)
+    Some(
+        days * 86_400 + i64::from(hour) * 3_600 + i64::from(minute) * 60 + i64::from(second)
+            - offset_seconds,
+    )
 }
 
 /// 拆出时区后缀：`Z`、`+08:00`、`-0530`。没有后缀时偏移为 0。
@@ -85,7 +93,8 @@ fn days_from_civil(year: i64, month: u32, day: u32) -> i64 {
     let era = year.div_euclid(400);
     let year_of_era = year - era * 400;
     let month = i64::from(month);
-    let day_of_year = (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + i64::from(day) - 1;
+    let day_of_year =
+        (153 * (if month > 2 { month - 3 } else { month + 9 }) + 2) / 5 + i64::from(day) - 1;
     let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
     era * 146_097 + day_of_era - 719_468
 }
@@ -97,11 +106,16 @@ fn civil_from_seconds(seconds: i64) -> Civil {
     let shifted = days + 719_468;
     let era = shifted.div_euclid(146_097);
     let day_of_era = shifted - era * 146_097;
-    let year_of_era = (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
     let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
     let month_index = (5 * day_of_year + 2) / 153;
     let day = (day_of_year - (153 * month_index + 2) / 5 + 1) as u32;
-    let month = if month_index < 10 { month_index + 3 } else { month_index - 9 } as u32;
+    let month = if month_index < 10 {
+        month_index + 3
+    } else {
+        month_index - 9
+    } as u32;
     let year = year_of_era + era * 400 + i64::from(month <= 2);
     Civil {
         year,
@@ -129,7 +143,11 @@ fn to_local(seconds: i64) -> Civil {
     }
     #[link(name = "kernel32")]
     unsafe extern "system" {
-        fn SystemTimeToTzSpecificLocalTime(zone: *const std::ffi::c_void, universal: *const SystemTime, local: *mut SystemTime) -> i32;
+        fn SystemTimeToTzSpecificLocalTime(
+            zone: *const std::ffi::c_void,
+            universal: *const SystemTime,
+            local: *mut SystemTime,
+        ) -> i32;
     }
     let utc = civil_from_seconds(seconds);
     let Ok(year) = u16::try_from(utc.year) else {
@@ -149,7 +167,10 @@ fn to_local(seconds: i64) -> Civil {
     // SAFETY: 两个指针都指向本函数栈上的完整 SYSTEMTIME；时区参数为空表示当前时区。
     let ok = unsafe { SystemTimeToTzSpecificLocalTime(std::ptr::null(), &universal, &mut local) };
     if ok == 0 {
-        eprintln!("Nana 换算本地时间失败，按 UTC 显示：{}", std::io::Error::last_os_error());
+        eprintln!(
+            "Nana 换算本地时间失败，按 UTC 显示：{}",
+            std::io::Error::last_os_error()
+        );
         return utc;
     }
     Civil {
@@ -184,9 +205,25 @@ mod tests {
 
     #[test]
     fn civil_round_trip_holds_across_eras_and_leap_days() {
-        for (year, month, day) in [(1970, 1, 1), (2000, 2, 29), (2026, 10, 8), (1969, 12, 31), (2400, 3, 1)] {
+        for (year, month, day) in [
+            (1970, 1, 1),
+            (2000, 2, 29),
+            (2026, 10, 8),
+            (1969, 12, 31),
+            (2400, 3, 1),
+        ] {
             let seconds = days_from_civil(year, month, day) * 86_400 + 3_661;
-            assert_eq!(civil_from_seconds(seconds), Civil { year, month, day, hour: 1, minute: 1, second: 1 });
+            assert_eq!(
+                civil_from_seconds(seconds),
+                Civil {
+                    year,
+                    month,
+                    day,
+                    hour: 1,
+                    minute: 1,
+                    second: 1
+                }
+            );
         }
     }
 

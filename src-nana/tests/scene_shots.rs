@@ -16,7 +16,9 @@ use std::time::Duration;
 
 use momobako_nana::acceptance_document_for_model;
 use momobako_nana::appearance::{self, Appearance};
-use momobako_nana::shell::{acceptance_gap_models, mount_shell, ShellMessage, ShellPage, ShellViewModel};
+use momobako_nana::shell::{
+    ShellMessage, ShellPage, ShellViewModel, acceptance_gap_models, mount_shell,
+};
 use nana_ui_devtools::agent::{AgentSession, RuntimeAgentSession, protocol::ThemeName};
 use nana_ui_devtools::offscreen;
 
@@ -50,9 +52,17 @@ fn renders_requested_scenes() {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/nana-scene-shots");
     fs::create_dir_all(&dir).expect("截图目录");
     let catalog = catalog();
-    for name in requested.split(',').map(str::trim).filter(|name| !name.is_empty()) {
+    for name in requested
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
         let Some((_, model)) = catalog.iter().find(|(scene, _)| *scene == name) else {
-            let known = catalog.iter().map(|(scene, _)| *scene).collect::<Vec<_>>().join(", ");
+            let known = catalog
+                .iter()
+                .map(|(scene, _)| *scene)
+                .collect::<Vec<_>>()
+                .join(", ");
             panic!("没有场景 {name}。可选：{known}");
         };
         for size in &sizes {
@@ -67,18 +77,31 @@ fn renders_requested_scenes() {
 }
 
 fn catalog() -> Vec<(&'static str, ShellViewModel)> {
-    let mut scenes = PAGES.iter().map(|(name, page)| (*name, ShellViewModel::for_page(page.clone()))).collect::<Vec<_>>();
+    let mut scenes = PAGES
+        .iter()
+        .map(|(name, page)| (*name, ShellViewModel::for_page(page.clone())))
+        .collect::<Vec<_>>();
     scenes.extend(acceptance_gap_models());
     scenes
 }
 
-fn shoot(mut model: ShellViewModel, width: u32, height: u32, theme: ThemeName, dir: &std::path::Path, stem: &str) {
+fn shoot(
+    mut model: ShellViewModel,
+    width: u32,
+    height: u32,
+    theme: ThemeName,
+    dir: &std::path::Path,
+    stem: &str,
+) {
     let appearance = Appearance::for_mode(&model, mode_of(theme));
     model.set_viewport_width(width as f32);
     let document = acceptance_document_for_model(model.clone()).expect("文档");
     let mut session = RuntimeAgentSession::new(document, width, height).expect("会话");
     session.set_theme(theme).expect("主题");
-    assert!(appearance::install(session.document_mut(), appearance).is_some(), "外观安装失败");
+    assert!(
+        appearance::install(session.document_mut(), appearance).is_some(),
+        "外观安装失败"
+    );
     session.flush().expect("布局");
     if !settle_feedback(&mut session, &mut model) {
         eprintln!("{stem}：尺寸回报四轮后还没停，视图可能在反复重建");
@@ -135,7 +158,11 @@ fn settle_feedback(session: &mut RuntimeAgentSession, model: &mut ShellViewModel
         mount_shell(session.document_mut(), model).expect("同步");
         session.flush().expect("回报后的布局");
     }
-    session.document_mut().context_mut().take_program_messages().is_empty()
+    session
+        .document_mut()
+        .context_mut()
+        .take_program_messages()
+        .is_empty()
 }
 
 /// 框架激活的对话框开着时，把它的进场动效走完再截图。离屏会话没有帧时钟，不推进就截到透明度
@@ -168,7 +195,9 @@ fn list(key: &str, default: &str) -> Vec<String> {
 }
 
 fn parse_size(size: &str) -> (u32, u32) {
-    let (width, height) = size.split_once('x').unwrap_or_else(|| panic!("尺寸写成 宽x高：{size}"));
+    let (width, height) = size
+        .split_once('x')
+        .unwrap_or_else(|| panic!("尺寸写成 宽x高：{size}"));
     (width.parse().expect("宽"), height.parse().expect("高"))
 }
 

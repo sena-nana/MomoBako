@@ -27,7 +27,9 @@ pub fn last_repository_path() -> PathBuf {
 impl WorkspaceState {
     /// 记住（或清掉）上次打开的资源库。值变了才排下写文件，同一个仓库反复刷新不重复写。
     pub(crate) fn remember_repository(&mut self, repo_id: Option<String>) {
-        let next = repo_id.map(|id| id.trim().to_string()).filter(|id| !id.is_empty());
+        let next = repo_id
+            .map(|id| id.trim().to_string())
+            .filter(|id| !id.is_empty());
         if self.last_active_repo_id == next {
             return;
         }
@@ -51,7 +53,10 @@ impl WorkspaceState {
     pub fn save_last_repository_file(&self, path: &Path) {
         let mut value = serde_json::Map::new();
         if let Some(repo_id) = &self.last_active_repo_id {
-            value.insert(LAST_ACTIVE_REPOSITORY_KEY.into(), serde_json::Value::String(repo_id.clone()));
+            value.insert(
+                LAST_ACTIVE_REPOSITORY_KEY.into(),
+                serde_json::Value::String(repo_id.clone()),
+            );
         }
         if let Some(parent) = path.parent()
             && let Err(error) = fs::create_dir_all(parent)

@@ -73,7 +73,13 @@ pub(super) fn paint_text(text: &str) -> PageFrame {
         draw_glyph(&mut rgba, x, y, ch);
         x += advance;
     }
-    PageFrame { width: PAGE_W, height: PAGE_H, rgba, text: text.to_string(), error: None }
+    PageFrame {
+        width: PAGE_W,
+        height: PAGE_H,
+        rgba,
+        text: text.to_string(),
+        error: None,
+    }
 }
 
 pub(super) fn paint_jpeg(jpeg: &[u8]) -> Result<PageFrame, String> {
@@ -91,7 +97,9 @@ pub(super) fn paint_jpeg(jpeg: &[u8]) -> Result<PageFrame, String> {
     draw_border(&mut rgba);
     let max_w = PAGE_W - 32;
     let max_h = PAGE_H - 32;
-    let scale = (max_w as f32 / src_w as f32).min(max_h as f32 / src_h as f32).min(1.0);
+    let scale = (max_w as f32 / src_w as f32)
+        .min(max_h as f32 / src_h as f32)
+        .min(1.0);
     let dst_w = ((src_w as f32) * scale).round().max(1.0) as u32;
     let dst_h = ((src_h as f32) * scale).round().max(1.0) as u32;
     let origin_x = (PAGE_W - dst_w) / 2;
@@ -101,14 +109,34 @@ pub(super) fn paint_jpeg(jpeg: &[u8]) -> Result<PageFrame, String> {
             let sx = ((x as f32 / dst_w as f32) * src_w as f32) as u32;
             let sy = ((y as f32 / dst_h as f32) * src_h as f32) as u32;
             let pixel = rgba_image.get_pixel(sx.min(src_w - 1), sy.min(src_h - 1));
-            put(&mut rgba, origin_x + x, origin_y + y, pixel[0], pixel[1], pixel[2], pixel[3]);
+            put(
+                &mut rgba,
+                origin_x + x,
+                origin_y + y,
+                pixel[0],
+                pixel[1],
+                pixel[2],
+                pixel[3],
+            );
         }
     }
-    Ok(PageFrame { width: PAGE_W, height: PAGE_H, rgba, text: String::new(), error: None })
+    Ok(PageFrame {
+        width: PAGE_W,
+        height: PAGE_H,
+        rgba,
+        text: String::new(),
+        error: None,
+    })
 }
 
 pub(super) fn failed(message: String) -> PageFrame {
-    PageFrame { width: 0, height: 0, rgba: Vec::new(), text: String::new(), error: Some(message) }
+    PageFrame {
+        width: 0,
+        height: 0,
+        rgba: Vec::new(),
+        text: String::new(),
+        error: Some(message),
+    }
 }
 
 fn filter_names(dict: &[u8]) -> Result<Vec<&'static str>, String> {
@@ -214,10 +242,13 @@ fn ascii85(data: &[u8]) -> Result<Vec<u8>, String> {
 fn push_group(out: &mut Vec<u8>, group: &[u8; 5], count: usize) -> Result<(), String> {
     let mut value = 0u32;
     for byte in group {
-        value = value.checked_mul(85).and_then(|value| value.checked_add(u32::from(byte - 33))).ok_or_else(|| {
-            eprintln!("Nana PDF ASCII85 数值溢出");
-            "ASCII85Decode 无法解码".to_string()
-        })?;
+        value = value
+            .checked_mul(85)
+            .and_then(|value| value.checked_add(u32::from(byte - 33)))
+            .ok_or_else(|| {
+                eprintln!("Nana PDF ASCII85 数值溢出");
+                "ASCII85Decode 无法解码".to_string()
+            })?;
     }
     let bytes = value.to_be_bytes();
     let take = count - 1;
@@ -229,7 +260,15 @@ fn push_group(out: &mut Vec<u8>, group: &[u8; 5], count: usize) -> Result<(), St
 fn lzw(data: &[u8]) -> Result<Vec<u8>, String> {
     let mut bits = BitReader::new(data);
     let mut width = 9u32;
-    let mut table: Vec<Vec<u8>> = (0..258).map(|code| if code < 256 { vec![code as u8] } else { Vec::new() }).collect();
+    let mut table: Vec<Vec<u8>> = (0..258)
+        .map(|code| {
+            if code < 256 {
+                vec![code as u8]
+            } else {
+                Vec::new()
+            }
+        })
+        .collect();
     let mut previous: Option<Vec<u8>> = None;
     let mut out = Vec::new();
     loop {
@@ -318,7 +357,11 @@ struct BitReader<'a> {
 
 impl<'a> BitReader<'a> {
     fn new(data: &'a [u8]) -> Self {
-        Self { data, index: 0, bit: 0 }
+        Self {
+            data,
+            index: 0,
+            bit: 0,
+        }
     }
 
     fn read(&mut self, width: u32) -> Option<u32> {

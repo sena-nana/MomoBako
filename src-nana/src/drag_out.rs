@@ -6,8 +6,8 @@
 
 use std::cell::RefCell;
 
-use crate::shell::status::FailureSource;
 use crate::shell::ShellViewModel;
+use crate::shell::status::FailureSource;
 
 thread_local! {
     static RESULT: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
@@ -22,7 +22,9 @@ pub fn apply_result(shell: &mut ShellViewModel) {
         Ok(()) => shell.input.external_drag_result = Some(true),
         Err(error) => {
             eprintln!("Nana 文件拖出失败：{error}");
-            shell.status.fail(FailureSource::Host, format!("拖出失败：{error}"));
+            shell
+                .status
+                .fail(FailureSource::Host, format!("拖出失败：{error}"));
             shell.input.external_drag_result = Some(false);
         }
     }
@@ -52,7 +54,10 @@ fn file_list(paths: &[String]) -> Result<Vec<std::path::PathBuf>, String> {
 }
 
 #[cfg(windows)]
-fn queue_windows(window: &nana_ui::WindowHandle, files: Vec<std::path::PathBuf>) -> Result<(), String> {
+fn queue_windows(
+    window: &nana_ui::WindowHandle,
+    files: Vec<std::path::PathBuf>,
+) -> Result<(), String> {
     let redraw = window.clone();
     let mut request = window.with_native_handle(move |handle| {
         let result = drag::start_drag(
@@ -62,7 +67,10 @@ fn queue_windows(window: &nana_ui::WindowHandle, files: Vec<std::path::PathBuf>)
             |result, cursor| {
                 eprintln!("Nana 文件拖出结束：{result:?} @ {},{}", cursor.x, cursor.y);
             },
-            drag::Options { mode: drag::DragMode::Copy, ..drag::Options::default() },
+            drag::Options {
+                mode: drag::DragMode::Copy,
+                ..drag::Options::default()
+            },
         )
         .map_err(|error| error.to_string());
         RESULT.with(|slot| *slot.borrow_mut() = Some(result));
@@ -84,7 +92,10 @@ mod tests {
     #[test]
     fn empty_paths_fail_without_a_system_call() {
         assert_eq!(file_list(&[]).unwrap_err(), "没有可拖出的绝对路径");
-        assert_eq!(file_list(&[" ".into()]).unwrap_err(), "没有可拖出的绝对路径");
+        assert_eq!(
+            file_list(&[" ".into()]).unwrap_err(),
+            "没有可拖出的绝对路径"
+        );
         assert_eq!(file_list(&["C:\\a.png".into()]).unwrap().len(), 1);
     }
 
@@ -95,17 +106,22 @@ mod tests {
         let mut shell = ShellViewModel::default();
         apply_result(&mut shell);
         let failure = shell.status.failure().expect("拖出失败要进状态区");
-        assert_eq!((failure.source, failure.message.as_str()), (FailureSource::Host, "拖出失败：OLE"));
+        assert_eq!(
+            (failure.source, failure.message.as_str()),
+            (FailureSource::Host, "拖出失败：OLE")
+        );
         assert_eq!(shell.input.external_drag_result, Some(false));
         RESULT.with(|slot| *slot.borrow_mut() = Some(Ok(())));
         apply_result(&mut shell);
         assert_eq!(shell.input.external_drag_result, Some(true));
-        shell.reduce(crate::shell::ShellMessage::Input(crate::shell::input::InputMessage::StartExternalDrag {
-            paths: vec!["C:\\repo\\a.png".into()],
-            trash: false,
-            backend_kind: "filesystem".into(),
-            repo_root: "C:\\repo".into(),
-        }));
+        shell.reduce(crate::shell::ShellMessage::Input(
+            crate::shell::input::InputMessage::StartExternalDrag {
+                paths: vec!["C:\\repo\\a.png".into()],
+                trash: false,
+                backend_kind: "filesystem".into(),
+                repo_root: "C:\\repo".into(),
+            },
+        ));
         assert!(shell.status.failure().is_none(), "拖出开始时清掉上一次失败");
     }
 }

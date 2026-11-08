@@ -14,7 +14,7 @@ use super::super::files::VirtualQuery;
 use super::super::status::FailureSource;
 use super::super::{ShellViewModel, WorkspacePanel};
 use super::smart::format_number;
-use super::{smart_ancestor_ids, SidebarEffect, SidebarSmartFolder, SidebarState};
+use super::{SidebarEffect, SidebarSmartFolder, SidebarState, smart_ancestor_ids};
 
 /// 没有打开的智能文件夹、也找不到名字时文件页头的标题（Vue `virtualViewTitle` 的回退）。
 const FALLBACK_TITLE: &str = "智能文件夹";
@@ -68,8 +68,18 @@ impl SmartResultSummary {
 /// 摘要行，照 Vue `smartFolderSummary`：「N 条结果」，后面按关键词、路径、格式、标签、颜色、形状、最低评分、
 /// 元数据条件的顺序接上有值的几项，用「 · 」隔开。祖先和自己的关键词、路径合在一起时是多行，用「 + 」连。
 pub fn summary_text(count: usize, filter: &SmartFolderFilter) -> String {
-    let text = |value: &Option<String>| value.as_deref().filter(|value| !value.is_empty()).map(|value| value.replace('\n', " + "));
-    let list = |values: &Option<Vec<String>>| values.as_ref().filter(|values| !values.is_empty()).map(|values| values.join(" / "));
+    let text = |value: &Option<String>| {
+        value
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .map(|value| value.replace('\n', " + "))
+    };
+    let list = |values: &Option<Vec<String>>| {
+        values
+            .as_ref()
+            .filter(|values| !values.is_empty())
+            .map(|values| values.join(" / "))
+    };
     let parts = [
         text(&filter.query).map(|value| format!("关键词 {value}")),
         text(&filter.path_prefix).map(|value| format!("路径 {value}")),
@@ -77,8 +87,16 @@ pub fn summary_text(count: usize, filter: &SmartFolderFilter) -> String {
         list(&filter.tags).map(|value| format!("标签 {value}")),
         list(&filter.colors).map(|value| format!("颜色 {value}")),
         list(&filter.shapes).map(|value| format!("形状 {value}")),
-        filter.min_rating.filter(|rating| rating.is_finite() && *rating > 0.0).map(|rating| format!("{} 星+", format_number(rating))),
-        filter.metadata_filters.as_ref().map(Vec::len).filter(|count| *count > 0).map(|count| format!("{count} 个元数据条件")),
+        filter
+            .min_rating
+            .filter(|rating| rating.is_finite() && *rating > 0.0)
+            .map(|rating| format!("{} 星+", format_number(rating))),
+        filter
+            .metadata_filters
+            .as_ref()
+            .map(Vec::len)
+            .filter(|count| *count > 0)
+            .map(|count| format!("{count} 个元数据条件")),
     ];
     let mut summary = format!("{count} 条结果");
     for part in parts.into_iter().flatten() {
@@ -97,7 +115,12 @@ impl SidebarState {
         };
         find_folder(&self.smart_folders, active)
             .map(|folder| folder.name.clone())
-            .or_else(|| self.smart_result.as_ref().filter(|summary| summary.smart_folder_id == active).map(|summary| summary.name.clone()))
+            .or_else(|| {
+                self.smart_result
+                    .as_ref()
+                    .filter(|summary| summary.smart_folder_id == active)
+                    .map(|summary| summary.name.clone())
+            })
             .unwrap_or_else(|| FALLBACK_TITLE.into())
     }
 
@@ -118,7 +141,10 @@ impl SidebarState {
         };
         self.smart_loading = true;
         self.smart_error.clear();
-        self.effects.push(SidebarEffect::QuerySmartFolder { repo_id: repo_id.to_string(), smart_folder_id });
+        self.effects.push(SidebarEffect::QuerySmartFolder {
+            repo_id: repo_id.to_string(),
+            smart_folder_id,
+        });
     }
 }
 
@@ -126,7 +152,11 @@ impl ShellViewModel {
     /// 新建、编辑、删除的结果（Vue `createSmartFolderInWorkspace` / `updateSmartFolderInWorkspace` /
     /// `deleteSmartFolderInWorkspace`）。换上整棵树、关掉对话框以后：新建的打开它，编辑的重查正在看的结果，
     /// 删除的清掉被删的结果。失败和过期的结果留在对话框里；删除的确认框没有错误行，失败写进状态区。
-    pub(crate) fn apply_smart_saved(&mut self, repo_id: &str, result: Result<SmartFolderOutcome, String>) {
+    pub(crate) fn apply_smart_saved(
+        &mut self,
+        repo_id: &str,
+        result: Result<SmartFolderOutcome, String>,
+    ) {
         let (folders, change) = match result {
             Ok(outcome) => (Ok(outcome.folders), Some(outcome.change)),
             Err(error) => (Err(error), None),
@@ -141,7 +171,9 @@ impl ShellViewModel {
         }
         match change {
             Some(SmartFolderChange::Created(Some(id))) => self.apply_smart_folder(id),
-            Some(SmartFolderChange::Created(None)) => eprintln!("Nana 新建智能文件夹的结果没有带回新文件夹，不打开"),
+            Some(SmartFolderChange::Created(None)) => {
+                eprintln!("Nana 新建智能文件夹的结果没有带回新文件夹，不打开")
+            }
             Some(SmartFolderChange::Updated(id)) => self.requery_edited_smart(repo_id, &id),
             Some(SmartFolderChange::Deleted(id)) => self.leave_deleted_smart(&id),
             None => {}
@@ -156,7 +188,10 @@ impl ShellViewModel {
         let Some(active) = self.sidebar.active_smart_folder_id.clone() else {
             return;
         };
-        let affected = active == edited || smart_ancestor_ids(&self.sidebar.smart_folders, &active).iter().any(|id| id == edited);
+        let affected = active == edited
+            || smart_ancestor_ids(&self.sidebar.smart_folders, &active)
+                .iter()
+                .any(|id| id == edited);
         if affected {
             self.sidebar.requery_active(repo_id);
         }
@@ -183,20 +218,40 @@ impl ShellViewModel {
     }
 
     /// 查询结果（Vue `selectSmartFolder`）：仓库或正在看的文件夹已经换了的不写；写下摘要，把行交给文件列表。
-    pub(crate) fn apply_smart_query(&mut self, repo_id: &str, smart_folder_id: &str, result: Result<SmartFolderResult, String>) {
+    /// 还停在智能文件夹面板时清掉选择。失败不把文件列换成错误，原因留在侧栏状态区。
+    pub(crate) fn apply_smart_query(
+        &mut self,
+        repo_id: &str,
+        smart_folder_id: &str,
+        result: Result<SmartFolderResult, String>,
+    ) {
+        let succeeded = result.is_ok();
         let summary = match &result {
             Ok(result) => Ok(SmartResultSummary::of(smart_folder_id, result)),
             Err(error) => Err(error.clone()),
         };
-        if self.sidebar.note_smart_query(repo_id, smart_folder_id, summary) {
-            self.files.set_virtual_rows(result.map(|result| result.query.rows).unwrap_or_default());
+        if self
+            .sidebar
+            .note_smart_query(repo_id, smart_folder_id, summary)
+        {
+            self.files
+                .set_virtual_rows(result.map(|result| result.query.rows).unwrap_or_default());
+            if succeeded && self.workspace.panel == WorkspacePanel::SmartFolder {
+                self.files.drop_smart_selection();
+            }
         }
     }
 }
 
 /// 在整棵智能文件夹树里按标识找。
 fn find_folder<'a>(folders: &'a [SidebarSmartFolder], id: &str) -> Option<&'a SidebarSmartFolder> {
-    folders.iter().find_map(|folder| if folder.id == id { Some(folder) } else { find_folder(&folder.children, id) })
+    folders.iter().find_map(|folder| {
+        if folder.id == id {
+            Some(folder)
+        } else {
+            find_folder(&folder.children, id)
+        }
+    })
 }
 
 #[cfg(test)]

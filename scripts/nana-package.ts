@@ -36,6 +36,7 @@ interface Options {
   packager?: string;
   buildId?: string;
   expectTag?: string;
+  dryRun: boolean;
 }
 
 function log(message: string): void {
@@ -47,6 +48,10 @@ function parseOptions(argv: readonly string[]): Options {
   const values = new Map<string, string>();
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
+    if (flag === "--dry-run") {
+      values.set(flag, "true");
+      continue;
+    }
     const value = argv[index + 1];
     if (!["--exe", "--out", "--packager", "--build-id", "--expect-tag"].includes(flag)) {
       throw new Error(`不认识的参数 ${flag}`);
@@ -63,6 +68,7 @@ function parseOptions(argv: readonly string[]): Options {
     packager: values.get("--packager") ?? (process.env.NANA_PACKAGER?.trim() || undefined),
     buildId: values.get("--build-id"),
     expectTag: values.get("--expect-tag"),
+    dryRun: values.has("--dry-run"),
   };
 }
 
@@ -195,8 +201,17 @@ function main(): void {
   if (!existsSync(options.exe)) throw new Error(`没有可执行文件 ${options.exe}，先运行 yarn nana:build`);
   const targetTriple = hostTriple();
   const plugins = collectPlugins(targetTriple);
-  const packager = ensurePackager(options);
   const buildId = options.buildId ?? defaultBuildId();
+  if (options.dryRun) {
+    // CI 门禁只校验真实 dist exe、插件 envelope/triple 和两种配置能否生成，
+    // 不下载 packager、写发布目录或启动 Windows 进程。
+    for (const variant of VARIANTS) {
+      renderPackageConfig(template, dirname(templatePath), variant, plugins);
+    }
+    log(`dry-run 通过：${options.exe}，${plugins.length} 个插件，${targetTriple}，构建号 ${buildId ?? "无"}`);
+    return;
+  }
+  const packager = ensurePackager(options);
   const context = { options, targetTriple, buildId };
   mkdirSync(options.out, { recursive: true });
   for (const stale of readdirSync(options.out).filter((name) => name.endsWith(".zip"))) {

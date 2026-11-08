@@ -23,7 +23,8 @@ pub const SIDEBAR_WIDTH_KEY: &str = "momobako.sidebarWidth";
 #[path = "workspace_startup.rs"]
 mod startup;
 pub use startup::{
-    IndexCounts, SettingsWait, StartupLog, StartupMode, StartupState, StartupStatus, StartupStepItem, StartupStepState, SyncCounts,
+    IndexCounts, SettingsWait, StartupLog, StartupMode, StartupState, StartupStatus,
+    StartupStepItem, StartupStepState, SyncCounts,
 };
 #[path = "workspace_switch.rs"]
 mod switch;
@@ -107,15 +108,27 @@ impl WorkspaceRepository {
             status: summary.status.clone(),
             backend_plugin_id: summary.backend.plugin_id.clone(),
             capabilities: summary.backend.capabilities.clone(),
-            cache_required: summary.local_cache.as_ref().is_some_and(|cache| cache.required),
+            cache_required: summary
+                .local_cache
+                .as_ref()
+                .is_some_and(|cache| cache.required),
             cache_status: summary
                 .local_cache
                 .as_ref()
                 .map(|cache| cache.status.clone())
                 .unwrap_or_default(),
-            cache_path: summary.local_cache.as_ref().and_then(|cache| cache.path.clone()),
-            login_expired: summary.authentication.as_ref().is_some_and(|auth| auth.login_expired),
-            logged_out: summary.authentication.as_ref().is_some_and(|auth| !auth.logged_in),
+            cache_path: summary
+                .local_cache
+                .as_ref()
+                .and_then(|cache| cache.path.clone()),
+            login_expired: summary
+                .authentication
+                .as_ref()
+                .is_some_and(|auth| auth.login_expired),
+            logged_out: summary
+                .authentication
+                .as_ref()
+                .is_some_and(|auth| !auth.logged_in),
         }
     }
 
@@ -132,7 +145,11 @@ impl WorkspaceRepository {
 
     /// 能当下载目标：就绪，而且可写（Vue 目标资源库对话框的 `requireReady`、`requireWritable`）。
     pub fn accepts_downloads(&self) -> bool {
-        self.status == "ready" && self.capabilities.iter().any(|capability| capability == "write")
+        self.status == "ready"
+            && self
+                .capabilities
+                .iter()
+                .any(|capability| capability == "write")
     }
 }
 
@@ -167,21 +184,41 @@ pub enum WorkspaceDialog {
 /// 宿主在归约后执行的副作用。列表、同步和摘要带着代次，换仓库、重试或新的刷新让旧结果作废。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WorkspaceEffect {
-    RefreshRepositories { generation: u64 },
+    RefreshRepositories {
+        generation: u64,
+    },
     /// 结构更新后重拉列表。不带代次，不能改启动步骤或页面。
     RefreshRepositoriesSilent,
-    SyncRepository { repo_id: String, generation: u64 },
-    LoadSnapshot { repo_id: String, generation: u64 },
+    SyncRepository {
+        repo_id: String,
+        generation: u64,
+    },
+    LoadSnapshot {
+        repo_id: String,
+        generation: u64,
+    },
     /// 启动和换仓库的第 4 步：读根目录首屏。
-    LoadFirstScreen { repo_id: String },
+    LoadFirstScreen {
+        repo_id: String,
+    },
     /// 结构更新后重拉当前仓库摘要。失败不能把页面改成错误。
-    LoadSnapshotSilent { repo_id: String },
-    RelocateRepository { repo_id: String, path: String },
-    DeleteRepository { repo_id: String, mode: DeleteMode },
+    LoadSnapshotSilent {
+        repo_id: String,
+    },
+    RelocateRepository {
+        repo_id: String,
+        path: String,
+    },
+    DeleteRepository {
+        repo_id: String,
+        mode: DeleteMode,
+    },
     PersistSidebar,
     /// 记住的资源库变了，写进 `last-repository.json`。
     PersistLastRepository,
-    StopPlayback { previous_repo_id: String },
+    StopPlayback {
+        previous_repo_id: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -260,7 +297,9 @@ impl WorkspaceState {
 
     pub fn active_repository(&self) -> Option<&WorkspaceRepository> {
         self.active_repo_id.as_ref().and_then(|repo_id| {
-            self.repositories.iter().find(|repository| &repository.repo_id == repo_id)
+            self.repositories
+                .iter()
+                .find(|repository| &repository.repo_id == repo_id)
         })
     }
 
@@ -305,7 +344,9 @@ impl WorkspaceState {
         match fs::read_to_string(path) {
             Ok(raw) => match serde_json::from_str::<serde_json::Value>(&raw) {
                 Ok(value) => self.apply_sidebar_storage(
-                    value.get(SIDEBAR_COLLAPSED_KEY).and_then(|item| item.as_str()),
+                    value
+                        .get(SIDEBAR_COLLAPSED_KEY)
+                        .and_then(|item| item.as_str()),
                     value.get(SIDEBAR_WIDTH_KEY).and_then(|item| item.as_str()),
                 ),
                 Err(error) => eprintln!("Nana 侧栏偏好解析失败：{error}"),
@@ -357,7 +398,8 @@ impl WorkspaceState {
             && previous != next
         {
             self.stop_playback = true;
-            self.effects.push(WorkspaceEffect::StopPlayback { previous_repo_id });
+            self.effects
+                .push(WorkspaceEffect::StopPlayback { previous_repo_id });
         }
         self.active_repo_id = next;
     }
@@ -365,7 +407,6 @@ impl WorkspaceState {
     fn reset_library_category(&mut self) {
         self.library_category = LibraryCategory::All;
     }
-
 }
 
 pub fn sidebar_prefs_path() -> std::path::PathBuf {
@@ -385,7 +426,9 @@ pub fn parse_sidebar_width(raw: Option<&str>) -> f32 {
     let Some(raw) = raw else {
         return SIDEBAR_DEFAULT_PX;
     };
-    raw.parse::<f32>().map(clamp_sidebar_width).unwrap_or(SIDEBAR_DEFAULT_PX)
+    raw.parse::<f32>()
+        .map(clamp_sidebar_width)
+        .unwrap_or(SIDEBAR_DEFAULT_PX)
 }
 
 #[cfg(test)]

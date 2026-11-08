@@ -28,7 +28,12 @@ fn log_message() -> ShellMessage {
         category: "repository".into(),
         action: "sync".into(),
         message: "后台同步完成".into(),
-        source: SystemLogSource { kind: "host".into(), label: Some("MomoBako".into()), plugin_id: None, repo_id: None },
+        source: SystemLogSource {
+            kind: "host".into(),
+            label: Some("MomoBako".into()),
+            plugin_id: None,
+            repo_id: None,
+        },
         location: SystemLogLocation::default(),
         context: serde_json::json!({}),
     }))
@@ -45,7 +50,14 @@ fn listed() -> ShellHarness {
 #[test]
 fn unrelated_updates_keep_every_playlist_node() {
     let mut harness = listed();
-    let keys = ["playlist-page", "playlist-reorder", "playlist-item-item-01", "playlist-remove-item-02", "player-title", "workspace-filter-bar"];
+    let keys = [
+        "playlist-page",
+        "playlist-reorder",
+        "playlist-item-item-01",
+        "playlist-remove-item-02",
+        "player-title",
+        "workspace-filter-bar",
+    ];
     let nodes = keys.map(|key| harness.keyed(key).unwrap_or_else(|| panic!("缺少 {key}")));
     let branch = harness.route_branch();
     let remounts = harness.view_stats().remounts;
@@ -57,11 +69,19 @@ fn unrelated_updates_keep_every_playlist_node() {
     ] {
         harness.apply(message);
         harness.flush();
-        assert_eq!(keys.map(|key| harness.keyed(key)), nodes.map(Some), "无关更新换掉了播放集页的节点");
+        assert_eq!(
+            keys.map(|key| harness.keyed(key)),
+            nodes.map(Some),
+            "无关更新换掉了播放集页的节点"
+        );
         harness.assert_same_as_fresh_mount();
     }
     assert_eq!(harness.route_branch(), branch, "常驻路由的分支不该重挂");
-    assert_eq!(harness.view_stats().remounts, remounts, "无关更新不该重挂任何内容");
+    assert_eq!(
+        harness.view_stats().remounts,
+        remounts,
+        "无关更新不该重挂任何内容"
+    );
 }
 
 /// 开始播放第二条：条目列表和行不换，列表里选中的条目原地换；播放条读到的当前项变了，岛重建一次。
@@ -74,20 +94,38 @@ fn playing_an_item_keeps_the_list_and_rebuilds_only_the_player_island() {
     let branch = harness.route_branch();
     let remounts = harness.view_stats().remounts;
 
-    harness.apply(ShellMessage::Player(PlayerMessage::PlayListed { item_id: Some("item-02".into()) }));
+    harness.apply(ShellMessage::Player(PlayerMessage::PlayListed {
+        item_id: Some("item-02".into()),
+    }));
     harness.flush();
-    assert_eq!(harness.keyed("playlist-reorder"), Some(list), "换当前播放不该重建条目列表");
+    assert_eq!(
+        harness.keyed("playlist-reorder"),
+        Some(list),
+        "换当前播放不该重建条目列表"
+    );
     assert_eq!(harness.keyed("playlist-item-item-02"), Some(row));
     assert_eq!(harness.route_branch(), branch);
-    assert_ne!(harness.keyed("player-title"), Some(card), "播放条读到的当前项变了，岛要重建");
-    assert_eq!(harness.view_stats().remounts, remounts + 1, "只重建播放条岛");
+    assert_ne!(
+        harness.keyed("player-title"),
+        Some(card),
+        "播放条读到的当前项变了，岛要重建"
+    );
+    assert_eq!(
+        harness.view_stats().remounts,
+        remounts + 1,
+        "只重建播放条岛"
+    );
     harness.assert_same_as_fresh_mount();
 
     let rebuilt = harness.view_stats().remounts;
     for _ in 0..8 {
         harness.frame();
     }
-    assert_eq!(harness.view_stats().remounts, rebuilt, "动效帧和播放推进不该重挂");
+    assert_eq!(
+        harness.view_stats().remounts,
+        rebuilt,
+        "动效帧和播放推进不该重挂"
+    );
 }
 
 /// 详情还没读回时是「选择一个播放集」空框、岛里没有播放条；读回后空框和面板原地互换，播放条岛有了内容。
@@ -98,9 +136,14 @@ fn listing_swaps_the_empty_frame_and_fills_the_player_island() {
     let mut harness = ShellHarness::mount(ShellViewModel::for_page(ShellPage::Playlists));
     assert_eq!(RouteKey::of(&harness.model), RouteKey::Playlists);
     assert!(harness.find("选择一个播放集").is_some(), "没点开时显示空框");
-    assert!(harness.keyed("player-title").is_none(), "没点开时岛里没有播放条");
+    assert!(
+        harness.keyed("player-title").is_none(),
+        "没点开时岛里没有播放条"
+    );
     let empty = harness.keyed("playlist-page-empty-frame").expect("空框");
-    let slot = harness.keyed("playlist-player-slot").expect("播放条的占位节点");
+    let slot = harness
+        .keyed("playlist-player-slot")
+        .expect("播放条的占位节点");
     let branch = harness.route_branch();
 
     harness.apply(ShellMessage::PlaylistDetailLoaded(Ok(detail)));
@@ -109,8 +152,14 @@ fn listing_swaps_the_empty_frame_and_fills_the_player_island() {
     assert_eq!(harness.keyed("playlist-page-empty-frame"), Some(empty));
     assert_eq!(harness.keyed("playlist-player-slot"), Some(slot));
     assert!(harness.find("选择一个播放集").is_none(), "读回后空框藏起来");
-    assert!(harness.find("演示播放列表").is_some(), "读回后显示播放集标题");
-    assert!(harness.keyed("player-title").is_some(), "读回后岛里有播放条");
+    assert!(
+        harness.find("演示播放列表").is_some(),
+        "读回后显示播放集标题"
+    );
+    assert!(
+        harness.keyed("player-title").is_some(),
+        "读回后岛里有播放条"
+    );
     harness.assert_same_as_fresh_mount();
 }
 
@@ -118,16 +167,31 @@ fn listing_swaps_the_empty_frame_and_fills_the_player_island() {
 #[test]
 fn unplayable_items_toggle_their_status_line_in_place() {
     let mut harness = listed();
-    let line = harness.keyed("playlist-item-status").expect("不可播放项目的行");
-    assert!(harness.find("不可播放项目：track-01.mp3: 文件不存在").is_none());
+    let line = harness
+        .keyed("playlist-item-status")
+        .expect("不可播放项目的行");
+    assert!(
+        harness
+            .find("不可播放项目：track-01.mp3: 文件不存在")
+            .is_none()
+    );
 
     let mut detail = harness.model.player.listed.clone().expect("详情");
     detail.items[0].status = "missing".into();
     detail.items[0].status_reason = Some("文件不存在".into());
     harness.apply(ShellMessage::PlaylistDetailLoaded(Ok(detail.clone())));
     harness.flush();
-    assert_eq!(harness.keyed("playlist-item-status"), Some(line), "状态行不该重建");
-    assert!(harness.find("不可播放项目：track-01.mp3: 文件不存在").is_some(), "状态行没写出原因");
+    assert_eq!(
+        harness.keyed("playlist-item-status"),
+        Some(line),
+        "状态行不该重建"
+    );
+    assert!(
+        harness
+            .find("不可播放项目：track-01.mp3: 文件不存在")
+            .is_some(),
+        "状态行没写出原因"
+    );
     harness.assert_same_as_fresh_mount();
 
     detail.items[0].status = "ready".into();
@@ -135,18 +199,32 @@ fn unplayable_items_toggle_their_status_line_in_place() {
     harness.apply(ShellMessage::PlaylistDetailLoaded(Ok(detail)));
     harness.flush();
     assert_eq!(harness.keyed("playlist-item-status"), Some(line));
-    assert!(harness.find("不可播放项目：track-01.mp3: 文件不存在").is_none(), "都能播放时状态行藏起来");
+    assert!(
+        harness
+            .find("不可播放项目：track-01.mp3: 文件不存在")
+            .is_none(),
+        "都能播放时状态行藏起来"
+    );
     harness.assert_same_as_fresh_mount();
 }
 
 /// 条目列表里各行的节点，按显示顺序。
 fn item_rows(harness: &ShellHarness) -> Vec<StableNodeId> {
     let list = harness.keyed("playlist-reorder").expect("条目列表");
-    harness.document().context().world().node(list).map(|node| node.children.to_vec()).unwrap_or_default()
+    harness
+        .document()
+        .context()
+        .world()
+        .node(list)
+        .map(|node| node.children.to_vec())
+        .unwrap_or_default()
 }
 
 /// 壳层存好以后读回的详情：照 `edit` 改过的条目。
-fn reload(harness: &mut ShellHarness, edit: impl FnOnce(&mut Vec<crate::backend::services::repository::PlaylistItem>)) {
+fn reload(
+    harness: &mut ShellHarness,
+    edit: impl FnOnce(&mut Vec<crate::backend::services::repository::PlaylistItem>),
+) {
     let mut detail = harness.model.player.listed.clone().expect("详情");
     edit(&mut detail.items);
     harness.apply(ShellMessage::PlaylistDetailLoaded(Ok(detail)));
@@ -159,21 +237,41 @@ fn reload(harness: &mut ShellHarness, edit: impl FnOnce(&mut Vec<crate::backend:
 fn dragging_an_item_moves_its_row_without_rebuilding() {
     let mut harness = listed();
     let list = harness.keyed("playlist-reorder").expect("条目列表");
-    let [first, second] = ["playlist-item-item-01", "playlist-item-item-02"].map(|key| harness.keyed(key).expect("条目行"));
+    let [first, second] = ["playlist-item-item-01", "playlist-item-item-02"]
+        .map(|key| harness.keyed(key).expect("条目行"));
     assert_eq!(item_rows(&harness), [first, second]);
     harness.take_messages();
     let grip = harness.center(harness.keyed("playlist-item-drag-item-02").expect("拖动柄"));
-    let top = harness.document().context().world().layout_box(first).expect("第一条的盒子").y + 4.0;
+    let top = harness
+        .document()
+        .context()
+        .world()
+        .layout_box(first)
+        .expect("第一条的盒子")
+        .y
+        + 4.0;
     let messages = harness.drag_messages(grip, (grip.0, top));
     let reorder = messages.iter().any(|message| {
         matches!(message, ShellMessage::Player(PlayerMessage::Reorder { source, before })
             if source == "item-02" && before.as_deref() == Some("item-01"))
     });
-    assert!(reorder, "拖到第一条上面应该发排序消息：{} 条消息", messages.len());
+    assert!(
+        reorder,
+        "拖到第一条上面应该发排序消息：{} 条消息",
+        messages.len()
+    );
 
     reload(&mut harness, |items| items.reverse());
-    assert_eq!(harness.keyed("playlist-reorder"), Some(list), "排序不该重建列表");
-    assert_eq!(item_rows(&harness), [second, first], "两行只换位置，节点不换");
+    assert_eq!(
+        harness.keyed("playlist-reorder"),
+        Some(list),
+        "排序不该重建列表"
+    );
+    assert_eq!(
+        item_rows(&harness),
+        [second, first],
+        "两行只换位置，节点不换"
+    );
     harness.assert_same_as_fresh_mount();
 }
 
@@ -184,25 +282,37 @@ fn removing_items_by_click_and_keyboard_keeps_the_other_rows() {
     let mut harness = listed();
     let second = harness.keyed("playlist-item-item-02").expect("第二条");
     harness.take_messages();
-    let title = harness.center(harness.keyed("playlist-item-title-item-02").expect("第二条的标题"));
+    let title = harness.center(
+        harness
+            .keyed("playlist-item-title-item-02")
+            .expect("第二条的标题"),
+    );
     let messages = harness.click_messages(title.0, title.1);
     assert!(
         matches!(messages.as_slice(), [ShellMessage::Player(PlayerMessage::OpenPreview { item_id: Some(id) })] if id == "item-02"),
         "点标题应该打开这一条的预览：{} 条消息",
         messages.len()
     );
-    let remove_first = harness.center(harness.keyed("playlist-remove-item-01").expect("第一条的移除"));
+    let remove_first = harness.center(
+        harness
+            .keyed("playlist-remove-item-01")
+            .expect("第一条的移除"),
+    );
     let messages = harness.click_messages(remove_first.0, remove_first.1);
     assert!(
         matches!(messages.as_slice(), [ShellMessage::RemovePlaylistItem { item_id, .. }] if item_id == "item-01"),
         "点「移除」应该只发一条移除消息：{} 条消息",
         messages.len()
     );
-    reload(&mut harness, |items| items.retain(|item| item.playlist_item_id != "item-01"));
+    reload(&mut harness, |items| {
+        items.retain(|item| item.playlist_item_id != "item-01")
+    });
     assert_eq!(item_rows(&harness), [second], "只拿掉被移除的那一行");
     harness.assert_same_as_fresh_mount();
 
-    let remove_second = harness.keyed("playlist-remove-item-02").expect("第二条的移除");
+    let remove_second = harness
+        .keyed("playlist-remove-item-02")
+        .expect("第二条的移除");
     harness.focus(remove_second);
     let messages = harness.key_messages("Enter");
     assert!(
@@ -217,25 +327,29 @@ fn removing_items_by_click_and_keyboard_keeps_the_other_rows() {
 #[test]
 fn row_buttons_click_their_own_actions() {
     let mut harness = listed();
-    harness.apply(ShellMessage::PlaylistPlayersLoaded(Ok(vec![crate::backend::services::repository::PlaylistPlayerContribution {
-        player_type_id: "audio".into(),
-        label: "音频".into(),
-        file_class: "audio".into(),
-        supported_extensions: vec!["mp3".into(), "wav".into()],
-        supports_seek: true,
-        supports_volume: true,
-        supports_preview_navigation: true,
-        description: None,
-    }])));
+    harness.apply(ShellMessage::PlaylistPlayersLoaded(Ok(vec![
+        crate::backend::services::repository::PlaylistPlayerContribution {
+            player_type_id: "audio".into(),
+            label: "音频".into(),
+            file_class: "audio".into(),
+            supported_extensions: vec!["mp3".into(), "wav".into()],
+            supports_seek: true,
+            supports_volume: true,
+            supports_preview_navigation: true,
+            description: None,
+        },
+    ])));
     harness.flush();
     harness.take_messages();
-    let opens_preview = |messages: &[ShellMessage]| {
-        matches!(messages, [ShellMessage::Player(PlayerMessage::OpenPreview { item_id: Some(id) })] if id == "item-02")
-    };
+    let opens_preview = |messages: &[ShellMessage]| matches!(messages, [ShellMessage::Player(PlayerMessage::OpenPreview { item_id: Some(id) })] if id == "item-02");
     for key in ["playlist-item-ext-item-02", "playlist-item-title-item-02"] {
         let (x, y) = harness.center(harness.keyed(key).expect("按钮"));
         let messages = harness.click_messages(x, y);
-        assert!(opens_preview(&messages), "点 {key} 应该打开这一条的预览：{} 条消息", messages.len());
+        assert!(
+            opens_preview(&messages),
+            "点 {key} 应该打开这一条的预览：{} 条消息",
+            messages.len()
+        );
     }
     let (x, y) = harness.center(harness.keyed("playlist-item-play-item-02").expect("播放"));
     let messages = harness.click_messages(x, y);
@@ -258,55 +372,249 @@ fn row_buttons_click_their_own_actions() {
 #[test]
 fn double_clicking_a_row_plays_from_it() {
     let mut harness = listed();
+    assert!(
+        harness.find("拖动排序").is_some(),
+        "拖动柄的读屏名应是「拖动排序」，不是空的"
+    );
     harness.take_messages();
-    let grip = |harness: &ShellHarness, id: &str| harness.center(harness.keyed(&format!("playlist-item-drag-{id}")).expect("拖动柄"));
-    let plays = |messages: &[ShellMessage]| messages.iter().any(|message| matches!(message, ShellMessage::Player(PlayerMessage::PlayListed { .. })));
+    let grip = |harness: &ShellHarness, id: &str| {
+        harness.center(
+            harness
+                .keyed(&format!("playlist-item-drag-{id}"))
+                .expect("拖动柄"),
+        )
+    };
+    let plays = |messages: &[ShellMessage]| {
+        messages.iter().any(|message| {
+            matches!(
+                message,
+                ShellMessage::Player(PlayerMessage::PlayListed { .. })
+            )
+        })
+    };
     let (x, y) = grip(&harness, "item-02");
     assert!(!plays(&harness.click_messages(x, y)));
-    assert!(!plays(&harness.click_messages(x, y)), "没有播放插件时双击不播");
+    assert!(
+        !plays(&harness.click_messages(x, y)),
+        "没有播放插件时双击不播"
+    );
 
-    harness.apply(ShellMessage::PlaylistPlayersLoaded(Ok(vec![crate::backend::services::repository::PlaylistPlayerContribution {
-        player_type_id: "audio".into(),
-        label: "音频".into(),
-        file_class: "audio".into(),
-        supported_extensions: vec!["mp3".into(), "wav".into()],
-        supports_seek: true,
-        supports_volume: true,
-        supports_preview_navigation: true,
-        description: None,
-    }])));
+    harness.apply(ShellMessage::PlaylistPlayersLoaded(Ok(vec![
+        crate::backend::services::repository::PlaylistPlayerContribution {
+            player_type_id: "audio".into(),
+            label: "音频".into(),
+            file_class: "audio".into(),
+            supported_extensions: vec!["mp3".into(), "wav".into()],
+            supports_seek: true,
+            supports_volume: true,
+            supports_preview_navigation: true,
+            description: None,
+        },
+    ])));
     harness.flush();
     harness.take_messages();
     let (first_x, first_y) = grip(&harness, "item-01");
-    assert!(harness.click_messages(first_x, first_y).is_empty(), "单击只是选中，不发消息");
+    assert!(
+        harness.click_messages(first_x, first_y).is_empty(),
+        "单击只是选中，不发消息"
+    );
     let (x, y) = grip(&harness, "item-02");
-    assert!(!plays(&harness.click_messages(x, y)), "和上一下点的不是同一行，不算双击");
+    assert!(
+        !plays(&harness.click_messages(x, y)),
+        "和上一下点的不是同一行，不算双击"
+    );
     let messages = harness.click_messages(x, y);
     assert!(
         matches!(messages.as_slice(), [ShellMessage::Player(PlayerMessage::PlayListed { item_id: Some(id) })] if id == "item-02"),
         "双击应该从这一条播放：{} 条消息",
         messages.len()
     );
-    assert!(!plays(&harness.click_messages(x, y)), "三连击的第三下不再算双击");
+    assert!(
+        !plays(&harness.click_messages(x, y)),
+        "三连击的第三下不再算双击"
+    );
+}
+
+/// 文件名单击只打开预览。400 毫秒内再点同一行的文件名，照 Vue 整行 `@dblclick` 再从这一条播放。
+/// 没有播放插件时第二下仍只打开预览。播放按钮上的连点不走这套双击。
+#[test]
+fn double_clicking_the_title_plays_after_opening_the_preview() {
+    let mut harness = listed();
+    harness.take_messages();
+    let title = |harness: &ShellHarness| {
+        harness.center(
+            harness
+                .keyed("playlist-item-title-item-02")
+                .expect("文件名"),
+        )
+    };
+    let opens = |messages: &[ShellMessage]| matches!(messages, [ShellMessage::Player(PlayerMessage::OpenPreview { item_id: Some(id) })] if id == "item-02");
+    let (x, y) = title(&harness);
+    assert!(opens(&harness.click_messages(x, y)), "单击文件名只打开预览");
+    let again = harness.click_messages(x, y);
+    assert!(
+        opens(&again),
+        "没有播放插件时连点第二下仍只打开预览：{} 条消息",
+        again.len()
+    );
+
+    harness.apply(ShellMessage::PlaylistPlayersLoaded(Ok(vec![
+        crate::backend::services::repository::PlaylistPlayerContribution {
+            player_type_id: "audio".into(),
+            label: "音频".into(),
+            file_class: "audio".into(),
+            supported_extensions: vec!["mp3".into(), "wav".into()],
+            supports_seek: true,
+            supports_volume: true,
+            supports_preview_navigation: true,
+            description: None,
+        },
+    ])));
+    harness.flush();
+    harness.take_messages();
+    let (x, y) = title(&harness);
+    assert!(
+        opens(&harness.click_messages(x, y)),
+        "有播放插件时单击文件名仍只打开预览"
+    );
+    let messages = harness.click_messages(x, y);
+    assert!(
+        matches!(
+            messages.as_slice(),
+            [
+                ShellMessage::Player(PlayerMessage::OpenPreview { item_id: Some(preview) }),
+                ShellMessage::Player(PlayerMessage::PlayListed { item_id: Some(play) }),
+            ] if preview == "item-02" && play == "item-02"
+        ),
+        "连点文件名应先打开预览再播放：{} 条消息",
+        messages.len()
+    );
+    assert!(
+        opens(&harness.click_messages(x, y)),
+        "三连击的第三下不再播放"
+    );
+}
+
+/// 扩展名方块单击只打开预览。400 毫秒内再点同一块，照 Vue 整行 `@dblclick` 先打开预览再从这一条播放。
+/// 没有播放插件、或这一条不能播时，第二下仍只打开预览。三连击的第三下不再播。计时和文件名分开。
+#[test]
+fn double_clicking_the_cover_plays_after_opening_the_preview() {
+    let mut harness = listed();
+    harness.take_messages();
+    let cover = |harness: &ShellHarness, id: &str| {
+        harness.center(
+            harness
+                .keyed(&format!("playlist-item-ext-{id}"))
+                .expect("扩展名方块"),
+        )
+    };
+    let opens = |messages: &[ShellMessage], id: &str| matches!(messages, [ShellMessage::Player(PlayerMessage::OpenPreview { item_id: Some(found) })] if found == id);
+    let (x, y) = cover(&harness, "item-02");
+    assert!(
+        opens(&harness.click_messages(x, y), "item-02"),
+        "单击扩展名方块只打开预览"
+    );
+    let again = harness.click_messages(x, y);
+    assert!(
+        opens(&again, "item-02"),
+        "没有播放插件时连点第二下仍只打开预览：{} 条消息",
+        again.len()
+    );
+
+    harness.apply(ShellMessage::PlaylistPlayersLoaded(Ok(vec![
+        crate::backend::services::repository::PlaylistPlayerContribution {
+            player_type_id: "audio".into(),
+            label: "音频".into(),
+            file_class: "audio".into(),
+            supported_extensions: vec!["mp3".into(), "wav".into()],
+            supports_seek: true,
+            supports_volume: true,
+            supports_preview_navigation: true,
+            description: None,
+        },
+    ])));
+    harness.flush();
+    harness.take_messages();
+    let (x, y) = cover(&harness, "item-02");
+    assert!(
+        opens(&harness.click_messages(x, y), "item-02"),
+        "有播放插件时单击扩展名方块仍只打开预览"
+    );
+    let messages = harness.click_messages(x, y);
+    assert!(
+        matches!(
+            messages.as_slice(),
+            [
+                ShellMessage::Player(PlayerMessage::OpenPreview { item_id: Some(preview) }),
+                ShellMessage::Player(PlayerMessage::PlayListed { item_id: Some(play) }),
+            ] if preview == "item-02" && play == "item-02"
+        ),
+        "连点扩展名方块应先打开预览再播放：{} 条消息",
+        messages.len()
+    );
+    assert!(
+        opens(&harness.click_messages(x, y), "item-02"),
+        "三连击的第三下不再播放"
+    );
+
+    reload(&mut harness, |items| {
+        let item = items
+            .iter_mut()
+            .find(|item| item.playlist_item_id == "item-01")
+            .expect("第一条");
+        item.status = "missing".into();
+        item.status_reason = Some("文件不存在".into());
+    });
+    harness.take_messages();
+    let (x, y) = cover(&harness, "item-01");
+    assert!(
+        opens(&harness.click_messages(x, y), "item-01"),
+        "不能播的条目单击扩展名方块仍只打开预览"
+    );
+    let blocked = harness.click_messages(x, y);
+    assert!(
+        opens(&blocked, "item-01"),
+        "不能播时连点第二下仍只打开预览：{} 条消息",
+        blocked.len()
+    );
 }
 
 /// 从按钮上按下拖动会拖动这一行（和 Vue 整行都能拖一样）：拖到第一条上面发排序消息，按钮自己的动作不发。
 #[test]
 fn dragging_from_a_row_button_reorders_instead_of_clicking() {
-    for key in ["playlist-item-ext-item-02", "playlist-item-title-item-02", "playlist-remove-item-02"] {
+    for key in [
+        "playlist-item-ext-item-02",
+        "playlist-item-title-item-02",
+        "playlist-remove-item-02",
+    ] {
         let mut harness = listed();
         harness.take_messages();
         let first = harness.keyed("playlist-item-item-01").expect("第一条");
         let start = harness.center(harness.keyed(key).expect("按钮"));
-        let top = harness.document().context().world().layout_box(first).expect("第一条的盒子").y + 4.0;
+        let top = harness
+            .document()
+            .context()
+            .world()
+            .layout_box(first)
+            .expect("第一条的盒子")
+            .y
+            + 4.0;
         let messages = harness.drag_messages(start, (start.0, top));
         let reorder = messages.iter().any(|message| {
             matches!(message, ShellMessage::Player(PlayerMessage::Reorder { source, before })
                 if source == "item-02" && before.as_deref() == Some("item-01"))
         });
-        assert!(reorder, "从 {key} 拖到第一条上面应该发排序消息：{} 条消息", messages.len());
+        assert!(
+            reorder,
+            "从 {key} 拖到第一条上面应该发排序消息：{} 条消息",
+            messages.len()
+        );
         let clicked = messages.iter().any(|message| {
-            matches!(message, ShellMessage::Player(PlayerMessage::OpenPreview { .. }) | ShellMessage::RemovePlaylistItem { .. })
+            matches!(
+                message,
+                ShellMessage::Player(PlayerMessage::OpenPreview { .. })
+                    | ShellMessage::RemovePlaylistItem { .. }
+            )
         });
         assert!(!clicked, "拖动以后 {key} 不该再当成点击");
     }
@@ -325,14 +633,27 @@ fn leaving_and_returning_rebuilds_a_matching_branch() {
     harness.apply(ShellMessage::SetWorkspacePanel(WorkspacePanel::Playlist));
     harness.flush();
     assert_eq!(RouteKey::of(&harness.model), RouteKey::Playlists);
-    assert!(harness.keyed("player-title").is_some(), "回来以后播放条岛要放回去");
+    assert!(
+        harness.keyed("player-title").is_some(),
+        "回来以后播放条岛要放回去"
+    );
     harness.assert_same_as_fresh_mount();
 
     harness.model.page = ShellPage::Playlists;
     harness.apply(ShellMessage::SetWorkspacePanel(WorkspacePanel::Search));
     harness.flush();
-    assert_eq!(RouteKey::of(&harness.model), RouteKey::Search, "面板是搜索就是搜索路由");
-    assert!(harness.find("演示播放列表").is_none(), "不在播放集面板时不显示播放表面");
-    assert!(harness.keyed("player-title").is_none(), "不在播放集面板时没有播放条");
+    assert_eq!(
+        RouteKey::of(&harness.model),
+        RouteKey::Search,
+        "面板是搜索就是搜索路由"
+    );
+    assert!(
+        harness.find("演示播放列表").is_none(),
+        "不在播放集面板时不显示播放表面"
+    );
+    assert!(
+        harness.keyed("player-title").is_none(),
+        "不在播放集面板时没有播放条"
+    );
     harness.assert_same_as_fresh_mount();
 }

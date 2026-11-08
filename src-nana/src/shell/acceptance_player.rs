@@ -12,19 +12,20 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 use crate::backend::services::repository::{
-    AssetDetail, AssetSummary, FilePreviewSourceResponse, MetadataEntry, PlaylistDetail, PlaylistItem,
-    PlaylistPlayerContribution, PlaylistSummary,
+    AssetDetail, AssetSummary, FilePreviewSourceResponse, MetadataEntry, PlaylistDetail,
+    PlaylistItem, PlaylistPlayerContribution, PlaylistSummary,
 };
 
+use super::super::InspectEffect;
 use super::super::inspect::InspectMessage;
 use super::super::player::{PlayerEffect, PlayerMessage};
-use super::super::InspectEffect;
 use super::super::{ShellMessage, ShellPage, ShellViewModel, SidebarMessage, SourcePrep};
-use super::base_scene::{playlist_players, tagged_file, Base, NOW, REPO_ID};
+use super::base_scene::{Base, NOW, REPO_ID, playlist_players, tagged_file};
 
 const PLAYLIST_ID: &str = "playlist-demo";
 /// 文本预览的内容。Vue 场景的 `SETTINGS_JSON` 是同一段。
-const TEXT_FIXTURE: &str = "{\n  \"name\": \"MomoBako\",\n  \"theme\": \"light\",\n  \"corners\": \"smooth\"\n}\n";
+const TEXT_FIXTURE: &str =
+    "{\n  \"name\": \"MomoBako\",\n  \"theme\": \"light\",\n  \"corners\": \"smooth\"\n}\n";
 /// 图片预览的字节。Vue 场景的 `COVER_PNG` 解出来是同一份。
 const COVER_PNG: &[u8] = include_bytes!("preview_fixtures/cover.png");
 /// 音频预览的字节。Vue 场景的 `TONE_MP3` 解出来是同一份。
@@ -78,7 +79,10 @@ fn playlist_open_scene() -> ShellViewModel {
 
 /// Vue `playlistOpen()` 的底子：`base()` 加上演示播放列表。
 fn demo_base() -> Base {
-    Base { playlists: vec![demo_summary()], ..Base::default() }
+    Base {
+        playlists: vec![demo_summary()],
+        ..Base::default()
+    }
 }
 
 /// 播放中打开当前队列浮层。
@@ -121,8 +125,17 @@ fn outside_playback_scene() -> ShellViewModel {
 }
 
 /// Vue `singleItemPlayback`：只有一个条目的播放集，点开后按页眉的「播放」从第一条开始。
-fn single_item_playback(summary: PlaylistSummary, path: &str, players: Vec<PlaylistPlayerContribution>) -> ShellViewModel {
-    let mut model = Base { playlists: vec![summary.clone()], players, ..Base::default() }.model();
+fn single_item_playback(
+    summary: PlaylistSummary,
+    path: &str,
+    players: Vec<PlaylistPlayerContribution>,
+) -> ShellViewModel {
+    let mut model = Base {
+        playlists: vec![summary.clone()],
+        players,
+        ..Base::default()
+    }
+    .model();
     open_playlist(&mut model, &summary, Some(vec![item(0, path)]));
     play_first(&mut model);
     model.page = ShellPage::PlaybackRunning;
@@ -133,40 +146,72 @@ fn single_item_playback(summary: PlaylistSummary, path: &str, players: Vec<Playl
 fn fail_pending_loads(model: &mut ShellViewModel) {
     let mut kept = Vec::new();
     for effect in model.player.take_effects() {
-        let PlayerEffect::LoadItem { item_id, path, still, generation, .. } = effect else {
+        let PlayerEffect::LoadItem {
+            item_id,
+            path,
+            still,
+            generation,
+            ..
+        } = effect
+        else {
             kept.push(effect);
             continue;
         };
         let result = Err(format!("无法读取当前项：验收仓库里没有 {path}"));
-        model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded { item_id, generation, still, result, prep: SourcePrep::default() }));
+        model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded {
+            item_id,
+            generation,
+            still,
+            result,
+            prep: SourcePrep::default(),
+        }));
     }
     model.player.requeue_effects(kept);
 }
 
 /// 点开侧栏里的播放集（Vue 侧栏的播放集默认收起，点的是收起态里那颗按钮），再按夹具送回详情；
 /// `items` 为空时详情还没回来。
-pub(super) fn open_playlist(model: &mut ShellViewModel, summary: &PlaylistSummary, items: Option<Vec<PlaylistItem>>) {
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::OpenSidebarPlaylist(summary.playlist_id.clone())));
+pub(super) fn open_playlist(
+    model: &mut ShellViewModel,
+    summary: &PlaylistSummary,
+    items: Option<Vec<PlaylistItem>>,
+) {
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::OpenSidebarPlaylist(
+        summary.playlist_id.clone(),
+    )));
     if model.sidebar.active_playlist_id.as_deref() != Some(summary.playlist_id.as_str()) {
-        eprintln!("Nana 验收场景没有活动仓库，播放集未打开：{}", summary.playlist_id);
+        eprintln!(
+            "Nana 验收场景没有活动仓库，播放集未打开：{}",
+            summary.playlist_id
+        );
         return;
     }
     // 详情请求在这里按夹具回答，宿主不会再派发。
     model.sidebar.take_effects();
     if let Some(items) = items {
-        let detail = PlaylistDetail { playlist: summary.clone(), items };
+        let detail = PlaylistDetail {
+            playlist: summary.clone(),
+            items,
+        };
         model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(detail)));
     }
 }
 
 /// 双击第一条：从它开始播放整张列表。
 pub(super) fn play_first(model: &mut ShellViewModel) {
-    let first = model.player.listed.as_ref().and_then(|detail| detail.items.first()).map(|item| item.playlist_item_id.clone());
+    let first = model
+        .player
+        .listed
+        .as_ref()
+        .and_then(|detail| detail.items.first())
+        .map(|item| item.playlist_item_id.clone());
     let Some(first) = first else {
         eprintln!("Nana 验收播放集是空的，没有可播放条目");
         return;
     };
-    model.reduce(ShellMessage::Player(PlayerMessage::PlayListed { item_id: Some(first) }));
+    model.reduce(ShellMessage::Player(PlayerMessage::PlayListed {
+        item_id: Some(first),
+    }));
 }
 
 const FOREIGN_TYPE: &str = "momobako.playlist.foreign";
@@ -208,7 +253,10 @@ fn demo_items() -> Vec<PlaylistItem> {
 /// 播放列表条目。编号从 01 开始，和 Vue 夹具的 `item-01` 一致。
 fn item(index: usize, path: &str) -> PlaylistItem {
     let filename = path.rsplit('/').next().unwrap_or(path).to_string();
-    let extension = filename.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase()).unwrap_or_default();
+    let extension = filename
+        .rsplit_once('.')
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .unwrap_or_default();
     PlaylistItem {
         playlist_item_id: format!("item-{:02}", index + 1),
         playlist_id: PLAYLIST_ID.into(),
@@ -237,20 +285,32 @@ fn live_preview_scene() -> ShellViewModel {
     model.files.display_mode = super::super::files::DisplayMode::List;
     let path = "notes/page.pdf";
     model.inspect.begin_selection(path);
-    super::super::inspect::native_preview::begin(&mut model.inspect, REPO_ID, path, "momobako.preview.pdf".into(), "PDF".into());
-    let loaded = super::super::inspect::native_preview::load("momobako.preview.pdf", super::PAGE_PDF).expect("验收 PDF");
+    super::super::inspect::native_preview::begin(
+        &mut model.inspect,
+        REPO_ID,
+        path,
+        "momobako.preview.pdf".into(),
+        "PDF".into(),
+    );
+    let loaded =
+        super::super::inspect::native_preview::load("momobako.preview.pdf", super::PAGE_PDF)
+            .expect("验收 PDF");
     let generation = model.inspect.generation;
-    model.reduce(ShellMessage::Inspect(super::super::inspect::InspectMessage::NativeLoaded {
-        path: path.into(),
-        generation,
-        result: Ok(loaded),
-    }));
+    model.reduce(ShellMessage::Inspect(
+        super::super::inspect::InspectMessage::NativeLoaded {
+            path: path.into(),
+            generation,
+            result: Ok(loaded),
+        },
+    ));
     model.inspect.facts = super::super::inspect::FileFacts {
         extension: "pdf".into(),
         size_label: format!("{} B", super::PAGE_PDF.len()),
         ..super::super::inspect::FileFacts::default()
     };
-    model.reduce(ShellMessage::Inspect(super::super::inspect::InspectMessage::SetComment("PDF 页".into())));
+    model.reduce(ShellMessage::Inspect(
+        super::super::inspect::InspectMessage::SetComment("PDF 页".into()),
+    ));
     model
 }
 
@@ -273,8 +333,12 @@ fn preview_scene(path: &str, size_bytes: i64) -> ShellViewModel {
 fn preview_scene_with(path: &str, size_bytes: i64, metadata: &[(&str, &str)]) -> ShellViewModel {
     let mut base = Base::default();
     if !base.entries.iter().any(|entry| entry.path == path) {
-        let metadata = metadata.iter().map(|(key, value)| ((*key).to_string(), Value::String((*value).into()))).collect::<BTreeMap<_, _>>();
-        base.entries.push(tagged_file(path, size_bytes, &[], metadata));
+        let metadata = metadata
+            .iter()
+            .map(|(key, value)| ((*key).to_string(), Value::String((*value).into())))
+            .collect::<BTreeMap<_, _>>();
+        base.entries
+            .push(tagged_file(path, size_bytes, &[], metadata));
     }
     let mut model = base.model();
     let asset_id = path.replace('/', "-");
@@ -289,7 +353,10 @@ fn preview_scene_with(path: &str, size_bytes: i64, metadata: &[(&str, &str)]) ->
             updated_at: NOW.into(),
         })
         .collect();
-    model.reduce(ShellMessage::SelectFile { path: path.into(), asset_id: Some(asset_id) });
+    model.reduce(ShellMessage::SelectFile {
+        path: path.into(),
+        asset_id: Some(asset_id),
+    });
     model.reduce(ShellMessage::AssetDetailLoaded(Ok(detail)));
     model
 }
@@ -297,7 +364,10 @@ fn preview_scene_with(path: &str, size_bytes: i64, metadata: &[(&str, &str)]) ->
 /// 素材详情和 Vue 夹具 `file()` / `asset()` 同一组字段：大小写成「N B」，修改时间是 NOW。
 fn preview_detail(path: &str, size_bytes: i64) -> AssetDetail {
     let filename = path.rsplit('/').next().unwrap_or(path).to_string();
-    let extension = filename.rsplit_once('.').map(|(_, ext)| ext.to_ascii_lowercase()).unwrap_or_default();
+    let extension = filename
+        .rsplit_once('.')
+        .map(|(_, ext)| ext.to_ascii_lowercase())
+        .unwrap_or_default();
     AssetDetail {
         summary: AssetSummary {
             asset_id: path.replace('/', "-"),
@@ -327,7 +397,10 @@ fn preview_detail(path: &str, size_bytes: i64) -> AssetDetail {
 }
 
 /// 取走预览排下的读取请求，找出要回答的那一个。
-fn take_effect<T>(model: &mut ShellViewModel, pick: impl Fn(InspectEffect) -> Option<T>) -> Option<T> {
+fn take_effect<T>(
+    model: &mut ShellViewModel,
+    pick: impl Fn(InspectEffect) -> Option<T>,
+) -> Option<T> {
     let found = model.inspect.take_effects().into_iter().find_map(pick);
     if found.is_none() {
         eprintln!("Nana 验收预览没有排下要回答的读取请求");
@@ -339,12 +412,22 @@ fn take_effect<T>(model: &mut ShellViewModel, pick: impl Fn(InspectEffect) -> Op
 fn preview_text_scene() -> ShellViewModel {
     let mut model = preview_scene("settings.json", TEXT_FIXTURE.len() as i64);
     let request = take_effect(&mut model, |effect| match effect {
-        InspectEffect::LoadText { path, markdown, generation, .. } => Some((path, markdown, generation)),
+        InspectEffect::LoadText {
+            path,
+            markdown,
+            generation,
+            ..
+        } => Some((path, markdown, generation)),
         _ => None,
     });
     if let Some((path, markdown, generation)) = request {
         let result = Ok(crate::shell::prepare_text(TEXT_FIXTURE.as_bytes()));
-        model.reduce(ShellMessage::Inspect(InspectMessage::BodyLoaded { path, markdown, generation, result }));
+        model.reduce(ShellMessage::Inspect(InspectMessage::BodyLoaded {
+            path,
+            markdown,
+            generation,
+            result,
+        }));
     }
     model
 }
@@ -367,7 +450,10 @@ fn preview_image_scene() -> ShellViewModel {
             size_bytes: COVER_SIZE,
             modified_at: Some(NOW.into()),
         };
-        model.reduce(ShellMessage::PreviewPixelsLoaded { source, pixels: crate::shell::decode_preview_pixels(COVER_PNG) });
+        model.reduce(ShellMessage::PreviewPixelsLoaded {
+            source,
+            pixels: crate::shell::decode_preview_pixels(COVER_PNG),
+        });
     }
     // 挂 file-preview 纹理槽会引用离屏没有注册的宿主纹理。
     model.preview_token = None;
@@ -384,35 +470,69 @@ fn preview_audio_scene() -> ShellViewModel {
 
 /// 没有视频播放插件（Vue 场景滤掉了 `momobako.preview.media`，只剩音频播放器）时预览 clip.avi：播放条不接管，
 /// 第二行写「没有可用于播放此媒体的插件」。音频不一样：Nana 有内置解码器认领 mp3 这些格式，没有音频插件也照常
-/// 接管播放条，所以这里用视频。预览照样自己解 AVI，不靠插件；离屏会话没有宿主纹理，画面帧画不出来，只交
-/// 会话和音轨，预览框画没有画面时的占位：缩略图或视频图标（真窗口里是 AVI 的画面）。Vue 这里是一块空白。
+/// 接管播放条，所以这里用视频。预览自己解 AVI，不靠插件。离屏没有宿主纹理，不挂 `file-preview` 槽，
+/// 按播放头把已经解出的那一帧画进预览框。有宿主纹理的真窗口仍走纹理槽。
 fn preview_no_player_scene() -> ShellViewModel {
     let path = "clip.avi";
     let size = CLIP_AVI.len() as i64;
     let mut base = Base::default();
     base.players.retain(|player| player.file_class == "audio");
-    base.entries.push(tagged_file(path, size, &[], BTreeMap::new()));
+    base.entries
+        .push(tagged_file(path, size, &[], BTreeMap::new()));
     let mut model = base.model();
-    model.reduce(ShellMessage::SelectFile { path: path.into(), asset_id: Some(path.replace('/', "-")) });
-    model.reduce(ShellMessage::AssetDetailLoaded(Ok(preview_detail(path, size))));
+    model.reduce(ShellMessage::SelectFile {
+        path: path.into(),
+        asset_id: Some(path.replace('/', "-")),
+    });
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(preview_detail(
+        path, size,
+    ))));
     let request = take_effect(&mut model, |effect| match effect {
-        InspectEffect::LoadMedia { path, generation, .. } => Some((path, generation)),
+        InspectEffect::LoadMedia {
+            path, generation, ..
+        } => Some((path, generation)),
         _ => None,
     });
     if let Some((path, generation)) = request {
         match crate::shell::preview_media_parts(REPO_ID, CLIP_AVI) {
-            Ok(parts) => model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded {
-                path,
-                generation,
-                result: Ok(parts.session),
-                pcm: parts.pcm,
-                frames: None,
-                prep: SourcePrep::default(),
-            })),
+            Ok(parts) => {
+                model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded {
+                    path,
+                    generation,
+                    result: Ok(parts.session),
+                    pcm: parts.pcm,
+                    frames: parts.frames,
+                    prep: SourcePrep::default(),
+                }));
+                if model.preview_pixels.is_none() {
+                    eprintln!("Nana 验收视频夹具没有留下可画的画面");
+                }
+                // 挂 file-preview 纹理槽会引用离屏没有注册的宿主纹理。先清记号，再拨播放头：
+                // 记号还在时换帧会把记号改回去，离屏就不再画解码像素。
+                model.preview_token = None;
+                park_on_later_frame(&mut model);
+            }
             Err(error) => eprintln!("Nana 验收视频夹具解不开：{error}"),
         }
     }
     model
+}
+
+/// 播放头放到时长的后半段，让预览画已经解出的对应帧。
+/// 调用前必须已经清掉纹理记号，否则换帧会把记号挂回去。没有会话或没有时长时只记日志，留在片头。
+fn park_on_later_frame(model: &mut ShellViewModel) {
+    let Some(mut session) = model.inspect.media_session().cloned() else {
+        eprintln!("Nana 验收视频没有播放会话，播放头留在片头");
+        return;
+    };
+    let Some(duration) = session.duration_ms.filter(|duration| *duration > 0) else {
+        eprintln!("Nana 验收视频没有时长，播放头留在片头");
+        return;
+    };
+    // 两帧平分时长时，中点正好是第二帧的时间；音轨更长时中点更靠后，仍落在最后一帧。
+    session.current_time_ms = duration / 2;
+    model.inspect.replace_shared_media(session);
+    super::super::inspect::sync_preview_frame(model);
 }
 
 /// 音频预览解不开：`voice.opus` 的字节认不出容器，Nana 没有原生解码器。预览框里是失败浮层，写
@@ -421,14 +541,24 @@ fn preview_audio_failed_scene() -> ShellViewModel {
     const BROKEN_AUDIO: &[u8] = b"not an audio container";
     let mut model = preview_scene("voice.opus", BROKEN_AUDIO.len() as i64);
     let request = take_effect(&mut model, |effect| match effect {
-        InspectEffect::LoadMedia { path, generation, .. } => Some((path, generation)),
+        InspectEffect::LoadMedia {
+            path, generation, ..
+        } => Some((path, generation)),
         _ => None,
     });
     if let Some((path, generation)) = request {
         // 和宿主一样经 `decode_media` 解码，失败原因来自真实的解码层。
-        let result = crate::shell::player::decode_media(REPO_ID, "opus", BROKEN_AUDIO).map(|parts| parts.session);
+        let result = crate::shell::player::decode_media(REPO_ID, "opus", BROKEN_AUDIO)
+            .map(|parts| parts.session);
         let prep = SourcePrep::default();
-        model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result, pcm: None, frames: None, prep }));
+        model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded {
+            path,
+            generation,
+            result,
+            pcm: None,
+            frames: None,
+            prep,
+        }));
     }
     model
 }
@@ -436,7 +566,9 @@ fn preview_audio_failed_scene() -> ShellViewModel {
 /// 用音频夹具回答预览排下的音视频读取，和宿主读完解码后送回的消息一样。
 fn answer_media(model: &mut ShellViewModel) {
     let request = take_effect(model, |effect| match effect {
-        InspectEffect::LoadMedia { path, generation, .. } => Some((path, generation)),
+        InspectEffect::LoadMedia {
+            path, generation, ..
+        } => Some((path, generation)),
         _ => None,
     });
     let Some((path, generation)) = request else {

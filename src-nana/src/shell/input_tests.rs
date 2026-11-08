@@ -1,20 +1,22 @@
 //! 宿主输入的分支回归。几何、拖放、外部打开和关闭确认都不依赖真窗口。
 
 use super::super::{
-    FilesEffect, ShellMessage, ShellPage, ShellViewModel, SidebarEffect, WorkspaceEffect, WorkspacePanel, WorkspaceRepository,
+    FilesEffect, ShellMessage, ShellPage, ShellViewModel, SidebarEffect, WorkspaceEffect,
+    WorkspacePanel, WorkspaceRepository,
 };
 use super::support::{
-    absolute_drag_paths, can_drag_entries, decide_close, filter_external_import_paths, internal_drag_distance,
-    join_repository_path, normalize_filesystem_path, normalize_move_paths, normalize_workspace_path, resolve_drop_target,
-    should_delegate_to_external_drag, workspace_parent_path, CloseDecision, DIALOG_EXPORT_ID, DIALOG_PLUGIN_ID,
-    DIALOG_ATTACH_ID, DIALOG_DOWNLOAD_ID, DIALOG_RELOCATE_ID, DIALOG_REPOSITORY_EXPORT_ID, DIALOG_THUMBNAIL_ID,
-    EXTERNAL_DRAG_SWITCH_DISTANCE,
+    CloseDecision, DIALOG_ATTACH_ID, DIALOG_DOWNLOAD_ID, DIALOG_EXPORT_ID, DIALOG_PLUGIN_ID,
+    DIALOG_RELOCATE_ID, DIALOG_REPOSITORY_EXPORT_ID, DIALOG_THUMBNAIL_ID,
+    EXTERNAL_DRAG_SWITCH_DISTANCE, absolute_drag_paths, can_drag_entries, decide_close,
+    filter_external_import_paths, internal_drag_distance, join_repository_path,
+    normalize_filesystem_path, normalize_move_paths, normalize_workspace_path, resolve_drop_target,
+    should_delegate_to_external_drag, workspace_parent_path,
 };
-use super::{begin_relocate_dialog, close_prompt, HostDragPhase, InputMessage, InternalSession};
-use nana_ui::FileDialogKind;
+use super::{HostDragPhase, InputMessage, InternalSession, begin_relocate_dialog, close_prompt};
 use crate::host_api::{HostInputRequest, HostRequest};
-use crate::shell::status::FailureSource;
 use crate::shell::InspectMessage;
+use crate::shell::status::FailureSource;
+use nana_ui::FileDialogKind;
 
 fn send(model: &mut ShellViewModel, message: InputMessage) {
     model.reduce(ShellMessage::Input(message));
@@ -50,32 +52,106 @@ fn drag_geometry_filters_paths_and_self_drops() {
     assert_eq!(workspace_parent_path("a/b/c"), "a/b");
     assert_eq!(workspace_parent_path("a"), "");
     assert_eq!(internal_drag_distance(0.0, 0.0, 3.0, 4.0), 5.0);
-    assert!(!should_delegate_to_external_drag(0.0, 0.0, 80.0, 0.0, 10.0, 10.0, 100.0, 100.0, EXTERNAL_DRAG_SWITCH_DISTANCE));
-    assert!(!should_delegate_to_external_drag(0.0, 0.0, 10.0, 0.0, 0.0, 10.0, 100.0, 100.0, EXTERNAL_DRAG_SWITCH_DISTANCE));
-    assert!(should_delegate_to_external_drag(0.0, 0.0, 72.0, 0.0, 100.0, 10.0, 100.0, 100.0, EXTERNAL_DRAG_SWITCH_DISTANCE));
-    assert_eq!(resolve_drop_target(Some("albums"), false, "photos"), Some("albums".into()));
-    assert_eq!(resolve_drop_target(None, true, "photos"), Some("photos".into()));
+    assert!(!should_delegate_to_external_drag(
+        0.0,
+        0.0,
+        80.0,
+        0.0,
+        10.0,
+        10.0,
+        100.0,
+        100.0,
+        EXTERNAL_DRAG_SWITCH_DISTANCE
+    ));
+    assert!(!should_delegate_to_external_drag(
+        0.0,
+        0.0,
+        10.0,
+        0.0,
+        0.0,
+        10.0,
+        100.0,
+        100.0,
+        EXTERNAL_DRAG_SWITCH_DISTANCE
+    ));
+    assert!(should_delegate_to_external_drag(
+        0.0,
+        0.0,
+        72.0,
+        0.0,
+        100.0,
+        10.0,
+        100.0,
+        100.0,
+        EXTERNAL_DRAG_SWITCH_DISTANCE
+    ));
+    assert_eq!(
+        resolve_drop_target(Some("albums"), false, "photos"),
+        Some("albums".into())
+    );
+    assert_eq!(
+        resolve_drop_target(None, true, "photos"),
+        Some("photos".into())
+    );
     assert_eq!(resolve_drop_target(None, false, "photos"), None);
     assert_eq!(
-        normalize_move_paths(&[" ".into(), "a".into(), "b/c".into(), "b".into(), "b/c/d".into()], "b"),
+        normalize_move_paths(
+            &[
+                " ".into(),
+                "a".into(),
+                "b/c".into(),
+                "b".into(),
+                "b/c/d".into()
+            ],
+            "b"
+        ),
         vec!["a".to_string(), "b/c/d".to_string()]
     );
-    assert_eq!(join_repository_path("C:\\repo", "photos", Some("a.png")), "C:\\repo\\photos\\a.png");
-    assert_eq!(normalize_filesystem_path("C:/Repo/a.png"), "c:\\repo\\a.png");
     assert_eq!(
-        filter_external_import_paths(&["C:\\repo\\a.png".into(), "D:\\other\\b.png".into(), " ".into()], "C:\\repo", ""),
+        join_repository_path("C:\\repo", "photos", Some("a.png")),
+        "C:\\repo\\photos\\a.png"
+    );
+    assert_eq!(
+        normalize_filesystem_path("C:/Repo/a.png"),
+        "c:\\repo\\a.png"
+    );
+    assert_eq!(
+        filter_external_import_paths(
+            &[
+                "C:\\repo\\a.png".into(),
+                "D:\\other\\b.png".into(),
+                " ".into()
+            ],
+            "C:\\repo",
+            ""
+        ),
         vec!["D:\\other\\b.png".to_string()]
     );
     assert!(absolute_drag_paths(&[" ".into()], "").is_empty());
-    assert_eq!(absolute_drag_paths(&["a.png".into()], "C:\\repo"), vec!["C:\\repo\\a.png".to_string()]);
+    assert_eq!(
+        absolute_drag_paths(&["a.png".into()], "C:\\repo"),
+        vec!["C:\\repo\\a.png".to_string()]
+    );
     assert!(!can_drag_entries(true, true, false, "filesystem"));
     assert!(!can_drag_entries(true, false, false, "webdav"));
     assert!(can_drag_entries(true, false, false, "filesystem"));
     assert_eq!(decide_close("quit", false), CloseDecision::CloseNow);
-    assert_eq!(decide_close("quit", true), CloseDecision::Ask { dirty: true });
-    assert_eq!(decide_close("minimizeToTray", true), CloseDecision::HoldForTray);
-    assert_eq!(decide_close("confirm", false), CloseDecision::Ask { dirty: false });
-    assert_eq!(decide_close("other", false), CloseDecision::Ask { dirty: false });
+    assert_eq!(
+        decide_close("quit", true),
+        CloseDecision::Ask { dirty: true }
+    );
+    assert_eq!(
+        decide_close("minimizeToTray", true),
+        CloseDecision::HoldForTray
+    );
+    assert_eq!(
+        decide_close("confirm", false),
+        CloseDecision::Ask { dirty: false }
+    );
+    assert_eq!(
+        decide_close("other", false),
+        CloseDecision::Ask { dirty: false }
+    );
 }
 
 #[test]
@@ -85,96 +161,169 @@ fn internal_drag_selects_moves_and_delegates_outside_the_window() {
     assert_eq!(model.files.selected_paths(), ["solo.png"]);
     assert_eq!(model.files.primary.as_deref(), Some("solo.png"));
     assert_eq!(model.input.hover_folder.as_deref(), Some("photos"));
-    send(&mut model, InputMessage::EntryDragMove {
-        x: 20.0,
-        y: 10.0,
-        bounds_width: 200.0,
-        bounds_height: 200.0,
-        hover_folder: Some("albums".into()),
-        over_browser: false,
-    });
+    send(
+        &mut model,
+        InputMessage::EntryDragMove {
+            x: 20.0,
+            y: 10.0,
+            bounds_width: 200.0,
+            bounds_height: 200.0,
+            hover_folder: Some("albums".into()),
+            over_browser: false,
+        },
+    );
     assert_eq!(model.input.hover_folder.as_deref(), Some("albums"));
     assert!(model.input.external_drag_result.is_none());
-    send(&mut model, InputMessage::EntryDragEnd { hover_folder: Some("albums".into()), over_browser: false, has_pointer: true });
-    assert!(matches!(model.files.take_effects().pop(), Some(FilesEffect::Move { parent, sources, .. }) if parent == "albums" && sources == ["solo.png"]));
+    send(
+        &mut model,
+        InputMessage::EntryDragEnd {
+            hover_folder: Some("albums".into()),
+            over_browser: false,
+            has_pointer: true,
+        },
+    );
+    assert!(
+        matches!(model.files.take_effects().pop(), Some(FilesEffect::Move { parent, sources, .. }) if parent == "albums" && sources == ["solo.png"])
+    );
     assert!(!model.input.internal_active);
 
     let mut model = ready("repo");
     send(&mut model, begin("keep.png", &["keep.png", "b/c.png"], 0.0));
     assert_eq!(model.input.dragged_paths, ["keep.png", "b/c.png"]);
     model.workspace.panel = WorkspacePanel::Trash;
-    send(&mut model, InputMessage::EntryDragEnd { hover_folder: Some("albums".into()), over_browser: false, has_pointer: true });
+    send(
+        &mut model,
+        InputMessage::EntryDragEnd {
+            hover_folder: Some("albums".into()),
+            over_browser: false,
+            has_pointer: true,
+        },
+    );
     assert!(model.files.take_effects().is_empty());
 
     let mut model = ready("repo");
     send(&mut model, begin("photos/a.png", &["photos/a.png"], 0.0));
-    send(&mut model, InputMessage::EntryDragEnd { hover_folder: Some("photos".into()), over_browser: true, has_pointer: true });
+    send(
+        &mut model,
+        InputMessage::EntryDragEnd {
+            hover_folder: Some("photos".into()),
+            over_browser: true,
+            has_pointer: true,
+        },
+    );
     assert!(model.files.take_effects().is_empty());
 
     let mut model = ready("repo");
     send(&mut model, begin("a.png", &["a.png"], 0.0));
-    send(&mut model, InputMessage::EntryDragMove {
-        x: 100.0,
-        y: 10.0,
-        bounds_width: 100.0,
-        bounds_height: 100.0,
-        hover_folder: None,
-        over_browser: false,
-    });
+    send(
+        &mut model,
+        InputMessage::EntryDragMove {
+            x: 100.0,
+            y: 10.0,
+            bounds_width: 100.0,
+            bounds_height: 100.0,
+            hover_folder: None,
+            over_browser: false,
+        },
+    );
     assert_eq!(model.input.external_drag_result, None);
     assert!(model.status.failure().is_none());
-    assert!(matches!(model.input.host_requests.last(), Some(HostRequest::Input(HostInputRequest::DragOut { paths })) if paths == &["C:\\repo\\a.png".to_string()]));
+    assert!(
+        matches!(model.input.host_requests.last(), Some(HostRequest::Input(HostInputRequest::DragOut { paths })) if paths == &["C:\\repo\\a.png".to_string()])
+    );
     assert!(model.input.session.is_none());
-    send(&mut model, InputMessage::EntryDragEnd { hover_folder: Some("albums".into()), over_browser: true, has_pointer: true });
+    send(
+        &mut model,
+        InputMessage::EntryDragEnd {
+            hover_folder: Some("albums".into()),
+            over_browser: true,
+            has_pointer: true,
+        },
+    );
     assert!(model.files.take_effects().is_empty());
 }
 
 #[test]
 fn refused_drags_pointer_leave_and_delegated_end_do_not_move() {
     let mut model = ready("repo");
-    send(&mut model, InputMessage::BeginEntryDrag {
-        path: "a.png".into(),
-        selected: vec!["a.png".into()],
-        x: 0.0,
-        y: 0.0,
-        writable: false,
-        trash: false,
-        smart_folder: false,
-        backend_kind: "filesystem".into(),
-        repo_root: "C:\\repo".into(),
-        hover_folder: None,
-        over_browser: true,
-    });
+    send(
+        &mut model,
+        InputMessage::BeginEntryDrag {
+            path: "a.png".into(),
+            selected: vec!["a.png".into()],
+            x: 0.0,
+            y: 0.0,
+            writable: false,
+            trash: false,
+            smart_folder: false,
+            backend_kind: "filesystem".into(),
+            repo_root: "C:\\repo".into(),
+            hover_folder: None,
+            over_browser: true,
+        },
+    );
     assert!(model.input.session.is_none());
-    send(&mut model, InputMessage::BeginEntryDrag {
-        path: "a.png".into(),
-        selected: vec!["a.png".into()],
-        x: 0.0,
-        y: 0.0,
-        writable: true,
-        trash: false,
-        smart_folder: true,
-        backend_kind: "filesystem".into(),
-        repo_root: "C:\\repo".into(),
-        hover_folder: None,
-        over_browser: true,
-    });
+    send(
+        &mut model,
+        InputMessage::BeginEntryDrag {
+            path: "a.png".into(),
+            selected: vec!["a.png".into()],
+            x: 0.0,
+            y: 0.0,
+            writable: true,
+            trash: false,
+            smart_folder: true,
+            backend_kind: "filesystem".into(),
+            repo_root: "C:\\repo".into(),
+            hover_folder: None,
+            over_browser: true,
+        },
+    );
     assert!(model.input.session.is_none());
 
     send(&mut model, begin("a.png", &["a.png"], 0.0));
-    send(&mut model, InputMessage::WindowPointerLeave { x: 10.0, y: 0.0 });
+    send(
+        &mut model,
+        InputMessage::WindowPointerLeave { x: 10.0, y: 0.0 },
+    );
     assert!(model.input.session.is_some());
-    send(&mut model, InputMessage::WindowPointerLeave { x: 72.0, y: 0.0 });
+    send(
+        &mut model,
+        InputMessage::WindowPointerLeave { x: 72.0, y: 0.0 },
+    );
     assert!(model.input.session.is_none());
     assert_eq!(model.input.external_drag_result, None);
-    assert!(matches!(model.input.host_requests.last(), Some(HostRequest::Input(HostInputRequest::DragOut { .. }))));
+    assert!(matches!(
+        model.input.host_requests.last(),
+        Some(HostRequest::Input(HostInputRequest::DragOut { .. }))
+    ));
 
     let mut model = ready("repo");
     send(&mut model, begin("a.png", &["a.png"], 0.0));
-    send(&mut model, InputMessage::EntryDragMove { x: 10.0, y: 0.0, bounds_width: 400.0, bounds_height: 400.0, hover_folder: None, over_browser: true });
+    send(
+        &mut model,
+        InputMessage::EntryDragMove {
+            x: 10.0,
+            y: 0.0,
+            bounds_width: 400.0,
+            bounds_height: 400.0,
+            hover_folder: None,
+            over_browser: true,
+        },
+    );
     send(&mut model, InputMessage::WindowBlur);
     assert!(model.input.session.is_some());
-    send(&mut model, InputMessage::EntryDragMove { x: 80.0, y: 0.0, bounds_width: 400.0, bounds_height: 400.0, hover_folder: None, over_browser: true });
+    send(
+        &mut model,
+        InputMessage::EntryDragMove {
+            x: 80.0,
+            y: 0.0,
+            bounds_width: 400.0,
+            bounds_height: 400.0,
+            hover_folder: None,
+            over_browser: true,
+        },
+    );
     model.input.session = Some(InternalSession {
         start_x: 0.0,
         start_y: 0.0,
@@ -189,11 +338,25 @@ fn refused_drags_pointer_leave_and_delegated_end_do_not_move() {
     model.input.dragged_paths = vec!["a.png".into()];
     send(&mut model, InputMessage::WindowBlur);
     assert!(model.input.session.is_some());
-    send(&mut model, InputMessage::EntryDragEnd { hover_folder: Some("albums".into()), over_browser: true, has_pointer: false });
+    send(
+        &mut model,
+        InputMessage::EntryDragEnd {
+            hover_folder: Some("albums".into()),
+            over_browser: true,
+            has_pointer: false,
+        },
+    );
     assert!(model.files.take_effects().is_empty());
     assert!(model.input.session.is_none());
 
-    send(&mut model, InputMessage::EntryDragEnd { hover_folder: None, over_browser: false, has_pointer: true });
+    send(
+        &mut model,
+        InputMessage::EntryDragEnd {
+            hover_folder: None,
+            over_browser: false,
+            has_pointer: true,
+        },
+    );
     assert!(model.files.take_effects().is_empty());
 }
 
@@ -201,11 +364,32 @@ fn refused_drags_pointer_leave_and_delegated_end_do_not_move() {
 fn html_and_host_drops_import_move_or_attach() {
     let mut model = ready("repo");
     model.input.drop_effect = "keep".into();
-    send(&mut model, InputMessage::DragOver { internal_transfer: false, writable: false, files_panel: true });
+    send(
+        &mut model,
+        InputMessage::DragOver {
+            internal_transfer: false,
+            writable: false,
+            files_panel: true,
+        },
+    );
     assert_eq!(model.input.drop_effect, "keep");
-    send(&mut model, InputMessage::DragOver { internal_transfer: true, writable: true, files_panel: true });
+    send(
+        &mut model,
+        InputMessage::DragOver {
+            internal_transfer: true,
+            writable: true,
+            files_panel: true,
+        },
+    );
     assert_eq!(model.input.drop_effect, "move");
-    send(&mut model, InputMessage::DragOver { internal_transfer: false, writable: true, files_panel: true });
+    send(
+        &mut model,
+        InputMessage::DragOver {
+            internal_transfer: false,
+            writable: true,
+            files_panel: true,
+        },
+    );
     assert_eq!(model.input.drop_effect, "copy");
     assert!(model.input.external_active && model.input.dragging_files);
     send(&mut model, InputMessage::DragLeave { nested: true });
@@ -220,257 +404,482 @@ fn html_and_host_drops_import_move_or_attach() {
 
     send(&mut model, begin("a.png", &["a.png"], 0.0));
     model.input.hover_folder = None;
-    send(&mut model, InputMessage::BrowserDrop {
-        internal_transfer: true,
-        paths: Vec::new(),
-        writable: true,
-        trash: false,
-        has_snapshot: true,
-        repo_root: "C:\\repo".into(),
-    });
-    assert!(matches!(model.files.take_effects().pop(), Some(FilesEffect::Move { parent, .. }) if parent == "photos"));
+    send(
+        &mut model,
+        InputMessage::BrowserDrop {
+            internal_transfer: true,
+            paths: Vec::new(),
+            writable: true,
+            trash: false,
+            has_snapshot: true,
+            repo_root: "C:\\repo".into(),
+        },
+    );
+    assert!(
+        matches!(model.files.take_effects().pop(), Some(FilesEffect::Move { parent, .. }) if parent == "photos")
+    );
 
-    send(&mut model, InputMessage::BrowserDrop {
-        internal_transfer: false,
-        paths: vec!["C:\\repo\\a.png".into(), "D:\\other\\b.png".into()],
-        writable: false,
-        trash: false,
-        has_snapshot: true,
-        repo_root: "C:\\repo".into(),
-    });
+    send(
+        &mut model,
+        InputMessage::BrowserDrop {
+            internal_transfer: false,
+            paths: vec!["C:\\repo\\a.png".into(), "D:\\other\\b.png".into()],
+            writable: false,
+            trash: false,
+            has_snapshot: true,
+            repo_root: "C:\\repo".into(),
+        },
+    );
     assert!(model.files.take_effects().is_empty());
-    send(&mut model, InputMessage::BrowserDrop {
-        internal_transfer: false,
-        paths: vec!["D:\\other\\b.png".into()],
-        writable: true,
-        trash: true,
-        has_snapshot: true,
-        repo_root: "C:\\repo".into(),
-    });
+    send(
+        &mut model,
+        InputMessage::BrowserDrop {
+            internal_transfer: false,
+            paths: vec!["D:\\other\\b.png".into()],
+            writable: true,
+            trash: true,
+            has_snapshot: true,
+            repo_root: "C:\\repo".into(),
+        },
+    );
     assert!(model.files.take_effects().is_empty());
-    send(&mut model, InputMessage::BrowserDrop {
-        internal_transfer: false,
-        paths: vec![" ".into()],
-        writable: true,
-        trash: false,
-        has_snapshot: true,
-        repo_root: "C:\\repo".into(),
-    });
+    send(
+        &mut model,
+        InputMessage::BrowserDrop {
+            internal_transfer: false,
+            paths: vec![" ".into()],
+            writable: true,
+            trash: false,
+            has_snapshot: true,
+            repo_root: "C:\\repo".into(),
+        },
+    );
     assert!(model.files.take_effects().is_empty());
-    send(&mut model, InputMessage::BrowserDrop {
-        internal_transfer: false,
-        paths: vec!["C:\\repo\\photos\\a.png".into(), "D:\\other\\b.png".into()],
-        writable: true,
-        trash: false,
-        has_snapshot: false,
-        repo_root: "C:\\repo".into(),
-    });
+    send(
+        &mut model,
+        InputMessage::BrowserDrop {
+            internal_transfer: false,
+            paths: vec!["C:\\repo\\photos\\a.png".into(), "D:\\other\\b.png".into()],
+            writable: true,
+            trash: false,
+            has_snapshot: false,
+            repo_root: "C:\\repo".into(),
+        },
+    );
     assert!(model.files.take_effects().is_empty());
     model.input.hover_folder = Some("albums".into());
-    send(&mut model, InputMessage::BrowserDrop {
-        internal_transfer: false,
-        paths: vec!["C:\\repo\\albums\\a.png".into(), "D:\\other\\b.png".into()],
-        writable: true,
-        trash: false,
-        has_snapshot: true,
-        repo_root: "C:\\repo".into(),
-    });
+    send(
+        &mut model,
+        InputMessage::BrowserDrop {
+            internal_transfer: false,
+            paths: vec!["C:\\repo\\albums\\a.png".into(), "D:\\other\\b.png".into()],
+            writable: true,
+            trash: false,
+            has_snapshot: true,
+            repo_root: "C:\\repo".into(),
+        },
+    );
     assert!(matches!(
         model.files.take_effects().pop(),
         Some(FilesEffect::Import { parent, sources, .. }) if parent.as_deref() == Some("albums") && sources == ["D:\\other\\b.png"]
     ));
 
     model.workspace.panel = WorkspacePanel::Trash;
-    send(&mut model, InputMessage::FolderHover { path: "albums".into(), trash: true });
+    send(
+        &mut model,
+        InputMessage::FolderHover {
+            path: "albums".into(),
+            trash: true,
+        },
+    );
     assert!(model.input.hover_folder.is_none());
     model.workspace.panel = WorkspacePanel::Files;
-    send(&mut model, InputMessage::FolderHover { path: "albums".into(), trash: false });
+    send(
+        &mut model,
+        InputMessage::FolderHover {
+            path: "albums".into(),
+            trash: false,
+        },
+    );
     send(&mut model, InputMessage::FolderLeave("other".into()));
     assert_eq!(model.input.hover_folder.as_deref(), Some("albums"));
     send(&mut model, InputMessage::FolderLeave("albums".into()));
     assert!(model.input.hover_folder.is_none());
-    send(&mut model, InputMessage::FolderDrop { path: "albums".into(), internal_transfer: false, paths: vec![" ".into()] });
+    send(
+        &mut model,
+        InputMessage::FolderDrop {
+            path: "albums".into(),
+            internal_transfer: false,
+            paths: vec![" ".into()],
+        },
+    );
     assert!(model.files.take_effects().is_empty());
     send(&mut model, begin("a.png", &["a.png"], 0.0));
     model.workspace.panel = WorkspacePanel::Trash;
-    send(&mut model, InputMessage::FolderDrop { path: "albums".into(), internal_transfer: true, paths: Vec::new() });
+    send(
+        &mut model,
+        InputMessage::FolderDrop {
+            path: "albums".into(),
+            internal_transfer: true,
+            paths: Vec::new(),
+        },
+    );
     assert!(model.files.take_effects().is_empty());
     model.workspace.panel = WorkspacePanel::Files;
-    send(&mut model, InputMessage::FolderDrop { path: "albums".into(), internal_transfer: false, paths: vec!["D:\\other\\a.png".into()] });
+    send(
+        &mut model,
+        InputMessage::FolderDrop {
+            path: "albums".into(),
+            internal_transfer: false,
+            paths: vec!["D:\\other\\a.png".into()],
+        },
+    );
     assert!(matches!(
         model.files.take_effects().pop(),
         Some(FilesEffect::Import { parent, sources, .. }) if parent.as_deref() == Some("albums") && sources == ["D:\\other\\a.png"]
     ));
 
-    send(&mut model, InputMessage::EmptyDragOver { has_active_id: true, has_repository: false });
+    send(
+        &mut model,
+        InputMessage::EmptyDragOver {
+            has_active_id: true,
+            has_repository: false,
+        },
+    );
     assert!(!model.input.dragging_repository_folder);
-    send(&mut model, InputMessage::EmptyDragOver { has_active_id: false, has_repository: false });
+    send(
+        &mut model,
+        InputMessage::EmptyDragOver {
+            has_active_id: false,
+            has_repository: false,
+        },
+    );
     assert!(model.input.dragging_repository_folder);
     assert_eq!(model.input.drop_effect, "copy");
     send(&mut model, InputMessage::EmptyDragLeave { nested: true });
     assert!(model.input.dragging_repository_folder);
     send(&mut model, InputMessage::EmptyDragLeave { nested: false });
     assert!(!model.input.dragging_repository_folder);
-    send(&mut model, InputMessage::EmptyDrop { has_active_id: true, has_repository: false, paths: vec!["C:\\new".into()] });
+    send(
+        &mut model,
+        InputMessage::EmptyDrop {
+            has_active_id: true,
+            has_repository: false,
+            paths: vec!["C:\\new".into()],
+        },
+    );
     assert!(model.sidebar.take_effects().is_empty());
-    send(&mut model, InputMessage::EmptyDrop { has_active_id: false, has_repository: false, paths: vec![" ".into()] });
+    send(
+        &mut model,
+        InputMessage::EmptyDrop {
+            has_active_id: false,
+            has_repository: false,
+            paths: vec![" ".into()],
+        },
+    );
     assert!(model.sidebar.take_effects().is_empty());
-    send(&mut model, InputMessage::EmptyDrop { has_active_id: false, has_repository: false, paths: vec![" C:\\new ".into(), "C:\\other".into()] });
-    assert!(matches!(model.sidebar.take_effects().pop(), Some(SidebarEffect::AttachRepository { path }) if path == "C:\\new"));
+    send(
+        &mut model,
+        InputMessage::EmptyDrop {
+            has_active_id: false,
+            has_repository: false,
+            paths: vec![" C:\\new ".into(), "C:\\other".into()],
+        },
+    );
+    assert!(
+        matches!(model.sidebar.take_effects().pop(), Some(SidebarEffect::AttachRepository { path }) if path == "C:\\new")
+    );
     assert!(model.input.pending_attach);
-    model.reduce(ShellMessage::Sidebar(crate::shell::SidebarMessage::RepositoryAttachFinished(Err("附加失败".into()))));
+    model.reduce(ShellMessage::Sidebar(
+        crate::shell::SidebarMessage::RepositoryAttachFinished(Err("附加失败".into())),
+    ));
     assert_eq!(model.input.empty_repository_error, "附加失败");
     assert!(!model.input.pending_attach);
-    model.reduce(ShellMessage::Sidebar(crate::shell::SidebarMessage::RepositoryAttachFinished(Err("忽略".into()))));
+    model.reduce(ShellMessage::Sidebar(
+        crate::shell::SidebarMessage::RepositoryAttachFinished(Err("忽略".into())),
+    ));
     assert_eq!(model.input.empty_repository_error, "附加失败");
 
     model.input.dragging_files = true;
-    send(&mut model, InputMessage::HostDrag {
-        phase: HostDragPhase::Enter,
-        paths: Vec::new(),
-        has_repository: false,
-        missing_repository: false,
-        writable: false,
-        files_panel: false,
-        has_snapshot: false,
-        repo_root: String::new(),
-    });
+    send(
+        &mut model,
+        InputMessage::HostDrag {
+            phase: HostDragPhase::Enter,
+            paths: Vec::new(),
+            has_repository: false,
+            missing_repository: false,
+            writable: false,
+            files_panel: false,
+            has_snapshot: false,
+            repo_root: String::new(),
+        },
+    );
     assert!(model.input.dragging_repository_folder);
     assert!(model.input.dragging_files);
     model.input.dragging_files = false;
-    send(&mut model, InputMessage::HostDrag {
-        phase: HostDragPhase::Leave,
-        paths: Vec::new(),
-        has_repository: false,
-        missing_repository: false,
-        writable: false,
-        files_panel: false,
-        has_snapshot: false,
-        repo_root: String::new(),
-    });
+    send(
+        &mut model,
+        InputMessage::HostDrag {
+            phase: HostDragPhase::Leave,
+            paths: Vec::new(),
+            has_repository: false,
+            missing_repository: false,
+            writable: false,
+            files_panel: false,
+            has_snapshot: false,
+            repo_root: String::new(),
+        },
+    );
     assert!(!model.input.dragging_repository_folder);
-    send(&mut model, InputMessage::HostDrag {
-        phase: HostDragPhase::Drop,
-        paths: vec!["C:\\library".into()],
-        has_repository: false,
-        missing_repository: true,
-        writable: false,
-        files_panel: true,
-        has_snapshot: false,
-        repo_root: String::new(),
-    });
+    send(
+        &mut model,
+        InputMessage::HostDrag {
+            phase: HostDragPhase::Drop,
+            paths: vec!["C:\\library".into()],
+            has_repository: false,
+            missing_repository: true,
+            writable: false,
+            files_panel: true,
+            has_snapshot: false,
+            repo_root: String::new(),
+        },
+    );
     assert!(model.sidebar.take_effects().is_empty());
-    send(&mut model, InputMessage::HostDrag {
-        phase: HostDragPhase::Over,
-        paths: Vec::new(),
-        has_repository: true,
-        missing_repository: false,
-        writable: false,
-        files_panel: true,
-        has_snapshot: true,
-        repo_root: "C:\\repo".into(),
-    });
+    send(
+        &mut model,
+        InputMessage::HostDrag {
+            phase: HostDragPhase::Over,
+            paths: Vec::new(),
+            has_repository: true,
+            missing_repository: false,
+            writable: false,
+            files_panel: true,
+            has_snapshot: true,
+            repo_root: "C:\\repo".into(),
+        },
+    );
     assert!(!model.input.dragging_files);
-    send(&mut model, InputMessage::HostDrag {
-        phase: HostDragPhase::Enter,
-        paths: Vec::new(),
-        has_repository: true,
-        missing_repository: false,
-        writable: true,
-        files_panel: true,
-        has_snapshot: true,
-        repo_root: "C:\\repo".into(),
-    });
+    send(
+        &mut model,
+        InputMessage::HostDrag {
+            phase: HostDragPhase::Enter,
+            paths: Vec::new(),
+            has_repository: true,
+            missing_repository: false,
+            writable: true,
+            files_panel: true,
+            has_snapshot: true,
+            repo_root: "C:\\repo".into(),
+        },
+    );
     assert!(model.input.dragging_files);
-    send(&mut model, InputMessage::HostDrag {
-        phase: HostDragPhase::Leave,
-        paths: Vec::new(),
-        has_repository: true,
-        missing_repository: false,
-        writable: true,
-        files_panel: true,
-        has_snapshot: true,
-        repo_root: "C:\\repo".into(),
-    });
+    send(
+        &mut model,
+        InputMessage::HostDrag {
+            phase: HostDragPhase::Leave,
+            paths: Vec::new(),
+            has_repository: true,
+            missing_repository: false,
+            writable: true,
+            files_panel: true,
+            has_snapshot: true,
+            repo_root: "C:\\repo".into(),
+        },
+    );
     assert!(!model.input.external_active);
     model.input.hover_folder = Some("photos".into());
-    send(&mut model, InputMessage::HostDrag {
-        phase: HostDragPhase::Drop,
-        paths: vec!["D:\\other\\c.png".into()],
-        has_repository: true,
-        missing_repository: false,
-        writable: true,
-        files_panel: false,
-        has_snapshot: true,
-        repo_root: "C:\\repo".into(),
-    });
+    send(
+        &mut model,
+        InputMessage::HostDrag {
+            phase: HostDragPhase::Drop,
+            paths: vec!["D:\\other\\c.png".into()],
+            has_repository: true,
+            missing_repository: false,
+            writable: true,
+            files_panel: false,
+            has_snapshot: true,
+            repo_root: "C:\\repo".into(),
+        },
+    );
     assert!(model.files.take_effects().is_empty());
     assert_eq!(model.input.hover_folder.as_deref(), Some("photos"));
-    send(&mut model, InputMessage::HostDrag {
-        phase: HostDragPhase::Drop,
-        paths: Vec::new(),
-        has_repository: true,
-        missing_repository: false,
-        writable: true,
-        files_panel: true,
-        has_snapshot: true,
-        repo_root: "C:\\repo".into(),
-    });
+    send(
+        &mut model,
+        InputMessage::HostDrag {
+            phase: HostDragPhase::Drop,
+            paths: Vec::new(),
+            has_repository: true,
+            missing_repository: false,
+            writable: true,
+            files_panel: true,
+            has_snapshot: true,
+            repo_root: "C:\\repo".into(),
+        },
+    );
     assert!(model.files.take_effects().is_empty());
-    send(&mut model, InputMessage::HostDrag {
-        phase: HostDragPhase::Drop,
-        paths: vec!["D:\\other\\c.png".into()],
-        has_repository: true,
-        missing_repository: false,
-        writable: true,
-        files_panel: true,
-        has_snapshot: true,
-        repo_root: "C:\\repo".into(),
-    });
-    assert!(matches!(model.files.take_effects().pop(), Some(FilesEffect::Import { sources, .. }) if sources == ["D:\\other\\c.png"]));
+    send(
+        &mut model,
+        InputMessage::HostDrag {
+            phase: HostDragPhase::Drop,
+            paths: vec!["D:\\other\\c.png".into()],
+            has_repository: true,
+            missing_repository: false,
+            writable: true,
+            files_panel: true,
+            has_snapshot: true,
+            repo_root: "C:\\repo".into(),
+        },
+    );
+    assert!(
+        matches!(model.files.take_effects().pop(), Some(FilesEffect::Import { sources, .. }) if sources == ["D:\\other\\c.png"])
+    );
 }
 
 #[test]
 fn box_selection_open_reveal_and_external_drag_follow_the_vue_guards() {
     let mut model = ready("repo");
-    model.files.set_drag_selection(vec!["a.png".into()], Some("a.png".into()), Some("old".into()));
-    send(&mut model, InputMessage::BoxSelect { paths: Vec::new(), append: true });
+    model.files.set_drag_selection(
+        vec!["a.png".into()],
+        Some("a.png".into()),
+        Some("old".into()),
+    );
+    send(
+        &mut model,
+        InputMessage::BoxSelect {
+            paths: Vec::new(),
+            append: true,
+        },
+    );
     assert_eq!(model.files.selected_paths(), ["a.png"]);
-    send(&mut model, InputMessage::BoxSelect { paths: vec!["a.png".into(), "b.png".into()], append: true });
+    send(
+        &mut model,
+        InputMessage::BoxSelect {
+            paths: vec!["a.png".into(), "b.png".into()],
+            append: true,
+        },
+    );
     assert_eq!(model.files.selected_paths(), ["a.png", "b.png"]);
     assert_eq!(model.files.primary.as_deref(), Some("a.png"));
     assert_eq!(model.files.anchor.as_deref(), Some("a.png"));
-    send(&mut model, InputMessage::BoxSelect { paths: Vec::new(), append: false });
+    send(
+        &mut model,
+        InputMessage::BoxSelect {
+            paths: Vec::new(),
+            append: false,
+        },
+    );
     assert!(model.files.selected_paths().is_empty());
     assert!(model.files.primary.is_none());
-    send(&mut model, InputMessage::BoxSelect { paths: vec!["c.png".into(), "d.png".into()], append: false });
+    send(
+        &mut model,
+        InputMessage::BoxSelect {
+            paths: vec!["c.png".into(), "d.png".into()],
+            append: false,
+        },
+    );
     assert_eq!(model.files.primary.as_deref(), Some("c.png"));
     assert_eq!(model.files.anchor.as_deref(), Some("c.png"));
 
     // 守卫拦下的请求不清状态区里的失败，真正开始的打开才清。
     model.status.fail(FailureSource::Host, "定位失败：上一次");
-    send(&mut model, InputMessage::OpenEntry { has_repo: false, absolute_path: "C:\\a.png".into(), path: "a.png".into() });
-    send(&mut model, InputMessage::OpenEntry { has_repo: true, absolute_path: " ".into(), path: "a.png".into() });
-    send(&mut model, InputMessage::RevealEntry { absolute_path: " ".into() });
-    send(&mut model, InputMessage::OpenExternalUrl { url: " ".into() });
-    assert!(model.status.failure().is_some(), "守卫拦下的请求不该清掉上一次失败");
+    send(
+        &mut model,
+        InputMessage::OpenEntry {
+            has_repo: false,
+            absolute_path: "C:\\a.png".into(),
+            path: "a.png".into(),
+        },
+    );
+    send(
+        &mut model,
+        InputMessage::OpenEntry {
+            has_repo: true,
+            absolute_path: " ".into(),
+            path: "a.png".into(),
+        },
+    );
+    send(
+        &mut model,
+        InputMessage::RevealEntry {
+            absolute_path: " ".into(),
+        },
+    );
+    send(
+        &mut model,
+        InputMessage::OpenExternalUrl { url: " ".into() },
+    );
+    assert!(
+        model.status.failure().is_some(),
+        "守卫拦下的请求不该清掉上一次失败"
+    );
     assert!(model.input.host_requests.is_empty());
-    send(&mut model, InputMessage::OpenEntry { has_repo: true, absolute_path: "C:\\a.png".into(), path: "a.png".into() });
+    send(
+        &mut model,
+        InputMessage::OpenEntry {
+            has_repo: true,
+            absolute_path: "C:\\a.png".into(),
+            path: "a.png".into(),
+        },
+    );
     assert!(model.status.failure().is_none());
-    send(&mut model, InputMessage::RevealEntry { absolute_path: "C:\\a.png".into() });
-    assert!(matches!(model.input.host_requests.last(), Some(crate::host_api::HostRequest::OpenExternal(request)) if request.reveal && request.target == "C:\\a.png"));
-    send(&mut model, InputMessage::OpenExternalUrl { url: "https://momobako.local".into() });
+    send(
+        &mut model,
+        InputMessage::RevealEntry {
+            absolute_path: "C:\\a.png".into(),
+        },
+    );
+    assert!(
+        matches!(model.input.host_requests.last(), Some(crate::host_api::HostRequest::OpenExternal(request)) if request.reveal && request.target == "C:\\a.png")
+    );
+    send(
+        &mut model,
+        InputMessage::OpenExternalUrl {
+            url: "https://momobako.local".into(),
+        },
+    );
     assert!(model.status.failure().is_none());
     assert_eq!(model.input.host_requests.len(), 3);
 
-    send(&mut model, InputMessage::StartExternalDrag { paths: vec!["a.png".into()], trash: true, backend_kind: "filesystem".into(), repo_root: "C:\\repo".into() });
+    send(
+        &mut model,
+        InputMessage::StartExternalDrag {
+            paths: vec!["a.png".into()],
+            trash: true,
+            backend_kind: "filesystem".into(),
+            repo_root: "C:\\repo".into(),
+        },
+    );
     assert_eq!(model.input.external_drag_result, Some(false));
     assert_eq!(model.input.host_requests.len(), 3);
-    send(&mut model, InputMessage::StartExternalDrag { paths: vec!["a.png".into()], trash: false, backend_kind: "webdav".into(), repo_root: "C:\\repo".into() });
-    send(&mut model, InputMessage::StartExternalDrag { paths: vec![" ".into()], trash: false, backend_kind: "filesystem".into(), repo_root: "C:\\repo".into() });
+    send(
+        &mut model,
+        InputMessage::StartExternalDrag {
+            paths: vec!["a.png".into()],
+            trash: false,
+            backend_kind: "webdav".into(),
+            repo_root: "C:\\repo".into(),
+        },
+    );
+    send(
+        &mut model,
+        InputMessage::StartExternalDrag {
+            paths: vec![" ".into()],
+            trash: false,
+            backend_kind: "filesystem".into(),
+            repo_root: "C:\\repo".into(),
+        },
+    );
     assert_eq!(model.input.host_requests.len(), 3);
     model.status.fail(FailureSource::Host, "拖出失败：上一次");
-    send(&mut model, InputMessage::StartExternalDrag { paths: vec!["a.png".into()], trash: false, backend_kind: "filesystem".into(), repo_root: "C:\\repo".into() });
+    send(
+        &mut model,
+        InputMessage::StartExternalDrag {
+            paths: vec!["a.png".into()],
+            trash: false,
+            backend_kind: "filesystem".into(),
+            repo_root: "C:\\repo".into(),
+        },
+    );
     assert!(model.status.failure().is_none(), "拖出开始时清掉上一次失败");
     assert_eq!(model.input.external_drag_result, None);
 
@@ -482,7 +891,13 @@ fn box_selection_open_reveal_and_external_drag_follow_the_vue_guards() {
     assert!(!model.input.external_active);
     assert!(!model.input.dragging_files);
     assert!(!model.input.dragging_repository_folder);
-    assert_eq!(model.status.failure().map(|failure| failure.message.as_str()), Some("保留"));
+    assert_eq!(
+        model
+            .status
+            .failure()
+            .map(|failure| failure.message.as_str()),
+        Some("保留")
+    );
 }
 
 /// 外部网址只排 http、https、mailto、tel：盘符路径和 `file:` 不交给系统；能开的整串原样交出（去掉首尾空白），
@@ -490,12 +905,28 @@ fn box_selection_open_reveal_and_external_drag_follow_the_vue_guards() {
 #[test]
 fn external_urls_outside_the_allowed_protocols_are_not_opened() {
     let mut model = ready("repo");
-    for url in ["C:\\Windows\\System32\\calc.exe", "file:///C:/Windows/System32/calc.exe", "eagle://item/1", "javascript:alert(1)"] {
-        send(&mut model, InputMessage::OpenExternalUrl { url: url.into() });
+    for url in [
+        "C:\\Windows\\System32\\calc.exe",
+        "file:///C:/Windows/System32/calc.exe",
+        "eagle://item/1",
+        "javascript:alert(1)",
+    ] {
+        send(
+            &mut model,
+            InputMessage::OpenExternalUrl { url: url.into() },
+        );
     }
-    assert!(model.input.host_requests.is_empty(), "协议不在范围内的网址不该排给宿主");
+    assert!(
+        model.input.host_requests.is_empty(),
+        "协议不在范围内的网址不该排给宿主"
+    );
 
-    send(&mut model, InputMessage::OpenExternalUrl { url: " https://example.com/?a=1&calc ".into() });
+    send(
+        &mut model,
+        InputMessage::OpenExternalUrl {
+            url: " https://example.com/?a=1&calc ".into(),
+        },
+    );
     assert!(matches!(
         model.input.host_requests.as_slice(),
         [crate::host_api::HostRequest::OpenExternal(request)] if !request.reveal && request.target == "https://example.com/?a=1&calc"
@@ -506,11 +937,18 @@ fn external_urls_outside_the_allowed_protocols_are_not_opened() {
 fn close_confirmation_and_file_dialogs_do_not_pretend_the_host_finished() {
     let mut model = ShellViewModel::default();
     model.settings.close_behavior = "confirm".into();
-    model.reduce(ShellMessage::WindowAction(crate::shell::WindowAction::Close));
+    model.reduce(ShellMessage::WindowAction(
+        crate::shell::WindowAction::Close,
+    ));
     assert!(model.input.pending_close);
     assert_eq!(model.input.notice, "确认关闭 MomoBako？");
-    assert!(model.input.host_requests.is_empty(), "确认框由浮层画，不排宿主请求");
-    model.reduce(ShellMessage::WindowAction(crate::shell::WindowAction::Close));
+    assert!(
+        model.input.host_requests.is_empty(),
+        "确认框由浮层画，不排宿主请求"
+    );
+    model.reduce(ShellMessage::WindowAction(
+        crate::shell::WindowAction::Close,
+    ));
     assert!(model.input.host_requests.is_empty());
     assert!(close_prompt(&model).is_some());
     send(&mut model, InputMessage::ConfirmCloseAnswer(false));
@@ -521,31 +959,59 @@ fn close_confirmation_and_file_dialogs_do_not_pretend_the_host_finished() {
     assert_eq!(model.input.notice, "");
 
     model.settings.close_behavior = "quit".into();
-    model.reduce(ShellMessage::WindowAction(crate::shell::WindowAction::Close));
+    model.reduce(ShellMessage::WindowAction(
+        crate::shell::WindowAction::Close,
+    ));
     assert!(!model.input.pending_close);
-    let commands = model.input.take_platform_commands(nana_ui_platform::WindowId(1), false);
-    assert!(matches!(commands.first(), Some(nana_ui_platform::host::WindowCommand::Close(_))));
+    let commands = model
+        .input
+        .take_platform_commands(nana_ui_platform::WindowId(1), false);
+    assert!(matches!(
+        commands.first(),
+        Some(nana_ui_platform::host::WindowCommand::Close(_))
+    ));
 
     model.dirty = true;
-    model.reduce(ShellMessage::WindowAction(crate::shell::WindowAction::Close));
+    model.reduce(ShellMessage::WindowAction(
+        crate::shell::WindowAction::Close,
+    ));
     assert!(model.input.pending_close);
     assert_eq!(model.input.notice, "有未保存的修改，确认关闭？");
     send(&mut model, InputMessage::ConfirmCloseAnswer(true));
-    assert!(!model.input.take_platform_commands(nana_ui_platform::WindowId(1), false).is_empty());
+    assert!(
+        !model
+            .input
+            .take_platform_commands(nana_ui_platform::WindowId(1), false)
+            .is_empty()
+    );
 
-    model.reduce(ShellMessage::Inspect(InspectMessage::SetComment("未保存".into())));
+    model.reduce(ShellMessage::Inspect(InspectMessage::SetComment(
+        "未保存".into(),
+    )));
     model.dirty = false;
     assert!(model.close_is_dirty());
     model.settings.close_behavior = "quit".into();
-    model.reduce(ShellMessage::WindowAction(crate::shell::WindowAction::Close));
+    model.reduce(ShellMessage::WindowAction(
+        crate::shell::WindowAction::Close,
+    ));
     assert!(model.input.pending_close);
 
     model.settings.close_behavior = "minimizeToTray".into();
-    model.reduce(ShellMessage::WindowAction(crate::shell::WindowAction::Close));
+    model.reduce(ShellMessage::WindowAction(
+        crate::shell::WindowAction::Close,
+    ));
     assert!(!model.input.pending_close);
     assert!(model.input.notice.is_empty());
-    assert!(matches!(model.input.host_requests.last(), Some(HostRequest::Input(HostInputRequest::MinimizeToTray))));
-    assert!(model.input.take_platform_commands(nana_ui_platform::WindowId(1), false).is_empty());
+    assert!(matches!(
+        model.input.host_requests.last(),
+        Some(HostRequest::Input(HostInputRequest::MinimizeToTray))
+    ));
+    assert!(
+        model
+            .input
+            .take_platform_commands(nana_ui_platform::WindowId(1), false)
+            .is_empty()
+    );
 
     let mut acceptance = ShellViewModel::for_page(ShellPage::Settings);
     assert!(close_prompt(&acceptance).is_none());
@@ -554,23 +1020,87 @@ fn close_confirmation_and_file_dialogs_do_not_pretend_the_host_finished() {
     assert!(close_prompt(&acceptance).is_some());
 
     model.admin.external_message = "正在选择导出位置…".into();
-    send(&mut model, InputMessage::FileDialogCompleted { request_id: DIALOG_EXPORT_ID, paths: Vec::new(), failed: None });
+    send(
+        &mut model,
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_EXPORT_ID,
+            paths: Vec::new(),
+            failed: None,
+        },
+    );
     assert!(model.admin.external_message.is_empty());
     assert!(model.admin.take_effects().is_empty());
-    send(&mut model, InputMessage::FileDialogCompleted { request_id: DIALOG_EXPORT_ID, paths: Vec::new(), failed: Some("Busy".into()) });
+    send(
+        &mut model,
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_EXPORT_ID,
+            paths: Vec::new(),
+            failed: Some("Busy".into()),
+        },
+    );
     assert_eq!(model.admin.external_error, "导出失败：Busy");
-    send(&mut model, InputMessage::FileDialogCompleted { request_id: 99, paths: vec!["x".into()], failed: None });
+    send(
+        &mut model,
+        InputMessage::FileDialogCompleted {
+            request_id: 99,
+            paths: vec!["x".into()],
+            failed: None,
+        },
+    );
     model.input.queue_save_dialog();
     model.input.queue_plugin_dialog();
-    let commands = model.input.take_platform_commands(nana_ui_platform::WindowId(1), false);
+    let commands = model
+        .input
+        .take_platform_commands(nana_ui_platform::WindowId(1), false);
     assert_eq!(commands.len(), 2);
-    assert!(matches!(&commands[0], nana_ui_platform::host::WindowCommand::OpenFileDialog { request, .. } if request.id == DIALOG_EXPORT_ID && request.file_name.as_deref() == Some("external-api.json")));
-    assert!(matches!(&commands[1], nana_ui_platform::host::WindowCommand::OpenFileDialog { request, .. } if request.id == DIALOG_PLUGIN_ID));
-    send(&mut model, InputMessage::FileDialogCompleted { request_id: DIALOG_PLUGIN_ID, paths: vec![" ".into()], failed: None });
+    assert!(matches!(
+        &commands[0],
+        nana_ui_platform::host::WindowCommand::OpenFileDialog { request, .. }
+            if request.id == DIALOG_EXPORT_ID
+                && request.title.as_deref() == Some("导出外部 API 连接 JSON")
+                && request.file_name.as_deref() == Some("external-api.json")
+                && request.filters.len() == 1
+                && request.filters[0].name.as_ref() == "JSON"
+                && request.filters[0].extensions.len() == 1
+                && request.filters[0].extensions[0].as_ref() == "json"
+    ));
+    assert!(matches!(
+        &commands[1],
+        nana_ui_platform::host::WindowCommand::OpenFileDialog { request, .. }
+            if request.id == DIALOG_PLUGIN_ID
+                && request.title.as_deref() == Some("选择 .momoplug 插件包")
+                && request.filters.len() == 1
+                && request.filters[0].name.as_ref() == "MomoBako 插件"
+                && request.filters[0].extensions[0].as_ref() == "momoplug"
+    ));
+    send(
+        &mut model,
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_PLUGIN_ID,
+            paths: vec![" ".into()],
+            failed: None,
+        },
+    );
     assert!(model.admin.take_effects().is_empty());
-    send(&mut model, InputMessage::FileDialogCompleted { request_id: DIALOG_PLUGIN_ID, paths: vec!["plugin.momoplug".into()], failed: None });
-    assert!(matches!(model.admin.take_effects().pop(), Some(crate::shell::admin::AdminEffect::Install(path)) if path == "plugin.momoplug"));
-    send(&mut model, InputMessage::FileDialogCompleted { request_id: DIALOG_PLUGIN_ID, paths: Vec::new(), failed: Some("Unavailable".into()) });
+    send(
+        &mut model,
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_PLUGIN_ID,
+            paths: vec!["plugin.momoplug".into()],
+            failed: None,
+        },
+    );
+    assert!(
+        matches!(model.admin.take_effects().pop(), Some(crate::shell::admin::AdminEffect::Install(path)) if path == "plugin.momoplug")
+    );
+    send(
+        &mut model,
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_PLUGIN_ID,
+            paths: Vec::new(),
+            failed: Some("Unavailable".into()),
+        },
+    );
     assert_eq!(model.admin.action_error, "插件包选择失败：Unavailable");
 }
 
@@ -607,7 +1137,9 @@ fn relocate_folder_dialog_queues_pick_folder_and_submits_only_a_chosen_path() {
     assert!(!model.workspace.path_prompt);
     assert!(!model.workspace.relocating);
     assert!(model.workspace.missing_error.is_empty());
-    let commands = model.input.take_platform_commands(nana_ui_platform::WindowId(1), false);
+    let commands = model
+        .input
+        .take_platform_commands(nana_ui_platform::WindowId(1), false);
     assert_eq!(commands.len(), 1);
     assert!(matches!(
         &commands[0],
@@ -621,22 +1153,47 @@ fn relocate_folder_dialog_queues_pick_folder_and_submits_only_a_chosen_path() {
     idle.workspace.startup.finish();
     idle.workspace.repositories.push(missing_repository("repo"));
     begin_relocate_dialog(&mut idle);
-    assert!(idle.input.take_platform_commands(nana_ui_platform::WindowId(1), false).is_empty());
+    assert!(
+        idle.input
+            .take_platform_commands(nana_ui_platform::WindowId(1), false)
+            .is_empty()
+    );
 
     let mut busy = finished_missing("repo");
     busy.workspace.relocating = true;
     begin_relocate_dialog(&mut busy);
     assert!(busy.workspace.relocating);
-    assert!(busy.input.take_platform_commands(nana_ui_platform::WindowId(1), false).is_empty());
+    assert!(
+        busy.input
+            .take_platform_commands(nana_ui_platform::WindowId(1), false)
+            .is_empty()
+    );
 
     let mut cancelled = finished_missing("repo");
     cancelled.workspace.path_draft = "C:/old".into();
-    send(&mut cancelled, InputMessage::FileDialogCompleted { request_id: DIALOG_RELOCATE_ID, paths: Vec::new(), failed: None });
-    assert!(!cancelled.workspace.relocating);
-    assert!(!cancelled.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::RelocateRepository { .. })));
     send(
         &mut cancelled,
-        InputMessage::FileDialogCompleted { request_id: DIALOG_RELOCATE_ID, paths: vec![" ".into()], failed: None },
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_RELOCATE_ID,
+            paths: Vec::new(),
+            failed: None,
+        },
+    );
+    assert!(!cancelled.workspace.relocating);
+    assert!(
+        !cancelled
+            .workspace
+            .take_effects()
+            .iter()
+            .any(|effect| matches!(effect, WorkspaceEffect::RelocateRepository { .. }))
+    );
+    send(
+        &mut cancelled,
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_RELOCATE_ID,
+            paths: vec![" ".into()],
+            failed: None,
+        },
     );
     assert!(!cancelled.workspace.relocating);
     assert!(cancelled.workspace.take_effects().is_empty());
@@ -645,7 +1202,11 @@ fn relocate_folder_dialog_queues_pick_folder_and_submits_only_a_chosen_path() {
     failed.workspace.path_draft = "C:/old".into();
     send(
         &mut failed,
-        InputMessage::FileDialogCompleted { request_id: DIALOG_RELOCATE_ID, paths: vec!["D:/library".into()], failed: Some("Busy".into()) },
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_RELOCATE_ID,
+            paths: vec!["D:/library".into()],
+            failed: Some("Busy".into()),
+        },
     );
     assert_eq!(failed.workspace.missing_error, "文件夹选择失败：Busy");
     assert!(!failed.workspace.relocating);
@@ -654,7 +1215,11 @@ fn relocate_folder_dialog_queues_pick_folder_and_submits_only_a_chosen_path() {
     let mut chosen = finished_missing("repo");
     send(
         &mut chosen,
-        InputMessage::FileDialogCompleted { request_id: DIALOG_RELOCATE_ID, paths: vec!["D:/library".into()], failed: None },
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_RELOCATE_ID,
+            paths: vec!["D:/library".into()],
+            failed: None,
+        },
     );
     assert!(chosen.workspace.relocating);
     assert!(matches!(
@@ -667,50 +1232,106 @@ fn relocate_folder_dialog_queues_pick_folder_and_submits_only_a_chosen_path() {
 fn attach_folder_dialog_submits_a_chosen_path_and_ignores_cancel() {
     let mut model = ShellViewModel::default();
     // 和 Vue 一样先打开添加菜单，选「本地文件夹」后才弹系统文件夹对话框。
-    model.admin.plugins = vec![serde_json::from_value(serde_json::json!({
-        "pluginId": "momobako.local-filesystem",
-        "name": "本地文件夹",
-        "version": "1.0.0",
-        "kind": "source",
-        "category": "source",
-        "description": "",
-        "capabilities": ["localRootPath"],
-        "enabled": true,
-        "sdk": "backend",
-        "entry": null,
-        "source": "builtin",
-        "runtime": "native-dylib",
-        "permissions": [],
-        "compat": {"sdkVersion": "1"},
-        "status": "ready"
-    }))
-    .expect("本地文件夹插件清单")];
-    model.reduce(ShellMessage::Sidebar(super::super::SidebarMessage::ShowRepositoryAddMenu));
-    assert!(model.input.take_platform_commands(nana_ui_platform::WindowId(1), false).is_empty(), "添加菜单本身不弹对话框");
-    model.reduce(ShellMessage::Sidebar(super::super::SidebarMessage::SelectRepositoryBackend("momobako.local-filesystem".into())));
-    let commands = model.input.take_platform_commands(nana_ui_platform::WindowId(1), false);
+    model.admin.plugins = vec![super::support::test_source_plugin(
+        "momobako.local-filesystem",
+        "本地文件夹",
+        &["localRootPath"],
+    )];
+    model.reduce(ShellMessage::Sidebar(
+        super::super::SidebarMessage::ShowRepositoryAddMenu,
+    ));
+    assert!(
+        model
+            .input
+            .take_platform_commands(nana_ui_platform::WindowId(1), false)
+            .is_empty(),
+        "添加菜单本身不弹对话框"
+    );
+    model.reduce(ShellMessage::Sidebar(
+        super::super::SidebarMessage::SelectRepositoryBackend("momobako.local-filesystem".into()),
+    ));
+    let commands = model
+        .input
+        .take_platform_commands(nana_ui_platform::WindowId(1), false);
     assert!(matches!(
         commands.as_slice(),
         [nana_ui_platform::host::WindowCommand::OpenFileDialog { request, .. }]
             if request.id == DIALOG_ATTACH_ID
                 && request.kind == FileDialogKind::PickFolder
-                && request.title.as_deref() == Some("添加资源库")
+                && request.title.as_deref() == Some("选择资源库文件夹")
+                && request.filters.is_empty()
     ));
 
-    send(&mut model, InputMessage::FileDialogCompleted { request_id: DIALOG_ATTACH_ID, paths: Vec::new(), failed: None });
-    assert!(model.sidebar.take_effects().is_empty());
-
     send(
         &mut model,
-        InputMessage::FileDialogCompleted { request_id: DIALOG_ATTACH_ID, paths: vec!["D:/library".into()], failed: Some("Busy".into()) },
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_ATTACH_ID,
+            paths: Vec::new(),
+            failed: None,
+        },
     );
-    let failure = model.status.failure().expect("弹层已经关了，文件夹选择失败进状态区");
-    assert_eq!((failure.source, failure.message.as_str()), (FailureSource::Repository, "文件夹选择失败：Busy"));
+    assert!(model.sidebar.take_effects().is_empty());
+    send(
+        &mut model,
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_ATTACH_ID,
+            paths: vec![" ".into()],
+            failed: None,
+        },
+    );
+    assert!(model.sidebar.take_effects().is_empty(), "空白路径不提交");
+
+    let mut eagle = ShellViewModel::default();
+    eagle.admin.plugins = vec![super::support::test_source_plugin(
+        "momobako.source.eagle-library",
+        "Eagle Library",
+        &[],
+    )];
+    eagle.reduce(ShellMessage::Sidebar(
+        super::super::SidebarMessage::SelectRepositoryBackend(
+            "momobako.source.eagle-library".into(),
+        ),
+    ));
+    let eagle_commands = eagle
+        .input
+        .take_platform_commands(nana_ui_platform::WindowId(1), false);
+    assert!(
+        matches!(
+            eagle_commands.as_slice(),
+            [nana_ui_platform::host::WindowCommand::OpenFileDialog { request, .. }]
+                if request.id == DIALOG_ATTACH_ID
+                    && request.kind == FileDialogKind::PickFolder
+                    && request.title.as_deref() == Some("选择 Eagle Library 目录")
+                    && request.filters.is_empty()
+        ),
+        "Eagle 添加资源库的标题照 Vue"
+    );
+
+    send(
+        &mut model,
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_ATTACH_ID,
+            paths: vec!["D:/library".into()],
+            failed: Some("Busy".into()),
+        },
+    );
+    let failure = model
+        .status
+        .failure()
+        .expect("弹层已经关了，文件夹选择失败进状态区");
+    assert_eq!(
+        (failure.source, failure.message.as_str()),
+        (FailureSource::Repository, "文件夹选择失败：Busy")
+    );
     assert!(model.sidebar.take_effects().is_empty());
 
     send(
         &mut model,
-        InputMessage::FileDialogCompleted { request_id: DIALOG_ATTACH_ID, paths: vec!["D:/library".into()], failed: None },
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_ATTACH_ID,
+            paths: vec!["D:/library".into()],
+            failed: None,
+        },
     );
     assert!(matches!(
         model.sidebar.take_effects().as_slice(),
@@ -720,7 +1341,10 @@ fn attach_folder_dialog_submits_a_chosen_path_and_ignores_cancel() {
 
 /// 下载单曲在任务弹层里的进度行：动作名，「准备下载 夜曲」→「正在下载 夜曲」。
 fn download_progress() -> crate::shell::entry_actions::DownloadProgress {
-    crate::shell::entry_actions::DownloadProgress { label: "下载单曲".into(), subject: "夜曲".into() }
+    crate::shell::entry_actions::DownloadProgress {
+        label: "下载单曲".into(),
+        subject: "夜曲".into(),
+    }
 }
 
 #[test]
@@ -735,7 +1359,9 @@ fn download_folder_calls_plugin_only_after_a_directory_is_chosen() {
     };
     send(&mut model, begin.clone());
     assert!(model.admin.take_effects().is_empty());
-    let commands = model.input.take_platform_commands(nana_ui_platform::WindowId(1), false);
+    let commands = model
+        .input
+        .take_platform_commands(nana_ui_platform::WindowId(1), false);
     assert!(matches!(
         commands.as_slice(),
         [nana_ui_platform::host::WindowCommand::OpenFileDialog { request, .. }]
@@ -744,32 +1370,58 @@ fn download_folder_calls_plugin_only_after_a_directory_is_chosen() {
                 && request.title.as_deref() == Some("选择下载目录")
     ));
 
-    send(&mut model, InputMessage::FileDialogCompleted { request_id: DIALOG_DOWNLOAD_ID, paths: Vec::new(), failed: None });
+    send(
+        &mut model,
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_DOWNLOAD_ID,
+            paths: Vec::new(),
+            failed: None,
+        },
+    );
     assert!(model.admin.take_effects().is_empty());
     assert!(model.input.pending_download.is_none());
 
     send(&mut model, begin);
     send(
         &mut model,
-        InputMessage::FileDialogCompleted { request_id: DIALOG_DOWNLOAD_ID, paths: vec!["D:/downloads".into()], failed: Some("Busy".into()) },
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_DOWNLOAD_ID,
+            paths: vec!["D:/downloads".into()],
+            failed: Some("Busy".into()),
+        },
     );
     assert!(model.admin.take_effects().is_empty());
     assert!(model.input.pending_download.is_none());
 
     assert!(model.operation.shown().is_none(), "没选目录不出进度行");
-    send(&mut model, InputMessage::BeginDownloadFolder {
-        plugin_id: "momobako.netease.source".into(),
-        method: "media.downloadTrackPackage".into(),
-        payload: serde_json::json!({"songId": 9}),
-        repository_id: Some("repo".into()),
-        progress: download_progress(),
-    });
     send(
         &mut model,
-        InputMessage::FileDialogCompleted { request_id: DIALOG_DOWNLOAD_ID, paths: vec!["D:/downloads".into()], failed: None },
+        InputMessage::BeginDownloadFolder {
+            plugin_id: "momobako.netease.source".into(),
+            method: "media.downloadTrackPackage".into(),
+            payload: serde_json::json!({"songId": 9}),
+            repository_id: Some("repo".into()),
+            progress: download_progress(),
+        },
+    );
+    send(
+        &mut model,
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_DOWNLOAD_ID,
+            paths: vec!["D:/downloads".into()],
+            failed: None,
+        },
     );
     let run = match model.admin.take_effects().as_slice() {
-        [crate::shell::admin::AdminEffect::CallPlugin { method, payload, repository_id, origin, .. }] => {
+        [
+            crate::shell::admin::AdminEffect::CallPlugin {
+                method,
+                payload,
+                repository_id,
+                origin,
+                ..
+            },
+        ] => {
             assert_eq!(method, "media.downloadTrackPackage");
             assert_eq!(payload["songId"], 9);
             assert_eq!(payload["destination"]["kind"], "localFolder");
@@ -783,13 +1435,35 @@ fn download_folder_calls_plugin_only_after_a_directory_is_chosen() {
         other => panic!("unexpected {other:?}"),
     };
     assert_eq!(run.progress.subject, "夜曲");
-    assert_eq!(run.destination, crate::shell::admin::source_download::DownloadDestination::LocalFolder("D:/downloads".into()));
+    assert_eq!(
+        run.destination,
+        crate::shell::admin::source_download::DownloadDestination::LocalFolder(
+            "D:/downloads".into()
+        )
+    );
     // Vue `runDownloadAction`：选好目录以后任务弹层出「下载单曲 · 正在下载 夜曲」36%，不确定进度。
     let row = model.operation.shown().cloned().expect("下载的进度行");
-    assert_eq!((row.label.as_str(), row.detail.as_str(), row.value, row.indeterminate), ("下载单曲", "正在下载 夜曲", 36.0, true));
-    send_admin(&mut model, crate::shell::admin::AdminMessage::DownloadFinished { run, result: Err("网络断开".into()) });
+    assert_eq!(
+        (
+            row.label.as_str(),
+            row.detail.as_str(),
+            row.value,
+            row.indeterminate
+        ),
+        ("下载单曲", "正在下载 夜曲", 36.0, true)
+    );
+    send_admin(
+        &mut model,
+        crate::shell::admin::AdminMessage::DownloadFinished {
+            run,
+            result: Err("网络断开".into()),
+        },
+    );
     assert!(model.operation.shown().is_none(), "下载失败时这一行取消");
-    assert_eq!(model.files.error, "下载单曲「夜曲」失败：网络断开", "失败的原因写进文件列");
+    assert_eq!(
+        model.files.error, "下载单曲「夜曲」失败：网络断开",
+        "失败的原因写进文件列"
+    );
 }
 
 fn send_admin(model: &mut ShellViewModel, message: crate::shell::admin::AdminMessage) {
@@ -808,20 +1482,49 @@ fn custom_thumbnail_dialog_is_id_six_and_writes_or_clears() {
     assert_ne!(DIALOG_THUMBNAIL_ID, DIALOG_DOWNLOAD_ID);
 
     let mut model = ready("repo");
-    send(&mut model, InputMessage::BeginThumbnailFile { repo_id: "repo".into(), path: "a.png".into(), kind: "file".into() });
-    let commands = model.input.take_platform_commands(nana_ui_platform::WindowId(1), false);
+    send(
+        &mut model,
+        InputMessage::BeginThumbnailFile {
+            repo_id: "repo".into(),
+            path: "a.png".into(),
+            kind: "file".into(),
+        },
+    );
+    let commands = model
+        .input
+        .take_platform_commands(nana_ui_platform::WindowId(1), false);
     assert!(matches!(
         commands.as_slice(),
         [nana_ui_platform::host::WindowCommand::OpenFileDialog { request, .. }] if request.id == DIALOG_THUMBNAIL_ID
     ));
-    send(&mut model, InputMessage::FileDialogCompleted { request_id: DIALOG_THUMBNAIL_ID, paths: Vec::new(), failed: None });
-    assert!(model.files.take_effects().is_empty());
-
-    send(&mut model, InputMessage::BeginThumbnailFile { repo_id: "repo".into(), path: "a.png".into(), kind: "file".into() });
-    let _ = model.input.take_platform_commands(nana_ui_platform::WindowId(1), false);
     send(
         &mut model,
-        InputMessage::FileDialogCompleted { request_id: DIALOG_THUMBNAIL_ID, paths: vec!["C:\\cover.png".into()], failed: None },
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_THUMBNAIL_ID,
+            paths: Vec::new(),
+            failed: None,
+        },
+    );
+    assert!(model.files.take_effects().is_empty());
+
+    send(
+        &mut model,
+        InputMessage::BeginThumbnailFile {
+            repo_id: "repo".into(),
+            path: "a.png".into(),
+            kind: "file".into(),
+        },
+    );
+    let _ = model
+        .input
+        .take_platform_commands(nana_ui_platform::WindowId(1), false);
+    send(
+        &mut model,
+        InputMessage::FileDialogCompleted {
+            request_id: DIALOG_THUMBNAIL_ID,
+            paths: vec!["C:\\cover.png".into()],
+            failed: None,
+        },
     );
     assert!(matches!(
         model.files.take_effects().as_slice(),
@@ -830,14 +1533,28 @@ fn custom_thumbnail_dialog_is_id_six_and_writes_or_clears() {
     ));
 
     crate::host_bridge::copy_text("C:\\clip.jpg");
-    send(&mut model, InputMessage::PasteThumbnail { repo_id: "repo".into(), path: "a.png".into(), kind: "file".into() });
+    send(
+        &mut model,
+        InputMessage::PasteThumbnail {
+            repo_id: "repo".into(),
+            path: "a.png".into(),
+            kind: "file".into(),
+        },
+    );
     assert!(matches!(
         model.files.take_effects().as_slice(),
         [FilesEffect::MutateThumbnail { action, source_path, .. }] if action == "save" && source_path.as_deref() == Some("C:\\clip.jpg")
     ));
 
     crate::host_bridge::copy_text("data:image/png;base64,AQID");
-    send(&mut model, InputMessage::PasteThumbnail { repo_id: "repo".into(), path: "a.png".into(), kind: "file".into() });
+    send(
+        &mut model,
+        InputMessage::PasteThumbnail {
+            repo_id: "repo".into(),
+            path: "a.png".into(),
+            kind: "file".into(),
+        },
+    );
     assert!(matches!(
         model.files.take_effects().as_slice(),
         [FilesEffect::MutateThumbnail { action, image_bytes, source_path, .. }]
@@ -845,14 +1562,181 @@ fn custom_thumbnail_dialog_is_id_six_and_writes_or_clears() {
     ));
 
     crate::host_bridge::copy_text("notes.txt");
-    send(&mut model, InputMessage::PasteThumbnail { repo_id: "repo".into(), path: "a.png".into(), kind: "file".into() });
+    send(
+        &mut model,
+        InputMessage::PasteThumbnail {
+            repo_id: "repo".into(),
+            path: "a.png".into(),
+            kind: "file".into(),
+        },
+    );
     assert!(model.files.take_effects().is_empty());
     assert!(model.files.error.contains("剪贴板"));
 
-    send(&mut model, InputMessage::ClearThumbnail { repo_id: "repo".into(), path: "a.png".into(), kind: "file".into() });
+    send(
+        &mut model,
+        InputMessage::ClearThumbnail {
+            repo_id: "repo".into(),
+            path: "a.png".into(),
+            kind: "file".into(),
+        },
+    );
     assert!(matches!(
         model.files.take_effects().as_slice(),
         [FilesEffect::MutateThumbnail { action, source_path, image_bytes, .. }]
             if action == "clear" && source_path.is_none() && image_bytes.is_none()
     ));
+}
+
+/// 实况导入排队系统选择器。取消、空白和失败都不提交；选中的路径才进入导入。
+#[test]
+fn live_import_picker_submits_only_a_chosen_path() {
+    use super::support::{DIALOG_IMPORT_ARCHIVE_ID, DIALOG_IMPORT_FOLDER_ID};
+    use crate::shell::files::{FileDialog, FilesMessage};
+
+    let mut model = ShellViewModel::default();
+    model.workspace.active_repo_id = Some("repo".into());
+    model.workspace.repositories = vec![WorkspaceRepository {
+        repo_id: "repo".into(),
+        name: "资料库".into(),
+        path: "C:/repo".into(),
+        status: "ready".into(),
+        backend_plugin_id: "filesystem".into(),
+        capabilities: vec!["write".into()],
+        cache_required: false,
+        cache_status: String::new(),
+        cache_path: None,
+        login_expired: false,
+        logged_out: false,
+    }];
+    model.reduce(ShellMessage::Files(FilesMessage::OpenDialog(
+        FileDialog::Import,
+    )));
+    assert_eq!(model.files.dialog, FileDialog::Closed);
+    let commands = model
+        .input
+        .take_platform_commands(nana_ui_platform::WindowId(1), false);
+    assert!(matches!(
+        commands.as_slice(),
+        [nana_ui_platform::host::WindowCommand::OpenFileDialog { request, .. }]
+            if request.id == DIALOG_IMPORT_FOLDER_ID && request.title.as_deref() == Some("选择导入文件夹")
+    ));
+    model.reduce(ShellMessage::Input(InputMessage::FileDialogCompleted {
+        request_id: DIALOG_IMPORT_FOLDER_ID,
+        paths: Vec::new(),
+        failed: None,
+    }));
+    assert!(model.files.take_effects().is_empty(), "取消不导入");
+    model.reduce(ShellMessage::Input(InputMessage::FileDialogCompleted {
+        request_id: DIALOG_IMPORT_FOLDER_ID,
+        paths: vec!["  ".into()],
+        failed: None,
+    }));
+    assert!(model.files.take_effects().is_empty(), "空白不导入");
+    model.reduce(ShellMessage::Input(InputMessage::FileDialogCompleted {
+        request_id: DIALOG_IMPORT_FOLDER_ID,
+        paths: vec!["D:/素材".into()],
+        failed: Some("Busy".into()),
+    }));
+    assert!(model.files.take_effects().is_empty(), "对话框失败不导入");
+    model.reduce(ShellMessage::Input(InputMessage::FileDialogCompleted {
+        request_id: DIALOG_IMPORT_FOLDER_ID,
+        paths: vec![" D:/素材 ".into()],
+        failed: None,
+    }));
+    assert!(matches!(
+        model.files.take_effects().as_slice(),
+        [FilesEffect::Import { sources, .. }] if sources == &["D:/素材".to_string()]
+    ));
+
+    model.files.mutating = false;
+    model.reduce(ShellMessage::Files(FilesMessage::OpenDialog(
+        FileDialog::ImportArchive,
+    )));
+    let commands = model
+        .input
+        .take_platform_commands(nana_ui_platform::WindowId(1), false);
+    assert!(matches!(
+        commands.as_slice(),
+        [nana_ui_platform::host::WindowCommand::OpenFileDialog { request, .. }] if request.id == DIALOG_IMPORT_ARCHIVE_ID
+    ));
+    model.reduce(ShellMessage::Input(InputMessage::FileDialogCompleted {
+        request_id: DIALOG_IMPORT_ARCHIVE_ID,
+        paths: vec!["D:/归档.zip".into()],
+        failed: None,
+    }));
+    assert!(matches!(
+        model.files.take_effects().as_slice(),
+        [FilesEffect::ImportArchive { archive_path, .. }] if archive_path == "D:/归档.zip"
+    ));
+}
+
+/// 窗口失焦把已经拖远的内部拖动交给系统，和 Vue `handleWindowBlur` 一样。
+/// 拖得还不够远时会话留着。窗口还聚焦时不发这条消息。不开窗口。
+#[test]
+fn focus_loss_hands_a_long_drag_to_the_system() {
+    let mut model = ready("repo");
+    send(&mut model, begin("a.png", &["a.png"], 0.0));
+    send(
+        &mut model,
+        InputMessage::EntryDragMove {
+            x: 10.0,
+            y: 10.0,
+            bounds_width: 400.0,
+            bounds_height: 400.0,
+            hover_folder: None,
+            over_browser: true,
+        },
+    );
+    assert!(model.input.session.is_some(), "短拖动还在窗口里");
+    let staying =
+        crate::shell::focus_loss_messages(&model, &nana_ui::InputPayload::Focus { focused: true });
+    assert!(staying.is_empty(), "窗口还聚焦时不交拖动");
+    let short =
+        crate::shell::focus_loss_messages(&model, &nana_ui::InputPayload::Focus { focused: false });
+    assert!(
+        matches!(
+            short.as_slice(),
+            [ShellMessage::Input(InputMessage::WindowBlur)]
+        ),
+        "失焦把拖动会话交回已有的归约"
+    );
+    for message in short {
+        model.reduce(message);
+    }
+    assert!(model.input.session.is_some(), "没拖够 72px，失焦不交给系统");
+    assert!(
+        model.input.host_requests.is_empty(),
+        "短拖动失焦不产生系统拖放"
+    );
+
+    send(
+        &mut model,
+        InputMessage::EntryDragMove {
+            x: 80.0,
+            y: 10.0,
+            bounds_width: 400.0,
+            bounds_height: 400.0,
+            hover_folder: None,
+            over_browser: true,
+        },
+    );
+    assert!(
+        model.input.session.is_some(),
+        "指针还在窗口里，移动本身不交给系统"
+    );
+    let long =
+        crate::shell::focus_loss_messages(&model, &nana_ui::InputPayload::Focus { focused: false });
+    assert!(matches!(
+        long.as_slice(),
+        [ShellMessage::Input(InputMessage::WindowBlur)]
+    ));
+    for message in long {
+        model.reduce(message);
+    }
+    assert!(model.input.session.is_none(), "拖够了再失焦，会话结束");
+    assert!(
+        matches!(model.input.host_requests.last(), Some(HostRequest::Input(HostInputRequest::DragOut { paths })) if paths == &["C:\\repo\\a.png".to_string()]),
+        "交给系统拖放"
+    );
 }

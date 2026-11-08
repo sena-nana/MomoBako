@@ -11,13 +11,14 @@ use std::path::{Path, PathBuf};
 use serde_json::Value;
 
 use crate::backend::services::repository::{
-    PlaylistPlayerContribution, PluginHookExecutionRecord, PluginManifest, RepositorySummary, SystemLogRecord,
-    TaskProgressSnapshot,
+    PlaylistPlayerContribution, PluginHookExecutionRecord, PluginManifest, RepositorySummary,
+    SystemLogRecord, TaskProgressSnapshot,
 };
 use crate::settings;
 
 use super::super::player::{
-    builtin_audio_formats, capability_id, resolve_player, PlayerCandidate, AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE,
+    AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE, PlayerCandidate, builtin_audio_formats, capability_id,
+    resolve_player,
 };
 
 pub(crate) use super::time::{hook_time_label, log_time_label, now_iso8601};
@@ -27,11 +28,22 @@ pub const CORNER_RADIUS_MAX: f64 = 20.0;
 pub const DEFAULT_CORNER_RADIUS: f64 = 8.0;
 pub const CORNER_STYLE_KEY: &str = "momobako.corners";
 pub const CORNER_RADIUS_KEY: &str = "momobako.cornerRadius";
-const PLUGIN_GROUP_ORDER: [&str; 6] = ["source", "library-kind", "parser", "preview", "service", "unclassified"];
+const PLUGIN_GROUP_ORDER: [&str; 6] = [
+    "source",
+    "library-kind",
+    "parser",
+    "preview",
+    "service",
+    "unclassified",
+];
 
 /// Windows 和 Linux 默认平滑，macOS 默认普通。未写入半径时用 MomoBako 的 8。
 pub fn default_corner_style() -> &'static str {
-    if cfg!(target_os = "macos") { "round" } else { "smooth" }
+    if cfg!(target_os = "macos") {
+        "round"
+    } else {
+        "smooth"
+    }
 }
 
 pub fn corners_path() -> PathBuf {
@@ -147,7 +159,11 @@ pub fn plugin_category(plugin: &PluginManifest) -> String {
 
 pub fn plugin_group(plugin: &PluginManifest) -> String {
     let category = plugin_category(plugin);
-    if PLUGIN_GROUP_ORDER[..5].contains(&category.as_str()) { category } else { "unclassified".into() }
+    if PLUGIN_GROUP_ORDER[..5].contains(&category.as_str()) {
+        category
+    } else {
+        "unclassified".into()
+    }
 }
 
 pub fn category_label(category: &str) -> &'static str {
@@ -169,10 +185,11 @@ pub fn plugin_source_label(source: &str) -> &'static str {
     }
 }
 
-/// 运行时芯片：原生动态库、仅清单，其余是「未知运行时」。
+/// 运行时芯片，照 Vue `pluginRuntimeLabel`：原生动态库、Vue 模块、仅清单，其余是「未知运行时」。
 pub fn plugin_runtime_label(runtime: &str) -> &'static str {
     match runtime {
         "native-dylib" => "原生动态库",
+        "vue-module" => "Vue 模块",
         "manifest-only" => "仅清单",
         _ => "未知运行时",
     }
@@ -235,18 +252,32 @@ pub fn can_delete_plugin(plugin: &PluginManifest) -> bool {
     plugin.source == "user"
 }
 
-fn hook_executions<'a>(records: &'a [PluginHookExecutionRecord], plugin_id: &str) -> Vec<&'a PluginHookExecutionRecord> {
-    records.iter().filter(|record| record.plugin_id == plugin_id).take(3).collect()
+fn hook_executions<'a>(
+    records: &'a [PluginHookExecutionRecord],
+    plugin_id: &str,
+) -> Vec<&'a PluginHookExecutionRecord> {
+    records
+        .iter()
+        .filter(|record| record.plugin_id == plugin_id)
+        .take(3)
+        .collect()
 }
 
-pub fn plugin_search_text(plugin: &PluginManifest, records: &[PluginHookExecutionRecord]) -> String {
+pub fn plugin_search_text(
+    plugin: &PluginManifest,
+    records: &[PluginHookExecutionRecord],
+) -> String {
     let mut parts = vec![
         plugin.name.clone(),
         plugin.description.clone(),
         plugin.plugin_id.clone(),
         plugin.disable_reason.clone().unwrap_or_default(),
         plugin.degradation_reason.clone().unwrap_or_default(),
-        plugin.r#type.as_ref().map(|item| item.layer.clone()).unwrap_or_default(),
+        plugin
+            .r#type
+            .as_ref()
+            .map(|item| item.layer.clone())
+            .unwrap_or_default(),
         plugin.kind.clone(),
         plugin_category(plugin),
     ];
@@ -266,18 +297,34 @@ pub fn plugin_search_text(plugin: &PluginManifest, records: &[PluginHookExecutio
         parts.push(record.hook_slot.clone());
         parts.push(record.hook_label.clone().unwrap_or_default());
     }
-    parts.into_iter().filter(|item| !item.is_empty()).collect::<Vec<_>>().join("\n").to_lowercase()
+    parts
+        .into_iter()
+        .filter(|item| !item.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+        .to_lowercase()
 }
 
-pub fn filtered_plugins<'a>(plugins: &'a [PluginManifest], keyword: &str, records: &[PluginHookExecutionRecord]) -> Vec<&'a PluginManifest> {
+pub fn filtered_plugins<'a>(
+    plugins: &'a [PluginManifest],
+    keyword: &str,
+    records: &[PluginHookExecutionRecord],
+) -> Vec<&'a PluginManifest> {
     let keyword = keyword.trim().to_lowercase();
     if keyword.is_empty() {
         return plugins.iter().collect();
     }
-    plugins.iter().filter(|plugin| plugin_search_text(plugin, records).contains(&keyword)).collect()
+    plugins
+        .iter()
+        .filter(|plugin| plugin_search_text(plugin, records).contains(&keyword))
+        .collect()
 }
 
-pub fn grouped_plugin_ids(plugins: &[PluginManifest], keyword: &str, records: &[PluginHookExecutionRecord]) -> Vec<(String, Vec<String>)> {
+pub fn grouped_plugin_ids(
+    plugins: &[PluginManifest],
+    keyword: &str,
+    records: &[PluginHookExecutionRecord],
+) -> Vec<(String, Vec<String>)> {
     let filtered = filtered_plugins(plugins, keyword, records);
     PLUGIN_GROUP_ORDER
         .into_iter()
@@ -294,14 +341,27 @@ pub fn grouped_plugin_ids(plugins: &[PluginManifest], keyword: &str, records: &[
 
 /// 插件声明的设置字段。和 Vue 一样只认 `contributes.settings.fields`，缺键或名称的跳过。
 pub fn settings_fields(plugin: &PluginManifest) -> Vec<ConfigField> {
-    let Some(fields) = plugin.contributes.get("settings").and_then(|item| item.get("fields")).and_then(|item| item.as_array()) else {
+    let Some(fields) = plugin
+        .contributes
+        .get("settings")
+        .and_then(|item| item.get("fields"))
+        .and_then(|item| item.as_array())
+    else {
         return Vec::new();
     };
     fields
         .iter()
         .filter_map(|field| {
-            let key = field.get("key").and_then(|item| item.as_str()).unwrap_or("").trim();
-            let label = field.get("label").and_then(|item| item.as_str()).unwrap_or("").trim();
+            let key = field
+                .get("key")
+                .and_then(|item| item.as_str())
+                .unwrap_or("")
+                .trim();
+            let label = field
+                .get("label")
+                .and_then(|item| item.as_str())
+                .unwrap_or("")
+                .trim();
             if key.is_empty() || label.is_empty() {
                 return None;
             }
@@ -313,7 +373,11 @@ pub fn settings_fields(plugin: &PluginManifest) -> Vec<ConfigField> {
                         .iter()
                         .filter_map(|option| {
                             let value = option.get("value")?.clone();
-                            let label = option.get("label").and_then(|item| item.as_str()).map(str::to_string).unwrap_or_else(|| option_wire(&value));
+                            let label = option
+                                .get("label")
+                                .and_then(|item| item.as_str())
+                                .map(str::to_string)
+                                .unwrap_or_else(|| option_wire(&value));
                             Some(FieldOption { label, value })
                         })
                         .collect()
@@ -322,11 +386,21 @@ pub fn settings_fields(plugin: &PluginManifest) -> Vec<ConfigField> {
             Some(ConfigField {
                 key: key.to_string(),
                 label: label.to_string(),
-                description: field.get("description").and_then(|item| item.as_str()).map(str::to_string),
-                field_type: field.get("type").and_then(|item| item.as_str()).unwrap_or("string").to_string(),
+                description: field
+                    .get("description")
+                    .and_then(|item| item.as_str())
+                    .map(str::to_string),
+                field_type: field
+                    .get("type")
+                    .and_then(|item| item.as_str())
+                    .unwrap_or("string")
+                    .to_string(),
                 options,
                 default_value: field.get("default").cloned(),
-                placeholder: field.get("placeholder").and_then(|item| item.as_str()).map(str::to_string),
+                placeholder: field
+                    .get("placeholder")
+                    .and_then(|item| item.as_str())
+                    .map(str::to_string),
             })
         })
         .collect()
@@ -347,7 +421,10 @@ pub fn plugin_settings_label(plugin: &PluginManifest) -> String {
 /// 插件设置区说明：`settingsPage.description`，来源插件有默认说明。
 pub fn plugin_settings_description(plugin: &PluginManifest) -> String {
     settings_page_text(plugin, "description")
-        .or_else(|| has_source_authentication(plugin).then(|| "管理来源账号、登录状态与关联仓库。".to_string()))
+        .or_else(|| {
+            has_source_authentication(plugin)
+                .then(|| "管理来源账号、登录状态与关联仓库。".to_string())
+        })
         .unwrap_or_default()
 }
 
@@ -362,11 +439,19 @@ fn settings_page_text(plugin: &PluginManifest, key: &str) -> Option<String> {
 }
 
 pub fn has_source_authentication(plugin: &PluginManifest) -> bool {
-    plugin.contributes.get("source").and_then(|item| item.get("authentication")).is_some_and(|item| !item.is_null())
+    plugin
+        .contributes
+        .get("source")
+        .and_then(|item| item.get("authentication"))
+        .is_some_and(|item| !item.is_null())
 }
 
 /// Vue `normalizeConfigFieldInput`。数字和选项的空值是重置。
-pub fn normalize_field_input(field: &ConfigField, text: &str, checked: Option<bool>) -> FieldChange {
+pub fn normalize_field_input(
+    field: &ConfigField,
+    text: &str,
+    checked: Option<bool>,
+) -> FieldChange {
     if field.field_type == "boolean" {
         return FieldChange::Set(Value::Bool(checked.unwrap_or(false)));
     }
@@ -384,8 +469,15 @@ pub fn normalize_field_input(field: &ConfigField, text: &str, checked: Option<bo
         };
     }
     if field.field_type == "select" {
-        let matched = field.options.iter().find(|option| option_wire(&option.value) == text);
-        return FieldChange::Set(matched.map(|option| option.value.clone()).unwrap_or_else(|| Value::String(text.to_string())));
+        let matched = field
+            .options
+            .iter()
+            .find(|option| option_wire(&option.value) == text);
+        return FieldChange::Set(
+            matched
+                .map(|option| option.value.clone())
+                .unwrap_or_else(|| Value::String(text.to_string())),
+        );
     }
     FieldChange::Set(Value::String(text.to_string()))
 }
@@ -411,7 +503,10 @@ pub fn config_value<'a>(
     plugin_id: &str,
     field: &'a ConfigField,
 ) -> Option<&'a Value> {
-    snapshots.get(plugin_id).and_then(|snapshot| snapshot.values.get(&field.key)).or(field.default_value.as_ref())
+    snapshots
+        .get(plugin_id)
+        .and_then(|snapshot| snapshot.values.get(&field.key))
+        .or(field.default_value.as_ref())
 }
 
 /// 单行字段里显示的文字：字符串原样，其它值写成 JSON 文本，空值为空。
@@ -434,7 +529,10 @@ pub struct BackendCount {
 pub fn backend_counts(repositories: &[RepositorySummary]) -> Vec<BackendCount> {
     let mut counts = Vec::<BackendCount>::new();
     for repository in repositories {
-        if let Some(current) = counts.iter_mut().find(|item| item.plugin_id == repository.backend.plugin_id) {
+        if let Some(current) = counts
+            .iter_mut()
+            .find(|item| item.plugin_id == repository.backend.plugin_id)
+        {
             current.count += 1;
             continue;
         }
@@ -452,7 +550,11 @@ pub fn backend_summary(counts: &[BackendCount]) -> String {
     if counts.is_empty() {
         return "无".into();
     }
-    counts.iter().map(|item| format!("{} ({})", item.name, item.count)).collect::<Vec<_>>().join(" / ")
+    counts
+        .iter()
+        .map(|item| format!("{} ({})", item.name, item.count))
+        .collect::<Vec<_>>()
+        .join(" / ")
 }
 
 pub fn external_status_label(ready: Option<bool>) -> &'static str {
@@ -525,86 +627,145 @@ pub fn audio_view(
         .cloned()
         .collect();
     let resolution = resolve_player(AUDIO_SEQUENCE_TYPE, &resolution_candidates, preferences);
-    let builtin = builtin_audio_formats(candidates).map(|formats| format!("{BUILTIN_AUDIO_NAME} · {formats}"));
+    let builtin = builtin_audio_formats(candidates)
+        .map(|formats| format!("{BUILTIN_AUDIO_NAME} · {formats}"));
     let preferred = preferences.get(AUDIO_CAPABILITY).cloned();
     let mut choices = Vec::new();
     if let Some(plugin_id) = preferred.clone()
-        && !implementations.iter().any(|(candidate, _)| candidate.plugin_id == plugin_id)
+        && !implementations
+            .iter()
+            .any(|(candidate, _)| candidate.plugin_id == plugin_id)
     {
-        choices.push(AudioChoice { plugin_id: plugin_id.clone(), label: format!("{plugin_id}（不可用）") });
+        choices.push(AudioChoice {
+            plugin_id: plugin_id.clone(),
+            label: format!("{plugin_id}（不可用）"),
+        });
     }
     if resolution.player.is_none()
         && preferred.is_none()
         && let Some(label) = builtin.clone()
     {
-        choices.push(AudioChoice { plugin_id: String::new(), label });
+        choices.push(AudioChoice {
+            plugin_id: String::new(),
+            label,
+        });
     }
     choices.extend(implementations.iter().map(|(candidate, name)| AudioChoice {
         plugin_id: candidate.plugin_id.clone(),
         label: format!("{name} · {}", candidate.plugin_id),
     }));
-    let selected = preferred.unwrap_or_else(|| resolution.player.as_ref().map(|player| player.plugin_id.clone()).unwrap_or_default());
-    let resolved_name = resolution
-        .player
-        .as_ref()
-        .and_then(|player| implementations.iter().find(|(candidate, _)| candidate == player).map(|(_, name)| name.clone()));
+    let selected = preferred.unwrap_or_else(|| {
+        resolution
+            .player
+            .as_ref()
+            .map(|player| player.plugin_id.clone())
+            .unwrap_or_default()
+    });
+    let resolved_name = resolution.player.as_ref().and_then(|player| {
+        implementations
+            .iter()
+            .find(|(candidate, _)| candidate == player)
+            .map(|(_, name)| name.clone())
+    });
     let notice = if resolution.fallback_used {
         let name = resolved_name
             .or_else(|| builtin.as_ref().map(|_| BUILTIN_AUDIO_NAME.to_string()))
             .unwrap_or_else(|| "官方默认实现".into());
         Some((format!("所选播放器当前不可用，已回退到 {name}。"), false))
     } else if resolution.player.is_none() && builtin.is_none() {
-        Some(("官方音频播放器未启用或缺失，音频播放暂不可用。".into(), true))
+        Some((
+            "官方音频播放器未启用或缺失，音频播放暂不可用。".into(),
+            true,
+        ))
     } else {
         None
     };
-    AudioView { choices, selected, selectable: !implementations.is_empty(), notice }
+    AudioView {
+        choices,
+        selected,
+        selectable: !implementations.is_empty(),
+        notice,
+    }
 }
 
 /// 实现音频能力的播放器和它所属插件的名字，按 Vue 的标签、插件名、插件标识排序。
 /// 插件只取启用且状态不是 error 的，和后端登记播放器类型的口径一致，也就是 Nana 真能放的那些。
-fn audio_implementations(candidates: &[PlayerCandidate], plugins: &[PluginManifest]) -> Vec<(PlayerCandidate, String)> {
-    let plugin_name = |plugin_id: &str| plugins.iter().find(|plugin| plugin.plugin_id == plugin_id).map(|plugin| plugin.name.clone());
+fn audio_implementations(
+    candidates: &[PlayerCandidate],
+    plugins: &[PluginManifest],
+) -> Vec<(PlayerCandidate, String)> {
+    let plugin_name = |plugin_id: &str| {
+        plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == plugin_id)
+            .map(|plugin| plugin.name.clone())
+    };
     let mut found: Vec<(PlayerCandidate, String)> = candidates
         .iter()
         .filter(|candidate| capability_id(candidate) == AUDIO_CAPABILITY)
-        .map(|candidate| (candidate.clone(), plugin_name(&candidate.plugin_id).unwrap_or_else(|| candidate.label.clone())))
+        .map(|candidate| {
+            (
+                candidate.clone(),
+                plugin_name(&candidate.plugin_id).unwrap_or_else(|| candidate.label.clone()),
+            )
+        })
         .collect();
-    for plugin in plugins.iter().filter(|plugin| plugin.enabled && plugin.status != "error") {
+    for plugin in plugins
+        .iter()
+        .filter(|plugin| plugin.enabled && plugin.status != "error")
+    {
         for candidate in contributed_players(plugin) {
-            let known = found.iter().any(|(item, _)| item.plugin_id == candidate.plugin_id && item.player_type_id == candidate.player_type_id);
+            let known = found.iter().any(|(item, _)| {
+                item.plugin_id == candidate.plugin_id
+                    && item.player_type_id == candidate.player_type_id
+            });
             if !known && capability_id(&candidate) == AUDIO_CAPABILITY {
                 found.push((candidate, plugin.name.clone()));
             }
         }
     }
     found.sort_by(|(left, left_name), (right, right_name)| {
-        left.label.cmp(&right.label).then(left_name.cmp(right_name)).then(left.plugin_id.cmp(&right.plugin_id))
+        left.label
+            .cmp(&right.label)
+            .then(left_name.cmp(right_name))
+            .then(left.plugin_id.cmp(&right.plugin_id))
     });
     found
 }
 
 /// 插件清单 `contributes.playlistPlayers` 里的播放器，带上清单里的 `capabilityId`。字段不全的条目记日志后跳过。
 fn contributed_players(plugin: &PluginManifest) -> Vec<PlayerCandidate> {
-    let Some(entries) = plugin.contributes.get("playlistPlayers").and_then(Value::as_array) else {
+    let Some(entries) = plugin
+        .contributes
+        .get("playlistPlayers")
+        .and_then(Value::as_array)
+    else {
         return Vec::new();
     };
     entries
         .iter()
-        .filter_map(|entry| match serde_json::from_value::<PlaylistPlayerContribution>(entry.clone()) {
-            Ok(player) => Some(PlayerCandidate {
-                plugin_id: plugin.plugin_id.clone(),
-                player_type_id: player.player_type_id,
-                capability_id: entry.get("capabilityId").and_then(Value::as_str).map(str::to_string),
-                label: player.label,
-                file_class: player.file_class,
-                extensions: player.supported_extensions,
-                supports_seek: player.supports_seek,
-                supports_volume: player.supports_volume,
-            }),
-            Err(error) => {
-                eprintln!("Nana 插件 {} 的播放器条目无法读取：{error}", plugin.plugin_id);
-                None
+        .filter_map(|entry| {
+            match serde_json::from_value::<PlaylistPlayerContribution>(entry.clone()) {
+                Ok(player) => Some(PlayerCandidate {
+                    plugin_id: plugin.plugin_id.clone(),
+                    player_type_id: player.player_type_id,
+                    capability_id: entry
+                        .get("capabilityId")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    label: player.label,
+                    file_class: player.file_class,
+                    extensions: player.supported_extensions,
+                    supports_seek: player.supports_seek,
+                    supports_volume: player.supports_volume,
+                }),
+                Err(error) => {
+                    eprintln!(
+                        "Nana 插件 {} 的播放器条目无法读取：{error}",
+                        plugin.plugin_id
+                    );
+                    None
+                }
             }
         })
         .collect()
@@ -634,15 +795,26 @@ pub fn source_kind_label(kind: &str) -> String {
 
 /// 位置标签：模块路径、文件和行号用冒号连起来，空的省掉。
 pub fn location_label(record: &SystemLogRecord) -> String {
-    [record.location.module_path.clone(), record.location.file.clone(), record.location.line.map(|line| line.to_string())]
-        .into_iter()
-        .flatten()
-        .filter(|item| !item.is_empty())
-        .collect::<Vec<_>>()
-        .join(":")
+    [
+        record.location.module_path.clone(),
+        record.location.file.clone(),
+        record.location.line.map(|line| line.to_string()),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|item| !item.is_empty())
+    .collect::<Vec<_>>()
+    .join(":")
 }
 
-pub fn log_matches(record: &SystemLogRecord, levels: &[String], kinds: &[String], plugin_id: &str, repo_id: &str, search: &str) -> bool {
+pub fn log_matches(
+    record: &SystemLogRecord,
+    levels: &[String],
+    kinds: &[String],
+    plugin_id: &str,
+    repo_id: &str,
+    search: &str,
+) -> bool {
     if !levels.is_empty() && !levels.iter().any(|level| level == &record.level) {
         return false;
     }
@@ -662,7 +834,11 @@ pub fn log_matches(record: &SystemLogRecord, levels: &[String], kinds: &[String]
     let location = [
         record.location.module_path.clone().unwrap_or_default(),
         record.location.file.clone().unwrap_or_default(),
-        record.location.line.map(|line| line.to_string()).unwrap_or_default(),
+        record
+            .location
+            .line
+            .map(|line| line.to_string())
+            .unwrap_or_default(),
     ]
     .join(":");
     let source = [
@@ -686,22 +862,46 @@ pub fn log_matches(record: &SystemLogRecord, levels: &[String], kinds: &[String]
     haystack.contains(&keyword)
 }
 
-pub fn filtered_logs(records: &[SystemLogRecord], levels: &[String], kinds: &[String], plugin_id: &str, repo_id: &str, search: &str) -> Vec<SystemLogRecord> {
+pub fn filtered_logs(
+    records: &[SystemLogRecord],
+    levels: &[String],
+    kinds: &[String],
+    plugin_id: &str,
+    repo_id: &str,
+    search: &str,
+) -> Vec<SystemLogRecord> {
     let mut records = records
         .iter()
         .filter(|record| log_matches(record, levels, kinds, plugin_id, repo_id, search))
         .cloned()
         .collect::<Vec<_>>();
-    records.sort_by(|left, right| left.timestamp.cmp(&right.timestamp).then(left.id.cmp(&right.id)));
+    records.sort_by(|left, right| {
+        left.timestamp
+            .cmp(&right.timestamp)
+            .then(left.id.cmp(&right.id))
+    });
     records
 }
 
-pub fn active_filter_count(levels: &[String], kinds: &[String], plugin_id: &str, repo_id: &str, search: &str) -> usize {
-    levels.len() + kinds.len() + usize::from(!plugin_id.is_empty()) + usize::from(!repo_id.is_empty()) + usize::from(!search.trim().is_empty())
+pub fn active_filter_count(
+    levels: &[String],
+    kinds: &[String],
+    plugin_id: &str,
+    repo_id: &str,
+    search: &str,
+) -> usize {
+    levels.len()
+        + kinds.len()
+        + usize::from(!plugin_id.is_empty())
+        + usize::from(!repo_id.is_empty())
+        + usize::from(!search.trim().is_empty())
 }
 
 pub fn unique_sorted(values: impl IntoIterator<Item = String>) -> Vec<String> {
-    let mut values = values.into_iter().filter(|item| !item.is_empty()).collect::<Vec<_>>();
+    let mut values = values
+        .into_iter()
+        .filter(|item| !item.is_empty())
+        .collect::<Vec<_>>();
     values.sort();
     values.dedup();
     values
@@ -709,7 +909,11 @@ pub fn unique_sorted(values: impl IntoIterator<Item = String>) -> Vec<String> {
 
 pub fn toggle_value(items: &[String], value: &str) -> Vec<String> {
     if items.iter().any(|item| item == value) {
-        items.iter().filter(|item| item.as_str() != value).cloned().collect()
+        items
+            .iter()
+            .filter(|item| item.as_str() != value)
+            .cloned()
+            .collect()
     } else {
         let mut next = items.to_vec();
         next.push(value.to_string());
@@ -727,6 +931,8 @@ pub struct PopoverRow {
     pub indeterminate: bool,
     pub source: String,
     pub updated_at_ms: i64,
+    /// 排队或运行中的后台任务可以取消。仓库操作行和已经在取消的任务为 false。
+    pub cancellable: bool,
 }
 
 /// 认不出协议的后台任务的标题。宿主的任务只跑下面 [`task_protocol_label`] 列出的协议，正常碰不到。
@@ -736,9 +942,10 @@ pub const TASK_LABEL_FALLBACK: &str = "后台任务";
 /// 「同步资源库」「复制文件」等），其余照后端协议说明（`docs/api-design.md`）。
 pub fn task_protocol_label(protocol_id: &str) -> Option<&'static str> {
     use crate::backend::services::mutsuki_runner::{
-        PROTOCOL_ARCHIVE_IMPORT, PROTOCOL_EAGLE_IMPORT, PROTOCOL_ENTRY_COPY, PROTOCOL_ENTRY_DELETE, PROTOCOL_ENTRY_IMPORT,
-        PROTOCOL_ENTRY_MOVE, PROTOCOL_PLAYBACK_PREPARE, PROTOCOL_PLAYLIST_DOWNLOAD, PROTOCOL_REPOSITORY_ACTION_RUN,
-        PROTOCOL_REPOSITORY_ATTACH, PROTOCOL_REPOSITORY_CREATE, PROTOCOL_REPOSITORY_EXPORT, PROTOCOL_REPOSITORY_IMPORT,
+        PROTOCOL_ARCHIVE_IMPORT, PROTOCOL_EAGLE_IMPORT, PROTOCOL_ENTRY_COPY, PROTOCOL_ENTRY_DELETE,
+        PROTOCOL_ENTRY_IMPORT, PROTOCOL_ENTRY_MOVE, PROTOCOL_PLAYBACK_PREPARE,
+        PROTOCOL_PLAYLIST_DOWNLOAD, PROTOCOL_REPOSITORY_ACTION_RUN, PROTOCOL_REPOSITORY_ATTACH,
+        PROTOCOL_REPOSITORY_CREATE, PROTOCOL_REPOSITORY_EXPORT, PROTOCOL_REPOSITORY_IMPORT,
         PROTOCOL_REPOSITORY_RELOCATE, PROTOCOL_REPOSITORY_SYNC, PROTOCOL_THUMBNAIL_REQUEST,
     };
     let label = match protocol_id {
@@ -770,7 +977,10 @@ pub fn task_protocol_label(protocol_id: &str) -> Option<&'static str> {
 /// - 标题是任务自己报的标题，没有时按协议写（[`task_protocol_label`]），不写泛泛的「进度」；
 /// - 仓库操作那一行已经表示的同一件事不再单列：这次操作在后台跑的协议（`OperationProgress::protocols`，
 ///   例如加载资源库的同步、复制文件的复制）的任务不出行，侧栏「任务」的计数也只算剩下的行。
-pub fn popover_rows(tasks: &[TaskProgressSnapshot], operation: Option<&super::OperationProgress>) -> Vec<PopoverRow> {
+pub fn popover_rows(
+    tasks: &[TaskProgressSnapshot],
+    operation: Option<&super::OperationProgress>,
+) -> Vec<PopoverRow> {
     let mut rows = Vec::new();
     if let Some(operation) = operation {
         rows.push(PopoverRow {
@@ -781,21 +991,39 @@ pub fn popover_rows(tasks: &[TaskProgressSnapshot], operation: Option<&super::Op
             indeterminate: operation.indeterminate,
             source: "资源库".into(),
             updated_at_ms: operation.updated_at_ms,
+            cancellable: false,
         });
     }
-    let covered = operation.map(|operation| operation.protocols).unwrap_or_default();
-    rows.extend(tasks.iter().filter(|task| !covered.iter().any(|protocol| *protocol == task.protocol_id)).map(|task| PopoverRow {
-        id: task.task_id.clone(),
-        label: task_label(task),
-        detail: task.error.clone().or(task.phase.clone()).unwrap_or_default(),
-        value: f64::from(task.percent.unwrap_or(0.0)),
-        indeterminate: task.percent.is_none(),
-        source: "任务".into(),
-        updated_at_ms: super::time::parse_rfc3339_millis(&task.updated_at).unwrap_or_else(|| {
-            eprintln!("Nana 任务快照的更新时间读不出，排在最后：{} {}", task.task_id, task.updated_at);
-            0
-        }),
-    }));
+    let covered = operation
+        .map(|operation| operation.protocols)
+        .unwrap_or_default();
+    rows.extend(
+        tasks
+            .iter()
+            .filter(|task| !covered.iter().any(|protocol| *protocol == task.protocol_id))
+            .map(|task| PopoverRow {
+                id: task.task_id.clone(),
+                label: task_label(task),
+                detail: task
+                    .error
+                    .clone()
+                    .or(task.phase.clone())
+                    .unwrap_or_default(),
+                value: f64::from(task.percent.unwrap_or(0.0)),
+                indeterminate: task.percent.is_none(),
+                source: "任务".into(),
+                updated_at_ms: super::time::parse_rfc3339_millis(&task.updated_at).unwrap_or_else(
+                    || {
+                        eprintln!(
+                            "Nana 任务快照的更新时间读不出，排在最后：{} {}",
+                            task.task_id, task.updated_at
+                        );
+                        0
+                    },
+                ),
+                cancellable: matches!(task.status.as_str(), "queued" | "running"),
+            }),
+    );
     rows.sort_by(|left, right| right.updated_at_ms.cmp(&left.updated_at_ms));
     rows
 }
@@ -803,10 +1031,17 @@ pub fn popover_rows(tasks: &[TaskProgressSnapshot], operation: Option<&super::Op
 /// 一个后台任务的标题：任务自己报的标题，没有时按协议写，协议也认不出时写「后台任务」。弹层每次同步都
 /// 重算这一行，这里不记日志。
 fn task_label(task: &TaskProgressSnapshot) -> String {
-    if let Some(label) = task.label.as_deref().map(str::trim).filter(|label| !label.is_empty()) {
+    if let Some(label) = task
+        .label
+        .as_deref()
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+    {
         return label.to_string();
     }
-    task_protocol_label(&task.protocol_id).unwrap_or(TASK_LABEL_FALLBACK).to_string()
+    task_protocol_label(&task.protocol_id)
+        .unwrap_or(TASK_LABEL_FALLBACK)
+        .to_string()
 }
 
 pub fn action_status_label(status: &str, enabled: bool) -> &'static str {
@@ -823,7 +1058,10 @@ pub fn action_can_run(status: &str, enabled: bool, selected_count: usize, runnin
     status == "ready" && enabled && selected_count > 0 && !running
 }
 
-pub fn apply_tool_page_selection(pages: &[super::ToolPageEntry], active: Option<&str>) -> Option<String> {
+pub fn apply_tool_page_selection(
+    pages: &[super::ToolPageEntry],
+    active: Option<&str>,
+) -> Option<String> {
     if pages.is_empty() {
         return None;
     }
@@ -838,7 +1076,10 @@ pub const TOOL_EAGLE_IMPORTER: &str = "momobako.tool.eagle-importer";
 pub const TOOL_API_PLAYGROUND: &str = "momobako.tool.api-playground";
 
 pub fn is_builtin_tool_page(id: &str) -> bool {
-    matches!(id, TOOL_FILE_MANAGER | TOOL_EAGLE_IMPORTER | TOOL_API_PLAYGROUND)
+    matches!(
+        id,
+        TOOL_FILE_MANAGER | TOOL_EAGLE_IMPORTER | TOOL_API_PLAYGROUND
+    )
 }
 
 /// 拓展页的工具：已启用、状态可用的插件里 `contributes.toolPages` 的条目，
@@ -846,26 +1087,47 @@ pub fn is_builtin_tool_page(id: &str) -> bool {
 pub fn tool_pages_from_plugins(plugins: &[PluginManifest]) -> Vec<super::ToolPageEntry> {
     let mut pages = Vec::new();
     for plugin in plugins {
-        if !plugin.enabled || matches!(plugin.status.as_str(), "disabled" | "unavailable" | "error") {
+        if !plugin.enabled || matches!(plugin.status.as_str(), "disabled" | "unavailable" | "error")
+        {
             continue;
         }
-        let Some(entries) = plugin.contributes.get("toolPages").and_then(|item| item.as_array()) else {
+        let Some(entries) = plugin
+            .contributes
+            .get("toolPages")
+            .and_then(|item| item.as_array())
+        else {
             continue;
         };
         for entry in entries {
-            let Some(id) = entry.get("toolPageId").and_then(|item| item.as_str()).map(str::trim).filter(|text| !text.is_empty()) else {
+            let Some(id) = entry
+                .get("toolPageId")
+                .and_then(|item| item.as_str())
+                .map(str::trim)
+                .filter(|text| !text.is_empty())
+            else {
                 eprintln!("Nana 插件 {} 的工具页缺少 toolPageId", plugin.plugin_id);
                 continue;
             };
-            let label = entry.get("label").and_then(|item| item.as_str()).unwrap_or(id).to_string();
-            let order = entry.get("order").and_then(|item| item.as_f64()).unwrap_or(100.0);
+            let label = entry
+                .get("label")
+                .and_then(|item| item.as_str())
+                .unwrap_or(id)
+                .to_string();
+            let order = entry
+                .get("order")
+                .and_then(|item| item.as_f64())
+                .unwrap_or(100.0);
             pages.push((
                 order,
                 super::ToolPageEntry {
                     id: id.to_string(),
                     label,
                     plugin_name: plugin.name.clone(),
-                    description: entry.get("description").and_then(|item| item.as_str()).unwrap_or_default().to_string(),
+                    description: entry
+                        .get("description")
+                        .and_then(|item| item.as_str())
+                        .unwrap_or_default()
+                        .to_string(),
                     native: is_builtin_tool_page(id),
                 },
             ));

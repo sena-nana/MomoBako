@@ -92,8 +92,11 @@ fn generates_versioned_offscreen_evidence() {
                     &root,
                     page_slug(&page),
                     page.clone(),
-                    acceptance_document_at_width(ShellViewModel::for_page(page.clone()), viewport.width as f32)
-                        .map_err(|e| e.to_string()),
+                    acceptance_document_at_width(
+                        ShellViewModel::for_page(page.clone()),
+                        viewport.width as f32,
+                    )
+                    .map_err(|e| e.to_string()),
                     viewport,
                 )
             })) {
@@ -312,7 +315,9 @@ fn file_entry(name: &str) -> FileBrowserEntry {
         path: name.into(),
         name: name.into(),
         kind: "file".into(),
-        extension: name.rsplit_once('.').map(|(_, extension)| extension.to_string()),
+        extension: name
+            .rsplit_once('.')
+            .map(|(_, extension)| extension.to_string()),
         size_bytes: Some(2_048),
         size_label: Some("2 KB".into()),
         modified_at: None,
@@ -337,7 +342,12 @@ fn file_entry(name: &str) -> FileBrowserEntry {
 fn special_models() -> Vec<(&'static str, ShellViewModel)> {
     // 根目录只有一个超长文件名：卡片标题要截断，不撑开列表。
     let mut long = ShellViewModel::for_page(ShellPage::FileList);
-    let listing = root_listing(&long, vec![file_entry("这是一个用于验证截断行为的超长文件名——项目资料——最终版本——2026-10-02——带有更多扩展信息.png")]);
+    let listing = root_listing(
+        &long,
+        vec![file_entry(
+            "这是一个用于验证截断行为的超长文件名——项目资料——最终版本——2026-10-02——带有更多扩展信息.png",
+        )],
+    );
     long.reduce(listing);
     // 根目录读回来是空的：文件列表显示空目录。
     let mut empty = ShellViewModel::for_page(ShellPage::FileList);
@@ -436,20 +446,29 @@ fn assert_scene_drawn(
     labels: &[&str],
     values: &[&str],
 ) -> Result<(), String> {
-    if let Some(label) = labels.iter().find(|label| !nodes.iter().any(|node| node.label.as_deref() == Some(**label))) {
+    if let Some(label) = labels.iter().find(|label| {
+        !nodes
+            .iter()
+            .any(|node| node.label.as_deref() == Some(**label))
+    }) {
         return Err(format!("missing label {label}"));
     }
-    if let Some(value) = values.iter().find(|value| !nodes.iter().any(|node| node.value.as_deref() == Some(**value))) {
+    if let Some(value) = values.iter().find(|value| {
+        !nodes
+            .iter()
+            .any(|node| node.value.as_deref() == Some(**value))
+    }) {
         return Err(format!("missing input value {value}"));
     }
     Ok(())
 }
 
 /// 未保存编辑不在画面上盖「未保存」：没有任何按钮或状态的无障碍名是这四个字，草稿只留在注释框里。
-fn assert_no_unsaved_stamp(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode]) -> Result<(), String> {
+fn assert_no_unsaved_stamp(
+    nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode],
+) -> Result<(), String> {
     let stamped = nodes.iter().any(|node| {
-        node.label.as_deref() == Some("未保存")
-            && (node.role == "button" || node.role == "status")
+        node.label.as_deref() == Some("未保存") && (node.role == "button" || node.role == "status")
     });
     if stamped {
         return Err("画面上出现了名为「未保存」的按钮或状态".into());
@@ -462,13 +481,85 @@ fn assert_no_unsaved_stamp(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNo
 fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
     match scene_id {
         "extensions" => &["文件系统与插件"],
-        "downloader-settings" => &["下载服务"],
+        // 拓展页的文件导入工具页：夹具仓库和根目录，对话框没开。
+        "file-import" => &[
+            "文件导入",
+            "File Manager",
+            "目标固定为当前工作区的当前目录。",
+            "默认资源库",
+            "目标目录",
+            "从文件夹导入",
+            "从 ZIP 导入",
+            "ZIP 首版固定支持 .zip，并按解压导入保留内部目录结构。",
+        ],
+        // 拓展页的 Eagle 导入工具页：没选库路径，空闲文案是「尚未选择」。不打开复制/剪切对话框。
+        "eagle-import" => &[
+            "Eagle 导入",
+            "Eagle Importer",
+            "导入目标固定为当前工作区的当前目录。",
+            "默认资源库",
+            "目标目录",
+            "EagleLibrary",
+            "尚未选择",
+            "选择目录",
+            "复制导入",
+            "剪切导入",
+        ],
+        // 复制导入已经提交、协议还没回来：复制按钮换成「处理中...」，剪切按钮不换字。
+        "eagle-import-busy" => &[
+            "Eagle 导入",
+            "Eagle Importer",
+            "默认资源库",
+            "目标目录",
+            "EagleLibrary",
+            "C:/acceptance",
+            "选择目录",
+            "处理中...",
+            "剪切导入",
+        ],
+        // 文件快照还是空回收站，面板已经回到拓展：四条按面板的原因对不上，写出兜底句。
+        "eagle-import-blocked" => &[
+            "Eagle 导入",
+            "Eagle Importer",
+            "默认资源库",
+            "尚未选择",
+            "当前目标不可导入。",
+            "选择目录",
+            "复制导入",
+            "剪切导入",
+            "assets",
+        ],
+        "downloader-settings" => &[
+            "下载服务",
+            "aria2 运行状态",
+            "查看 aria2 运行时、任务队列和下载目录状态。",
+            "刷新中",
+        ],
         "source-auth-gap" | "source-auth-methods" => &["账号与仓库"],
-        "office-convert" => &["Office 转换"],
+        "office-convert" => &[
+            "Office 转换",
+            "运行状态与缓存",
+            "读取当前转换器、自带运行时与守护进程状态。",
+            "刷新中",
+            "运行自检",
+            "关闭守护进程",
+            "资源库缓存清理",
+            "清理缓存",
+            "转换器模式",
+            "自动下载 LibreOffice",
+        ],
         "foreign-tool" => &["自定义工具"],
         "search-results" => &["搜索结果"],
         // 唯一的资源库目录丢失：缺失页的眉题和重定向入口。
         "missing" => &["资源库丢失", "重定向"],
+        // 旧网易云仓库缓存未配置：主按钮换成「打开来源设置」，不画重定向。
+        "missing-source-cache" => &[
+            "资源库丢失",
+            "云村 Aura",
+            "这个来源资源库需要在插件设置中配置本地缓存或重新认证。仓库记录和已有缓存不会被删除。",
+            "netease-cloud-music://account/123456",
+            "打开来源设置",
+        ],
         // 单击只选中、留在文件列表：右侧详情写出这个文件的路径和大小。
         "live-files-selected" => &["notes/page.pdf", "1820 B"],
         // 右侧详情读回 cover.png 的注释和链接。
@@ -476,6 +567,34 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
         // 右键菜单开在 cover.png 上，带复制和重命名。
         "live-menu" => &["复制到…", "重命名"],
         "copy-dialog" => &["复制到文件夹", "目标目录"],
+        // 单击 cover.png 后打开重命名：标题、字段和按钮照 Vue，草稿仍是原来的文件名。
+        "rename-dialog" => &["重命名文件", "新名称", "取消", "保存"],
+        // 从文件夹导入：对话框打开，路径留空，不提交，不编造成功。
+        "import-folder-dialog" => &["从文件夹导入", "多个路径用分号分隔", "取消", "导入"],
+        // 从 ZIP 导入：对话框打开，路径留空，不提交，不编造成功。
+        "import-zip-dialog" => &["从 ZIP 导入", "压缩包路径", "取消", "导入"],
+        // Eagle 复制导入：没有选中文件，路径留空，不写完成提示、条数或目标目录。
+        "import-eagle-dialog" => &["从 Eagle 复制导入", "Eagle 资源库路径", "取消", "导入"],
+        // Eagle 剪切导入：同一个对话框的剪切模式。标题换成剪切那句，路径仍留空。
+        "import-eagle-move-dialog" => &["从 Eagle 剪切导入", "Eagle 资源库路径", "取消", "导入"],
+        // 目录树里的 assets 打开重命名，不提交。
+        "folder-rename-dialog" => &[
+            "重命名文件夹",
+            "正在重命名 assets。",
+            "文件夹名称",
+            "取消",
+            "保存",
+        ],
+        // 目录树里的 assets 打开处理确认：两个选项和取消，不写成已经删除。
+        "folder-delete-dialog" => &[
+            "处理文件夹",
+            "将处理文件夹“assets”。请选择内部内容的处理方式。",
+            "转移到上级目录",
+            "保留内部文件和子文件夹，只删除当前这一层目录。",
+            "移入回收站",
+            "将该目录及其全部内容移入回收站，可在回收站中还原。",
+            "取消",
+        ],
         // 图片幻灯片读不到文件：播放条写「图片无法播放」，停留时长照常可调。
         "still-playback" => &["图片无法播放", "图片停留时长"],
         // 音频预览解不开：预览框里写失败标题和原因，不再只画唱片。
@@ -487,6 +606,43 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
         "filter-bar-active" => &["3 个条件", "默认资源库 / cover.png"],
         // 查询跑完没有命中：空状态写明全部资源库里没有匹配的文件。
         "search-empty" => &["当前查询: 不存在的文件", "0 条结果", "没有匹配的文件"],
+        // 有资源库，搜索派发出去时领域服务没起来：只画交回的失败原因，不写命中。
+        "search-failed" => &["当前查询: 封面", "1 个仓库", "0 条结果", "领域服务未启动"],
+        // 没有资源库时的日志：历史答空，空文案照 Vue `WorkspaceLogsPanel.vue`，不写四条夹具日志。
+        "logs-no-library" => &[
+            "系统日志",
+            "还没有系统日志",
+            "宿主、插件和辅助进程产生的关键操作会在这里持续汇总。",
+            "0 条缓存",
+            "0 条命中",
+            "无资源库",
+        ],
+        // 没有资源库时的拓展：插件来自空库启动读到的清单，工具区停在 API Playground。
+        "extensions-no-library" => &[
+            "文件系统与插件",
+            "API Playground",
+            "后端 API 调试",
+            "插件工具",
+            "无资源库",
+        ],
+        // 没有资源库时的仓库动作：没有仓库就不读列表，空文案仍是 Vue 原文。
+        "actions-no-library" => &[
+            "仓库动作",
+            "动作",
+            "0 项",
+            "当前仓库没有导入动作。",
+            "无资源库",
+        ],
+        // 没有资源库：空状态标题和说明照 Vue `SearchPanel.vue`，不写仓库名、命中或查询。
+        "search-no-library" => &[
+            "搜索结果",
+            "全局搜索",
+            "输入关键词、标签或评分条件后，这里会展示跨仓库结果。",
+            "0 个仓库",
+            "0 条结果",
+            "还没有可搜索的资源库",
+            "先在资源库页面添加一个仓库，再执行跨仓库搜索。",
+        ],
         // 移动还没回来：文件列写「正在处理文件」，任务弹层的仓库操作行爬到上限。
         "file-operation-progress" => &["正在处理文件", "移动文件", "移动到目标文件夹", "88%"],
         // 换仓库停在启动页第 2 步，侧栏收起。
@@ -497,8 +653,88 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
         "preview-no-player" => &["没有可用于播放此媒体的插件", "未选择播放内容"],
         // Shift 选出一段再 Ctrl 加一项：详情写多选摘要。
         "files-multi-select" => &["4 个项目", "4 个文件"],
+        // 侧栏点回收站。夹具摘要里回收站是 0，目录读回来是空列表，不编已删除文件。
+        "trash" => &[
+            "回收站",
+            "还原所有项目",
+            "清空回收站",
+            "选择一个文件或文件夹",
+            "在中间列表中选择目标，然后可执行还原或彻底删除。",
+            "未选择播放内容",
+        ],
+        // 侧栏点未分类。摘要里只有根目录的 cover.png 对得上，不编别的文件。
+        "uncategorized" => &[
+            "分类视图",
+            "未分类共 1 项。",
+            "cover.png",
+            "文件管理",
+            "选择一个文件或文件夹",
+            "在中间列表中选择目标查看详情。",
+            "未选择播放内容",
+        ],
+        // 两个夹具文件都没有标签。
+        "untagged" => &[
+            "分类视图",
+            "未标签共 2 项。",
+            "cover.png",
+            "page.pdf",
+            "文件管理",
+            "选择一个文件或文件夹",
+            "未选择播放内容",
+        ],
+        // 夹具没有访问时间：列表是空的，仍是文件浏览面板，播放条留在下面。
+        "recent" => &[
+            "分类视图",
+            "按最近访问时间排序，共 0 项。",
+            "清空记录",
+            "文件管理",
+            "选择一个文件或文件夹",
+            "在中间列表中选择目标查看详情。",
+            "未选择播放内容",
+        ],
+        // 夹具没有导入动作：切到动作面板再答空列表。页头和空状态照 Vue，不编动作名或运行结果。
+        "repository-actions" => &["仓库动作", "动作", "0 项", "当前仓库没有导入动作。"],
+        // 进入夹具目录 assets：面包屑停在这一层，列表只有树里的子文件夹 covers。
+        // 右侧是目录摘要，不是「选择一个文件」。播放条仍在文件浏览面板下面。
+        "assets-directory" => &[
+            "当前目录",
+            "根目录",
+            "assets",
+            "covers",
+            "直属文件",
+            "直属子文件夹",
+            "当前视图总条目",
+            "未选择播放内容",
+        ],
+        // 进入夹具目录 covers：这一层没有子项。面包屑是根目录 / assets / covers，
+        // 列表不编文件；右侧仍是目录摘要，计数是 0。播放条留在下面。
+        "covers-directory" => &[
+            "当前目录",
+            "根目录",
+            "assets",
+            "covers",
+            "assets/covers",
+            "直属文件",
+            "直属子文件夹",
+            "当前视图总条目",
+            "0",
+            "未选择播放内容",
+        ],
+        // 夹具没有智能文件夹：打开后的结果页列表是空的，不写命中数。空文案是 Vue 只读虚拟视图的详情。
+        "smart-folder" => &[
+            "分类视图",
+            "智能文件夹",
+            "选择一个文件或文件夹",
+            "在中间列表中选择目标查看详情。",
+            "还没有智能文件夹。",
+            "未选择播放内容",
+        ],
         // 来源登录过期：单曲右键菜单里的来源动作禁用，后面一行写原因。
-        "source-menu-unavailable" => &["来源认证或本地缓存不可用", "下载单曲到其他资源库", "清理播放缓存"],
+        "source-menu-unavailable" => &[
+            "来源认证或本地缓存不可用",
+            "下载单曲到其他资源库",
+            "清理播放缓存",
+        ],
         // 下载单曲到其他资源库、有两个候选：弹出选择，列出两个资源库。
         "source-download-target" => &["选择目标资源库", "下载到 第二资源库", "下载到 第三资源库"],
         // 在线单曲的播放源还在准备：预览框是准备卡，写文件名和「准备音频」。
@@ -506,7 +742,11 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
         // 在线单曲的播放源准备失败：预览框写失败标题、插件交回的原话和「重试」。
         "online-preview-failed" => &["无法预览该音频", "网易云登录已失效，请重新登录", "重试"],
         // 播放集里的在线单曲准备失败：播放条第二行写原话，「播放」可点。
-        "online-playback-failed" => &["我喜欢的音乐", "网易云接口请求超时，请检查网络后重试", "播放"],
+        "online-playback-failed" => &[
+            "我喜欢的音乐",
+            "网易云接口请求超时，请检查网络后重试",
+            "播放",
+        ],
         _ => page_labels(page),
     }
 }
@@ -516,6 +756,8 @@ fn scene_values(scene_id: &str) -> &'static [&'static str] {
     match scene_id {
         "unsaved-edit" => &["第 2 页的表格还要核对。"],
         "conflict" => &["封面改用暖色版本。"],
+        "rename-dialog" => &["cover.png"],
+        "folder-rename-dialog" => &["assets"],
         _ => &[],
     }
 }

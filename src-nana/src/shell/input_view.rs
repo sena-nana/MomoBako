@@ -2,14 +2,14 @@
 
 use std::path::PathBuf;
 
-use nana_ui::runtime::view::{on_mount, signal, AnyView, NodeRef};
-use nana_ui::runtime::FileDropEvent;
-use nana_ui::ButtonKind;
-use nana_ui_core::{DropAccepts, DropEffect};
 use super::{HostDragPhase, InputMessage};
-use crate::shell::view_part_overlay::dialog::{intent_button, DialogFrame, MODAL_CARD};
+use crate::shell::view_part_overlay::dialog::{DialogFrame, MODAL_CARD, intent_button};
 use crate::shell::view_part_overlay::session::Projected;
 use crate::shell::{MainRegion, ShellMessage, ShellViewModel, WorkspacePanel};
+use nana_ui::ButtonKind;
+use nana_ui::runtime::FileDropEvent;
+use nana_ui::runtime::view::{AnyView, NodeRef, on_mount, signal};
+use nana_ui_core::{DropAccepts, DropEffect};
 
 /// 挂上拖放时从壳层抄下来的仓库条件。事件回调里不再借壳层；常驻视图把它放进信号，事件到达时现读。
 #[derive(Clone, Debug, PartialEq)]
@@ -73,7 +73,9 @@ pub(crate) fn accept_file_drops(target: NodeRef) {
             eprintln!("Nana 文件拖放目标没有建出来，不登记拖放");
             return;
         };
-        if let Err(error) = cx.set_drop_target_node(id, DropAccepts::files().effect(DropEffect::Copy)) {
+        if let Err(error) =
+            cx.set_drop_target_node(id, DropAccepts::files().effect(DropEffect::Copy))
+        {
             eprintln!("Nana 文件拖放目标没有挂上：{error}");
         }
     });
@@ -90,7 +92,11 @@ impl CloseConfirmView {
         if !model.input.pending_close {
             return None;
         }
-        let notice = if model.input.notice.is_empty() { "确认关闭 MomoBako？".to_string() } else { model.input.notice.clone() };
+        let notice = if model.input.notice.is_empty() {
+            "确认关闭 MomoBako？".to_string()
+        } else {
+            model.input.notice.clone()
+        };
         Some(Self { notice })
     }
 }
@@ -105,11 +111,24 @@ pub(crate) fn close_prompt(model: &ShellViewModel) -> Option<AnyView> {
     let view = signal(CloseConfirmView::project(model)?);
     Projected::register(view, CloseConfirmView::project);
     let cancel = intent_button("取消", ButtonKind::Ghost, false, "close-confirm-cancel");
-    let confirm = intent_button("确认关闭", ButtonKind::Primary, false, "close-confirm-accept");
-    Some(DialogFrame::new("close-confirm", || "关闭 MomoBako".to_string(), || answer(false)).size(MODAL_CARD).confirm(
-        move || view.with(|view| view.notice.clone()),
-        cancel,
-        confirm,
-        || answer(true),
-    ))
+    let confirm = intent_button(
+        "确认关闭",
+        ButtonKind::Primary,
+        false,
+        "close-confirm-accept",
+    );
+    Some(
+        DialogFrame::new(
+            "close-confirm",
+            || "关闭 MomoBako".to_string(),
+            || answer(false),
+        )
+        .size(MODAL_CARD)
+        .confirm(
+            move || view.with(|view| view.notice.clone()),
+            cancel,
+            confirm,
+            || answer(true),
+        ),
+    )
 }

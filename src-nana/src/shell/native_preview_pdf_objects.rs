@@ -9,7 +9,8 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use super::{
-    dict_before, direct_length, find_keyword, is_pdf_delim, parse_hex, parse_literal, parse_number, skip_noise, stream_data_start,
+    dict_before, direct_length, find_keyword, is_pdf_delim, parse_hex, parse_literal, parse_number,
+    skip_noise, stream_data_start,
 };
 
 /// 页树最多走多深、最多收多少页，防止环和恶意文件。
@@ -32,7 +33,11 @@ impl Value {
     /// 字典里某个键的值；不是字典或没有这个键时为 `None`。
     pub(super) fn get(&self, key: &str) -> Option<&Value> {
         match self {
-            Value::Dict(entries) => entries.iter().rev().find(|(name, _)| name == key).map(|(_, value)| value),
+            Value::Dict(entries) => entries
+                .iter()
+                .rev()
+                .find(|(name, _)| name == key)
+                .map(|(_, value)| value),
             _ => None,
         }
     }
@@ -75,13 +80,23 @@ impl<'a> Document<'a> {
             let (object, end) = read_object(bytes, body_start);
             if is_type(&object.value, "ObjStm") {
                 for (inner, value) in object_stream_members(bytes, &object) {
-                    objects.insert(inner, Object { value, stream: None });
+                    objects.insert(
+                        inner,
+                        Object {
+                            value,
+                            stream: None,
+                        },
+                    );
                 }
             }
             objects.insert(number, object);
             cursor = end.max(body_start + 1);
         }
-        Self { bytes, objects, root: trailer_root(bytes) }
+        Self {
+            bytes,
+            objects,
+            root: trailer_root(bytes),
+        }
     }
 
     pub(super) fn object(&self, number: u32) -> Option<&Object> {
@@ -112,21 +127,41 @@ impl<'a> Document<'a> {
     /// 按页树顺序列出所有页。页树走不通时按对象编号收集 `/Type /Page`。
     pub(super) fn pages(&self) -> Vec<Page> {
         let mut pages = Vec::new();
-        let tree = self.root.and_then(|root| self.objects.get(&root)).and_then(|catalog| catalog.value.get("Pages")).cloned();
+        let tree = self
+            .root
+            .and_then(|root| self.objects.get(&root))
+            .and_then(|catalog| catalog.value.get("Pages"))
+            .cloned();
         if let Some(Value::Ref(number)) = tree {
             let mut visited = HashSet::new();
             self.walk(number, None, 0, &mut visited, &mut pages);
         }
         if pages.is_empty() {
-            let mut numbers: Vec<u32> = self.objects.iter().filter(|(_, object)| is_type(&object.value, "Page")).map(|(number, _)| *number).collect();
+            let mut numbers: Vec<u32> = self
+                .objects
+                .iter()
+                .filter(|(_, object)| is_type(&object.value, "Page"))
+                .map(|(number, _)| *number)
+                .collect();
             numbers.sort_unstable();
-            pages = numbers.into_iter().filter_map(|number| self.page(number, None)).take(MAX_PAGES).collect();
+            pages = numbers
+                .into_iter()
+                .filter_map(|number| self.page(number, None))
+                .take(MAX_PAGES)
+                .collect();
         }
         pages
     }
 
     /// 走一个页树节点：`/Pages` 往下走 `/Kids`，`/Page` 收进来。资源字典没写时继承上一层的。
-    fn walk(&self, number: u32, inherited: Option<&Value>, depth: usize, visited: &mut HashSet<u32>, pages: &mut Vec<Page>) {
+    fn walk(
+        &self,
+        number: u32,
+        inherited: Option<&Value>,
+        depth: usize,
+        visited: &mut HashSet<u32>,
+        pages: &mut Vec<Page>,
+    ) {
         if depth > MAX_TREE_DEPTH || pages.len() >= MAX_PAGES || !visited.insert(number) {
             return;
         }
@@ -150,13 +185,22 @@ impl<'a> Document<'a> {
 
     fn page(&self, number: u32, inherited: Option<&Value>) -> Option<Page> {
         let page = &self.objects.get(&number)?.value;
-        let contents = match page.get("Contents").map(|contents| (contents, self.resolve(contents))) {
+        let contents = match page
+            .get("Contents")
+            .map(|contents| (contents, self.resolve(contents)))
+        {
             Some((_, Value::Array(items))) => items.clone(),
             Some((reference @ Value::Ref(_), _)) => vec![reference.clone()],
             _ => Vec::new(),
         };
-        let resources = page.get("Resources").or(inherited).map(|resources| self.resolve(resources).clone());
-        Some(Page { contents, resources })
+        let resources = page
+            .get("Resources")
+            .or(inherited)
+            .map(|resources| self.resolve(resources).clone());
+        Some(Page {
+            contents,
+            resources,
+        })
     }
 }
 
@@ -200,7 +244,10 @@ fn number_before(bytes: &[u8], end: usize) -> Option<(usize, u32)> {
     if index == digits_end {
         return None;
     }
-    let value = std::str::from_utf8(&bytes[index..digits_end]).ok()?.parse().ok()?;
+    let value = std::str::from_utf8(&bytes[index..digits_end])
+        .ok()?
+        .parse()
+        .ok()?;
     Some((index, value))
 }
 
@@ -215,22 +262,31 @@ fn read_object(bytes: &[u8], start: usize) -> (Object, usize) {
         if let Some(data_start) = stream_data_start(bytes, after + 6) {
             let dict = dict_before(bytes, after);
             // `dict_before` 找不到字典时交回空串，不在文件里，记成空区间。
-            let dict_start = if dict.is_empty() { after } else { dict.as_ptr() as usize - bytes.as_ptr() as usize };
+            let dict_start = if dict.is_empty() {
+                after
+            } else {
+                dict.as_ptr() as usize - bytes.as_ptr() as usize
+            };
             let dict_range = dict_start..dict_start + dict.len();
             let end_keyword = find_keyword(bytes, b"endstream", data_start);
             let data_end = match (direct_length(dict), end_keyword) {
                 (Some(length), end) => {
                     let by_length = data_start.saturating_add(length).min(bytes.len());
-                    end.map(|position| by_length.min(position)).unwrap_or(by_length)
+                    end.map(|position| by_length.min(position))
+                        .unwrap_or(by_length)
                 }
                 (None, Some(position)) => position,
                 (None, None) => bytes.len(),
             };
             stream = Some((dict_range, data_start..data_end.max(data_start)));
-            index = end_keyword.map(|position| position + b"endstream".len()).unwrap_or(data_end);
+            index = end_keyword
+                .map(|position| position + b"endstream".len())
+                .unwrap_or(data_end);
         }
     }
-    let end = find_keyword(bytes, b"endobj", index).map(|position| position + b"endobj".len()).unwrap_or(index);
+    let end = find_keyword(bytes, b"endobj", index)
+        .map(|position| position + b"endobj".len())
+        .unwrap_or(index);
     (Object { value, stream }, end)
 }
 
@@ -258,9 +314,10 @@ fn object_stream_members(bytes: &[u8], object: &Object) -> Vec<(u32, Value)> {
     let mut header = 0;
     let mut entries = Vec::new();
     for _ in 0..count.min(MAX_PAGES) {
-        let (Some(Value::Num(number)), Some(Value::Num(offset))) =
-            (parse_value(&plain, &mut header, 0), parse_value(&plain, &mut header, 0))
-        else {
+        let (Some(Value::Num(number)), Some(Value::Num(offset))) = (
+            parse_value(&plain, &mut header, 0),
+            parse_value(&plain, &mut header, 0),
+        ) else {
             break;
         };
         entries.push((number as u32, first.saturating_add(offset as usize)));
@@ -300,10 +357,15 @@ pub(super) fn parse_value(bytes: &[u8], index: &mut usize, depth: usize) -> Opti
         b'/' => {
             *index += 1;
             let start = *index;
-            while *index < bytes.len() && !bytes[*index].is_ascii_whitespace() && !is_pdf_delim(bytes[*index]) {
+            while *index < bytes.len()
+                && !bytes[*index].is_ascii_whitespace()
+                && !is_pdf_delim(bytes[*index])
+            {
                 *index += 1;
             }
-            Some(Value::Name(String::from_utf8_lossy(&bytes[start..*index]).into_owned()))
+            Some(Value::Name(
+                String::from_utf8_lossy(&bytes[start..*index]).into_owned(),
+            ))
         }
         b'<' if bytes.get(*index + 1) == Some(&b'<') => {
             *index += 2;
@@ -354,7 +416,9 @@ pub(super) fn parse_value(bytes: &[u8], index: &mut usize, depth: usize) -> Opti
             skip_noise(bytes, &mut look);
             if parse_number(bytes, &mut look).is_some() {
                 skip_noise(bytes, &mut look);
-                let ends = bytes.get(look + 1).is_none_or(|next| next.is_ascii_whitespace() || is_pdf_delim(*next));
+                let ends = bytes
+                    .get(look + 1)
+                    .is_none_or(|next| next.is_ascii_whitespace() || is_pdf_delim(*next));
                 if bytes.get(look) == Some(&b'R') && ends {
                     *index = look + 1;
                     return Some(Value::Ref(first as u32));
@@ -365,7 +429,10 @@ pub(super) fn parse_value(bytes: &[u8], index: &mut usize, depth: usize) -> Opti
         _ => {
             // 关键字（true、false、null、R、stream 之类）：读到分隔符为止。
             let start = *index;
-            while *index < bytes.len() && !bytes[*index].is_ascii_whitespace() && !is_pdf_delim(bytes[*index]) {
+            while *index < bytes.len()
+                && !bytes[*index].is_ascii_whitespace()
+                && !is_pdf_delim(bytes[*index])
+            {
                 *index += 1;
             }
             if *index == start {

@@ -57,13 +57,22 @@ pub(crate) trait ShellPart {
     /// 放进骨架槽位的根节点；这块现在没有内容时为 `None`。
     fn root(&self) -> Option<StableNodeId>;
     /// 按 `mode` 从头挂这一块：首次挂载，或者工作台排法变了。不等输入法组合。
-    fn mount(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel, mode: BodyMode) -> Result<Swap, FrameworkError>;
+    fn mount(
+        &mut self,
+        cx: &mut PartCx<'_>,
+        model: &ShellViewModel,
+        mode: BodyMode,
+    ) -> Result<Swap, FrameworkError>;
     /// 只写本块的信号，不建节点。每次整体同步都调用，组合输入中也调用。
     fn sync(&mut self, model: &ShellViewModel);
     /// ViewModel 相对上次挂载有没有本块必须重挂才能跟上的变化。
     fn needs_remount(&self, model: &ShellViewModel) -> bool;
     /// 重挂本块需要重挂的部分（整块，或主区的当前路由分支）。
-    fn remount(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel) -> Result<Swap, FrameworkError>;
+    fn remount(
+        &mut self,
+        cx: &mut PartCx<'_>,
+        model: &ShellViewModel,
+    ) -> Result<Swap, FrameworkError>;
     /// 焦点在本块里，而且输入法正在组合（预编辑非空）。这时重挂会打断组合，要延后。
     fn composing(&self, document: &RuntimeDocument) -> bool;
 }
@@ -77,7 +86,11 @@ pub(crate) struct Swap {
 
 impl Swap {
     /// 换下 `old`，在 `fresh` 下面找回 `kept`。
-    pub(crate) fn replace(old: Option<MountedView>, kept: Option<KeptState>, fresh: Option<&MountedView>) -> Self {
+    pub(crate) fn replace(
+        old: Option<MountedView>,
+        kept: Option<KeptState>,
+        fresh: Option<&MountedView>,
+    ) -> Self {
         let mut swap = Self::default();
         swap.retired.extend(old);
         if let (Some(kept), Some(fresh)) = (kept, fresh) {
@@ -88,7 +101,10 @@ impl Swap {
 
     /// 只在 `roots` 下面找回 `kept`，不换下什么。
     pub(crate) fn restore(kept: KeptState, roots: Vec<StableNodeId>) -> Self {
-        Self { retired: Vec::new(), restore: vec![(kept, roots)] }
+        Self {
+            retired: Vec::new(),
+            restore: vec![(kept, roots)],
+        }
     }
 
     pub(crate) fn merge(&mut self, other: Swap) {
@@ -119,7 +135,8 @@ pub(crate) fn mount_detached(
 ) -> Result<Option<MountedView>, FrameworkError> {
     let document_id = document.document();
     let context = document.context_mut();
-    let mounted = context.mount_view_detached(document_id, move || hot::with_signals(hot, build))?;
+    let mounted =
+        context.mount_view_detached(document_id, move || hot::with_signals(hot, build))?;
     match mounted.roots().len() {
         0 => {
             mounted.unmount(context)?;
@@ -139,7 +156,9 @@ pub(crate) fn composing_under(document: &RuntimeDocument, roots: &[StableNodeId]
     let Some(focused) = world.focused(document.document()) else {
         return false;
     };
-    roots.iter().any(|root| world.is_descendant_or_self(focused, *root))
+    roots
+        .iter()
+        .any(|root| world.is_descendant_or_self(focused, *root))
         && world.ime(focused).is_some_and(|ime| !ime.text.is_empty())
 }
 

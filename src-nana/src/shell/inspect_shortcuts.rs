@@ -30,14 +30,21 @@ pub struct SearchShortcut {
 pub fn shortcuts_from_plugins(plugins: &[PluginManifest]) -> Vec<SearchShortcut> {
     let mut shortcuts = Vec::new();
     for plugin in plugins {
-        if !plugin.enabled || matches!(plugin.status.as_str(), "disabled" | "unavailable" | "error") {
+        if !plugin.enabled || matches!(plugin.status.as_str(), "disabled" | "unavailable" | "error")
+        {
             continue;
         }
         let Some(extension) = plugin.contributes.get("libraryExtension") else {
             continue;
         };
-        let kind = extension.get("libraryKind").and_then(|value| value.as_str()).unwrap_or("");
-        let Some(list) = extension.get("searchShortcuts").and_then(|value| value.as_array()) else {
+        let kind = extension
+            .get("libraryKind")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
+        let Some(list) = extension
+            .get("searchShortcuts")
+            .and_then(|value| value.as_array())
+        else {
             continue;
         };
         for item in list {
@@ -70,7 +77,9 @@ fn js_truthy(value: Option<&Value>) -> bool {
     match value {
         None | Some(Value::Null) => false,
         Some(Value::Bool(flag)) => *flag,
-        Some(Value::Number(number)) => number.as_f64().is_some_and(|value| value != 0.0 && !value.is_nan()),
+        Some(Value::Number(number)) => number
+            .as_f64()
+            .is_some_and(|value| value != 0.0 && !value.is_nan()),
         Some(Value::String(text)) => !text.is_empty(),
         Some(Value::Array(_)) | Some(Value::Object(_)) => true,
     }
@@ -84,8 +93,14 @@ fn parse_shortcut(kind: &str, item: &serde_json::Value) -> Option<SearchShortcut
     let label = text(item, "label").unwrap_or_else(|| id.clone());
     let metadata = text(item, "metadataFilters").or_else(|| text(item, "metadata"))?;
     let sort = item.get("sort");
-    let sort_field = sort.and_then(|value| text(value, "field")).unwrap_or_default();
-    let sort_direction = if sort.and_then(|value| value.get("direction")).and_then(|value| value.as_str()) == Some("desc") {
+    let sort_field = sort
+        .and_then(|value| text(value, "field"))
+        .unwrap_or_default();
+    let sort_direction = if sort
+        .and_then(|value| value.get("direction"))
+        .and_then(|value| value.as_str())
+        == Some("desc")
+    {
         SortDirection::Desc
     } else {
         SortDirection::Asc
@@ -109,7 +124,12 @@ fn official_asmr(kind: &str, id: &str) -> Option<SearchShortcut> {
     let (label, metadata, sort_field, desc) = match id {
         "works" => ("ASMR 作品", "libraryKind=asmr", "metadata.workId", false),
         "lyrics" => ("含歌词", "libraryKind=asmr\nlyricStatus=local", "", false),
-        "continue" => ("继续收听", "libraryKind=asmr\nlisteningStatus=listening", "metadata.lastListenedAt", true),
+        "continue" => (
+            "继续收听",
+            "libraryKind=asmr\nlisteningStatus=listening",
+            "metadata.lastListenedAt",
+            true,
+        ),
         "random" => ("随机一首", "libraryKind=asmr", "random", false),
         _ => return None,
     };
@@ -118,14 +138,23 @@ fn official_asmr(kind: &str, id: &str) -> Option<SearchShortcut> {
         label: label.to_string(),
         metadata: metadata.to_string(),
         sort_field: sort_field.to_string(),
-        sort_direction: if desc { SortDirection::Desc } else { SortDirection::Asc },
+        sort_direction: if desc {
+            SortDirection::Desc
+        } else {
+            SortDirection::Asc
+        },
         library_kind: kind.to_string(),
         plugin_id: String::new(),
     })
 }
 
 fn text(value: &serde_json::Value, key: &str) -> Option<String> {
-    value.get(key).and_then(|item| item.as_str()).map(str::trim).filter(|item| !item.is_empty()).map(str::to_string)
+    value
+        .get(key)
+        .and_then(|item| item.as_str())
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
 }
 
 #[cfg(test)]
@@ -173,7 +202,9 @@ mod tests {
 
     #[test]
     fn asmr_string_ids_become_filter_shortcuts() {
-        let shortcuts = shortcuts_from_plugins(&[plugin(serde_json::json!(["works", "lyrics", "continue", "random", "missing"]))]);
+        let shortcuts = shortcuts_from_plugins(&[plugin(serde_json::json!([
+            "works", "lyrics", "continue", "random", "missing"
+        ]))]);
         assert_eq!(shortcuts.len(), 4);
         assert_eq!(shortcuts[0].label, "ASMR 作品");
         assert_eq!(shortcuts[0].metadata, "libraryKind=asmr");
@@ -199,14 +230,40 @@ mod tests {
 
     #[test]
     fn entries_match_by_library_kind_and_asmr_work_ids() {
-        let meta = |pairs: &[(&str, Value)]| pairs.iter().map(|(key, value)| (key.to_string(), value.clone())).collect();
-        assert!(matches_entry("asmr", &meta(&[("libraryKind", Value::from("asmr"))])));
-        assert!(matches_entry("asmr", &meta(&[("workId", Value::from("RJ01"))])));
+        let meta = |pairs: &[(&str, Value)]| {
+            pairs
+                .iter()
+                .map(|(key, value)| (key.to_string(), value.clone()))
+                .collect()
+        };
+        assert!(matches_entry(
+            "asmr",
+            &meta(&[("libraryKind", Value::from("asmr"))])
+        ));
+        assert!(matches_entry(
+            "asmr",
+            &meta(&[("workId", Value::from("RJ01"))])
+        ));
         assert!(matches_entry("asmr", &meta(&[("rjCode", Value::from(1))])));
-        assert!(!matches_entry("asmr", &meta(&[("workId", Value::from(""))])));
-        assert!(!matches_entry("asmr", &meta(&[("libraryKind", Value::from("audio"))])));
-        assert!(matches_entry("audio", &meta(&[("libraryKind", Value::from("audio"))])));
-        assert!(!matches_entry("audio", &meta(&[("workId", Value::from("RJ01"))])));
-        assert!(!matches_entry("", &meta(&[("libraryKind", Value::from(""))])));
+        assert!(!matches_entry(
+            "asmr",
+            &meta(&[("workId", Value::from(""))])
+        ));
+        assert!(!matches_entry(
+            "asmr",
+            &meta(&[("libraryKind", Value::from("audio"))])
+        ));
+        assert!(matches_entry(
+            "audio",
+            &meta(&[("libraryKind", Value::from("audio"))])
+        ));
+        assert!(!matches_entry(
+            "audio",
+            &meta(&[("workId", Value::from("RJ01"))])
+        ));
+        assert!(!matches_entry(
+            "",
+            &meta(&[("libraryKind", Value::from(""))])
+        ));
     }
 }

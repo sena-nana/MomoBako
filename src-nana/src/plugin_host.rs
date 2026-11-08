@@ -15,22 +15,42 @@ use nana_ui::nana_package::manifest::PackageManifest;
 use serde_json::json;
 
 use crate::app_paths::HostLocations;
+use crate::backend::RepositoryRuntime;
 use crate::backend::services::external_tools::{self, ToolLocations};
 use crate::backend::services::mutsuki_host::{self, MomoPluginRuntime};
 use crate::backend::services::mutsuki_runner::MomoTaskRuntime;
 use crate::backend::services::runtime::bundled_plugins;
-use crate::backend::RepositoryRuntime;
 
-/// 依次同步随附插件、设置外部程序目录、启动插件宿主。
-pub(crate) fn start(locations: &HostLocations, runtime: &RepositoryRuntime, tasks: &Arc<MomoTaskRuntime>) {
-    sync_bundled_plugins(locations, runtime);
-    configure_tools(locations);
-    start_plugin_host(runtime, tasks);
+/// 启动插件相关能力，并返回可观测的降级结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct StartupReport {
+    pub bundled_plugins: bool,
+    pub external_tools: bool,
+    pub plugin_host: bool,
 }
 
-fn sync_bundled_plugins(locations: &HostLocations, runtime: &RepositoryRuntime) {
+impl StartupReport {
+    pub(crate) fn degraded(self) -> bool {
+        !self.bundled_plugins || !self.external_tools || !self.plugin_host
+    }
+}
+
+/// 依次同步随附插件、设置外部程序目录、启动插件宿主。
+pub(crate) fn start(
+    locations: &HostLocations,
+    runtime: &RepositoryRuntime,
+    tasks: &Arc<MomoTaskRuntime>,
+) -> StartupReport {
+    StartupReport {
+        bundled_plugins: sync_bundled_plugins(locations, runtime),
+        external_tools: configure_tools(locations),
+        plugin_host: start_plugin_host(runtime, tasks),
+    }
+}
+
+fn sync_bundled_plugins(locations: &HostLocations, runtime: &RepositoryRuntime) -> bool {
     let Some(dir) = locations.bundled_plugins.as_deref() else {
-        return;
+        return true;
     };
     let manifest = nana_ui::NanaApplication::package_manifest();
     if locations.is_packaged() && manifest.is_none() {
@@ -46,27 +66,43 @@ fn sync_bundled_plugins(locations: &HostLocations, runtime: &RepositoryRuntime) 
         Ok(Some(packages)) => packages,
         Ok(None) => {
             eprintln!("Nana 没有插件打包输出，随附插件不同步：{}", dir.display());
-            return;
+            return true;
         }
         Err(error) => {
-            report_failure("plugin.bundle", "listFailed", "随附插件列不出来，这次不同步。", &error);
-            return;
+            report_failure(
+                "plugin.bundle",
+                "listFailed",
+                "随附插件列不出来，这次不同步。",
+                &error,
+            );
+            return false;
         }
     };
     match bundled_plugins::sync_bundled_plugins(&packages, &runtime.service_root()) {
-        Ok(report) => momobako_backend::app_log!(
-            "info",
-            "plugin.bundle",
-            "synced",
-            "随附插件已同步。",
-            json!({
-                "source": dir.display().to_string(),
-                "copied": report.copied,
-                "unchanged": report.unchanged.len(),
-                "removed": report.removed,
-            })
-        ),
-        Err(error) => report_failure("plugin.bundle", "syncFailed", "随附插件同步失败，插件目录保持上次的样子。", &error),
+        Ok(report) => {
+            momobako_backend::app_log!(
+                "info",
+                "plugin.bundle",
+                "synced",
+                "随附插件已同步。",
+                json!({
+                    "source": dir.display().to_string(),
+                    "copied": report.copied,
+                    "unchanged": report.unchanged.len(),
+                    "removed": report.removed,
+                })
+            );
+            true
+        }
+        Err(error) => {
+            report_failure(
+                "plugin.bundle",
+                "syncFailed",
+                "随附插件同步失败，插件目录保持上次的样子。",
+                &error,
+            );
+            false
+        }
     }
 }
 
@@ -78,7 +114,13 @@ fn bundled_packages(
     manifest: Option<&PackageManifest>,
 ) -> Result<Option<Vec<PathBuf>>, String> {
     if let Some(manifest) = manifest.filter(|_| packaged) {
-        return Ok(Some(manifest.plugins.iter().map(|plugin| dir.join(&plugin.file)).collect()));
+        return Ok(Some(
+            manifest
+                .plugins
+                .iter()
+                .map(|plugin| dir.join(&plugin.file))
+                .collect(),
+        ));
     }
     if !packaged && !dir.is_dir() {
         return Ok(None);
@@ -86,31 +128,62 @@ fn bundled_packages(
     bundled_plugins::list_plugin_packages(dir).map(Some)
 }
 
-fn configure_tools(locations: &HostLocations) {
+fn configure_tools(locations: &HostLocations) -> bool {
     let tools = ToolLocations {
         bundled: locations.bundled_tools.clone(),
         downloads: locations.tool_downloads.clone(),
     };
     if let Err(error) = external_tools::configure(tools) {
-        report_failure("tools", "configureFailed", "外部程序目录没有设置上。", &error);
+        report_failure(
+            "tools",
+            "configureFailed",
+            "外部程序目录没有设置上。",
+            &error,
+        );
+        return false;
     }
+    true
 }
 
-fn start_plugin_host(runtime: &RepositoryRuntime, tasks: &Arc<MomoTaskRuntime>) {
+fn start_plugin_host(runtime: &RepositoryRuntime, tasks: &Arc<MomoTaskRuntime>) -> bool {
     let host = Arc::new(MomoPluginRuntime::new(runtime.clone(), Arc::clone(tasks)));
-    if let Err(error) = host.reload() {
-        report_failure("plugin.host", "loadFailed", "插件没有加载起来，后端插件暂时不可用。", &error);
-    }
+    let loaded = match host.reload() {
+        Ok(()) => true,
+        Err(error) => {
+            report_failure(
+                "plugin.host",
+                "loadFailed",
+                "插件没有加载起来，后端插件暂时不可用；可在插件管理页重试。",
+                &error,
+            );
+            false
+        }
+    };
     // 第一代加载失败也装上宿主：之后在插件管理页启停或安装插件时会重新加载。
-    if let Err(error) = mutsuki_host::install_host(host) {
-        report_failure("plugin.host", "installFailed", "插件宿主没有装上，后端插件不可用。", &error);
+    match mutsuki_host::install_host(host) {
+        Ok(()) => loaded,
+        Err(error) => {
+            report_failure(
+                "plugin.host",
+                "installFailed",
+                "插件宿主没有装上，后端插件不可用。",
+                &error,
+            );
+            false
+        }
     }
 }
 
 /// 失败写进系统日志和标准错误（开发时看得到）。
 fn report_failure(category: &str, action: &str, message: &str, error: &str) {
     eprintln!("Nana {message}{error}");
-    momobako_backend::app_log!("error", category, action, message, json!({ "error": error }));
+    momobako_backend::app_log!(
+        "error",
+        category,
+        action,
+        message,
+        json!({ "error": error })
+    );
 }
 
 #[cfg(test)]

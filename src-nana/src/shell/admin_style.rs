@@ -7,10 +7,10 @@
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{fields, widget, AnyView, El, IntoProp, IntoView};
+use nana_ui::runtime::view::{AnyView, El, IntoProp, IntoView, fields, widget};
 use nana_ui::runtime::{
-    AlignSpec, BoxPaint, Button, IconGlyph, InteractionStyle, JustifySpec, LengthSpec, NodeStyle, PaintContext, Painter,
-    SemanticPaint, Stack, Text, TextHorizontalAlignment, TextInput,
+    AlignSpec, BoxPaint, Button, IconGlyph, InteractionStyle, JustifySpec, LengthSpec, NodeStyle,
+    PaintContext, Painter, SemanticPaint, Stack, Text, TextHorizontalAlignment, TextInput,
 };
 use nana_ui_core::{
     Icon, LineHeightSpec, OverflowWrapSpec, RadiusTier, SemanticColorMix, SemanticColorRole as Role,
@@ -34,15 +34,30 @@ pub(crate) fn label(value: impl Into<String>, size: f32, weight: u16, color: Rol
 }
 
 /// 指定行高倍数的文字。标题 1.25、说明 1.45 或 1.5 这类按 Vue 单独写。
-pub(crate) fn label_lh(value: impl Into<String>, size: f32, weight: u16, color: Role, line: f32) -> Text {
-    let mut text = Text::new(value.into()).color(color).font_size(size).font_weight(weight);
+pub(crate) fn label_lh(
+    value: impl Into<String>,
+    size: f32,
+    weight: u16,
+    color: Role,
+    line: f32,
+) -> Text {
+    let mut text = Text::new(value.into())
+        .color(color)
+        .font_size(size)
+        .font_weight(weight);
     Arc::make_mut(&mut text.style.layout).line_height = Some(LineHeightSpec::Relative(line));
     text.style.text_horizontal_alignment = TextHorizontalAlignment::Start;
     text
 }
 
 /// 行高写成像素的文字，对应 Vue 里写死 `line-height: 24px` 一类的标签。
-pub(crate) fn label_px(value: impl Into<String>, size: f32, weight: u16, color: Role, line_px: f32) -> Text {
+pub(crate) fn label_px(
+    value: impl Into<String>,
+    size: f32,
+    weight: u16,
+    color: Role,
+    line_px: f32,
+) -> Text {
     let mut text = label(value, size, weight, color);
     Arc::make_mut(&mut text.style.layout).line_height = Some(LineHeightSpec::Absolute(line_px));
     text
@@ -54,7 +69,13 @@ pub(crate) fn mono(value: impl Into<String>, size: f32, weight: u16, color: Role
 }
 
 /// 指定行高倍数的等宽文字，日志上下文的 `<pre>` 用 1.6。
-pub(crate) fn mono_lh(value: impl Into<String>, size: f32, weight: u16, color: Role, line: f32) -> Text {
+pub(crate) fn mono_lh(
+    value: impl Into<String>,
+    size: f32,
+    weight: u16,
+    color: Role,
+    line: f32,
+) -> Text {
     let mut text = label_lh(value, size, weight, color, line);
     Arc::make_mut(&mut text.style.layout).font_family = Some(MONO_FAMILY.into());
     text
@@ -82,7 +103,12 @@ pub(crate) fn fixed_color(mut text: Text, rgb: [u8; 3]) -> Text {
 }
 
 fn rgba(rgb: [u8; 3]) -> [f32; 4] {
-    [f32::from(rgb[0]) / 255.0, f32::from(rgb[1]) / 255.0, f32::from(rgb[2]) / 255.0, 1.0]
+    [
+        f32::from(rgb[0]) / 255.0,
+        f32::from(rgb[1]) / 255.0,
+        f32::from(rgb[2]) / 255.0,
+        1.0,
+    ]
 }
 
 /// 小图标。颜色跟随所在控件的前景角色。
@@ -104,21 +130,54 @@ pub(crate) enum Tone {
 
 /// Vue 原生 `<button>`：高 32、左右内边距 10、字 14/500、图标 14、间距 6、圆角 sm。
 /// 禁用时整体 45% 不透明，不换颜色。要绑定禁用时用 `bind::ActionDisabled`，透明度一起换。
-pub(crate) fn action(text: impl Into<String>, icon: Option<Icon>, tone: Tone, disabled: bool) -> Button {
+pub(crate) fn action(
+    text: impl Into<String>,
+    icon: Option<Icon>,
+    tone: Tone,
+    disabled: bool,
+) -> Button {
     let (foreground, background, hovered, pressed, weight) = match tone {
         Tone::Plain => (Role::Text, None, Some(Role::Hover), Some(Role::Active), 500),
-        Tone::Primary => (Role::AccentOnSoft, Some(Role::AccentSoft), Some(Role::AccentSoftHover), Some(Role::AccentSoftPressed), 600),
-        Tone::Danger => (Role::Danger, None, Some(Role::DangerSoftHover), Some(Role::DangerSoftPressed), 500),
+        Tone::Primary => (
+            Role::AccentOnSoft,
+            Some(Role::AccentSoft),
+            Some(Role::AccentSoftHover),
+            Some(Role::AccentSoftPressed),
+            600,
+        ),
+        Tone::Danger => (
+            Role::Danger,
+            None,
+            Some(Role::DangerSoftHover),
+            Some(Role::DangerSoftPressed),
+            500,
+        ),
     };
     let mut style = NodeStyle {
         foreground: Some(foreground),
         background,
         radius: Some(RadiusTier::Sm),
         interaction: InteractionStyle {
-            hovered: SemanticPaint { background: hovered, foreground: Some(foreground), ..SemanticPaint::default() },
-            pressed: SemanticPaint { background: pressed, foreground: Some(foreground), ..SemanticPaint::default() },
-            focused: SemanticPaint { background: hovered, foreground: Some(foreground), ..SemanticPaint::default() },
-            disabled: SemanticPaint { background, foreground: Some(foreground), ..SemanticPaint::default() },
+            hovered: SemanticPaint {
+                background: hovered,
+                foreground: Some(foreground),
+                ..SemanticPaint::default()
+            },
+            pressed: SemanticPaint {
+                background: pressed,
+                foreground: Some(foreground),
+                ..SemanticPaint::default()
+            },
+            focused: SemanticPaint {
+                background: hovered,
+                foreground: Some(foreground),
+                ..SemanticPaint::default()
+            },
+            disabled: SemanticPaint {
+                background,
+                foreground: Some(foreground),
+                ..SemanticPaint::default()
+            },
             ..InteractionStyle::default()
         },
         text_horizontal_alignment: TextHorizontalAlignment::Center,
@@ -144,7 +203,10 @@ pub(crate) fn action(text: impl Into<String>, icon: Option<Icon>, tone: Tone, di
             layout.opacity = Some(crate::theme_map::DISABLED_OPACITY);
         }
     }
-    let mut button = Button::new(text).icon_gap(6.0).disabled(disabled).style(style);
+    let mut button = Button::new(text)
+        .icon_gap(6.0)
+        .disabled(disabled)
+        .style(style);
     if let Some(icon) = icon {
         button = button.icon(icon).icon_size(14.0);
     }
@@ -154,7 +216,9 @@ pub(crate) fn action(text: impl Into<String>, icon: Option<Icon>, tone: Tone, di
 /// 拼进 `.key()` 的外部文本（插件、字段、日志、仓库、任务标识）。`/` 是键路径分隔符，
 /// 留着会让壳层挂载失败；按 `%` 转义成 `%2F`，不同的原文仍得到不同的键。
 pub(crate) fn key_part(text: &str) -> String {
-    text.replace('%', "%25").replace('/', "%2F").replace('~', "%7E")
+    text.replace('%', "%25")
+        .replace('/', "%2F")
+        .replace('~', "%7E")
 }
 
 /// 一列外部标识对应的键：先转义，重复出现的再加「~第几次」。第一次出现的键保持原样，
@@ -166,7 +230,11 @@ pub(crate) fn unique_keys<'a>(ids: impl IntoIterator<Item = &'a str>) -> Vec<Str
             let base = key_part(id);
             let count = seen.entry(base.clone()).or_insert(0);
             *count += 1;
-            if *count == 1 { base } else { format!("{base}~{count}") }
+            if *count == 1 {
+                base
+            } else {
+                format!("{base}~{count}")
+            }
         })
         .collect()
 }
@@ -174,7 +242,11 @@ pub(crate) fn unique_keys<'a>(ids: impl IntoIterator<Item = &'a str>) -> Vec<Str
 /// CSS `minmax(min, max)` 的定宽上限轨道。CSS 先把剩余空间分给这类轨道直到上限，再分给 `fr`；
 /// Nana 网格按权重分配后冻结越界轨道，所以给它极大的权重：空间够时先到上限，余下的给其它轨道。
 pub(crate) fn capped(min_px: f32, max_px: f32) -> nana_ui_core::GridTrack {
-    nana_ui_core::GridTrack::MinMax { min_px, fr: 1000.0, max_px: Some(max_px) }
+    nana_ui_core::GridTrack::MinMax {
+        min_px,
+        fr: 1000.0,
+        max_px: Some(max_px),
+    }
 }
 
 /// 水平排列：子项垂直居中，宽度随内容。
@@ -184,7 +256,9 @@ pub(crate) fn row(gap: f32) -> Stack {
 
 /// 两端对齐的一行，对应 `display:flex; justify-content: space-between`。
 pub(crate) fn spread(gap: f32, align: AlignSpec) -> Stack {
-    Stack::bar(gap).align(align).justify(JustifySpec::SpaceBetween)
+    Stack::bar(gap)
+        .align(align)
+        .justify(JustifySpec::SpaceBetween)
 }
 
 /// 竖直排列，宽度占满，高度随内容。
@@ -267,10 +341,17 @@ pub(crate) fn stat(text: impl IntoProp<String>, key: impl Into<String>) -> AnyVi
 
 /// `.workspace-hints__chip`：高 28、左右 10、药丸、主背景、1px 边线、弱色 12/500。文字可以绑定；
 /// 返回元素，调用方还能再绑显隐。
-pub(crate) fn hint_chip(text: impl IntoProp<String>, key: impl Into<String>) -> El<Stack, (El<Text>,)> {
+pub(crate) fn hint_chip(
+    text: impl IntoProp<String>,
+    key: impl Into<String>,
+) -> El<Stack, (El<Text>,)> {
     let body = fixed(row(0.0), None, Some(28.0));
-    widget(rounded(pad(body, 0.0, 10.0, 0.0, 10.0), None).surface(Role::Background).outline(Role::Border, 1.0))
-        .children((bound(label(String::new(), 12.0, 500, Role::Muted), text).key(key.into()),))
+    widget(
+        rounded(pad(body, 0.0, 10.0, 0.0, 10.0), None)
+            .surface(Role::Background)
+            .outline(Role::Border, 1.0),
+    )
+    .children((bound(label(String::new(), 12.0, 500, Role::Muted), text).key(key.into()),))
 }
 
 /// `.asset-card__pill` 的四种语气。
@@ -288,12 +369,27 @@ pub(crate) enum PillTone {
 
 /// `.asset-card__pill` 的外框和字色：高 24、左右 8、药丸，底色按语气。
 pub(crate) fn pill_look(tone: PillTone) -> (Stack, Role) {
-    let body = rounded(pad(fixed(row(0.0), None, Some(24.0)), 0.0, 8.0, 0.0, 8.0), None);
+    let body = rounded(
+        pad(fixed(row(0.0), None, Some(24.0)), 0.0, 8.0, 0.0, 8.0),
+        None,
+    );
     match tone {
         PillTone::Accent => (body.surface(Role::AccentSoft), Role::Accent),
         PillTone::Ghost => (body.surface(Role::Subtle), Role::Muted),
-        PillTone::Danger => (body.painter(SoftFill::new(Soft::Danger, None)), Role::Danger),
-        PillTone::Warning => (body.painter(SoftFill::new(Soft::Alpha { role: Role::Accent, alpha: 0.14 }, None)), Role::Accent),
+        PillTone::Danger => (
+            body.painter(SoftFill::new(Soft::Danger, None)),
+            Role::Danger,
+        ),
+        PillTone::Warning => (
+            body.painter(SoftFill::new(
+                Soft::Alpha {
+                    role: Role::Accent,
+                    alpha: 0.14,
+                },
+                None,
+            )),
+            Role::Accent,
+        ),
     }
 }
 
@@ -321,7 +417,9 @@ pub(crate) fn workbench_header(
     key: &'static str,
 ) -> AnyView {
     let mut left = vec![
-        widget(eyebrow_text(eyebrow)).key(format!("{key}-eyebrow")).into_any(),
+        widget(eyebrow_text(eyebrow))
+            .key(format!("{key}-eyebrow"))
+            .into_any(),
         widget(pad(column(0.0), 4.0, 0.0, 0.0, 0.0))
             .children((widget(label(title, 24.0, 700, Role::Text)).key(format!("{key}-title")),))
             .into_any(),
@@ -329,14 +427,29 @@ pub(crate) fn workbench_header(
     if !subline.is_empty() {
         left.push(
             widget(pad(column(0.0), 8.0, 0.0, 0.0, 0.0))
-                .children((widget(wrapping(label(subline, 14.0, 400, Role::Muted))).key(format!("{key}-subline")),))
+                .children((widget(wrapping(label(subline, 14.0, 400, Role::Muted)))
+                    .key(format!("{key}-subline")),))
                 .into_any(),
         );
     }
-    let stats = widget(Stack::row(10.0).align(AlignSpec::Start).wrap(true).grow(0.0).shrink(0.0)).children(trailing);
+    let stats = widget(
+        Stack::row(10.0)
+            .align(AlignSpec::Start)
+            .wrap(true)
+            .grow(0.0)
+            .shrink(0.0),
+    )
+    .children(trailing);
     widget(spread(16.0, AlignSpec::Start))
         .children((
-            widget(Stack::column(0.0).width(LengthSpec::Shrink).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0)).children(left),
+            widget(
+                Stack::column(0.0)
+                    .width(LengthSpec::Shrink)
+                    .min_width(LengthSpec::Px(0.0))
+                    .grow(1.0)
+                    .shrink(1.0),
+            )
+            .children(left),
             stats,
         ))
         .key(format!("{key}-header"))
@@ -355,19 +468,35 @@ pub(crate) type NoticeEl = El<Stack, (El<Stack, (El<Text>,)>,)>;
 
 /// `.asset-browser__state`：外边距 16/20/0、内边距 10/12、xl 圆角、1px 边线、弱色字。
 /// 错误时换成危险色柔和底和危险色字。文字可以绑定；返回元素，调用方还能再绑显隐。
-pub(crate) fn state_notice(text: impl IntoProp<String>, error: bool, key: impl Into<String>) -> NoticeEl {
+pub(crate) fn state_notice(
+    text: impl IntoProp<String>,
+    error: bool,
+    key: impl Into<String>,
+) -> NoticeEl {
     let body = pad(row(8.0), 10.0, 12.0, 10.0, 12.0);
     let (body, color) = if error {
-        (body.painter(SoftFill::new(Soft::Danger, Some(RadiusTier::Xl)).bordered(Role::Danger, 1.0)), Role::Danger)
+        (
+            body.painter(
+                SoftFill::new(Soft::Danger, Some(RadiusTier::Xl)).bordered(Role::Danger, 1.0),
+            ),
+            Role::Danger,
+        )
     } else {
-        (body.surface(Role::Background).outline(Role::Border, 1.0).radius(RadiusTier::Xl), Role::Muted)
+        (
+            body.surface(Role::Background)
+                .outline(Role::Border, 1.0)
+                .radius(RadiusTier::Xl),
+            Role::Muted,
+        )
     };
     let body = body.with_layout(|layout| {
         layout.width = Some(LengthSpec::Shrink);
         layout.max_width = Some(LengthSpec::Fill);
     });
-    widget(pad(column(0.0), 16.0, 20.0, 0.0, 20.0).align(AlignSpec::Start))
-        .children((widget(body).children((bound(wrapping(label(String::new(), 14.0, 400, color)), text).key(key.into()),)),))
+    widget(pad(column(0.0), 16.0, 20.0, 0.0, 20.0).align(AlignSpec::Start)).children((widget(body)
+        .children(
+            (bound(wrapping(label(String::new(), 14.0, 400, color)), text).key(key.into()),),
+        ),))
 }
 
 /// 虚线空状态：标题和说明。
@@ -375,7 +504,11 @@ pub(crate) type EmptyEl = El<Stack, (El<Text>, El<Text>)>;
 
 /// `.search-workbench__empty`：虚线 `border-strong`、xl 圆角、内边距 24、`bg-subtle`，
 /// 18 号粗体标题和弱色说明竖排，间距 8，竖直居中并占满剩余高度。文字可以绑定。
-pub(crate) fn dashed_empty(title: impl IntoProp<String>, message: impl IntoProp<String>, key: &'static str) -> EmptyEl {
+pub(crate) fn dashed_empty(
+    title: impl IntoProp<String>,
+    message: impl IntoProp<String>,
+    key: &'static str,
+) -> EmptyEl {
     let frame = pad(Stack::fill_column(8.0), 24.0, 24.0, 24.0, 24.0)
         .justify(JustifySpec::Center)
         .surface(Role::Subtle)
@@ -389,7 +522,11 @@ pub(crate) fn dashed_empty(title: impl IntoProp<String>, message: impl IntoProp<
     widget(frame)
         .children((
             bound(label(String::new(), 18.0, 700, Role::Text), title).key(format!("{key}-title")),
-            bound(wrapping(label(String::new(), 14.0, 400, Role::Muted)), message).key(format!("{key}-detail")),
+            bound(
+                wrapping(label(String::new(), 14.0, 400, Role::Muted)),
+                message,
+            )
+            .key(format!("{key}-detail")),
         ))
         .key(key)
 }
@@ -439,8 +576,15 @@ pub(crate) fn native_input(input: TextInput) -> TextInput {
 ///
 /// 选中后 NanaUI 画「✓」，颜色取主题勾选框配方的选中字色（强调色上的字色），不读这里给的前景，
 /// 所以选中底用强调色，勾才看得见。Vue 是 `accent-soft` 底上强调色的 7 见方小方块，底色和形状的差异留着。
-pub(crate) fn native_checkbox(mut checkbox: nana_ui::runtime::Checkbox, size: f32) -> nana_ui::runtime::Checkbox {
-    let selected = SemanticPaint { background: Some(Role::Accent), border: Some(Role::Accent), ..SemanticPaint::default() };
+pub(crate) fn native_checkbox(
+    mut checkbox: nana_ui::runtime::Checkbox,
+    size: f32,
+) -> nana_ui::runtime::Checkbox {
+    let selected = SemanticPaint {
+        background: Some(Role::Accent),
+        border: Some(Role::Accent),
+        ..SemanticPaint::default()
+    };
     let style = &mut checkbox.style;
     style.control_height = None;
     style.background = Some(Role::Background);
@@ -465,7 +609,11 @@ pub(crate) fn native_field_style(height: f32) -> NodeStyle {
         border: Some(Role::BorderStrong),
         radius: Some(RadiusTier::Sm),
         interaction: InteractionStyle {
-            focused: SemanticPaint { background: Some(Role::Background), border: Some(Role::BorderStrong), ..SemanticPaint::default() },
+            focused: SemanticPaint {
+                background: Some(Role::Background),
+                border: Some(Role::BorderStrong),
+                ..SemanticPaint::default()
+            },
             ..InteractionStyle::default()
         },
         text_vertical_alignment: nana_ui::runtime::TextVerticalAlignment::Center,
@@ -502,7 +650,11 @@ pub(crate) enum Soft {
     /// `color-mix(in srgb, <role> N%, <base>)`。
     RoleMix { role: Role, ratio: f32, base: Role },
     /// `color-mix(in srgb, #rrggbb N%, <base>)`，Vue 写死的日志级别色。
-    RgbMix { rgb: [u8; 3], ratio: f32, base: Role },
+    RgbMix {
+        rgb: [u8; 3],
+        ratio: f32,
+        base: Role,
+    },
 }
 
 /// 柔和底色绘制器。只画自身底色和可选描边，子节点照常绘制。
@@ -516,7 +668,11 @@ pub(crate) struct SoftFill {
 
 impl SoftFill {
     pub(crate) fn new(soft: Soft, radius: Option<RadiusTier>) -> Self {
-        Self { soft, radius, border: None }
+        Self {
+            soft,
+            radius,
+            border: None,
+        }
     }
 
     /// 同时描一圈 1px 角色色边线。
@@ -528,8 +684,14 @@ impl SoftFill {
     fn resolve(&self, cx: &PaintContext<'_>) -> [f32; 4] {
         let dark = crate::theme_map::is_dark(cx.theme_appearance());
         match self.soft {
-            Soft::Success => cx.color(SemanticColorMix::alpha(Role::Success, if dark { 0.14 } else { 0.10 })),
-            Soft::Danger => cx.color(SemanticColorMix::alpha(Role::Danger, if dark { 0.14 } else { 0.10 })),
+            Soft::Success => cx.color(SemanticColorMix::alpha(
+                Role::Success,
+                if dark { 0.14 } else { 0.10 },
+            )),
+            Soft::Danger => cx.color(SemanticColorMix::alpha(
+                Role::Danger,
+                if dark { 0.14 } else { 0.10 },
+            )),
             Soft::Alpha { role, alpha } => cx.color(SemanticColorMix::alpha(role, alpha)),
             Soft::RoleMix { role, ratio, base } => mix(cx.color(role), cx.color(base), ratio),
             Soft::RgbMix { rgb, ratio, base } => mix(rgba(rgb), cx.color(base), ratio),
@@ -545,7 +707,12 @@ fn mix(first: [f32; 4], second: [f32; 4], ratio: f32) -> [f32; 4] {
         return [0.0; 4];
     }
     let channel = |a: f32, b: f32| (a * first[3] * ratio + b * second[3] * (1.0 - ratio)) / alpha;
-    [channel(first[0], second[0]), channel(first[1], second[1]), channel(first[2], second[2]), alpha]
+    [
+        channel(first[0], second[0]),
+        channel(first[1], second[1]),
+        channel(first[2], second[2]),
+        alpha,
+    ]
 }
 
 impl Painter for SoftFill {

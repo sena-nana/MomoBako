@@ -8,8 +8,8 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use nana_ui::runtime::{
-    Gradient, LayoutBox, LengthSpec, PaintContext, Painter, RadiusTier, SemanticColorRole, Stack, Text,
-    TextHorizontalAlignment,
+    Gradient, LayoutBox, LengthSpec, PaintContext, Painter, RadiusTier, SemanticColorRole, Stack,
+    Text, TextHorizontalAlignment,
 };
 use nana_ui_core::{BoxShadowSpec, Icon, ThemeAppearance};
 
@@ -17,8 +17,18 @@ use nana_ui_core::{BoxShadowSpec, Icon, ThemeAppearance};
 const LINE_BODY: f32 = 1.55;
 
 /// 一段文字。行高按 CSS 的倍数折成像素，和 Vue 计算样式一致。
-pub(crate) fn text(label: impl Into<String>, size: f32, weight: u16, role: SemanticColorRole, line_height: f32) -> Text {
-    Text::new(label.into()).font_size(size).font_weight(weight).color(role).line_height(line_height)
+pub(crate) fn text(
+    label: impl Into<String>,
+    size: f32,
+    weight: u16,
+    role: SemanticColorRole,
+    line_height: f32,
+) -> Text {
+    Text::new(label.into())
+        .font_size(size)
+        .font_weight(weight)
+        .color(role)
+        .line_height(line_height)
 }
 
 /// 正文：14px、400、主文本色，行高 21.7。
@@ -47,12 +57,24 @@ pub(crate) fn eyebrow(label: impl Into<String>) -> Text {
 
 /// 详情标题 `files-detail__section h2`：18px、700，行高 27.9。
 pub(crate) fn heading(label: impl Into<String>) -> Text {
-    wrapping(text(label, 18.0, 700, SemanticColorRole::Text, 18.0 * LINE_BODY))
+    wrapping(text(
+        label,
+        18.0,
+        700,
+        SemanticColorRole::Text,
+        18.0 * LINE_BODY,
+    ))
 }
 
 /// `files-detail__subline`：14px 弱化色，长路径按列宽断行。
 pub(crate) fn subline(label: impl Into<String>) -> Text {
-    wrapping(text(label, 14.0, 400, SemanticColorRole::Muted, 14.0 * LINE_BODY))
+    wrapping(text(
+        label,
+        14.0,
+        400,
+        SemanticColorRole::Muted,
+        14.0 * LINE_BODY,
+    ))
 }
 
 /// 值文本 `asset-meta__value`：14px 主文本色，长值按列宽断行。
@@ -83,7 +105,9 @@ pub(crate) fn centered(mut node: Text) -> Text {
 
 /// `asset-meta__row`：标签在上、值在下，间距 6；除第一行外上边一条 1px 分隔，上内边距 12。
 pub(crate) fn meta_row(first: bool) -> Stack {
-    let row = Stack::column(6.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0));
+    let row = Stack::column(6.0)
+        .width(LengthSpec::Fill)
+        .min_width(LengthSpec::Px(0.0));
     if first { row } else { top_rule(row, 12.0) }
 }
 
@@ -166,7 +190,11 @@ impl ButtonLook {
 }
 
 /// 按 [`ButtonLook`] 画的按钮。禁用时只把字压成最弱色，不加底和边。
-pub(crate) fn styled_button(label: impl Into<String>, icon: Option<Icon>, look: ButtonLook) -> nana_ui::runtime::Button {
+pub(crate) fn styled_button(
+    label: impl Into<String>,
+    icon: Option<Icon>,
+    look: ButtonLook,
+) -> nana_ui::runtime::Button {
     let mut button = nana_ui::runtime::Button::new(label);
     if let Some(icon) = icon {
         button = button.icon(icon).icon_size(look.icon_size);
@@ -180,8 +208,14 @@ pub(crate) fn styled_button(label: impl Into<String>, icon: Option<Icon>, look: 
     style.control_height = None;
     style.control_padding_x = None;
     style.control_padding_y = None;
-    style.interaction.hovered = nana_ui::runtime::SemanticPaint { background: look.hover.or(look.background), ..Default::default() };
-    style.interaction.pressed = nana_ui::runtime::SemanticPaint { background: look.hover.or(look.background), ..Default::default() };
+    style.interaction.hovered = nana_ui::runtime::SemanticPaint {
+        background: look.hover.or(look.background),
+        ..Default::default()
+    };
+    style.interaction.pressed = nana_ui::runtime::SemanticPaint {
+        background: look.hover.or(look.background),
+        ..Default::default()
+    };
     style.interaction.disabled = nana_ui::runtime::SemanticPaint {
         foreground: Some(SemanticColorRole::Faint),
         background: look.background,
@@ -196,7 +230,9 @@ pub(crate) fn styled_button(label: impl Into<String>, icon: Option<Icon>, look: 
     layout.padding_bottom = Some(LengthSpec::Px(0.0));
     layout.font_size = Some(look.font_size);
     layout.font_weight = Some(look.weight);
-    layout.line_height = Some(nana_ui_core::LineHeightSpec::Absolute(look.font_size * LINE_BODY));
+    layout.line_height = Some(nana_ui_core::LineHeightSpec::Absolute(
+        look.font_size * LINE_BODY,
+    ));
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
     button.style(style)
@@ -238,10 +274,19 @@ fn folder_gradient(bounds: LayoutBox) -> Gradient {
     let angle = 135f32.to_radians();
     let (sin, cos) = angle.sin_cos();
     let half = (bounds.width * sin.abs() + bounds.height * cos.abs()) / 2.0;
-    let center = [bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0];
+    let center = [
+        bounds.x + bounds.width / 2.0,
+        bounds.y + bounds.height / 2.0,
+    ];
     let direction = [sin, -cos];
-    let start = [center[0] - direction[0] * half, center[1] - direction[1] * half];
-    let end = [center[0] + direction[0] * half, center[1] + direction[1] * half];
+    let start = [
+        center[0] - direction[0] * half,
+        center[1] - direction[1] * half,
+    ];
+    let end = [
+        center[0] + direction[0] * half,
+        center[1] + direction[1] * half,
+    ];
     Gradient::linear(start, end)
         .stop(0.0, [199.0 / 255.0, 165.0 / 255.0, 102.0 / 255.0, 1.0])
         .stop(1.0, [115.0 / 255.0, 85.0 / 255.0, 47.0 / 255.0, 1.0])
@@ -257,7 +302,11 @@ impl Painter for PreviewPainter {
                 cx.rounded_rect(bounds, radius, nana_ui::runtime::BoxPaint::fill(fill));
             }
             Tone::Folder => {
-                cx.rounded_rect(bounds, radius, nana_ui::runtime::BoxPaint::fill(folder_gradient(bounds)));
+                cx.rounded_rect(
+                    bounds,
+                    radius,
+                    nana_ui::runtime::BoxPaint::fill(folder_gradient(bounds)),
+                );
             }
         }
         if let Some(icon) = self.icon {
@@ -288,7 +337,11 @@ pub(crate) fn hex_rgba(hex: &str) -> Option<[f32; 4]> {
     if digits.len() != 6 || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
         return None;
     }
-    let channel = |index: usize| u8::from_str_radix(&digits[index..index + 2], 16).ok().map(|value| f32::from(value) / 255.0);
+    let channel = |index: usize| {
+        u8::from_str_radix(&digits[index..index + 2], 16)
+            .ok()
+            .map(|value| f32::from(value) / 255.0)
+    };
     Some([channel(0)?, channel(2)?, channel(4)?, 1.0])
 }
 
@@ -317,7 +370,10 @@ mod tests {
     #[test]
     fn hex_colors_parse_only_full_rgb() {
         assert_eq!(hex_rgba("#ff0000"), Some([1.0, 0.0, 0.0, 1.0]));
-        assert_eq!(hex_rgba("#C7A566").map(|rgba| (rgba[0] * 255.0).round() as u8), Some(199));
+        assert_eq!(
+            hex_rgba("#C7A566").map(|rgba| (rgba[0] * 255.0).round() as u8),
+            Some(199)
+        );
         assert_eq!(hex_rgba("ff0000"), None);
         assert_eq!(hex_rgba("#fff"), None);
         assert_eq!(hex_rgba("#gg0000"), None);
@@ -325,11 +381,19 @@ mod tests {
 
     #[test]
     fn folder_gradient_runs_from_top_left_to_bottom_right() {
-        let gradient = folder_gradient(LayoutBox { x: 0.0, y: 0.0, width: 130.0, height: 112.0 });
+        let gradient = folder_gradient(LayoutBox {
+            x: 0.0,
+            y: 0.0,
+            width: 130.0,
+            height: 112.0,
+        });
         let nana_ui::runtime::GradientShape::Linear { start, end } = gradient.shape else {
             panic!("文件夹底色应是线性渐变");
         };
-        assert!(start[0] < end[0] && start[1] < end[1], "135° 从左上到右下：{start:?} → {end:?}");
+        assert!(
+            start[0] < end[0] && start[1] < end[1],
+            "135° 从左上到右下：{start:?} → {end:?}"
+        );
         let length = ((end[0] - start[0]).powi(2) + (end[1] - start[1]).powi(2)).sqrt();
         assert!((length - (130.0 + 112.0) * std::f32::consts::FRAC_1_SQRT_2).abs() < 0.01);
     }

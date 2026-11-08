@@ -29,7 +29,11 @@ pub fn begin(model: &mut ShellViewModel, repo_id: String, path: String, kind: St
         note(model, "自定义缩略图缺少仓库或路径。");
         return;
     }
-    model.input.pending_thumbnail = Some(PendingThumbnail { repo_id, path, kind });
+    model.input.pending_thumbnail = Some(PendingThumbnail {
+        repo_id,
+        path,
+        kind,
+    });
     model.input.queue_thumbnail_dialog();
 }
 
@@ -40,7 +44,8 @@ pub fn paste(model: &mut ShellViewModel, repo_id: String, path: String, kind: St
         note(model, "自定义缩略图缺少仓库或路径。");
         return;
     }
-    let Some(text) = host_bridge::read_clipboard_text().filter(|text| !text.trim().is_empty()) else {
+    let Some(text) = host_bridge::read_clipboard_text().filter(|text| !text.trim().is_empty())
+    else {
         eprintln!("Nana 剪贴板没有可用于缩略图的文本");
         note(model, "剪贴板里没有图片路径或图片数据。");
         return;
@@ -81,11 +86,21 @@ pub fn complete(model: &mut ShellViewModel, paths: &[String], failed: Option<Str
         note(model, &format!("自定义缩略图选择失败：{error}"));
         return true;
     }
-    let Some(path) = paths.iter().map(|item| item.trim()).find(|item| !item.is_empty()) else {
+    let Some(path) = paths
+        .iter()
+        .map(|item| item.trim())
+        .find(|item| !item.is_empty())
+    else {
         eprintln!("Nana 取消自定义缩略图选择");
         return true;
     };
-    queue_save(model, pending.repo_id, pending.path, pending.kind, ThumbnailSource::Path(path.to_string()));
+    queue_save(
+        model,
+        pending.repo_id,
+        pending.path,
+        pending.kind,
+        ThumbnailSource::Path(path.to_string()),
+    );
     true
 }
 
@@ -100,7 +115,9 @@ pub fn parse_clipboard(text: &str) -> Result<ThumbnailSource, String> {
     }
     let path = text.strip_prefix("file://").unwrap_or(text).trim();
     let lower = path.to_ascii_lowercase();
-    let image = ["png", "jpg", "jpeg", "webp", "bmp"].iter().any(|ext| lower.ends_with(&format!(".{ext}")));
+    let image = ["png", "jpg", "jpeg", "webp", "bmp"]
+        .iter()
+        .any(|ext| lower.ends_with(&format!(".{ext}")));
     if image {
         return Ok(ThumbnailSource::Path(path.to_string()));
     }
@@ -117,7 +134,10 @@ fn parse_data_url(text: &str) -> Option<ThumbnailSource> {
     if bytes.is_empty() {
         return None;
     }
-    Some(ThumbnailSource::Bytes { bytes, media_type: format!("image/{media}") })
+    Some(ThumbnailSource::Bytes {
+        bytes,
+        media_type: format!("image/{media}"),
+    })
 }
 
 /// 标准 base64。只给剪贴板的 data URL 用，不引入新的图片解码器。
@@ -132,7 +152,10 @@ fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
             _ => None,
         }
     }
-    let bytes: Vec<u8> = input.bytes().filter(|byte| !byte.is_ascii_whitespace()).collect();
+    let bytes: Vec<u8> = input
+        .bytes()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .collect();
     if bytes.is_empty() || bytes.len() % 4 != 0 {
         return Err("base64 长度无效".into());
     }
@@ -160,10 +183,19 @@ fn decode_base64(input: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-fn queue_save(model: &mut ShellViewModel, repo_id: String, path: String, kind: String, source: ThumbnailSource) {
+fn queue_save(
+    model: &mut ShellViewModel,
+    repo_id: String,
+    path: String,
+    kind: String,
+    source: ThumbnailSource,
+) {
     let (source_path, image_bytes) = match source {
         ThumbnailSource::Path(path) => (Some(path), None),
-        ThumbnailSource::Bytes { bytes, media_type: _ } => (None, Some(bytes)),
+        ThumbnailSource::Bytes {
+            bytes,
+            media_type: _,
+        } => (None, Some(bytes)),
     };
     model.files.queue_thumbnail(FilesEffect::MutateThumbnail {
         repo_id,

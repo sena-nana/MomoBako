@@ -8,10 +8,17 @@
 #[path = "video_preview.rs"]
 mod video_preview;
 pub(crate) use video_preview::VideoFrame;
+
+/// 包内预览：只接受纯 Rust 能解的未压缩 AVI，返回画面。不是这类返回 `Ok(None)`。不返回 PCM。
+pub(super) fn uncompressed_avi_frames(bytes: &[u8]) -> Result<Option<Vec<VideoFrame>>, String> {
+    video_preview::uncompressed_avi_frames(bytes)
+}
 #[cfg(test)]
 pub(super) fn sample_uncompressed() -> Vec<u8> {
     video_preview::sample_uncompressed()
 }
+
+use std::collections::BTreeMap;
 
 use serde_json::Value;
 
@@ -24,9 +31,50 @@ const TEXT_BYTE_LIMIT: usize = 768 * 1024;
 const IMAGE_EXTENSIONS: &[&str] = &["png", "jpg", "jpeg", "webp", "gif", "bmp", "avif", "svg"];
 const MARKDOWN_EXTENSIONS: &[&str] = &["md", "markdown", "mdown", "mkd", "mkdn", "mdx"];
 const TEXT_EXTENSIONS: &[&str] = &[
-    "txt", "text", "log", "csv", "tsv", "json", "jsonl", "yaml", "yml", "toml", "xml", "html", "css", "scss", "sass",
-    "less", "js", "jsx", "ts", "tsx", "vue", "rs", "py", "rb", "go", "java", "c", "h", "cpp", "hpp", "cs", "php", "sh",
-    "bash", "zsh", "ps1", "bat", "cmd", "ini", "cfg", "conf", "env", "gitignore", "gitattributes",
+    "txt",
+    "text",
+    "log",
+    "csv",
+    "tsv",
+    "json",
+    "jsonl",
+    "yaml",
+    "yml",
+    "toml",
+    "xml",
+    "html",
+    "css",
+    "scss",
+    "sass",
+    "less",
+    "js",
+    "jsx",
+    "ts",
+    "tsx",
+    "vue",
+    "rs",
+    "py",
+    "rb",
+    "go",
+    "java",
+    "c",
+    "h",
+    "cpp",
+    "hpp",
+    "cs",
+    "php",
+    "sh",
+    "bash",
+    "zsh",
+    "ps1",
+    "bat",
+    "cmd",
+    "ini",
+    "cfg",
+    "conf",
+    "env",
+    "gitignore",
+    "gitattributes",
 ];
 const VIDEO_EXTENSIONS: &[&str] = &["mp4", "mov", "mkv", "webm", "avi", "m4v"];
 const AUDIO_EXTENSIONS: &[&str] = &["mp3", "wav", "ogg", "flac", "m4a", "aac", "opus"];
@@ -43,11 +91,16 @@ pub fn classify(extension: &str) -> PreviewKind {
     if TEXT_EXTENSIONS.contains(&extension.as_str()) {
         return PreviewKind::Text;
     }
-    if VIDEO_EXTENSIONS.contains(&extension.as_str()) || AUDIO_EXTENSIONS.contains(&extension.as_str()) {
+    if VIDEO_EXTENSIONS.contains(&extension.as_str())
+        || AUDIO_EXTENSIONS.contains(&extension.as_str())
+    {
         return PreviewKind::Media;
     }
     if let Some((view_id, label)) = super::native_preview::builtin_view(&extension) {
-        return PreviewKind::Native { view_id: view_id.to_string(), label: label.to_string() };
+        return PreviewKind::Native {
+            view_id: view_id.to_string(),
+            label: label.to_string(),
+        };
     }
     PreviewKind::Unsupported
 }
@@ -65,7 +118,10 @@ pub struct PreviewText {
 pub fn prepare_text(bytes: &[u8]) -> PreviewText {
     let truncated = bytes.len() > TEXT_BYTE_LIMIT;
     let shown = &bytes[..bytes.len().min(TEXT_BYTE_LIMIT)];
-    PreviewText { text: decode_text(shown, truncated), truncated_at: truncated.then_some(shown.len() as u64) }
+    PreviewText {
+        text: decode_text(shown, truncated),
+        truncated_at: truncated.then_some(shown.len() as u64),
+    }
 }
 
 /// 按 BOM 选编码：EF BB BF 是 UTF-8，FF FE / FE FF 是 UTF-16 小端 / 大端，没有 BOM 按 UTF-8。
@@ -83,14 +139,20 @@ fn decode_text(bytes: &[u8], truncated: bool) -> String {
 }
 
 fn utf8_text(bytes: &[u8], truncated: bool) -> String {
-    let bytes = if truncated { trim_partial_utf8(bytes) } else { bytes };
+    let bytes = if truncated {
+        trim_partial_utf8(bytes)
+    } else {
+        bytes
+    };
     String::from_utf8_lossy(bytes).into_owned()
 }
 
 /// UTF-16 两字节一个码元；截断留下的单个尾字节丢掉，坏的代理对换成替换符。
 fn utf16_text(bytes: &[u8], unit: fn([u8; 2]) -> u16) -> String {
     let units = bytes.chunks_exact(2).map(|pair| unit([pair[0], pair[1]]));
-    char::decode_utf16(units).map(|item| item.unwrap_or(char::REPLACEMENT_CHARACTER)).collect()
+    char::decode_utf16(units)
+        .map(|item| item.unwrap_or(char::REPLACEMENT_CHARACTER))
+        .collect()
 }
 
 /// 算法：从末尾往前最多看 3 个字节，找到最后一个字符的首字节，按首字节算出该字符应有的长度；
@@ -108,7 +170,11 @@ fn trim_partial_utf8(bytes: &[u8]) -> &[u8] {
             0xf0..=0xf7 => 4,
             _ => 1,
         };
-        return if bytes.len() - start < width { &bytes[..start] } else { bytes };
+        return if bytes.len() - start < width {
+            &bytes[..start]
+        } else {
+            bytes
+        };
     }
     bytes
 }
@@ -119,6 +185,8 @@ pub(super) fn begin_media(state: &mut super::InspectState, repo_id: &str, path: 
     state.body = super::PreviewBody::Empty;
     state.error.clear();
     state.media_retry = false;
+    state.lyrics.clear();
+    state.lyrics_pending = false;
     state.effects.push(super::InspectEffect::LoadMedia {
         repo_id: repo_id.to_string(),
         path: path.to_string(),
@@ -135,7 +203,7 @@ pub(super) fn note_media(
     generation: u64,
     result: Result<PlaybackSessionState, String>,
     frames: Option<Vec<VideoFrame>>,
-    retryable: bool,
+    prep: &super::super::SourcePrep,
 ) {
     if generation != state.generation || state.target_path.as_deref() != Some(path.as_str()) {
         eprintln!("Nana 忽略过期的音视频预览：{path}");
@@ -147,17 +215,111 @@ pub(super) fn note_media(
             state.error.clear();
             state.media_retry = false;
             super::bridge::install_video(state, frames);
+            // Vue `loadLyrics` 在播放源就绪、舞台已经画出来以后才读歌词。读的时候先写「读取歌词...」。
+            if prep.lyrics_pending {
+                state.lyrics.clear();
+                state.lyrics_pending = true;
+                let repo_id = state.repo_id.clone().unwrap_or_default();
+                state.effects.push(super::InspectEffect::LoadLyrics {
+                    repo_id,
+                    audio_path: path.clone(),
+                    generation,
+                    lyric_path: prep.lyric_path.clone(),
+                });
+            } else {
+                state.lyrics_pending = false;
+                state.lyrics = super::super::inspect_lyrics::parse_lrc(&prep.lyric_text);
+            }
             state.body = super::PreviewBody::Media(session);
         }
         Err(error) => {
             eprintln!("Nana 音视频预览失败：{error}");
             super::bridge::install_video(state, None);
+            state.lyrics.clear();
+            state.lyrics_pending = false;
             let repo_id = state.repo_id.clone().unwrap_or_default();
             state.body = super::PreviewBody::Media(failed_session(&repo_id, error.clone()));
             state.error = error;
-            state.media_retry = retryable;
+            state.media_retry = prep.retryable;
         }
     }
+}
+
+/// 预览内容读好以后要记的访问（Vue 的预览插件都先 `preparePreviewFileSource` / 准备播放源，再发
+/// `emitRepositoryEntryAccess`）。
+pub(super) enum PreviewAccess {
+    None,
+    /// 在线条目的播放源准备好了，后端已经写下访问时间：当场改「最近使用」。结果过期了也改。
+    Recorded {
+        repo_id: String,
+        path: String,
+        at: String,
+    },
+    /// 当前预览的本地文件读好了字节，后端没有经手：排一次访问记录。
+    Record {
+        path: String,
+    },
+}
+
+/// 在归约消费消息之前看出这次读取要记的访问。只有读的正是当前预览（代次和文件都对得上）、读成功了才记本地文件；
+/// 图片的预览源由 `PreviewPixelsLoaded` 在壳层记。
+pub(super) fn preview_access(
+    state: &super::InspectState,
+    message: &super::InspectMessage,
+) -> PreviewAccess {
+    let current = |path: &str, generation: u64| {
+        generation == state.generation && state.target_path.as_deref() == Some(path)
+    };
+    match message {
+        super::InspectMessage::MediaLoaded {
+            prep:
+                super::super::SourcePrep {
+                    accessed: Some(access),
+                    ..
+                },
+            ..
+        } => PreviewAccess::Recorded {
+            repo_id: access.repo_id.clone(),
+            path: access.path.clone(),
+            at: access.at.clone(),
+        },
+        super::InspectMessage::MediaLoaded {
+            path,
+            generation,
+            result: Ok(_),
+            ..
+        } if current(path, *generation) && !state.virtual_asset => {
+            PreviewAccess::Record { path: path.clone() }
+        }
+        super::InspectMessage::BodyLoaded {
+            path,
+            generation,
+            result: Ok(_),
+            ..
+        }
+        | super::InspectMessage::NativeLoaded {
+            path,
+            generation,
+            result: Ok(_),
+        } if current(path, *generation) => PreviewAccess::Record { path: path.clone() },
+        _ => PreviewAccess::None,
+    }
+}
+
+/// 歌词文件读完。代次或路径对不上就丢掉，正在读的那一份继续留着。
+/// 空正文把「读取歌词...」换成「暂无歌词」，不编造歌词。
+pub(super) fn note_lyrics(
+    state: &mut super::InspectState,
+    path: String,
+    generation: u64,
+    text: String,
+) {
+    if generation != state.generation || state.target_path.as_deref() != Some(path.as_str()) {
+        eprintln!("Nana 忽略过期的歌词：{path}");
+        return;
+    }
+    state.lyrics_pending = false;
+    state.lyrics = super::super::inspect_lyrics::parse_lrc(&text);
 }
 
 /// 预览框里的「重试」：在线条目的播放源准备失败以后，换一个代次重新准备，上一次晚到的结果丢掉。
@@ -185,7 +347,10 @@ pub struct MediaParts {
 
 /// WAV 优先。失败后再试 mp3、flac、ogg/Vorbis，然后解视频容器。没有画面的 m4a、aac、opus 走媒体基础音轨。认不出的字节仍是没有解码器。
 #[cfg(test)]
-pub(crate) fn preview_media_session(repo_id: &str, bytes: &[u8]) -> Result<PlaybackSessionState, String> {
+pub(crate) fn preview_media_session(
+    repo_id: &str,
+    bytes: &[u8],
+) -> Result<PlaybackSessionState, String> {
     preview_media_parts(repo_id, bytes).map(|parts| parts.session)
 }
 
@@ -194,10 +359,18 @@ pub(crate) fn preview_media_parts(repo_id: &str, bytes: &[u8]) -> Result<MediaPa
     match crate::shell::player::pcm_from_bytes(bytes) {
         Ok(pcm) => {
             let duration = pcm.duration_ms;
-            Ok(MediaParts { session: paused_audio_session(repo_id, duration), pcm: Some(pcm), frames: None })
+            Ok(MediaParts {
+                session: paused_audio_session(repo_id, duration),
+                pcm: Some(pcm),
+                frames: None,
+            })
         }
         Err(_) => match video_preview::open_clip(repo_id, bytes) {
-            Ok((session, pcm, frames)) => Ok(MediaParts { session, pcm, frames: Some(frames) }),
+            Ok((session, pcm, frames)) => Ok(MediaParts {
+                session,
+                pcm,
+                frames: Some(frames),
+            }),
             Err(error) => {
                 eprintln!("Nana 视频预览失败：{error}");
                 Err(error)
@@ -247,11 +420,17 @@ pub(super) fn extension_of(extension: &str, filename: &str) -> String {
     if !extension.is_empty() {
         return extension;
     }
-    filename.rsplit_once('.').map(|(_, suffix)| normalize_extension(suffix)).unwrap_or_default()
+    filename
+        .rsplit_once('.')
+        .map(|(_, suffix)| normalize_extension(suffix))
+        .unwrap_or_default()
 }
 
 fn normalize_extension(extension: &str) -> String {
-    extension.trim().trim_start_matches('.').to_ascii_lowercase()
+    extension
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase()
 }
 
 /// 扩展名是不是视频容器（Vue `isVideoExtension`）。音视频预览失败时按它选标题。
@@ -260,14 +439,22 @@ pub(crate) fn is_video_extension(extension: &str) -> bool {
 }
 
 pub(super) fn metadata_string(metadata: &[MetadataEntry], key: &str) -> Option<String> {
-    metadata.iter().find(|entry| entry.key == key).and_then(|entry| entry.value.as_str().map(str::to_string))
+    metadata
+        .iter()
+        .find(|entry| entry.key == key)
+        .and_then(|entry| entry.value.as_str().map(str::to_string))
 }
 
 pub(super) fn metadata_rating(metadata: &[MetadataEntry]) -> i64 {
     metadata
         .iter()
         .find(|entry| entry.key == "rating")
-        .and_then(|entry| entry.value.as_i64().or_else(|| entry.value.as_f64().map(|value| value.round() as i64)))
+        .and_then(|entry| {
+            entry
+                .value
+                .as_i64()
+                .or_else(|| entry.value.as_f64().map(|value| value.round() as i64))
+        })
         .map(|value| value.clamp(0, 5))
         .unwrap_or(0)
 }
@@ -276,25 +463,106 @@ pub(super) fn metadata_rating(metadata: &[MetadataEntry]) -> i64 {
 /// `{ label, tags }` 取它 `tags` 里的字符串，`tags` 里没有字符串时取 `label`。去空白、去重，保持原顺序。
 /// 不是数组时返回 `None`，由调用方退回索引标签。
 pub(super) fn metadata_tags(metadata: &[MetadataEntry]) -> Option<Vec<String>> {
-    let value = metadata.iter().find(|entry| entry.key == "tagGroups")?.value.as_array()?;
-    let mut tags: Vec<String> = Vec::new();
-    for item in value {
+    let value = metadata
+        .iter()
+        .find(|entry| entry.key == "tagGroups")?
+        .value
+        .as_array()?;
+    Some(flatten_tag_groups(value))
+}
+
+/// Vue `FileMetadataEditor` 的 `sourcePayload`，从预览条目的元数据取出四个输入。
+///
+/// 评分不是有限数字时是 0。`comment` 是空字符串时用 `note`，不去掉首尾空白。
+/// `tagGroups` 不是数组时是空列表，不退回索引标签。
+pub(super) fn preview_entry_editor(
+    metadata: &BTreeMap<String, Value>,
+) -> (i64, String, String, Vec<String>) {
+    let comment = json_string(metadata, "comment");
+    let comment = if comment.is_empty() {
+        json_string(metadata, "note")
+    } else {
+        comment
+    };
+    let tags = match metadata.get("tagGroups") {
+        Some(Value::Array(items)) => flatten_tag_groups(items),
+        _ => Vec::new(),
+    };
+    (
+        preview_rating(metadata),
+        comment,
+        json_string(metadata, "link"),
+        tags,
+    )
+}
+
+/// 预览页打开、且草稿还没改过时，用列表条目盖住编辑器的四个输入。正在输入时不动。
+pub(crate) fn adopt_preview_entry(
+    state: &mut super::InspectState,
+    metadata: &BTreeMap<String, Value>,
+) {
+    if state.dirty() {
+        return;
+    }
+    let (rating, comment, link, tags) = preview_entry_editor(metadata);
+    state.draft.rating = rating;
+    state.baseline.rating = rating;
+    state.draft.comment = comment.clone();
+    state.baseline.comment = comment;
+    state.draft.link = link.clone();
+    state.baseline.link = link;
+    state.draft.tags = tags.clone();
+    state.baseline.tags = tags;
+}
+
+fn json_string(metadata: &BTreeMap<String, Value>, key: &str) -> String {
+    metadata
+        .get(key)
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Vue `metadataNumber`：只有有限数字才四舍五入并夹到 0–5。
+fn preview_rating(metadata: &BTreeMap<String, Value>) -> i64 {
+    let Some(Value::Number(number)) = metadata.get("rating") else {
+        return 0;
+    };
+    let Some(value) = number.as_f64().filter(|value| value.is_finite()) else {
+        return 0;
+    };
+    (value.round() as i64).clamp(0, 5)
+}
+
+fn flatten_tag_groups(items: &[Value]) -> Vec<String> {
+    let mut tags = Vec::new();
+    for item in items {
         for tag in tag_group_item(item) {
-            if !tags.iter().any(|existing| *existing == tag) {
+            if !tags.iter().any(|existing| existing == &tag) {
                 tags.push(tag);
             }
         }
     }
-    Some(tags)
+    tags
 }
 
 /// `tagGroups` 的一项展平出来的标签。认不出的项（数字、空对象）记日志后不出标签。
 fn tag_group_item(item: &Value) -> Vec<String> {
-    let trimmed = |value: &Value| value.as_str().map(str::trim).filter(|text| !text.is_empty()).map(str::to_string);
+    let trimmed = |value: &Value| {
+        value
+            .as_str()
+            .map(str::trim)
+            .filter(|text| !text.is_empty())
+            .map(str::to_string)
+    };
     match item {
         Value::String(_) => trimmed(item).into_iter().collect(),
         Value::Object(group) => {
-            let nested = group.get("tags").and_then(Value::as_array).map(|tags| tags.iter().filter_map(trimmed).collect::<Vec<_>>()).unwrap_or_default();
+            let nested = group
+                .get("tags")
+                .and_then(Value::as_array)
+                .map(|tags| tags.iter().filter_map(trimmed).collect::<Vec<_>>())
+                .unwrap_or_default();
             if !nested.is_empty() {
                 return nested;
             }
@@ -319,8 +587,17 @@ pub(in crate::shell) fn display_value(value: &Value) -> String {
         Value::String(text) => text.trim().to_string(),
         Value::Number(number) => number.to_string(),
         Value::Bool(flag) => flag.to_string(),
-        Value::Array(items) if items.iter().all(|item| !item.is_array() && !item.is_object()) => {
-            items.iter().map(display_value).filter(|text| !text.is_empty()).collect::<Vec<_>>().join("，")
+        Value::Array(items)
+            if items
+                .iter()
+                .all(|item| !item.is_array() && !item.is_object()) =>
+        {
+            items
+                .iter()
+                .map(display_value)
+                .filter(|text| !text.is_empty())
+                .collect::<Vec<_>>()
+                .join("，")
         }
         other => other.to_string(),
     }
@@ -337,7 +614,11 @@ pub(super) fn fill_recorded_facts(facts: &mut super::FileFacts, metadata: &[Meta
 }
 
 fn metadata_u32(metadata: &[MetadataEntry], key: &str) -> u32 {
-    let Some(value) = metadata.iter().find(|entry| entry.key == key).map(|entry| &entry.value) else {
+    let Some(value) = metadata
+        .iter()
+        .find(|entry| entry.key == key)
+        .map(|entry| &entry.value)
+    else {
         return 0;
     };
     let number = match value {
@@ -346,7 +627,9 @@ fn metadata_u32(metadata: &[MetadataEntry], key: &str) -> u32 {
         _ => None,
     };
     match number {
-        Some(number) if number.is_finite() && number > 0.0 && number <= u32::MAX as f64 => number.round() as u32,
+        Some(number) if number.is_finite() && number > 0.0 && number <= u32::MAX as f64 => {
+            number.round() as u32
+        }
         _ => {
             eprintln!("Nana 元数据尺寸不是正数：{key}");
             0
@@ -355,7 +638,10 @@ fn metadata_u32(metadata: &[MetadataEntry], key: &str) -> u32 {
 }
 
 fn metadata_f64(metadata: &[MetadataEntry], key: &str) -> Option<f64> {
-    let value = metadata.iter().find(|entry| entry.key == key).map(|entry| &entry.value)?;
+    let value = metadata
+        .iter()
+        .find(|entry| entry.key == key)
+        .map(|entry| &entry.value)?;
     let number = match value {
         Value::Number(number) => number.as_f64(),
         Value::String(text) => text.trim().parse::<f64>().ok(),

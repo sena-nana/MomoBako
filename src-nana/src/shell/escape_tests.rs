@@ -4,7 +4,7 @@
 //! 按钮，或标题栏搜索框），两种做法关掉的是同一层。控件自己处理掉的 Escape（下拉框收起选项）
 //! 不再关别的层。最后一个用例是新做法的行为：焦点不在按钮或输入框上时也照样关。
 
-use nana_ui::runtime::{component_descriptors, Entity, Select, StableNodeId};
+use nana_ui::runtime::{Entity, Select, StableNodeId, component_descriptors};
 
 use crate::shell::view_harness::ShellHarness;
 use crate::shell::{AdminMessage, GapMessage, ShellMessage, ShellViewModel, SidebarMessage};
@@ -27,16 +27,28 @@ fn escape_from_input(harness: &mut ShellHarness, label: &str) {
 #[test]
 fn escape_closes_a_dialog_from_its_own_input() {
     let cases: [(&str, &str, fn(&ShellViewModel) -> bool); 3] = [
-        ("folder-create-dialog", "文件夹名称", |model| model.sidebar.folder_dialog.open),
-        ("smart-folder-dialog", "名称", |model| model.sidebar.smart_draft.open),
-        ("playlist-create-dialog", "名称", |model| model.playlist_dialog_open),
+        ("folder-create-dialog", "文件夹名称", |model| {
+            model.sidebar.folder_dialog.open
+        }),
+        ("smart-folder-dialog", "名称", |model| {
+            model.sidebar.smart_draft.open
+        }),
+        ("playlist-create-dialog", "名称", |model| {
+            model.playlist_dialog_open
+        }),
     ];
     for (name, field, open) in cases {
         let mut harness = ShellHarness::mount(scene(name));
-        assert!(open(&harness.model) && harness.content_roots().0.is_some(), "{name} 应该开着对话框");
+        assert!(
+            open(&harness.model) && harness.content_roots().0.is_some(),
+            "{name} 应该开着对话框"
+        );
         escape_from_input(&mut harness, field);
         assert!(!open(&harness.model), "{name}：Escape 应该关掉对话框");
-        assert!(harness.content_roots().0.is_none(), "{name}：关掉后浮层槽位应该空着");
+        assert!(
+            harness.content_roots().0.is_none(),
+            "{name}：关掉后浮层槽位应该空着"
+        );
         harness.assert_same_as_fresh_mount();
     }
 }
@@ -49,7 +61,10 @@ fn escape_closes_the_repository_delete_dialog_unless_deleting() {
     harness.sync();
     harness.flush();
     assert!(!harness.press_escape(), "删除进行中 Escape 不该发关闭消息");
-    assert!(harness.model.workspace.delete_dialog_open(), "删除进行中对话框不该被 Escape 关掉");
+    assert!(
+        harness.model.workspace.delete_dialog_open(),
+        "删除进行中对话框不该被 Escape 关掉"
+    );
     assert!(harness.content_roots().0.is_some());
 
     harness.model.workspace.deleting_mode = None;
@@ -58,7 +73,10 @@ fn escape_closes_the_repository_delete_dialog_unless_deleting() {
     let cancel = harness.node("取消");
     harness.focus(cancel);
     assert!(harness.press_escape());
-    assert!(!harness.model.workspace.delete_dialog_open(), "Escape 应该关掉删除资源库对话框");
+    assert!(
+        !harness.model.workspace.delete_dialog_open(),
+        "Escape 应该关掉删除资源库对话框"
+    );
     assert!(harness.content_roots().0.is_none());
     harness.assert_same_as_fresh_mount();
 }
@@ -67,9 +85,17 @@ fn escape_closes_the_repository_delete_dialog_unless_deleting() {
 #[test]
 fn escape_closes_popovers() {
     let mut harness = ShellHarness::mount(scene("repo-switcher"));
-    assert_ne!(harness.model.sidebar.popover, Default::default(), "场景里应该开着仓库弹层");
+    assert_ne!(
+        harness.model.sidebar.popover,
+        Default::default(),
+        "场景里应该开着仓库弹层"
+    );
     escape_from_input(&mut harness, "全局搜索");
-    assert_eq!(harness.model.sidebar.popover, Default::default(), "Escape 应该关掉仓库弹层");
+    assert_eq!(
+        harness.model.sidebar.popover,
+        Default::default(),
+        "Escape 应该关掉仓库弹层"
+    );
     assert!(harness.content_roots().0.is_none());
 
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
@@ -88,21 +114,32 @@ fn escape_closes_context_menus() {
     let mut harness = ShellHarness::mount(scene("live-menu"));
     assert!(harness.model.files.entry_menu.is_some());
     escape_from_input(&mut harness, "全局搜索");
-    assert!(harness.model.files.entry_menu.is_none(), "Escape 应该关掉文件右键菜单");
+    assert!(
+        harness.model.files.entry_menu.is_none(),
+        "Escape 应该关掉文件右键菜单"
+    );
     assert!(harness.content_roots().0.is_none());
 
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
-    harness.apply(ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::OpenFolderMenu {
-        path: "assets".into(),
-        label: "assets".into(),
-        x: 120.0,
-        y: 200.0,
-    })));
+    harness.apply(ShellMessage::Sidebar(SidebarMessage::Gap(
+        GapMessage::OpenFolderMenu {
+            path: "assets".into(),
+            label: "assets".into(),
+            x: 120.0,
+            y: 200.0,
+        },
+    )));
     harness.flush();
-    assert!(harness.model.sidebar.folder_menu.is_some(), "文件夹右键菜单没有打开");
+    assert!(
+        harness.model.sidebar.folder_menu.is_some(),
+        "文件夹右键菜单没有打开"
+    );
     assert!(harness.content_roots().0.is_some());
     escape_from_input(&mut harness, "全局搜索");
-    assert!(harness.model.sidebar.folder_menu.is_none(), "Escape 应该关掉文件夹右键菜单");
+    assert!(
+        harness.model.sidebar.folder_menu.is_none(),
+        "Escape 应该关掉文件夹右键菜单"
+    );
     assert!(harness.content_roots().0.is_none());
     harness.assert_same_as_fresh_mount();
 }
@@ -115,7 +152,10 @@ fn escape_in_the_filter_bar_closes_nothing() {
     let field = harness.input_within("workspace-filter-bar");
     harness.focus(field);
     harness.press_escape();
-    assert!(harness.model.inspect.filter_bar_open, "Escape 不该关掉筛选栏");
+    assert!(
+        harness.model.inspect.filter_bar_open,
+        "Escape 不该关掉筛选栏"
+    );
     assert!(harness.keyed("workspace-filter-bar").is_some());
     harness.assert_same_as_fresh_mount();
 }
@@ -130,10 +170,20 @@ fn escape_consumed_by_a_select_leaves_the_popover_open() {
     harness.focus(select);
     let entity = Entity::<Select>::from_stable_id(select);
     let document = &mut harness.window.document;
-    document.context_mut().update_component(entity, |select, _| select.opened = true).expect("展开下拉框");
+    document
+        .context_mut()
+        .update_component(entity, |select, _| select.opened = true)
+        .expect("展开下拉框");
     harness.flush();
-    assert!(!harness.press_escape(), "下拉框处理掉的 Escape 不该再发关闭消息");
-    let opened = harness.document().context().read(entity, |select| select.opened).expect("下拉框");
+    assert!(
+        !harness.press_escape(),
+        "下拉框处理掉的 Escape 不该再发关闭消息"
+    );
+    let opened = harness
+        .document()
+        .context()
+        .read(entity, |select| select.opened)
+        .expect("下拉框");
     assert!(!opened, "Escape 应该收起下拉框的选项");
     assert!(harness.model.admin.popover_open, "任务弹层不该跟着关");
 }
@@ -151,7 +201,14 @@ fn escape_closes_the_top_layer_without_focus() {
     let mut harness = ShellHarness::mount(scene("folder-create-dialog"));
     let dialog = harness.content_roots().0.expect("对话框在浮层里");
     let focused = harness.focused().expect("框架应该把焦点放进对话框");
-    assert!(harness.document().context().world().is_descendant_or_self(focused, dialog), "初始焦点不在对话框里");
+    assert!(
+        harness
+            .document()
+            .context()
+            .world()
+            .is_descendant_or_self(focused, dialog),
+        "初始焦点不在对话框里"
+    );
     assert!(harness.press_escape());
     assert!(!harness.model.sidebar.folder_dialog.open);
     assert!(!harness.press_escape(), "没有能关的层时不发消息");
@@ -164,6 +221,10 @@ fn first_select(harness: &ShellHarness) -> StableNodeId {
     world
         .document_order(document.document())
         .into_iter()
-        .find(|id| world.component_type(*id).is_some_and(|kind| kind.as_str() == component_descriptors::SELECT.type_id))
+        .find(|id| {
+            world
+                .component_type(*id)
+                .is_some_and(|kind| kind.as_str() == component_descriptors::SELECT.type_id)
+        })
         .expect("场景里有下拉框")
 }

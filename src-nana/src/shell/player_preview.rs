@@ -9,7 +9,7 @@ use crate::backend::services::repository::PlaybackSessionState;
 
 use super::super::inspect::InspectState;
 use super::wav_player::{self, Action, Output};
-use super::{find_player_for_extension, PlayerMatch, PlayerState, PreviewPcm, QueueItem};
+use super::{PlayerMatch, PlayerState, PreviewPcm, QueueItem, find_player_for_extension};
 
 /// 播放时钟拨一帧的结果。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -95,9 +95,14 @@ impl PlayerState {
             self.session.error = Some("没有可用于播放此媒体的插件".into());
             return false;
         };
-        if self.repo_id.as_deref().is_some_and(|current| current != entry.repo_id) {
+        if self
+            .repo_id
+            .as_deref()
+            .is_some_and(|current| current != entry.repo_id)
+        {
             self.stop_runtime(false, inspect);
             self.listed = None;
+            self.active_player_type_id = None;
             self.current_id = None;
             self.queue.clear();
             self.history.clear();
@@ -182,7 +187,8 @@ impl PlayerState {
         self.session.current_time_ms = duration;
         if self.audible() {
             let session = self.session.clone();
-            let (session, error) = wav_player::drive(Output::Cursor, &self.wav, session, Action::Pause);
+            let (session, error) =
+                wav_player::drive(Output::Cursor, &self.wav, session, Action::Pause);
             self.session = session;
             if let Some(error) = error {
                 eprintln!("Nana 播放到头后停声失败：{error}");
@@ -206,7 +212,8 @@ impl PlayerState {
         }
         let session = self.session.clone();
         let volume = session.volume;
-        let (session, error) = wav_player::drive(Output::Cursor, &self.wav, session, Action::Volume(volume));
+        let (session, error) =
+            wav_player::drive(Output::Cursor, &self.wav, session, Action::Volume(volume));
         self.session = session;
         if let Some(error) = error {
             eprintln!("Nana 新条目沿用音量失败：{error}");
@@ -216,8 +223,13 @@ impl PlayerState {
     /// 临时条目插到当前项后面，同一路径的旧临时条目先去掉。随机模式下也排在当前项后面。
     pub(super) fn insert_transient(&mut self, item: QueueItem) {
         let current = self.current_id.clone();
-        self.queue.retain(|queue_item| !queue_item.transient || queue_item.path != item.path);
-        let Some(index) = current.as_ref().and_then(|id| self.queue.iter().position(|queue_item| &queue_item.id == id)) else {
+        self.queue
+            .retain(|queue_item| !queue_item.transient || queue_item.path != item.path);
+        let Some(index) = current.as_ref().and_then(|id| {
+            self.queue
+                .iter()
+                .position(|queue_item| &queue_item.id == id)
+        }) else {
             self.queue.push(item);
             return;
         };
@@ -239,23 +251,43 @@ impl PlayerState {
 
     /// 按扩展名找播放器，拼出预览文件的临时条目。找不到播放器返回 `None`。
     fn preview_item(&mut self, entry: &PreviewEntry<'_>) -> Option<QueueItem> {
-        let filename = entry.path.rsplit(['/', '\\']).next().unwrap_or(entry.path).to_string();
+        let filename = entry
+            .path
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or(entry.path)
+            .to_string();
         let extension = if entry.extension.trim().is_empty() {
-            filename.rsplit_once('.').map(|(_, ext)| ext.to_string()).unwrap_or_default()
+            filename
+                .rsplit_once('.')
+                .map(|(_, ext)| ext.to_string())
+                .unwrap_or_default()
         } else {
             entry.extension.to_string()
         };
-        let extension = extension.trim().trim_start_matches('.').to_ascii_lowercase();
+        let extension = extension
+            .trim()
+            .trim_start_matches('.')
+            .to_ascii_lowercase();
         let (player_type_id, label, file_class) = self.entry_player(&extension)?;
-        Some(self.transient_item(entry, &filename, &extension, &player_type_id, &label, &file_class))
+        Some(self.transient_item(
+            entry,
+            &filename,
+            &extension,
+            &player_type_id,
+            &label,
+            &file_class,
+        ))
     }
 
     /// 能放这个扩展名的音视频播放器：插件登记的贡献优先，其次是内置候选。
     pub(super) fn entry_player(&self, extension: &str) -> Option<(String, String, String)> {
         match find_player_for_extension(extension, &self.candidates, &self.contributions)? {
-            PlayerMatch::Native(candidate) => {
-                Some((candidate.player_type_id.clone(), candidate.label.clone(), candidate.file_class.clone()))
-            }
+            PlayerMatch::Native(candidate) => Some((
+                candidate.player_type_id.clone(),
+                candidate.label.clone(),
+                candidate.file_class.clone(),
+            )),
             PlayerMatch::Contribution(contribution) => Some((
                 contribution.player_type_id.clone(),
                 contribution.label.clone(),

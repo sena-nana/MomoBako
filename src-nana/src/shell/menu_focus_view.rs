@@ -7,8 +7,8 @@
 
 use nana_ui::runtime::{AppContext, DocumentId, RovingEdge, StableNodeId};
 
-use super::menu_focus::MenuSurface;
 use super::ShellViewModel;
+use super::menu_focus::MenuSurface;
 
 /// 壳层视图里管键盘菜单焦点的那一份状态。
 #[derive(Debug, Default)]
@@ -20,11 +20,18 @@ pub(crate) struct MenuFocusView {
 impl MenuFocusView {
     /// 新挂的视图不照做挂载以前的请求。
     pub(crate) fn new(model: &ShellViewModel) -> Self {
-        Self { applied: model.menu_focus.latest().map_or(0, |(serial, _)| serial) }
+        Self {
+            applied: model.menu_focus.latest().map_or(0, |(serial, _)| serial),
+        }
     }
 
     /// 整体同步收尾时调：照新的请求聚焦。
-    pub(crate) fn sync(&mut self, context: &mut AppContext, document: DocumentId, model: &ShellViewModel) {
+    pub(crate) fn sync(
+        &mut self,
+        context: &mut AppContext,
+        document: DocumentId,
+        model: &ShellViewModel,
+    ) {
         let Some((serial, request)) = model.menu_focus.latest() else {
             return;
         };
@@ -39,7 +46,12 @@ impl MenuFocusView {
 }
 
 /// 聚焦 `surface` 那一组的 `edge` 一端。找不到组或者组里没有能聚焦的项时记日志。
-fn focus_edge(context: &mut AppContext, document: DocumentId, surface: MenuSurface, edge: RovingEdge) {
+fn focus_edge(
+    context: &mut AppContext,
+    document: DocumentId,
+    surface: MenuSurface,
+    edge: RovingEdge,
+) {
     let Some(group) = find_group(context, document, surface.group_key()) else {
         eprintln!("Nana 键盘打开的菜单还没有挂好，焦点留在原处：{surface:?}");
         return;
@@ -53,7 +65,14 @@ fn focus_edge(context: &mut AppContext, document: DocumentId, surface: MenuSurfa
 
 /// 键路径最后一段是 `key`、声明了方向键焦点组的节点。
 fn find_group(context: &AppContext, document: DocumentId, key: &str) -> Option<StableNodeId> {
-    context.world().document_order(document).into_iter().find(|id| {
-        context.roving_focus_group(*id).is_some() && context.assembly_path(*id).is_some_and(|path| path.rsplit('/').next() == Some(key))
-    })
+    context
+        .world()
+        .document_order(document)
+        .into_iter()
+        .find(|id| {
+            context.roving_focus_group(*id).is_some()
+                && context
+                    .assembly_path(*id)
+                    .is_some_and(|path| path.rsplit('/').next() == Some(key))
+        })
 }

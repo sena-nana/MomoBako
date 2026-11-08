@@ -7,10 +7,10 @@
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::X;
-use nana_ui::runtime::view::{fields, widget, AnyView, El, FieldWrite, IntoProp, IntoView};
+use nana_ui::runtime::view::{AnyView, El, FieldWrite, IntoProp, IntoView, fields, widget};
 use nana_ui::runtime::{
-    AlignSpec, Button, IconButton, LengthSpec, NodePainter, NodeStyle, SemanticColorRole, SemanticPaint, Stack, Text,
-    TextHorizontalAlignment, TextInput,
+    AlignSpec, Button, IconButton, LengthSpec, NodePainter, NodeStyle, SemanticColorRole,
+    SemanticPaint, Stack, Text, TextHorizontalAlignment, TextInput,
 };
 use nana_ui_core::{LineHeightSpec, RadiusTier, SemanticColorMix};
 
@@ -32,8 +32,16 @@ const CHIP_GAP: f32 = 6.0;
 pub(crate) const INPUT_WIDTH: f32 = 120.0;
 
 /// 按 Vue 字号、字重和行高排一段文字。
-pub(crate) fn label(content: impl Into<String>, size: f32, weight: u16, role: SemanticColorRole) -> Text {
-    let mut node = Text::new(content.into()).color(role).font_size(size).font_weight(weight);
+pub(crate) fn label(
+    content: impl Into<String>,
+    size: f32,
+    weight: u16,
+    role: SemanticColorRole,
+) -> Text {
+    let mut node = Text::new(content.into())
+        .color(role)
+        .font_size(size)
+        .font_weight(weight);
     node.style.text_horizontal_alignment = TextHorizontalAlignment::Start;
     let layout = Arc::make_mut(&mut node.style.layout);
     layout.line_height = Some(LineHeightSpec::Relative(LINE_RATIO));
@@ -41,7 +49,12 @@ pub(crate) fn label(content: impl Into<String>, size: f32, weight: u16, role: Se
 }
 
 /// 能按列宽折行的文字，路径和摘要用它。
-pub(crate) fn wrapping_label(content: impl Into<String>, size: f32, weight: u16, role: SemanticColorRole) -> Text {
+pub(crate) fn wrapping_label(
+    content: impl Into<String>,
+    size: f32,
+    weight: u16,
+    role: SemanticColorRole,
+) -> Text {
     let mut node = label(content, size, weight, role);
     let layout = Arc::make_mut(&mut node.style.layout);
     layout.width = Some(LengthSpec::Fill);
@@ -72,7 +85,10 @@ pub(crate) fn bound(node: Text, value: impl IntoProp<String>) -> El<Text> {
 
 /// Vue `.asset-stat`：26px 高的计数胶囊，主表面底、12px 次要文字。文字可以绑定，
 /// 返回元素，调用方还能再绑显隐。
-pub(crate) fn stat(content: impl IntoProp<String>, key: impl Into<String>) -> El<Stack, (El<Text>,)> {
+pub(crate) fn stat(
+    content: impl IntoProp<String>,
+    key: impl Into<String>,
+) -> El<Stack, (El<Text>,)> {
     let key = key.into();
     widget(
         Stack::row(0.0)
@@ -84,7 +100,11 @@ pub(crate) fn stat(content: impl IntoProp<String>, key: impl Into<String>) -> El
             .grow(0.0)
             .shrink(0.0),
     )
-    .children((bound(label(String::new(), 12.0, 500, SemanticColorRole::Muted), content).key(format!("{key}-text")),))
+    .children((bound(
+        label(String::new(), 12.0, 500, SemanticColorRole::Muted),
+        content,
+    )
+    .key(format!("{key}-text")),))
     .key(key)
 }
 
@@ -124,17 +144,34 @@ pub(crate) fn chip(content: &str, active: bool, swatch: Option<SwatchColor>) -> 
     style.interaction.disabled = SemanticPaint::default();
     if let Some(color) = swatch {
         // 色块左缘：1px 边框加 9px 内边距。
-        style.painter = Some(NodePainter::new(SwatchChipPainter { color, inset: 1.0 + CHIP_PADDING }));
+        style.painter = Some(NodePainter::new(SwatchChipPainter {
+            color,
+            inset: 1.0 + CHIP_PADDING,
+        }));
     }
     button.style(style)
 }
 
 /// 芯片常态的字色、底色和描边：选中是强调色，未选是主表面底、次要字。
-fn chip_roles(active: bool) -> (Option<SemanticColorRole>, Option<SemanticColorRole>, Option<SemanticColorRole>) {
+fn chip_roles(
+    active: bool,
+) -> (
+    Option<SemanticColorRole>,
+    Option<SemanticColorRole>,
+    Option<SemanticColorRole>,
+) {
     if active {
-        (Some(SemanticColorRole::Accent), Some(SemanticColorRole::AccentSoft), Some(SemanticColorRole::Accent))
+        (
+            Some(SemanticColorRole::Accent),
+            Some(SemanticColorRole::AccentSoft),
+            Some(SemanticColorRole::Accent),
+        )
     } else {
-        (Some(SemanticColorRole::Muted), Some(SemanticColorRole::Background), Some(SemanticColorRole::Border))
+        (
+            Some(SemanticColorRole::Muted),
+            Some(SemanticColorRole::Background),
+            Some(SemanticColorRole::Border),
+        )
     }
 }
 
@@ -145,11 +182,19 @@ impl FieldWrite<Button, bool> for ChipActive {
     const FIELD: &'static str = "Button.style.{foreground,background,border}(chip)";
 
     fn write(target: &mut Button, active: bool) {
-        (target.style.foreground, target.style.background, target.style.border) = chip_roles(active);
+        (
+            target.style.foreground,
+            target.style.background,
+            target.style.border,
+        ) = chip_roles(active);
     }
 
     fn differs(target: &Button, active: &bool) -> bool {
-        (target.style.foreground, target.style.background, target.style.border) != chip_roles(*active)
+        (
+            target.style.foreground,
+            target.style.background,
+            target.style.border,
+        ) != chip_roles(*active)
     }
 }
 
@@ -172,7 +217,11 @@ pub(crate) fn bar_button(content: &str, disabled: bool) -> Button {
     style.radius = Some(RadiusTier::Sm);
     ghost_paint(&mut style);
     style.interaction.disabled = SemanticPaint {
-        foreground_mix: Some(SemanticColorMix::new(SemanticColorRole::Text, SemanticColorRole::Surface, DISABLED_OPACITY)),
+        foreground_mix: Some(SemanticColorMix::new(
+            SemanticColorRole::Text,
+            SemanticColorRole::Surface,
+            DISABLED_OPACITY,
+        )),
         ..SemanticPaint::default()
     };
     button.style(style)
@@ -180,7 +229,9 @@ pub(crate) fn bar_button(content: &str, disabled: bool) -> Button {
 
 /// 关闭筛选栏：和工具按钮同高，14px 叉号（Vue lucide `X`，两条对角线），正文色。
 pub(crate) fn close_button(name: &str) -> IconButton {
-    let button = IconButton::new(X, name).size(nana_ui_core::ControlSize::Large).colors_from_style();
+    let button = IconButton::new(X, name)
+        .size(nana_ui_core::ControlSize::Large)
+        .colors_from_style();
     let mut style = button.style.clone();
     {
         let layout = Arc::make_mut(&mut style.layout);
@@ -237,8 +288,15 @@ pub(crate) fn input_pill(fill: bool) -> Stack {
 }
 
 /// 胶囊里的输入框：透明、无边框，左右 8px，12px 正文。宽度为 `None` 时填满胶囊。
-pub(crate) fn pill_input(value: &str, placeholder: &str, name: &str, width: Option<f32>) -> TextInput {
-    let input = TextInput::new(value.to_string()).placeholder(placeholder.to_string()).label(name.to_string());
+pub(crate) fn pill_input(
+    value: &str,
+    placeholder: &str,
+    name: &str,
+    width: Option<f32>,
+) -> TextInput {
+    let input = TextInput::new(value.to_string())
+        .placeholder(placeholder.to_string())
+        .label(name.to_string());
     let mut style = input.style.clone();
     {
         let layout = Arc::make_mut(&mut style.layout);
@@ -324,8 +382,16 @@ pub(crate) fn pill_button(content: &str, disabled: bool) -> Button {
     style.interaction.hovered = accent;
     style.interaction.pressed = accent;
     style.interaction.disabled = SemanticPaint {
-        foreground_mix: Some(SemanticColorMix::new(SemanticColorRole::Muted, SemanticColorRole::Background, DISABLED_OPACITY)),
-        background_mix: Some(SemanticColorMix::new(SemanticColorRole::Subtle, SemanticColorRole::Background, DISABLED_OPACITY)),
+        foreground_mix: Some(SemanticColorMix::new(
+            SemanticColorRole::Muted,
+            SemanticColorRole::Background,
+            DISABLED_OPACITY,
+        )),
+        background_mix: Some(SemanticColorMix::new(
+            SemanticColorRole::Subtle,
+            SemanticColorRole::Background,
+            DISABLED_OPACITY,
+        )),
         ..SemanticPaint::default()
     };
     button.style(style)
@@ -344,7 +410,9 @@ pub(crate) fn hint_chip(content: &str, key: String) -> AnyView {
             .grow(0.0)
             .shrink(0.0),
     )
-    .children((widget(label(content, 12.0, 500, SemanticColorRole::Muted)).key(format!("{key}-text")),))
+    .children((
+        widget(label(content, 12.0, 500, SemanticColorRole::Muted)).key(format!("{key}-text")),
+    ))
     .key(key)
     .into_any()
 }

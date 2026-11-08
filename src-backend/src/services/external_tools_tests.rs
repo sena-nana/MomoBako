@@ -29,7 +29,9 @@ impl Dirs {
 
     /// 在目录里放一个假的程序文件，返回它的路径。
     fn tool(&self, dir: &str, name: &str) -> PathBuf {
-        let path = self.dir(dir).join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+        let path = self
+            .dir(dir)
+            .join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
         fs::write(&path, b"stub").expect("写假的程序");
         path
     }
@@ -55,7 +57,11 @@ fn bundled_tools_win_over_downloads_and_the_sidecar() {
     dirs.tool("downloads", "ffmpeg");
     dirs.tool("sidecar", "ffmpeg");
 
-    let resolved = resolve_tool("ffmpeg", Some(&dirs.locations()), Some(&dirs.dir("sidecar")));
+    let resolved = resolve_tool(
+        "ffmpeg",
+        Some(&dirs.locations()),
+        Some(&dirs.dir("sidecar")),
+    );
 
     assert_eq!(resolved, bundled);
 }
@@ -66,7 +72,11 @@ fn downloads_come_before_the_sidecar() {
     let downloaded = dirs.tool("downloads", "ffprobe");
     dirs.tool("sidecar", "ffprobe");
 
-    let resolved = resolve_tool("ffprobe", Some(&dirs.locations()), Some(&dirs.dir("sidecar")));
+    let resolved = resolve_tool(
+        "ffprobe",
+        Some(&dirs.locations()),
+        Some(&dirs.dir("sidecar")),
+    );
 
     assert_eq!(resolved, downloaded);
 }
@@ -76,9 +86,16 @@ fn the_sidecar_still_counts_when_the_host_set_nothing() {
     let dirs = Dirs::new("sidecar");
     let sidecar = dirs.tool("sidecar", "ffmpeg");
 
-    assert_eq!(resolve_tool("ffmpeg", None, Some(&dirs.dir("sidecar"))), sidecar);
     assert_eq!(
-        resolve_tool("ffmpeg", Some(&ToolLocations::default()), Some(&dirs.dir("sidecar"))),
+        resolve_tool("ffmpeg", None, Some(&dirs.dir("sidecar"))),
+        sidecar
+    );
+    assert_eq!(
+        resolve_tool(
+            "ffmpeg",
+            Some(&ToolLocations::default()),
+            Some(&dirs.dir("sidecar"))
+        ),
         sidecar
     );
 }
@@ -86,10 +103,17 @@ fn the_sidecar_still_counts_when_the_host_set_nothing() {
 #[test]
 fn falls_back_to_the_bare_name_for_path_lookup() {
     let dirs = Dirs::new("path");
-    fs::create_dir_all(dirs.dir("bundled").join(format!("ffmpeg{}", std::env::consts::EXE_SUFFIX)))
-        .expect("和程序同名的目录不算程序");
+    fs::create_dir_all(
+        dirs.dir("bundled")
+            .join(format!("ffmpeg{}", std::env::consts::EXE_SUFFIX)),
+    )
+    .expect("和程序同名的目录不算程序");
 
-    let resolved = resolve_tool("ffmpeg", Some(&dirs.locations()), Some(Path::new("missing-dir")));
+    let resolved = resolve_tool(
+        "ffmpeg",
+        Some(&dirs.locations()),
+        Some(Path::new("missing-dir")),
+    );
 
     assert_eq!(resolved, PathBuf::from("ffmpeg"));
 }

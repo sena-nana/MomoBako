@@ -264,14 +264,24 @@ mod tests {
     fn corner_scale_follows_the_vue_radius_tokens() {
         let metrics = corner_metrics(8.0);
         assert_eq!(
-            [metrics.radius_xs, metrics.radius_sm, metrics.radius_md, metrics.radius_lg, metrics.radius_xl, metrics.radius_xxl],
+            [
+                metrics.radius_xs,
+                metrics.radius_sm,
+                metrics.radius_md,
+                metrics.radius_lg,
+                metrics.radius_xl,
+                metrics.radius_xxl
+            ],
             [4.0, 6.0, 8.0, 10.0, 12.0, 16.0]
         );
         assert_eq!(corner_metrics(40.0).radius_xxl, 40.0);
         assert_eq!(corner_metrics(40.0).radius_md, 20.0);
         assert_eq!(corner_metrics(-3.0).radius_md, 0.0);
         assert_eq!(corner_metrics(f32::NAN).radius_md, DEFAULT_CORNER_RADIUS_PX);
-        assert_eq!(corner_metrics(8.0).control_height, UI_METRICS.control_height);
+        assert_eq!(
+            corner_metrics(8.0).control_height,
+            UI_METRICS.control_height
+        );
     }
 }
 

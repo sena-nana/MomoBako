@@ -6,13 +6,18 @@
 use nana_ui::runtime::{AccessibilityRole, StableNodeId};
 
 use super::OverlayKey;
-use crate::backend::services::repository::{SystemLogLocation, SystemLogRecord, SystemLogSource, TaskProgressSnapshot};
-use crate::shell::files::{FileDialog, FilesMessage};
+use crate::backend::services::repository::{
+    SystemLogLocation, SystemLogRecord, SystemLogSource, TaskProgressSnapshot,
+};
+use crate::shell::files::{FileDialog, FilesEffect, FilesMessage};
 use crate::shell::host_events::HostMessage;
 use crate::shell::input::InputMessage;
 use crate::shell::player::PlayerMessage;
 use crate::shell::view_harness::ShellHarness;
-use crate::shell::{AdminMessage, GapMessage, InspectMessage, ShellMessage, ShellPage, ShellViewModel, SidebarMessage, ThumbnailFrame};
+use crate::shell::{
+    AdminMessage, GapMessage, InspectMessage, ShellMessage, ShellPage, ShellViewModel,
+    SidebarMessage, ThumbnailFrame,
+};
 
 pub(super) fn scene(name: &str) -> ShellViewModel {
     crate::shell::acceptance_gap_models()
@@ -32,7 +37,12 @@ fn background_messages() -> Vec<ShellMessage> {
             category: "repository".into(),
             action: "sync".into(),
             message: "后台同步完成".into(),
-            source: SystemLogSource { kind: "host".into(), label: Some("MomoBako".into()), plugin_id: None, repo_id: None },
+            source: SystemLogSource {
+                kind: "host".into(),
+                label: Some("MomoBako".into()),
+                plugin_id: None,
+                repo_id: None,
+            },
             location: SystemLogLocation::default(),
             context: serde_json::json!({}),
         })),
@@ -90,23 +100,54 @@ pub(super) fn cases() -> Vec<Case> {
             name: "folder-create-dialog",
             model: || scene("folder-create-dialog"),
             key: OverlayKey::FolderDialog,
-            closes: |message| matches!(message, ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::CloseFolderDialog))),
+            closes: |message| {
+                matches!(
+                    message,
+                    ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::CloseFolderDialog))
+                )
+            },
             busy: Some(|model| model.sidebar.folder_dialog.submitting = true),
             close_button: false,
         },
         Case {
             name: "folder-delete",
-            model: || opened("live-files-plain", gap(GapMessage::OpenFolderDelete { path: "assets".into(), label: "assets".into() })),
+            model: || {
+                opened(
+                    "live-files-plain",
+                    gap(GapMessage::OpenFolderDelete {
+                        path: "assets".into(),
+                        label: "assets".into(),
+                    }),
+                )
+            },
             key: OverlayKey::FolderDelete,
-            closes: |message| matches!(message, ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::CloseFolderDelete))),
+            closes: |message| {
+                matches!(
+                    message,
+                    ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::CloseFolderDelete))
+                )
+            },
             busy: Some(|model| model.sidebar.folder_delete_submitting = true),
             close_button: false,
         },
         Case {
             name: "smart-delete",
-            model: || opened("live-files-plain", gap(GapMessage::OpenSmartDelete { id: "smart-1".into(), label: "高评分".into() })),
+            model: || {
+                opened(
+                    "live-files-plain",
+                    gap(GapMessage::OpenSmartDelete {
+                        id: "smart-1".into(),
+                        label: "高评分".into(),
+                    }),
+                )
+            },
             key: OverlayKey::SmartDelete,
-            closes: |message| matches!(message, ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::CloseSmartDelete))),
+            closes: |message| {
+                matches!(
+                    message,
+                    ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::CloseSmartDelete))
+                )
+            },
             busy: Some(|model| model.sidebar.smart_draft.busy = true),
             close_button: false,
         },
@@ -115,7 +156,10 @@ pub(super) fn cases() -> Vec<Case> {
             model: || scene("repo-delete-dialog"),
             key: OverlayKey::RepositoryDelete,
             closes: |message| matches!(message, ShellMessage::MissingCloseDelete),
-            busy: Some(|model| model.workspace.deleting_mode = Some(crate::shell::workspace::DeleteMode::RecordOnly)),
+            busy: Some(|model| {
+                model.workspace.deleting_mode =
+                    Some(crate::shell::workspace::DeleteMode::RecordOnly)
+            }),
             close_button: false,
         },
         Case {
@@ -142,7 +186,12 @@ pub(super) fn cases() -> Vec<Case> {
             name: "smart-folder-dialog",
             model: || scene("smart-folder-dialog"),
             key: OverlayKey::SmartFolderDialog,
-            closes: |message| matches!(message, ShellMessage::Sidebar(SidebarMessage::CloseSmartFolderDialog)),
+            closes: |message| {
+                matches!(
+                    message,
+                    ShellMessage::Sidebar(SidebarMessage::CloseSmartFolderDialog)
+                )
+            },
             busy: Some(|model| model.sidebar.smart_draft.busy = true),
             close_button: false,
         },
@@ -175,11 +224,18 @@ pub(super) fn cases() -> Vec<Case> {
             model: || {
                 let mut model = scene("live-files-plain");
                 model.settings.close_behavior = "confirm".into();
-                model.reduce(ShellMessage::WindowAction(crate::shell::WindowAction::Close));
+                model.reduce(ShellMessage::WindowAction(
+                    crate::shell::WindowAction::Close,
+                ));
                 model
             },
             key: OverlayKey::CloseConfirm,
-            closes: |message| matches!(message, ShellMessage::Input(InputMessage::ConfirmCloseAnswer(false))),
+            closes: |message| {
+                matches!(
+                    message,
+                    ShellMessage::Input(InputMessage::ConfirmCloseAnswer(false))
+                )
+            },
             busy: None,
             close_button: false,
         },
@@ -200,7 +256,9 @@ fn within_dialog(harness: &ShellHarness, label: &str) -> StableNodeId {
     harness
         .nodes()
         .into_iter()
-        .find(|node| node.label.as_deref() == Some(label) && world.is_descendant_or_self(node.id, surface))
+        .find(|node| {
+            node.label.as_deref() == Some(label) && world.is_descendant_or_self(node.id, surface)
+        })
         .unwrap_or_else(|| panic!("对话框里没有 {label}"))
         .id
 }
@@ -210,23 +268,56 @@ const OUTSIDE: (f32, f32) = (8.0, 792.0);
 
 pub(super) fn mounted(case: &Case) -> ShellHarness {
     let harness = ShellHarness::mount((case.model)());
-    assert_eq!(OverlayKey::of(&harness.model), Some(case.key), "{}：场景里应该开着这个对话框", case.name);
-    let host = harness.keyed("dialog-host").unwrap_or_else(|| panic!("{}：对话框没有挂在宿主下", case.name));
-    let surface = harness.keyed("dialog-surface").unwrap_or_else(|| panic!("{}：没有对话框", case.name));
-    let active = harness.document().context().world().overlay_host(host).and_then(|state| state.active);
+    assert_eq!(
+        OverlayKey::of(&harness.model),
+        Some(case.key),
+        "{}：场景里应该开着这个对话框",
+        case.name
+    );
+    let host = harness
+        .keyed("dialog-host")
+        .unwrap_or_else(|| panic!("{}：对话框没有挂在宿主下", case.name));
+    let surface = harness
+        .keyed("dialog-surface")
+        .unwrap_or_else(|| panic!("{}：没有对话框", case.name));
+    let active = harness
+        .document()
+        .context()
+        .world()
+        .overlay_host(host)
+        .and_then(|state| state.active);
     assert_eq!(active, Some(surface), "{}：对话框应该由宿主激活", case.name);
     harness
 }
 
 /// 只有一条消息，就是这个对话框的关闭消息；归约后对话框关了。
-fn assert_closes(case: &Case, gesture: &str, harness: &mut ShellHarness, messages: Vec<ShellMessage>) {
-    assert_eq!(messages.len(), 1, "{}：{gesture}应该只发一条消息", case.name);
-    assert!((case.closes)(&messages[0]), "{}：{gesture}发的不是关闭消息", case.name);
+fn assert_closes(
+    case: &Case,
+    gesture: &str,
+    harness: &mut ShellHarness,
+    messages: Vec<ShellMessage>,
+) {
+    assert_eq!(
+        messages.len(),
+        1,
+        "{}：{gesture}应该只发一条消息",
+        case.name
+    );
+    assert!(
+        (case.closes)(&messages[0]),
+        "{}：{gesture}发的不是关闭消息",
+        case.name
+    );
     for message in messages {
         harness.apply(message);
     }
     harness.flush();
-    assert_ne!(OverlayKey::of(&harness.model), Some(case.key), "{}：{gesture}后对话框还开着", case.name);
+    assert_ne!(
+        OverlayKey::of(&harness.model),
+        Some(case.key),
+        "{}：{gesture}后对话框还开着",
+        case.name
+    );
 }
 
 #[test]
@@ -259,14 +350,31 @@ fn busy_dialogs_ignore_every_close_gesture() {
         let mut harness = mounted(&case);
         busy(&mut harness.model);
         changed(&mut harness);
-        assert!(harness.escape_messages().is_empty(), "{}：处理中 Escape 不该发消息", case.name);
-        assert!(harness.click_messages(OUTSIDE.0, OUTSIDE.1).is_empty(), "{}：处理中点外面不该发消息", case.name);
+        assert!(
+            harness.escape_messages().is_empty(),
+            "{}：处理中 Escape 不该发消息",
+            case.name
+        );
+        assert!(
+            harness.click_messages(OUTSIDE.0, OUTSIDE.1).is_empty(),
+            "{}：处理中点外面不该发消息",
+            case.name
+        );
         if case.close_button {
             let close = within_dialog(&harness, "关闭");
             let (x, y) = harness.center(close);
-            assert!(harness.click_messages(x, y).is_empty(), "{}：处理中点关闭位不该发消息", case.name);
+            assert!(
+                harness.click_messages(x, y).is_empty(),
+                "{}：处理中点关闭位不该发消息",
+                case.name
+            );
         }
-        assert_eq!(OverlayKey::of(&harness.model), Some(case.key), "{}：处理中对话框应该还开着", case.name);
+        assert_eq!(
+            OverlayKey::of(&harness.model),
+            Some(case.key),
+            "{}：处理中对话框应该还开着",
+            case.name
+        );
         assert!(harness.content_roots().0.is_some());
     }
 }
@@ -295,12 +403,22 @@ fn unrelated_updates_keep_every_dialog_node() {
         for message in background_messages() {
             harness.apply(message);
             harness.flush();
-            assert_eq!(harness.content_roots().0, Some(root), "{}：无关更新换掉了浮层根", case.name);
+            assert_eq!(
+                harness.content_roots().0,
+                Some(root),
+                "{}：无关更新换掉了浮层根",
+                case.name
+            );
         }
         for _ in 0..6 {
             harness.frame();
         }
-        assert_eq!(subtree(&harness, root), before, "{}：无关更新换掉了对话框里的节点", case.name);
+        assert_eq!(
+            subtree(&harness, root),
+            before,
+            "{}：无关更新换掉了对话框里的节点",
+            case.name
+        );
         assert!(harness.view_stats().remounts >= remounts);
         harness.assert_same_as_fresh_mount();
     }
@@ -329,14 +447,24 @@ fn dialog_state_changes_patch_the_bound_fields_in_place() {
     let root = harness.content_roots().0.expect("对话框");
     let before = subtree(&harness, root);
     assert!(harness.find("远端").is_none());
-    harness.apply(ShellMessage::Files(FilesMessage::SetExportField { field: "target".into(), value: "git".into() }));
+    harness.apply(ShellMessage::Files(FilesMessage::SetExportField {
+        field: "target".into(),
+        value: "git".into(),
+    }));
     harness.flush();
     assert!(harness.find("远端").is_some(), "切到 Git 后应该有远端");
-    assert!(harness.find("格式").is_none(), "切到 Git 后压缩包字段应该藏起");
+    assert!(
+        harness.find("格式").is_none(),
+        "切到 Git 后压缩包字段应该藏起"
+    );
     harness.model.files.export.busy = true;
     changed(&mut harness);
     assert!(harness.find("处理中").is_some(), "导出中主按钮应该写处理中");
-    assert_eq!(subtree(&harness, root), before, "切换分段和导出中都不该换节点");
+    assert_eq!(
+        subtree(&harness, root),
+        before,
+        "切换分段和导出中都不该换节点"
+    );
     harness.assert_same_as_fresh_mount();
 
     // 删除资源库：删除中左下角出现「处理中...」。
@@ -354,10 +482,18 @@ fn dialog_state_changes_patch_the_bound_fields_in_place() {
     let mut harness = ShellHarness::mount(scene("copy-dialog"));
     let root = harness.content_roots().0.expect("对话框");
     assert_eq!(value(&harness, "目标目录"), "notes");
-    harness.apply(ShellMessage::Files(FilesMessage::OpenDialog(FileDialog::Rename)));
+    harness.apply(ShellMessage::Files(FilesMessage::OpenDialog(
+        FileDialog::Rename,
+    )));
     harness.flush();
-    if OverlayKey::of(&harness.model) == Some(OverlayKey::FileDialog) && harness.model.files.dialog == FileDialog::Rename {
-        assert_ne!(harness.content_roots().0, Some(root), "换一种文件对话框应该换块");
+    if OverlayKey::of(&harness.model) == Some(OverlayKey::FileDialog)
+        && harness.model.files.dialog == FileDialog::Rename
+    {
+        assert_ne!(
+            harness.content_roots().0,
+            Some(root),
+            "换一种文件对话框应该换块"
+        );
         harness.assert_same_as_fresh_mount();
     }
 }
@@ -366,9 +502,17 @@ fn dialog_state_changes_patch_the_bound_fields_in_place() {
 #[test]
 fn composing_in_dialog_inputs_is_never_interrupted() {
     let cases: [(&str, fn() -> ShellViewModel, &str); 3] = [
-        ("smart-folder-dialog", || scene("smart-folder-dialog"), "名称"),
+        (
+            "smart-folder-dialog",
+            || scene("smart-folder-dialog"),
+            "名称",
+        ),
         ("copy-dialog", || scene("copy-dialog"), "目标目录"),
-        ("playlist-create-dialog", || scene("playlist-create-dialog"), "名称"),
+        (
+            "playlist-create-dialog",
+            || scene("playlist-create-dialog"),
+            "名称",
+        ),
     ];
     for (name, model, label) in cases {
         let mut harness = ShellHarness::mount(model());
@@ -380,12 +524,20 @@ fn composing_in_dialog_inputs_is_never_interrupted() {
             harness.apply(message);
             harness.flush();
             assert_eq!(harness.input(label), field, "{name}：后台消息换掉了输入框");
-            assert_eq!(harness.preedit(field).as_deref(), Some("pinyin"), "{name}：后台消息打断了组合");
+            assert_eq!(
+                harness.preedit(field).as_deref(),
+                Some("pinyin"),
+                "{name}：后台消息打断了组合"
+            );
             assert_eq!(harness.focused(), Some(field), "{name}：焦点离开了输入框");
         }
         for _ in 0..6 {
             harness.frame();
-            assert_eq!(harness.preedit(field).as_deref(), Some("pinyin"), "{name}：动效帧打断了组合");
+            assert_eq!(
+                harness.preedit(field).as_deref(),
+                Some("pinyin"),
+                "{name}：动效帧打断了组合"
+            );
         }
         harness.commit("字");
         for message in harness.take_messages() {
@@ -394,7 +546,10 @@ fn composing_in_dialog_inputs_is_never_interrupted() {
         harness.flush();
         assert_eq!(harness.input(label), field, "{name}：提交后换了输入框");
         let committed = value(&harness, label);
-        assert!(committed.contains('字') && committed.chars().count() == typed.chars().count() + 1, "{name}：提交的文字没有进输入框：{committed}");
+        assert!(
+            committed.contains('字') && committed.chars().count() == typed.chars().count() + 1,
+            "{name}：提交的文字没有进输入框：{committed}"
+        );
         harness.assert_same_as_fresh_mount();
     }
 }
@@ -409,10 +564,18 @@ fn file_page_dialogs_show_once_in_the_overlay() {
         let dialogs = harness
             .nodes()
             .into_iter()
-            .filter(|node| matches!(node.role, AccessibilityRole::Dialog | AccessibilityRole::AlertDialog))
+            .filter(|node| {
+                matches!(
+                    node.role,
+                    AccessibilityRole::Dialog | AccessibilityRole::AlertDialog
+                )
+            })
             .collect::<Vec<_>>();
         assert_eq!(dialogs.len(), 1, "{name}：对话框应该只有一份");
-        assert!(world.is_descendant_or_self(dialogs[0].id, root), "{name}：对话框不在浮层里");
+        assert!(
+            world.is_descendant_or_self(dialogs[0].id, root),
+            "{name}：对话框不在浮层里"
+        );
     }
 }
 
@@ -423,12 +586,25 @@ fn close_confirm_shows_on_every_page_above_other_dialogs() {
     settings.input.pending_close = true;
     settings.input.notice = "确认关闭 MomoBako？".into();
     let harness = ShellHarness::mount(settings);
-    assert_eq!(OverlayKey::of(&harness.model), Some(OverlayKey::CloseConfirm));
-    assert!(harness.nodes().iter().any(|node| node.role == AccessibilityRole::AlertDialog), "设置页上没有关闭确认");
+    assert_eq!(
+        OverlayKey::of(&harness.model),
+        Some(OverlayKey::CloseConfirm)
+    );
+    assert!(
+        harness
+            .nodes()
+            .iter()
+            .any(|node| node.role == AccessibilityRole::AlertDialog),
+        "设置页上没有关闭确认"
+    );
 
     let mut model = scene("folder-create-dialog");
     model.input.pending_close = true;
-    assert_eq!(OverlayKey::of(&model), Some(OverlayKey::CloseConfirm), "关闭确认应该压在别的对话框上面");
+    assert_eq!(
+        OverlayKey::of(&model),
+        Some(OverlayKey::CloseConfirm),
+        "关闭确认应该压在别的对话框上面"
+    );
 }
 
 /// 浮层的先后：文件页的对话框排在弹层和菜单后面（原来画在主区里），弹层关掉以后才露出来；
@@ -439,12 +615,180 @@ fn file_dialogs_wait_behind_popovers_and_escape_follows_the_same_order() {
     model.reduce(ShellMessage::Admin(AdminMessage::ToggleTaskPopover));
     assert_eq!(OverlayKey::of(&model), Some(OverlayKey::TaskPopover));
     let mut harness = ShellHarness::mount(model);
-    assert!(harness.find("复制到文件夹").is_none(), "弹层开着时复制对话框排在后面");
+    assert!(
+        harness.find("复制到文件夹").is_none(),
+        "弹层开着时复制对话框排在后面"
+    );
     assert!(harness.press_escape());
-    assert!(!harness.model.admin.popover_open, "Escape 先关显示着的任务弹层");
+    assert!(
+        !harness.model.admin.popover_open,
+        "Escape 先关显示着的任务弹层"
+    );
     assert_eq!(OverlayKey::of(&harness.model), Some(OverlayKey::FileDialog));
-    assert!(harness.find("复制到文件夹").is_some(), "弹层关掉后复制对话框露出来");
+    assert!(
+        harness.find("复制到文件夹").is_some(),
+        "弹层关掉后复制对话框露出来"
+    );
     assert!(harness.press_escape());
-    assert_eq!(harness.model.files.dialog, FileDialog::Closed, "再按 Escape 关掉复制对话框");
+    assert_eq!(
+        harness.model.files.dialog,
+        FileDialog::Closed,
+        "再按 Escape 关掉复制对话框"
+    );
     harness.assert_same_as_fresh_mount();
+}
+
+fn node_disabled(harness: &ShellHarness, id: StableNodeId) -> bool {
+    harness
+        .nodes()
+        .into_iter()
+        .any(|node| node.id == id && node.disabled)
+}
+
+/// 重命名文件夹的「保存」已经发出、文件服务还没回来时，名称输入框照 Vue 仍可改。
+/// 「保存」和「取消」禁用；再按回车或再点「保存」不另发一次重命名，改过的名字留在输入框里。
+#[test]
+fn folder_rename_name_stays_editable_while_the_save_is_in_flight() {
+    let mut model = scene("folder-rename-dialog");
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::Gap(
+        GapMessage::SubmitFolderDialog,
+    )));
+    assert!(
+        model.files.mutating && model.sidebar.folder_dialog.submitting,
+        "保存已经交给文件服务"
+    );
+    let first = model.files.take_effects();
+    assert!(
+        first.iter().any(|effect| matches!(
+            effect,
+            FilesEffect::Rename { path, new_name, .. } if path == "assets" && new_name == "assets"
+        )),
+        "第一次保存应重命名 assets：{first:?}"
+    );
+
+    let mut harness = ShellHarness::mount(model);
+    let field = harness.input("文件夹名称");
+    assert!(
+        !node_disabled(&harness, field),
+        "变更中文件夹名称输入框仍可改"
+    );
+    let save = within_dialog(&harness, "保存");
+    let cancel = within_dialog(&harness, "取消");
+    assert!(node_disabled(&harness, save), "变更中「保存」应禁用");
+    assert!(node_disabled(&harness, cancel), "变更中「取消」应禁用");
+
+    harness.focus(field);
+    harness.type_text("2");
+    let typed = harness.take_messages();
+    harness.settle(typed);
+    let edited = harness.value(field);
+    assert_ne!(edited, "assets", "打进去的字应留在输入框：{edited}");
+    assert!(edited.contains('2'), "输入框里应有刚打的字：{edited}");
+    assert_eq!(harness.model.sidebar.folder_dialog.value, edited);
+    assert!(
+        harness.model.files.mutating && harness.model.sidebar.folder_dialog.submitting,
+        "打字不该结束变更"
+    );
+    assert!(
+        harness.model.files.take_effects().is_empty(),
+        "打字不应另发重命名"
+    );
+
+    harness.focus(field);
+    harness.press_key("Enter");
+    assert!(
+        harness.model.files.take_effects().is_empty(),
+        "变更中回车不应另发重命名"
+    );
+    assert!(harness.model.sidebar.folder_dialog.open);
+    assert_eq!(
+        harness.model.sidebar.folder_dialog.value, edited,
+        "没提交成，名字留着"
+    );
+
+    let (x, y) = harness.center(within_dialog(&harness, "保存"));
+    let clicks = harness.click_messages(x, y);
+    harness.settle(clicks);
+    assert!(
+        harness.model.files.take_effects().is_empty(),
+        "变更中再点「保存」不应另发重命名"
+    );
+    assert_eq!(harness.value(field), edited);
+    assert!(harness.model.files.mutating && harness.model.sidebar.folder_dialog.submitting);
+}
+
+/// 复制到文件夹的「复制」已经发出、文件服务还没回来时，目标目录照 Vue 仍可改。
+/// 「复制」（此时写成「处理中...」）和「取消」禁用；再按回车或再点主按钮不另发一次复制。
+/// 已经发出的请求仍用提交当时的目录。
+#[test]
+fn copy_target_stays_editable_while_the_copy_is_in_flight() {
+    let mut model = scene("copy-dialog");
+    // 验收场景只预填了目标目录，没记下要复制的条目。按打开对话框的路径补上来源，再提交当时的目录。
+    model.reduce(ShellMessage::Files(FilesMessage::OpenDialog(
+        FileDialog::Copy,
+    )));
+    model.reduce(ShellMessage::Files(FilesMessage::DraftChanged(
+        "notes".into(),
+    )));
+    model.reduce(ShellMessage::Files(FilesMessage::SubmitDialog));
+    assert!(
+        model.files.mutating && model.files.dialog == FileDialog::Copy,
+        "复制已经交给文件服务"
+    );
+    let first = model.files.take_effects();
+    assert!(
+        first.iter().any(|effect| matches!(
+            effect,
+            FilesEffect::Copy { parent, sources, .. }
+                if parent.as_deref() == Some("notes") && sources.as_slice() == ["cover.png"]
+        )),
+        "第一次复制应把 cover.png 复制到 notes：{first:?}"
+    );
+
+    let mut harness = ShellHarness::mount(model);
+    let field = harness.input("目标目录");
+    assert!(!node_disabled(&harness, field), "复制中目标目录仍可改");
+    let submit = within_dialog(&harness, "处理中...");
+    let cancel = within_dialog(&harness, "取消");
+    assert!(node_disabled(&harness, submit), "复制中主按钮应禁用");
+    assert!(node_disabled(&harness, cancel), "复制中「取消」应禁用");
+
+    harness.focus(field);
+    harness.type_text("2");
+    let typed = harness.take_messages();
+    harness.settle(typed);
+    let edited = harness.value(field);
+    assert_ne!(edited, "notes", "打进去的字应留在输入框：{edited}");
+    assert!(edited.contains('2'), "输入框里应有刚打的字：{edited}");
+    assert_eq!(harness.model.files.target_draft, edited);
+    assert!(
+        harness.model.files.mutating && harness.model.files.dialog == FileDialog::Copy,
+        "打字不该结束复制"
+    );
+    assert!(
+        harness.model.files.take_effects().is_empty(),
+        "打字不应另发复制"
+    );
+
+    harness.focus(field);
+    harness.press_key("Enter");
+    assert!(
+        harness.model.files.take_effects().is_empty(),
+        "复制中回车不应另发复制"
+    );
+    assert_eq!(harness.model.files.dialog, FileDialog::Copy);
+    assert_eq!(
+        harness.model.files.target_draft, edited,
+        "没提交成，路径留着"
+    );
+
+    let (x, y) = harness.center(within_dialog(&harness, "处理中..."));
+    let clicks = harness.click_messages(x, y);
+    harness.settle(clicks);
+    assert!(
+        harness.model.files.take_effects().is_empty(),
+        "复制中再点主按钮不应另发复制"
+    );
+    assert_eq!(harness.value(field), edited);
+    assert!(harness.model.files.mutating && harness.model.files.dialog == FileDialog::Copy);
 }

@@ -6,11 +6,16 @@
 //! 三是一致性：一串消息增量同步之后，文档和同一 ViewModel 新挂的文档无障碍树相同。
 //! 四是收敛：视图量到尺寸后发回的消息归约、同步几轮就停，不在每帧重建。
 
-use crate::backend::services::repository::{SystemLogLocation, SystemLogRecord, SystemLogSource, TaskProgressSnapshot};
+use crate::backend::services::repository::{
+    SystemLogLocation, SystemLogRecord, SystemLogSource, TaskProgressSnapshot,
+};
 use crate::shell::host_events::HostMessage;
 use crate::shell::player::{PlayerMessage, QueueItem};
 use crate::shell::view_harness::ShellHarness;
-use crate::shell::{GapMessage, InspectMessage, ShellMessage, ShellPage, ShellViewModel, SidebarMessage, ThumbnailFrame};
+use crate::shell::{
+    GapMessage, InspectMessage, ShellMessage, ShellPage, ShellViewModel, SidebarMessage,
+    ThumbnailFrame,
+};
 
 fn scene(name: &str) -> ShellViewModel {
     crate::shell::acceptance_gap_models()
@@ -30,7 +35,12 @@ fn background_messages() -> Vec<ShellMessage> {
             category: "repository".into(),
             action: "sync".into(),
             message: "后台同步完成".into(),
-            source: SystemLogSource { kind: "host".into(), label: Some("MomoBako".into()), plugin_id: None, repo_id: None },
+            source: SystemLogSource {
+                kind: "host".into(),
+                label: Some("MomoBako".into()),
+                plugin_id: None,
+                repo_id: None,
+            },
             location: SystemLogLocation::default(),
             context: serde_json::json!({}),
         })),
@@ -59,10 +69,28 @@ fn background_messages() -> Vec<ShellMessage> {
 }
 
 /// 预编辑和节点都还在，焦点也没动。
-fn assert_composing(harness: &ShellHarness, label: &str, id: nana_ui::runtime::StableNodeId, preedit: &str, after: &str) {
-    assert_eq!(harness.input(label), id, "{after}后输入框 {label} 被换成了新节点");
-    assert_eq!(harness.preedit(id).as_deref(), Some(preedit), "{after}后输入框 {label} 的预编辑断了");
-    assert_eq!(harness.focused(), Some(id), "{after}后焦点离开了输入框 {label}");
+fn assert_composing(
+    harness: &ShellHarness,
+    label: &str,
+    id: nana_ui::runtime::StableNodeId,
+    preedit: &str,
+    after: &str,
+) {
+    assert_eq!(
+        harness.input(label),
+        id,
+        "{after}后输入框 {label} 被换成了新节点"
+    );
+    assert_eq!(
+        harness.preedit(id).as_deref(),
+        Some(preedit),
+        "{after}后输入框 {label} 的预编辑断了"
+    );
+    assert_eq!(
+        harness.focused(),
+        Some(id),
+        "{after}后焦点离开了输入框 {label}"
+    );
 }
 
 #[test]
@@ -76,12 +104,17 @@ fn title_bar_search_keeps_its_preedit_through_messages_and_frames() {
         harness.flush();
         assert_composing(&harness, "全局搜索", search, "zhong", "后台消息");
     }
-    harness.apply(ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::OpenFolderCreate(String::new()))));
+    harness.apply(ShellMessage::Sidebar(SidebarMessage::Gap(
+        GapMessage::OpenFolderCreate(String::new()),
+    )));
     for _ in 0..12 {
         harness.frame();
         assert_composing(&harness, "全局搜索", search, "zhong", "动效帧");
     }
-    assert!(harness.content_roots().0.is_none(), "组合中开对话框会抢走焦点，要等组合结束");
+    assert!(
+        harness.content_roots().0.is_none(),
+        "组合中开对话框会抢走焦点，要等组合结束"
+    );
     harness.commit("中");
     for message in harness.take_messages() {
         harness.apply(message);
@@ -92,7 +125,14 @@ fn title_bar_search_keeps_its_preedit_through_messages_and_frames() {
     assert_eq!(harness.model.inspect.query, "中");
     let dialog = harness.content_roots().0.expect("组合结束后对话框打开");
     let focused = harness.focused().expect("焦点");
-    assert!(harness.document().context().world().is_descendant_or_self(focused, dialog), "对话框打开后焦点在对话框里");
+    assert!(
+        harness
+            .document()
+            .context()
+            .world()
+            .is_descendant_or_self(focused, dialog),
+        "对话框打开后焦点在对话框里"
+    );
 }
 
 /// 受控输入的回滚竞态：按键的消息还排在后台消息后面没归约时，同步不能把 ViewModel 里较旧的
@@ -144,7 +184,11 @@ fn dialog_input_keeps_its_node_and_preedit_while_composing() {
         harness.frame();
         assert_composing(&harness, "文件夹名称", field, "wenjian", "动效帧");
     }
-    assert_eq!(harness.content_roots().0, Some(overlay), "常驻对话框不该重挂");
+    assert_eq!(
+        harness.content_roots().0,
+        Some(overlay),
+        "常驻对话框不该重挂"
+    );
     assert_eq!(harness.keyed("dialog-surface"), Some(surface));
 
     // 输入法取消：没有新文字，输入框和焦点都还在原处。
@@ -165,7 +209,11 @@ fn dialog_input_keeps_its_node_and_preedit_while_composing() {
     assert_eq!(harness.input("文件夹名称"), field);
     assert_eq!(harness.value(field), "文件");
     assert_eq!(harness.focused(), Some(field));
-    assert_eq!(harness.content_roots().0, Some(overlay), "提交草稿不该重挂对话框");
+    assert_eq!(
+        harness.content_roots().0,
+        Some(overlay),
+        "提交草稿不该重挂对话框"
+    );
     harness.assert_same_as_fresh_mount();
 }
 
@@ -174,13 +222,22 @@ fn dialog_input_keeps_its_node_and_preedit_while_composing() {
 #[test]
 fn dialog_opens_through_the_framework_and_frames_do_not_remount() {
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
-    harness.apply(ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::OpenFolderCreate(String::new()))));
+    harness.apply(ShellMessage::Sidebar(SidebarMessage::Gap(
+        GapMessage::OpenFolderCreate(String::new()),
+    )));
     harness.flush();
     let (overlay, primary) = harness.content_roots();
     let overlay = overlay.expect("对话框在浮层里");
     let host = harness.keyed("dialog-host").expect("对话框宿主");
     let dialog = harness.keyed("dialog-surface").expect("对话框");
-    let active = |harness: &ShellHarness| harness.document().context().world().overlay_host(host).and_then(|state| state.active);
+    let active = |harness: &ShellHarness| {
+        harness
+            .document()
+            .context()
+            .world()
+            .overlay_host(host)
+            .and_then(|state| state.active)
+    };
     assert_eq!(active(&harness), Some(dialog), "对话框应该是宿主激活的浮层");
     let remounts = harness.view_stats().remounts;
     for _ in 0..14 {
@@ -188,7 +245,11 @@ fn dialog_opens_through_the_framework_and_frames_do_not_remount() {
         assert_eq!(active(&harness), Some(dialog));
     }
     assert_eq!(harness.view_stats().remounts, remounts, "动效帧重挂了内容");
-    assert_eq!(harness.content_roots(), (Some(overlay), primary), "动效帧换掉了内容根节点");
+    assert_eq!(
+        harness.content_roots(),
+        (Some(overlay), primary),
+        "动效帧换掉了内容根节点"
+    );
     harness.assert_same_as_fresh_mount();
 }
 
@@ -202,13 +263,26 @@ fn playback_frames_only_touch_the_bound_bar_fields() {
     let mut model = scene("live-files-plain");
     model.player.repo_id = model.workspace.active_repo_id.clone();
     model.player.queue = vec![wav_item(&path)];
-    model.reduce(ShellMessage::Player(PlayerMessage::PlayItem { item_id: "tone".into() }));
+    model.reduce(ShellMessage::Player(PlayerMessage::PlayItem {
+        item_id: "tone".into(),
+    }));
     crate::shell::player::fulfill_loads(&mut model);
-    assert_eq!(model.player.session.status, "playing", "测试音频没有开始播放");
+    assert_eq!(
+        model.player.session.status, "playing",
+        "测试音频没有开始播放"
+    );
     let mut harness = ShellHarness::mount(model);
     let time = harness.node("0:00 / 0:03");
-    let seek = nana_ui::runtime::Entity::<nana_ui::runtime::RangeField>::from_stable_id(harness.node("播放进度"));
-    let position = |harness: &ShellHarness| harness.document().context().read(seek, |range| range.value).expect("拖动条");
+    let seek = nana_ui::runtime::Entity::<nana_ui::runtime::RangeField>::from_stable_id(
+        harness.node("播放进度"),
+    );
+    let position = |harness: &ShellHarness| {
+        harness
+            .document()
+            .context()
+            .read(seek, |range| range.value)
+            .expect("拖动条")
+    };
     let remounts = harness.view_stats().remounts;
     let patched = ShellHarness::stats().nodes_patched;
     let mut positions = vec![position(&harness)];
@@ -216,12 +290,26 @@ fn playback_frames_only_touch_the_bound_bar_fields() {
         harness.frame();
         positions.push(position(&harness));
     }
-    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "拖动条位置应逐帧前进：{positions:?}");
+    assert!(
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "拖动条位置应逐帧前进：{positions:?}"
+    );
     let world = harness.document().context().world();
-    assert_eq!(world.text(time), Some("0:01 / 0:03"), "播放一秒后时间没有跟着走");
-    assert_eq!(harness.view_stats().remounts, remounts, "播放推进重挂了内容");
+    assert_eq!(
+        world.text(time),
+        Some("0:01 / 0:03"),
+        "播放一秒后时间没有跟着走"
+    );
+    assert_eq!(
+        harness.view_stats().remounts,
+        remounts,
+        "播放推进重挂了内容"
+    );
     assert!(harness.model.player.session.current_time_ms >= 1_000);
-    assert!(ShellHarness::stats().nodes_patched > patched, "播放推进没有经绑定改字段");
+    assert!(
+        ShellHarness::stats().nodes_patched > patched,
+        "播放推进没有经绑定改字段"
+    );
     harness.assert_same_as_fresh_mount();
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -234,12 +322,16 @@ fn incremental_sync_matches_a_fresh_mount_step_by_step() {
     let steps = [
         ShellMessage::Inspect(InspectMessage::SetQuery("封面".into())),
         ShellMessage::Inspect(InspectMessage::ToggleFilterBar),
-        ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::OpenFolderCreate(String::new()))),
+        ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::OpenFolderCreate(
+            String::new(),
+        ))),
         ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::CloseFolderDialog)),
         ShellMessage::ToggleSidebar,
         ShellMessage::ToggleSidebar,
         ShellMessage::OpenSettings,
-        ShellMessage::Sidebar(SidebarMessage::SelectShortcut(crate::shell::ShortcutId::All)),
+        ShellMessage::Sidebar(SidebarMessage::SelectShortcut(
+            crate::shell::ShortcutId::All,
+        )),
     ];
     for message in steps {
         harness.apply(message);
@@ -270,13 +362,18 @@ fn every_mount_shapes_text_in_simplified_chinese() {
             .find(|node| node.label.as_deref() == Some("默认资源库"))
             .expect("侧栏的仓库名")
             .id;
-        world.computed_style(label).and_then(|style| style.language.clone())
+        world
+            .computed_style(label)
+            .and_then(|style| style.language.clone())
     };
     let harness = ShellHarness::mount(scene("live-files"));
     assert_eq!(language(harness.document()), zh, "harness 挂的壳层");
     let mut document = crate::acceptance_document_for_model(scene("live-files")).expect("验收文档");
     document
-        .flush(nana_ui::runtime::LayoutViewport::new(1200.0, 800.0), &mut nana_ui::NanaTextShaper::default())
+        .flush(
+            nana_ui::runtime::LayoutViewport::new(1200.0, 800.0),
+            &mut nana_ui::NanaTextShaper::default(),
+        )
         .expect("布局");
     assert_eq!(language(&document), zh, "离屏验收和截图场景的壳层");
 }
@@ -288,11 +385,16 @@ fn mount_shell_tells_live_documents_apart() {
     let mut first = crate::acceptance_document_for_model(model.clone()).expect("第一份文档");
     let second = crate::acceptance_document_for_model(model.clone()).expect("第二份文档");
     let mut changed = model.clone();
-    changed.reduce(ShellMessage::Inspect(InspectMessage::SetQuery("封面".into())));
+    changed.reduce(ShellMessage::Inspect(InspectMessage::SetQuery(
+        "封面".into(),
+    )));
     crate::shell::mount_shell(&mut first, &changed).expect("同步第一份");
     // 同步只写信号，搜索框的值在下一次刷新时落到节点上。
     first
-        .flush(nana_ui::runtime::LayoutViewport::new(1200.0, 800.0), &mut nana_ui::NanaTextShaper::default())
+        .flush(
+            nana_ui::runtime::LayoutViewport::new(1200.0, 800.0),
+            &mut nana_ui::NanaTextShaper::default(),
+        )
         .expect("刷新第一份");
     let query = |document: &nana_ui::runtime::RuntimeDocument| {
         let world = document.context().world();
@@ -300,15 +402,27 @@ fn mount_shell_tells_live_documents_apart() {
             .project_accessibility(document.document())
             .into_iter()
             .find(|node| node.label.as_deref() == Some("全局搜索"))
-            .and_then(|node| world.text_input(node.id).map(|input| input.value.to_string()))
+            .and_then(|node| {
+                world
+                    .text_input(node.id)
+                    .map(|input| input.value.to_string())
+            })
             .expect("搜索框")
     };
     let shells = |document: &nana_ui::runtime::RuntimeDocument| {
-        document.context().world().nodes_of_component(document.document(), APP_SHELL.type_id).count()
+        document
+            .context()
+            .world()
+            .nodes_of_component(document.document(), APP_SHELL.type_id)
+            .count()
     };
     assert_eq!(query(&first), "封面");
     assert_eq!(query(&second), "", "同步第一份文档改到了第二份");
-    assert_eq!((shells(&first), shells(&second)), (1, 1), "同步时又挂了一棵壳层");
+    assert_eq!(
+        (shells(&first), shells(&second)),
+        (1, 1),
+        "同步时又挂了一棵壳层"
+    );
 }
 
 /// 8 kHz、8-bit 单声道 PCM。
@@ -349,6 +463,7 @@ fn wav_item(path: &std::path::Path) -> QueueItem {
         file_class: "audio".into(),
         thumbnail_path: None,
         is_virtual: false,
+        local_absolute_path: None,
     }
 }
 
@@ -374,8 +489,14 @@ fn size_feedback_settles_in_every_scene() {
         ShellPage::SettingsError,
         ShellPage::Logs,
     ];
-    let mut scenes = pages.map(|page| (format!("{page:?}"), ShellViewModel::for_page(page))).to_vec();
-    scenes.extend(crate::shell::acceptance_gap_models().into_iter().map(|(name, model)| (name.to_string(), model)));
+    let mut scenes = pages
+        .map(|page| (format!("{page:?}"), ShellViewModel::for_page(page)))
+        .to_vec();
+    scenes.extend(
+        crate::shell::acceptance_gap_models()
+            .into_iter()
+            .map(|(name, model)| (name.to_string(), model)),
+    );
     for (name, model) in scenes {
         let mut harness = ShellHarness::mount(model);
         let mut rounds = 0;

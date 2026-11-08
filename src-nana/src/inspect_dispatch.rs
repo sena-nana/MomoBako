@@ -10,40 +10,105 @@ use nana_ui::RuntimeProgramContext;
 use serde_json::Value;
 
 use crate::backend::services::repository::{
-    FilePreviewSourceResponse, FileReadRequest, MetadataUpdateRequest, SearchDateFilter, SearchMetadataFilter,
-    SearchNumberFilter, SearchRequest, SearchSort,
+    FilePreviewSourceResponse, FileReadRequest, MetadataUpdateRequest, SearchDateFilter,
+    SearchMetadataFilter, SearchNumberFilter, SearchRequest, SearchSort,
 };
-use crate::playback_source::{prepare_and_read, Requester};
-use crate::shell::SourcePrep;
 use crate::backend::viewmodels::RepositoryQueryViewModel;
+use crate::playback_source::{Requester, prepare_and_read};
+use crate::shell::inspect_lyrics::{self, LyricHint};
 use crate::shell::{
-    DateBound, InspectEffect, InspectMessage, NumberBound, SearchRequestDraft, SearchRow, ShellMessage,
+    DateBound, InspectEffect, InspectMessage, NumberBound, SearchRequestDraft, SearchRow,
+    ShellMessage,
 };
+use crate::shell::{SourcePrep, is_video_extension};
 use crate::task_guard::spawn_service;
-use crate::{decode_preview_pixels, prepare_preview_text, MomoBakoApplication};
+use crate::{MomoBakoApplication, decode_preview_pixels, prepare_preview_text};
 
 /// 执行预览和搜索归约留下的请求。
-pub fn dispatch_inspect_effects(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
+pub fn dispatch_inspect_effects(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+) {
     for effect in app.shell.inspect.take_effects() {
         match effect {
-            InspectEffect::LoadImage { repo_id, path } => dispatch_image(app, context, repo_id, path),
-            InspectEffect::LoadText { repo_id, path, markdown, generation } => {
+            InspectEffect::LoadImage { repo_id, path } => {
+                dispatch_image(app, context, repo_id, path)
+            }
+            InspectEffect::LoadText {
+                repo_id,
+                path,
+                markdown,
+                generation,
+            } => {
                 dispatch_text(app, context, repo_id, path, markdown, generation);
             }
-            InspectEffect::LoadNative { repo_id, path, view_id, generation } => {
+            InspectEffect::LoadNative {
+                repo_id,
+                path,
+                view_id,
+                generation,
+            } => {
                 dispatch_native(app, context, repo_id, path, view_id, generation);
             }
+            InspectEffect::LoadArchiveEntry {
+                repo_id,
+                path,
+                entry,
+                through,
+                generation,
+            } => {
+                dispatch_archive_entry(app, context, repo_id, path, entry, through, generation);
+            }
             InspectEffect::Autoplay { path, generation } => {
-                app.shell.reduce(ShellMessage::Inspect(InspectMessage::Autoplay { path, generation }));
+                app.shell
+                    .reduce(ShellMessage::Inspect(InspectMessage::Autoplay {
+                        path,
+                        generation,
+                    }));
             }
-            InspectEffect::LoadMedia { repo_id, path, generation, virtual_entry } => {
-                dispatch_media(app, context, MediaRequest { repo_id, path, generation, virtual_entry });
+            InspectEffect::LoadMedia {
+                repo_id,
+                path,
+                generation,
+                virtual_entry,
+            } => {
+                dispatch_media(
+                    app,
+                    context,
+                    MediaRequest {
+                        repo_id,
+                        path,
+                        generation,
+                        virtual_entry,
+                    },
+                );
             }
-            InspectEffect::SaveMetadata { repo_id, asset_id, expected_version, metadata } => {
+            InspectEffect::LoadLyrics {
+                repo_id,
+                audio_path,
+                generation,
+                lyric_path,
+            } => {
+                dispatch_lyrics(app, context, repo_id, audio_path, generation, lyric_path);
+            }
+            InspectEffect::SaveMetadata {
+                repo_id,
+                asset_id,
+                expected_version,
+                metadata,
+            } => {
                 dispatch_save(app, context, repo_id, asset_id, expected_version, metadata);
             }
-            InspectEffect::LoadAsset { repo_id, asset_id } => dispatch_asset(app, context, repo_id, asset_id),
-            InspectEffect::Search { generation, request } => dispatch_search(app, context, generation, request),
+            InspectEffect::LoadAsset { repo_id, asset_id } => {
+                dispatch_asset(app, context, repo_id, asset_id)
+            }
+            InspectEffect::ReloadAsset { repo_id, asset_id } => {
+                dispatch_refresh_asset(app, context, repo_id, asset_id)
+            }
+            InspectEffect::Search {
+                generation,
+                request,
+            } => dispatch_search(app, context, generation, request),
         }
     }
 }
@@ -64,7 +129,8 @@ struct QueryImageSource {
 
 impl ImagePreviewSource for QueryImageSource {
     fn prepare(&self, request: FileReadRequest) -> Result<FilePreviewSourceResponse, String> {
-        self.executor.block_on(self.query.prepare_preview_file_source(request))
+        self.executor
+            .block_on(self.query.prepare_preview_file_source(request))
     }
 
     fn read(&self, request: FileReadRequest) -> Result<Vec<u8>, String> {
@@ -72,34 +138,69 @@ impl ImagePreviewSource for QueryImageSource {
     }
 }
 
-fn dispatch_image(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String, path: String) {
+fn dispatch_image(
+    app: &MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+    path: String,
+) {
     let (fail_repo, fail_path) = (repo_id.clone(), path.clone());
-    let failed = move |error| ShellMessage::PreviewPixelsLoaded { source: empty_source(&fail_repo, &fail_path), pixels: Err(error) };
-    spawn_service(app.services.as_ref(), context, "图片预览", failed, |services| {
-        let source = QueryImageSource { query: services.repository_query.clone(), executor: services.executor.clone() };
-        move || load_image_preview(&source, repo_id, path)
-    });
+    let failed = move |error| ShellMessage::PreviewPixelsLoaded {
+        source: empty_source(&fail_repo, &fail_path),
+        pixels: Err(error),
+    };
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "图片预览",
+        failed,
+        |services| {
+            let source = QueryImageSource {
+                query: services.repository_query.clone(),
+                executor: services.executor.clone(),
+            };
+            move || load_image_preview(&source, repo_id, path)
+        },
+    );
 }
 
 /// 图片预览在任务线程里做的事：准备预览源，媒体类型是 `image/*` 才读字节、解成像素。准备、读取、解码失败和
 /// 不是图片的媒体类型都按失败交回，预览框写原因。
-pub(crate) fn load_image_preview(source: &impl ImagePreviewSource, repo_id: String, path: String) -> ShellMessage {
-    let prepared = match source.prepare(FileReadRequest { repo_id: repo_id.clone(), path: path.clone() }) {
+pub(crate) fn load_image_preview(
+    source: &impl ImagePreviewSource,
+    repo_id: String,
+    path: String,
+) -> ShellMessage {
+    let prepared = match source.prepare(FileReadRequest {
+        repo_id: repo_id.clone(),
+        path: path.clone(),
+    }) {
         Ok(prepared) => prepared,
         Err(error) => {
             eprintln!("Nana 准备图片预览失败：{path}：{error}");
-            return ShellMessage::PreviewPixelsLoaded { source: empty_source(&repo_id, &path), pixels: Err(error) };
+            return ShellMessage::PreviewPixelsLoaded {
+                source: empty_source(&repo_id, &path),
+                pixels: Err(error),
+            };
         }
     };
     let pixels = if prepared.media_type.starts_with("image/") {
-        source.read(FileReadRequest { repo_id, path: path.clone() }).and_then(|bytes| decode_preview_pixels(&bytes))
+        source
+            .read(FileReadRequest {
+                repo_id,
+                path: path.clone(),
+            })
+            .and_then(|bytes| decode_preview_pixels(&bytes))
     } else {
         Err(format!("原生纹理预览暂不支持 {}", prepared.media_type))
     };
     if let Err(error) = &pixels {
         eprintln!("Nana 图片预览失败：{path}：{error}");
     }
-    ShellMessage::PreviewPixelsLoaded { source: prepared, pixels }
+    ShellMessage::PreviewPixelsLoaded {
+        source: prepared,
+        pixels,
+    }
 }
 
 /// 一次音视频预览读取。`virtual_entry` 是在线条目，先准备播放源。
@@ -112,29 +213,66 @@ struct MediaRequest {
 
 /// 读出音视频并解码。本地条目经仓库服务读字节；在线条目先经 `momobako.playback.prepare` 准备播放源、读准备好的
 /// 本地文件（`playback_source.rs`），准备失败时标成可以重试，预览框给「重试」。
-fn dispatch_media(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, request: MediaRequest) {
-    let MediaRequest { repo_id, path, generation, virtual_entry } = request;
+fn dispatch_media(
+    app: &MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    request: MediaRequest,
+) {
+    let MediaRequest {
+        repo_id,
+        path,
+        generation,
+        virtual_entry,
+    } = request;
     let fail_path = path.clone();
     let failed = move |error| {
-        let prep = SourcePrep { retryable: virtual_entry, ..SourcePrep::default() };
+        let prep = SourcePrep {
+            retryable: virtual_entry,
+            ..SourcePrep::default()
+        };
         media_message(fail_path.clone(), generation, Err(error), prep)
     };
-    let extension = std::path::Path::new(&path).extension().and_then(|extension| extension.to_str()).unwrap_or_default().to_string();
-    spawn_service(app.services.as_ref(), context, "音视频预览", failed, |services| {
-        let query = services.repository_query.clone();
-        let tasks = services.tasks.clone();
-        let executor = services.executor.clone();
-        move || {
-            let (bytes, prep) = if virtual_entry {
-                prepare_and_read(&tasks, &executor, Requester::Preview, &repo_id, &path)
-            } else {
-                (executor.block_on(query.read_file(FileReadRequest { repo_id: repo_id.clone(), path: path.clone() })), SourcePrep::default())
-            };
-            // 和播放条装当前项走同一个解码：坏的 wav、mp3、flac、ogg 报它自己的原因，预览页写出来的和播放条一致。
-            let result = bytes.and_then(|bytes| crate::shell::player::decode_media(&repo_id, &extension, &bytes));
-            media_message(path, generation, result, prep)
-        }
-    });
+    let extension = std::path::Path::new(&path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or_default()
+        .to_string();
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "音视频预览",
+        failed,
+        |services| {
+            let query = services.repository_query.clone();
+            let tasks = services.tasks.clone();
+            let executor = services.executor.clone();
+            move || {
+                let (bytes, mut prep, hint) = if virtual_entry {
+                    prepare_and_read(&tasks, &executor, Requester::Preview, &repo_id, &path)
+                } else {
+                    (
+                        executor.block_on(query.read_file(FileReadRequest {
+                            repo_id: repo_id.clone(),
+                            path: path.clone(),
+                        })),
+                        SourcePrep::default(),
+                        LyricHint::Absent,
+                    )
+                };
+                // 和播放条装当前项走同一个解码：坏的 wav、mp3、flac、ogg 报它自己的原因，预览页写出来的和播放条一致。
+                let result = bytes.and_then(|bytes| {
+                    crate::shell::player::decode_media(&repo_id, &extension, &bytes)
+                });
+                // 音频解出来以后再读歌词，舞台先出来，读的时候写「读取歌词...」。视频不读。
+                inspect_lyrics::schedule_lyrics(
+                    &mut prep,
+                    hint,
+                    result.is_ok() && !is_video_extension(&extension),
+                );
+                media_message(path, generation, result, prep)
+            }
+        },
+    );
 }
 
 fn dispatch_text(
@@ -147,19 +285,33 @@ fn dispatch_text(
 ) {
     let fail_path = path.clone();
     let failed = move |error| body_error(fail_path.clone(), markdown, generation, error);
-    spawn_service(app.services.as_ref(), context, "文本预览", failed, |services| {
-        let query = services.repository_query.clone();
-        let executor = services.executor.clone();
-        move || {
-            let result = executor
-                .block_on(query.read_file(FileReadRequest { repo_id, path: path.clone() }))
-                .map(|bytes| prepare_preview_text(&bytes));
-            if let Err(error) = &result {
-                eprintln!("Nana 读取文本预览失败：{path}：{error}");
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "文本预览",
+        failed,
+        |services| {
+            let query = services.repository_query.clone();
+            let executor = services.executor.clone();
+            move || {
+                let result = executor
+                    .block_on(query.read_file(FileReadRequest {
+                        repo_id,
+                        path: path.clone(),
+                    }))
+                    .map(|bytes| prepare_preview_text(&bytes));
+                if let Err(error) = &result {
+                    eprintln!("Nana 读取文本预览失败：{path}：{error}");
+                }
+                ShellMessage::Inspect(InspectMessage::BodyLoaded {
+                    path,
+                    markdown,
+                    generation,
+                    result,
+                })
             }
-            ShellMessage::Inspect(InspectMessage::BodyLoaded { path, markdown, generation, result })
-        }
-    });
+        },
+    );
 }
 
 fn dispatch_native(
@@ -172,16 +324,75 @@ fn dispatch_native(
 ) {
     let fail_path = path.clone();
     let failed = move |error| native_message(fail_path.clone(), generation, Err(error));
-    spawn_service(app.services.as_ref(), context, "原生预览", failed, |services| {
-        let query = services.repository_query.clone();
-        let executor = services.executor.clone();
-        move || {
-            let result = executor
-                .block_on(query.read_file(FileReadRequest { repo_id, path: path.clone() }))
-                .and_then(|bytes| crate::shell::load_native_preview(&view_id, &bytes));
-            native_message(path, generation, result)
-        }
-    });
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "原生预览",
+        failed,
+        |services| {
+            let query = services.repository_query.clone();
+            let executor = services.executor.clone();
+            move || {
+                let result = executor
+                    .block_on(query.read_file(FileReadRequest {
+                        repo_id,
+                        path: path.clone(),
+                    }))
+                    .and_then(|bytes| crate::shell::load_native_preview(&view_id, &bytes));
+                native_message(path, generation, result)
+            }
+        },
+    );
+}
+
+/// 再读一次压缩包容器，只解开已经点开的那一条，然后丢掉容器字节。
+fn dispatch_archive_entry(
+    app: &MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+    path: String,
+    entry: String,
+    through: Vec<String>,
+    generation: u64,
+) {
+    let fail_path = path.clone();
+    let fail_entry = entry.clone();
+    let fail_through = through.clone();
+    let failed = move |error| {
+        ShellMessage::Inspect(crate::shell::archive_entry_loaded(
+            fail_path.clone(),
+            fail_entry.clone(),
+            fail_through.clone(),
+            generation,
+            Err(error),
+        ))
+    };
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "包内文件",
+        failed,
+        |services| {
+            let query = services.repository_query.clone();
+            let executor = services.executor.clone();
+            move || {
+                let result = executor
+                    .block_on(query.read_file(FileReadRequest {
+                        repo_id,
+                        path: path.clone(),
+                    }))
+                    .and_then(|bytes| {
+                        crate::shell::preview_archive_entry(&bytes, &through, &entry)
+                    });
+                if let Err(error) = &result {
+                    eprintln!("Nana 读取包内文件失败：{path} 里的 {entry}：{error}");
+                }
+                ShellMessage::Inspect(crate::shell::archive_entry_loaded(
+                    path, entry, through, generation, result,
+                ))
+            }
+        },
+    );
 }
 
 fn dispatch_save(
@@ -193,23 +404,79 @@ fn dispatch_save(
     metadata: BTreeMap<String, Value>,
 ) {
     let failed = |error| saved_message(Err(error));
-    spawn_service(app.services.as_ref(), context, "保存元数据", failed, |services| {
-        let query = services.repository_query.clone();
-        let executor = services.executor.clone();
-        move || {
-            let request = MetadataUpdateRequest { repo_id, asset_id, expected_version, metadata, source: Some("desktop".into()) };
-            saved_message(executor.block_on(query.update_asset_metadata(request)).map(|response| (response.outcome, response.asset)))
-        }
-    });
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "保存元数据",
+        failed,
+        |services| {
+            let query = services.repository_query.clone();
+            let executor = services.executor.clone();
+            move || {
+                let request = MetadataUpdateRequest {
+                    repo_id,
+                    asset_id,
+                    expected_version,
+                    metadata,
+                    source: Some("desktop".into()),
+                };
+                saved_message(
+                    executor
+                        .block_on(query.update_asset_metadata(request))
+                        .map(|response| (response.outcome, response.asset)),
+                )
+            }
+        },
+    );
 }
 
-fn dispatch_asset(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String, asset_id: String) {
+/// 刷新重读素材详情。和单击的 `LoadAsset` 分开：结果不改选中路径，也不打开预览。
+fn dispatch_refresh_asset(
+    app: &MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+    asset_id: String,
+) {
+    let failed = |error| ShellMessage::RefreshAssetLoaded(Err(error));
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "刷新素材详情",
+        failed,
+        |services| {
+            let query = services.repository_query.clone();
+            let executor = services.executor.clone();
+            move || {
+                ShellMessage::RefreshAssetLoaded(
+                    executor.block_on(query.get_asset_detail(repo_id, asset_id)),
+                )
+            }
+        },
+    );
+}
+
+fn dispatch_asset(
+    app: &MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+    asset_id: String,
+) {
     let failed = |error| ShellMessage::AssetDetailLoaded(Err(error));
-    spawn_service(app.services.as_ref(), context, "打开搜索结果", failed, |services| {
-        let query = services.repository_query.clone();
-        let executor = services.executor.clone();
-        move || ShellMessage::AssetDetailLoaded(executor.block_on(query.get_asset_detail(repo_id, asset_id)))
-    });
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "打开搜索结果",
+        failed,
+        |services| {
+            let query = services.repository_query.clone();
+            let executor = services.executor.clone();
+            move || {
+                ShellMessage::AssetDetailLoaded(
+                    executor.block_on(query.get_asset_detail(repo_id, asset_id)),
+                )
+            }
+        },
+    );
 }
 
 fn dispatch_search(
@@ -220,16 +487,29 @@ fn dispatch_search(
 ) {
     let service_request = to_service_request(request);
     let failed = move |error| search_message(generation, Err(error));
-    spawn_service(app.services.as_ref(), context, "搜索", failed, |services| {
-        let query = services.repository_query.clone();
-        let executor = services.executor.clone();
-        move || {
-            let result = executor
-                .block_on(query.search_assets(service_request))
-                .map(|response| response.results.into_iter().map(SearchRow::from_hit).collect());
-            search_message(generation, result)
-        }
-    });
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "搜索",
+        failed,
+        |services| {
+            let query = services.repository_query.clone();
+            let executor = services.executor.clone();
+            move || {
+                let result =
+                    executor
+                        .block_on(query.search_assets(service_request))
+                        .map(|response| {
+                            response
+                                .results
+                                .into_iter()
+                                .map(SearchRow::from_hit)
+                                .collect()
+                        });
+                search_message(generation, result)
+            }
+        },
+    );
 }
 
 fn to_service_request(request: SearchRequestDraft) -> SearchRequest {
@@ -267,7 +547,12 @@ fn some_list(values: Vec<String>) -> Option<Vec<String>> {
 }
 
 fn some_metadata(values: Vec<(String, String)>) -> Option<Vec<SearchMetadataFilter>> {
-    (!values.is_empty()).then(|| values.into_iter().map(|(key, value)| SearchMetadataFilter { key, value }).collect())
+    (!values.is_empty()).then(|| {
+        values
+            .into_iter()
+            .map(|(key, value)| SearchMetadataFilter { key, value })
+            .collect()
+    })
 }
 
 fn some_numbers(values: Vec<NumberBound>) -> Option<Vec<SearchNumberFilter>> {
@@ -284,26 +569,111 @@ fn some_numbers(values: Vec<NumberBound>) -> Option<Vec<SearchNumberFilter>> {
 }
 
 fn some_dates(values: Vec<DateBound>) -> Option<Vec<SearchDateFilter>> {
-    (!values.is_empty()).then(|| values.into_iter().map(|bound| SearchDateFilter { key: bound.key, from: bound.from, to: bound.to }).collect())
+    (!values.is_empty()).then(|| {
+        values
+            .into_iter()
+            .map(|bound| SearchDateFilter {
+                key: bound.key,
+                from: bound.from,
+                to: bound.to,
+            })
+            .collect()
+    })
 }
 
-fn media_message(path: String, generation: u64, result: Result<crate::shell::MediaParts, String>, prep: SourcePrep) -> ShellMessage {
+/// 音频舞台出来以后读歌词。本地路径直接读文件；没有路径时读同级 `.lrc`。
+/// 读失败或服务没起来交回空正文，舞台从「读取歌词...」换成「暂无歌词」，不把预览打成失败。
+fn dispatch_lyrics(
+    app: &MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+    audio_path: String,
+    generation: u64,
+    lyric_path: Option<String>,
+) {
+    let fail_path = audio_path.clone();
+    let failed = move |error| {
+        eprintln!("Nana 读取歌词失败：{fail_path}：{error}");
+        lyrics_message(fail_path.clone(), generation, String::new())
+    };
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "歌词",
+        failed,
+        |services| {
+            let query = services.repository_query.clone();
+            let executor = services.executor.clone();
+            move || {
+                let hint = match lyric_path.clone() {
+                    Some(path) => LyricHint::Local(path),
+                    None => LyricHint::Absent,
+                };
+                let repo_id = repo_id.clone();
+                let text = inspect_lyrics::text_for(hint, &audio_path, |path| {
+                    executor.block_on(query.read_file(FileReadRequest {
+                        repo_id: repo_id.clone(),
+                        path: path.to_string(),
+                    }))
+                });
+                lyrics_message(audio_path, generation, text)
+            }
+        },
+    );
+}
+
+fn lyrics_message(path: String, generation: u64, text: String) -> ShellMessage {
+    ShellMessage::Inspect(InspectMessage::LyricsLoaded {
+        path,
+        generation,
+        text,
+    })
+}
+
+fn media_message(
+    path: String,
+    generation: u64,
+    result: Result<crate::shell::MediaParts, String>,
+    prep: SourcePrep,
+) -> ShellMessage {
     let (result, pcm, frames) = match result {
         Ok(parts) => (Ok(parts.session), parts.pcm, parts.frames),
         Err(error) => (Err(error), None, None),
     };
-    ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result, pcm, frames, prep })
+    ShellMessage::Inspect(InspectMessage::MediaLoaded {
+        path,
+        generation,
+        result,
+        pcm,
+        frames,
+        prep,
+    })
 }
 
-fn native_message(path: String, generation: u64, result: Result<crate::shell::NativeLoad, String>) -> ShellMessage {
-    ShellMessage::Inspect(InspectMessage::NativeLoaded { path, generation, result })
+fn native_message(
+    path: String,
+    generation: u64,
+    result: Result<crate::shell::NativeLoad, String>,
+) -> ShellMessage {
+    ShellMessage::Inspect(InspectMessage::NativeLoaded {
+        path,
+        generation,
+        result,
+    })
 }
 
 fn body_error(path: String, markdown: bool, generation: u64, error: String) -> ShellMessage {
-    ShellMessage::Inspect(InspectMessage::BodyLoaded { path, markdown, generation, result: Err(error) })
+    ShellMessage::Inspect(InspectMessage::BodyLoaded {
+        path,
+        markdown,
+        generation,
+        result: Err(error),
+    })
 }
 
-fn saved_message(result: Result<(String, crate::backend::services::repository::AssetDetail), String>) -> ShellMessage {
+fn saved_message(
+    result: Result<(String, crate::backend::services::repository::AssetDetail), String>,
+) -> ShellMessage {
     ShellMessage::Inspect(InspectMessage::MetadataSaved(result))
 }
 

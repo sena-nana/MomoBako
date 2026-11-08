@@ -10,13 +10,15 @@
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{ARCHIVE, COPY, FOLDER_OPEN, PENCIL};
-use nana_ui::runtime::view::{fields, signal, widget, AnyView, IntoView, Signal};
+use nana_ui::runtime::view::{AnyView, IntoView, Signal, fields, signal, widget};
 use nana_ui::runtime::{LengthSpec, RadiusTier, SemanticColorRole, Stack};
 use nana_ui::{ButtonKind, DialogSize, Icon};
 
 use super::files::{FileDialog, FilesMessage, FilesState};
 use super::files_view::style;
-use super::view_part_overlay::dialog::{action, footer, text_field, wrapping_text, DialogFrame, MODAL_CARD};
+use super::view_part_overlay::dialog::{
+    DialogFrame, MODAL_CARD, action, footer, text_field, wrapping_text,
+};
 use super::view_part_overlay::session::{Draft, Projected};
 use super::{ShellMessage, ShellViewModel};
 
@@ -49,7 +51,12 @@ impl Title {
     fn text(&self, files: &FilesState) -> String {
         match self {
             Self::Fixed(title) => (*title).to_string(),
-            Self::Eagle => if files.eagle_mode == "move" { "从 Eagle 剪切导入" } else { "从 Eagle 复制导入" }.to_string(),
+            Self::Eagle => if files.eagle_mode == "move" {
+                "从 Eagle 剪切导入"
+            } else {
+                "从 Eagle 复制导入"
+            }
+            .to_string(),
         }
     }
 }
@@ -75,10 +82,34 @@ const RENAME_DIALOG: DialogSize = DialogSize::capped(460.0, 92.0);
 /// `.modal-card` 宽。三种导入 Vue 里没有对话框（原生选择器），图标按动作取，和文件页别的对话框一样
 /// 标题前都有图标。
 fn text_dialog_spec(dialog: FileDialog) -> Option<TextDialog> {
-    let spec = |title, size, icon, label, placeholder, submit, draft| TextDialog { title, size, icon, label, placeholder, submit, draft };
+    let spec = |title, size, icon, label, placeholder, submit, draft| TextDialog {
+        title,
+        size,
+        icon,
+        label,
+        placeholder,
+        submit,
+        draft,
+    };
     Some(match dialog {
-        FileDialog::Rename => spec(Title::Fixed("重命名文件"), RENAME_DIALOG, PENCIL, "新名称", "输入新的文件名", "保存", name_draft),
-        FileDialog::Copy => spec(Title::Fixed("复制到文件夹"), MODAL_CARD, COPY, "目标目录", "留空表示根目录", "复制", target_draft),
+        FileDialog::Rename => spec(
+            Title::Fixed("重命名文件"),
+            RENAME_DIALOG,
+            PENCIL,
+            "新名称",
+            "输入新的文件名",
+            "保存",
+            name_draft,
+        ),
+        FileDialog::Copy => spec(
+            Title::Fixed("复制到文件夹"),
+            MODAL_CARD,
+            COPY,
+            "目标目录",
+            "留空表示根目录",
+            "复制",
+            target_draft,
+        ),
         FileDialog::Import => spec(
             Title::Fixed("从文件夹导入"),
             MODAL_CARD,
@@ -88,12 +119,24 @@ fn text_dialog_spec(dialog: FileDialog) -> Option<TextDialog> {
             "导入",
             import_draft,
         ),
-        FileDialog::ImportArchive => {
-            spec(Title::Fixed("从 ZIP 导入"), MODAL_CARD, ARCHIVE, "压缩包路径", "D:/素材/归档.zip", "导入", import_draft)
-        }
-        FileDialog::ImportEagle => {
-            spec(Title::Eagle, MODAL_CARD, FOLDER_OPEN, "Eagle 资源库路径", "D:/素材/示例.library", "导入", import_draft)
-        }
+        FileDialog::ImportArchive => spec(
+            Title::Fixed("从 ZIP 导入"),
+            MODAL_CARD,
+            ARCHIVE,
+            "压缩包路径",
+            "D:/素材/归档.zip",
+            "导入",
+            import_draft,
+        ),
+        FileDialog::ImportEagle => spec(
+            Title::Eagle,
+            MODAL_CARD,
+            FOLDER_OPEN,
+            "Eagle 资源库路径",
+            "D:/素材/示例.library",
+            "导入",
+            import_draft,
+        ),
         FileDialog::Hardlink | FileDialog::Closed => return None,
     })
 }
@@ -102,7 +145,8 @@ fn text_dialog_spec(dialog: FileDialog) -> Option<TextDialog> {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct TextDialogView {
     pub title: String,
-    /// 文件变更进行中：输入和按钮禁用，主按钮写「处理中...」，三种关闭手势都不关。
+    /// 文件变更进行中：取消和主按钮禁用，主按钮写「处理中...」，三种关闭手势都不关。
+    /// 输入框跟不跟着禁用由对话框种类决定，不在这份投影里。
     pub busy: bool,
     pub submit: String,
 }
@@ -114,7 +158,11 @@ impl TextDialogView {
         Some(Self {
             title: spec.title.text(files),
             busy: files.mutating,
-            submit: if files.mutating { "处理中...".to_string() } else { spec.submit.to_string() },
+            submit: if files.mutating {
+                "处理中...".to_string()
+            } else {
+                spec.submit.to_string()
+            },
         })
     }
 }
@@ -128,13 +176,19 @@ pub(super) fn file_dialog(model: &ShellViewModel) -> Option<AnyView> {
 }
 
 /// 一个输入框的对话框：字段标签、输入，底部取消和主操作。回车提交。
+///
+/// 复制到文件夹的目标目录照 Vue `CopyTargetDialog` 没有 `disabled`，复制进行中仍可改下一份路径；
+/// 已经发出的请求用提交当时的目录。重命名文件的输入框照 Vue 在变更中保持禁用，导入对话框同样锁住输入。
 fn text_dialog(model: &ShellViewModel, dialog: FileDialog) -> Option<AnyView> {
     let spec = text_dialog_spec(dialog)?;
     let view = signal(TextDialogView::project(model)?);
     Projected::register(view, TextDialogView::project);
     let read = spec.draft;
-    let draft = Draft::register(model, move |model| (model.files.dialog == dialog).then(|| read(&model.files).to_string()));
+    let draft = Draft::register(model, move |model| {
+        (model.files.dialog == dialog).then(|| read(&model.files).to_string())
+    });
     let busy = move || view.with(|view| view.busy);
+    let lock_input = dialog != FileDialog::Copy;
     let submit = || file_message(FilesMessage::SubmitDialog);
     let close = || file_message(FilesMessage::CloseDialog);
     let body = text_field(
@@ -143,20 +197,30 @@ fn text_dialog(model: &ShellViewModel, dialog: FileDialog) -> Option<AnyView> {
         draft,
         spec.placeholder,
         false,
-        busy,
+        move || lock_input && view.with(|view| view.busy),
         |value| file_message(FilesMessage::DraftChanged(value)),
         Some(Arc::new(submit)),
     );
     let buttons = vec![
         action("取消", ButtonKind::Ghost, busy, "file-dialog-cancel", close),
-        action(move || view.with(|view| view.submit.clone()), ButtonKind::Primary, busy, "file-dialog-submit", submit),
+        action(
+            move || view.with(|view| view.submit.clone()),
+            ButtonKind::Primary,
+            busy,
+            "file-dialog-submit",
+            submit,
+        ),
     ];
     Some(
-        DialogFrame::new("file-dialog", move || view.with(|view| view.title.clone()), close)
-            .size(spec.size)
-            .title_icon(spec.icon)
-            .busy(busy)
-            .dialog(body, footer(None, buttons)),
+        DialogFrame::new(
+            "file-dialog",
+            move || view.with(|view| view.title.clone()),
+            close,
+        )
+        .size(spec.size)
+        .title_icon(spec.icon)
+        .busy(busy)
+        .dialog(body, footer(None, buttons)),
     )
 }
 
@@ -183,7 +247,12 @@ impl HardlinkView {
             existing_path: prompt.existing_path.clone(),
             new_path: prompt.new_path.clone(),
             busy: files.hardlink_busy(),
-            confirm: if files.hardlink_busy() { "处理中..." } else { "加入关联" }.to_string(),
+            confirm: if files.hardlink_busy() {
+                "处理中..."
+            } else {
+                "加入关联"
+            }
+            .to_string(),
         })
     }
 }
@@ -206,14 +275,25 @@ fn hardlink_dialog(model: &ShellViewModel) -> Option<AnyView> {
             .outline(SemanticColorRole::BorderSoft, 1.0)
             .radius(RadiusTier::Md),
     )
-    .children((path_line(view, |view| view.existing_path.clone(), "file-hardlink-existing"), path_line(view, |view| view.new_path.clone(), "file-hardlink-new")))
+    .children((
+        path_line(
+            view,
+            |view| view.existing_path.clone(),
+            "file-hardlink-existing",
+        ),
+        path_line(view, |view| view.new_path.clone(), "file-hardlink-new"),
+    ))
     .key("file-hardlink-paths");
     let body = widget(Stack::column(12.0).width(LengthSpec::Fill)).children((message, paths));
     let buttons = vec![
         action("跳过", ButtonKind::Ghost, busy, "file-hardlink-skip", skip),
-        action(move || view.with(|view| view.confirm.clone()), ButtonKind::Primary, busy, "file-hardlink-confirm", || {
-            file_message(FilesMessage::ConfirmHardlink)
-        }),
+        action(
+            move || view.with(|view| view.confirm.clone()),
+            ButtonKind::Primary,
+            busy,
+            "file-hardlink-confirm",
+            || file_message(FilesMessage::ConfirmHardlink),
+        ),
     ];
     Some(
         DialogFrame::new("hardlink-dialog", || "加入硬链接关联".to_string(), skip)
@@ -225,7 +305,11 @@ fn hardlink_dialog(model: &ShellViewModel) -> Option<AnyView> {
 }
 
 /// 路径框里的一行：12px 弱色、任意处折行。
-fn path_line(view: Signal<HardlinkView>, read: fn(&HardlinkView) -> String, key: &'static str) -> AnyView {
+fn path_line(
+    view: Signal<HardlinkView>,
+    read: fn(&HardlinkView) -> String,
+    key: &'static str,
+) -> AnyView {
     widget(style::wrapping(style::small_muted(String::new())))
         .key(key)
         .prop::<String, fields::text::value>(move || view.with(read))

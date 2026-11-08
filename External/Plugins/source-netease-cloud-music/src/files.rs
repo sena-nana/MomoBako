@@ -41,13 +41,25 @@ fn write_new_file(runtime: &RuntimeContext, path: &Path, bytes: &[u8]) -> Result
         Ok(file) => file,
         Err(error) if error.kind() == ErrorKind::AlreadyExists => return Ok(false),
         Err(error) => {
-            log_file_error(runtime, "downloadCreateFailed", "网易云下载无法新建文件。", path, &error);
+            log_file_error(
+                runtime,
+                "downloadCreateFailed",
+                "网易云下载无法新建文件。",
+                path,
+                &error,
+            );
             return Err(format!("无法新建文件 {}：{error}", path.display()));
         }
     };
     if let Err(error) = file.write_all(bytes).and_then(|()| file.sync_all()) {
         drop(file);
-        log_file_error(runtime, "downloadWriteFailed", "网易云下载写入文件失败。", path, &error);
+        log_file_error(
+            runtime,
+            "downloadWriteFailed",
+            "网易云下载写入文件失败。",
+            path,
+            &error,
+        );
         remove_written(runtime, &[path.to_path_buf()]);
         return Err(format!("写入文件 {} 失败：{error}", path.display()));
     }
@@ -55,7 +67,11 @@ fn write_new_file(runtime: &RuntimeContext, path: &Path, bytes: &[u8]) -> Result
 }
 
 /// 先写同目录下的临时文件，再改名替换目标，目标处不会留下写了一半的文件。
-pub(crate) fn replace_file(runtime: &RuntimeContext, path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn replace_file(
+    runtime: &RuntimeContext,
+    path: &Path,
+    bytes: &[u8],
+) -> Result<(), String> {
     let name = path
         .file_name()
         .ok_or_else(|| format!("下载目标缺少文件名：{}", path.display()))?
@@ -63,7 +79,13 @@ pub(crate) fn replace_file(runtime: &RuntimeContext, path: &Path, bytes: &[u8]) 
         .to_string();
     let temp = path.with_file_name(format!("{name}.download"));
     if let Err(error) = fs::write(&temp, bytes) {
-        log_file_error(runtime, "downloadWriteFailed", "网易云下载写入临时文件失败。", &temp, &error);
+        log_file_error(
+            runtime,
+            "downloadWriteFailed",
+            "网易云下载写入临时文件失败。",
+            &temp,
+            &error,
+        );
         remove_written(runtime, &[temp.clone()]);
         return Err(format!("写入临时文件 {} 失败：{error}", temp.display()));
     }
@@ -72,7 +94,13 @@ pub(crate) fn replace_file(runtime: &RuntimeContext, path: &Path, bytes: &[u8]) 
         _ => fs::rename(&temp, path),
     };
     if let Err(error) = placed {
-        log_file_error(runtime, "downloadMoveFailed", "网易云下载落盘失败。", path, &error);
+        log_file_error(
+            runtime,
+            "downloadMoveFailed",
+            "网易云下载落盘失败。",
+            path,
+            &error,
+        );
         remove_written(runtime, &[temp]);
         return Err(format!("文件 {} 落盘失败：{error}", path.display()));
     }

@@ -21,12 +21,24 @@ pub(crate) struct SoftFill {
 impl SoftFill {
     /// Vue `--err-soft`。
     pub(crate) fn err() -> Self {
-        Self { role: SemanticColorRole::Danger, light_alpha: 0.10, dark_alpha: 0.14, radius: RadiusTier::Sm, border: None }
+        Self {
+            role: SemanticColorRole::Danger,
+            light_alpha: 0.10,
+            dark_alpha: 0.14,
+            radius: RadiusTier::Sm,
+            border: None,
+        }
     }
 
     /// Vue `--ok-soft`。
     pub(crate) fn ok() -> Self {
-        Self { role: SemanticColorRole::Success, light_alpha: 0.10, dark_alpha: 0.14, radius: RadiusTier::Sm, border: None }
+        Self {
+            role: SemanticColorRole::Success,
+            light_alpha: 0.10,
+            dark_alpha: 0.14,
+            radius: RadiusTier::Sm,
+            border: None,
+        }
     }
 
     pub(crate) fn radius(mut self, radius: RadiusTier) -> Self {
@@ -45,7 +57,11 @@ impl SoftFill {
     }
 
     fn alpha(&self, appearance: ThemeAppearance) -> f32 {
-        if crate::theme_map::is_dark(appearance) { self.dark_alpha } else { self.light_alpha }
+        if crate::theme_map::is_dark(appearance) {
+            self.dark_alpha
+        } else {
+            self.light_alpha
+        }
     }
 
     fn paint_with(&self, cx: &mut PaintContext<'_>, radius: Radius) {
@@ -63,7 +79,10 @@ impl SoftFill {
             ^ u64::from(self.light_alpha.to_bits()) << 16
             ^ u64::from(self.dark_alpha.to_bits())
             ^ (self.radius as u64) << 40
-            ^ self.border.map(|(role, width)| (role as u64) << 32 ^ u64::from(width.to_bits()) << 8).unwrap_or(0)
+            ^ self
+                .border
+                .map(|(role, width)| (role as u64) << 32 ^ u64::from(width.to_bits()) << 8)
+                .unwrap_or(0)
     }
 }
 

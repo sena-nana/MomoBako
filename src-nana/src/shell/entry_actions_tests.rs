@@ -27,7 +27,9 @@ fn row() -> FileRow {
         is_virtual: false,
         provider_id: Some("netease".into()),
         provider_item_id: Some("9".into()),
-        source_payload: Some(serde_json::json!({"entryKind": "track", "songId": 9, "cookie": "hide"})),
+        source_payload: Some(
+            serde_json::json!({"entryKind": "track", "songId": 9, "cookie": "hide"}),
+        ),
         local_absolute_path: None,
     })
 }
@@ -37,13 +39,19 @@ fn directory() -> FileRow {
     directory.kind = "directory".into();
     directory.name = "夜曲合集".into();
     directory.path = "playlists/night".into();
-    directory.source_payload = Some(serde_json::json!({"entryKind": "playlist-folder", "playlistId": 3, "playlistName": "夜曲"}));
+    directory.source_payload = Some(
+        serde_json::json!({"entryKind": "playlist-folder", "playlistId": 3, "playlistName": "夜曲"}),
+    );
     directory
 }
 
 /// 当前资源库可用、缓存在 D:/cache、还有别的资源库可下载。
 fn ready() -> SourceContext {
-    SourceContext { managed_cache_root: Some("D:/cache".into()), source_unavailable: false, has_target_repository: true }
+    SourceContext {
+        managed_cache_root: Some("D:/cache".into()),
+        source_unavailable: false,
+        has_target_repository: true,
+    }
 }
 
 fn manifest() -> PluginManifest {
@@ -113,18 +121,41 @@ fn payload_of(action: &FilePluginAction) -> Option<&Value> {
 #[test]
 fn track_actions_carry_the_managed_cache_root_and_split_downloads_by_target() {
     let actions = actions_for(&[manifest()], &row(), &ready());
-    assert_eq!(labels(&actions), ["清理播放缓存", "重新获取播放资源", "下载单曲到本地", "下载单曲到其他资源库"]);
+    assert_eq!(
+        labels(&actions),
+        [
+            "清理播放缓存",
+            "重新获取播放资源",
+            "下载单曲到本地",
+            "下载单曲到其他资源库"
+        ]
+    );
     for action in &actions[..2] {
-        let FilePluginDispatch::Call { payload, .. } = &action.dispatch else { panic!("不是直接调用：{:?}", action.dispatch) };
+        let FilePluginDispatch::Call { payload, .. } = &action.dispatch else {
+            panic!("不是直接调用：{:?}", action.dispatch)
+        };
         assert_eq!(payload["managedCacheRoot"], "D:/cache", "{}", action.label);
         assert_eq!(payload["songId"], 9);
-        assert!(payload["sourcePayload"]["cookie"].is_null(), "不公开 cookie");
+        assert!(
+            payload["sourcePayload"]["cookie"].is_null(),
+            "不公开 cookie"
+        );
     }
-    let FilePluginDispatch::Call { method, payload, .. } = &actions[1].dispatch else { panic!("不是直接调用") };
+    let FilePluginDispatch::Call {
+        method, payload, ..
+    } = &actions[1].dispatch
+    else {
+        panic!("不是直接调用")
+    };
     assert_eq!(method, "media.prepareTrackPlayback");
     assert_eq!(payload["forceRefresh"], true);
     match &actions[2].dispatch {
-        FilePluginDispatch::AskFolder { method, payload, progress, .. } => {
+        FilePluginDispatch::AskFolder {
+            method,
+            payload,
+            progress,
+            ..
+        } => {
             assert_eq!(method, "media.downloadTrackPackage");
             assert_eq!(payload["managedCacheRoot"], "D:/cache");
             assert_eq!(payload["playlistName"], "song", "没有歌单名时用条目名");
@@ -134,7 +165,11 @@ fn track_actions_carry_the_managed_cache_root_and_split_downloads_by_target() {
         other => panic!("到本地不是先问目录：{other:?}"),
     }
     match &actions[3].dispatch {
-        FilePluginDispatch::AskRepository { parent_path, payload, .. } => {
+        FilePluginDispatch::AskRepository {
+            parent_path,
+            payload,
+            ..
+        } => {
             assert_eq!(parent_path, &None, "单曲导入到目标资源库的根目录");
             assert_eq!(payload["managedCacheRoot"], "D:/cache");
         }
@@ -142,10 +177,18 @@ fn track_actions_carry_the_managed_cache_root_and_split_downloads_by_target() {
     }
     assert_ne!(actions[2].value, actions[3].value, "两项的值不同");
 
-    let no_cache = SourceContext { managed_cache_root: None, ..ready() };
+    let no_cache = SourceContext {
+        managed_cache_root: None,
+        ..ready()
+    };
     let actions = actions_for(&[manifest()], &row(), &no_cache);
-    let FilePluginDispatch::Call { payload, .. } = &actions[0].dispatch else { panic!("不是直接调用") };
-    assert!(payload["managedCacheRoot"].is_null(), "没有缓存目录时照 Vue 写 null");
+    let FilePluginDispatch::Call { payload, .. } = &actions[0].dispatch else {
+        panic!("不是直接调用")
+    };
+    assert!(
+        payload["managedCacheRoot"].is_null(),
+        "没有缓存目录时照 Vue 写 null"
+    );
 }
 
 /// 歌单目录：声明了只到其他资源库，只出一项、不加去处后缀；下载的文件导入到以歌单命名的文件夹。
@@ -154,13 +197,29 @@ fn a_declared_target_is_the_only_download_entry() {
     let actions = actions_for(&[manifest()], &directory(), &ready());
     assert_eq!(labels(&actions), ["下载歌单", "创建播放列表"]);
     match &actions[0].dispatch {
-        FilePluginDispatch::AskRepository { method, payload, progress, parent_path, .. } => {
+        FilePluginDispatch::AskRepository {
+            method,
+            payload,
+            progress,
+            parent_path,
+            ..
+        } => {
             assert_eq!(method, "media.downloadPlaylistPackage");
             assert_eq!(payload["playlistId"], 3);
             assert_eq!(payload["playlistName"], "夜曲");
-            assert!(payload.get("tracks").is_none(), "不列目录、不带曲目，插件按歌单标识取来源里完整的歌单");
-            assert_eq!((progress.preparing(), progress.running()), ("准备下载 夜曲合集".into(), "正在下载 夜曲合集".into()));
-            assert_eq!(parent_path.as_deref(), Some("夜曲"), "导入到以歌单命名的文件夹");
+            assert!(
+                payload.get("tracks").is_none(),
+                "不列目录、不带曲目，插件按歌单标识取来源里完整的歌单"
+            );
+            assert_eq!(
+                (progress.preparing(), progress.running()),
+                ("准备下载 夜曲合集".into(), "正在下载 夜曲合集".into())
+            );
+            assert_eq!(
+                parent_path.as_deref(),
+                Some("夜曲"),
+                "导入到以歌单命名的文件夹"
+            );
         }
         other => panic!("不是先选资源库：{other:?}"),
     }
@@ -170,25 +229,58 @@ fn a_declared_target_is_the_only_download_entry() {
 /// 全部禁用，原因是「来源认证或本地缓存不可用」；没有能下载到的其他资源库时只有「到其他资源库」禁用。
 #[test]
 fn unavailable_sources_disable_every_action_with_the_reason() {
-    let unavailable = SourceContext { source_unavailable: true, ..ready() };
+    let unavailable = SourceContext {
+        source_unavailable: true,
+        ..ready()
+    };
     let actions = actions_for(&[manifest()], &row(), &unavailable);
     assert_eq!(actions.len(), 4);
-    assert!(actions.iter().all(|action| action.unavailable == Some(SOURCE_UNAVAILABLE)), "{actions:?}");
+    assert!(
+        actions
+            .iter()
+            .all(|action| action.unavailable == Some(SOURCE_UNAVAILABLE)),
+        "{actions:?}"
+    );
     let actions = actions_for(&[manifest()], &directory(), &unavailable);
-    assert!(actions.iter().all(|action| action.unavailable == Some(SOURCE_UNAVAILABLE)), "创建播放列表也禁用");
+    assert!(
+        actions
+            .iter()
+            .all(|action| action.unavailable == Some(SOURCE_UNAVAILABLE)),
+        "创建播放列表也禁用"
+    );
 
     let mut expired = row();
-    expired.source_payload = Some(serde_json::json!({"entryKind": "track", "songId": 9, "loginExpired": true}));
+    expired.source_payload =
+        Some(serde_json::json!({"entryKind": "track", "songId": 9, "loginExpired": true}));
     let actions = actions_for(&[manifest()], &expired, &ready());
-    assert!(actions.iter().all(|action| action.unavailable == Some(SOURCE_UNAVAILABLE)), "条目自己标了登录过期");
+    assert!(
+        actions
+            .iter()
+            .all(|action| action.unavailable == Some(SOURCE_UNAVAILABLE)),
+        "条目自己标了登录过期"
+    );
     let mut flagged = row();
-    flagged.metadata.insert("loginExpired".into(), Value::Bool(true));
-    assert!(actions_for(&[manifest()], &flagged, &ready()).iter().all(|action| action.unavailable.is_some()), "元数据里标了也算");
+    flagged
+        .metadata
+        .insert("loginExpired".into(), Value::Bool(true));
+    assert!(
+        actions_for(&[manifest()], &flagged, &ready())
+            .iter()
+            .all(|action| action.unavailable.is_some()),
+        "元数据里标了也算"
+    );
 
-    let alone = SourceContext { has_target_repository: false, ..ready() };
+    let alone = SourceContext {
+        has_target_repository: false,
+        ..ready()
+    };
     let actions = actions_for(&[manifest()], &row(), &alone);
     let reasons: Vec<_> = actions.iter().map(|action| action.unavailable).collect();
-    assert_eq!(reasons, [None, None, None, Some(NO_TARGET_REPOSITORY)], "只有到其他资源库禁用");
+    assert_eq!(
+        reasons,
+        [None, None, None, Some(NO_TARGET_REPOSITORY)],
+        "只有到其他资源库禁用"
+    );
 }
 
 /// 「创建播放列表」照 Vue `runPlaylistAction` 在本地建播放集：标识是「来源-歌单」，名称取来源的歌单名，
@@ -210,13 +302,21 @@ fn playlist_from_directory_builds_a_local_playlist() {
     directory.source_payload = Some(serde_json::json!({"entryKind": "playlist-folder"}));
     directory.provider_id = None;
     let actions = actions_for(&[manifest()], &directory, &ready());
-    let FilePluginDispatch::CreatePlaylist(playlist) = &actions[1].dispatch else { panic!("不是本地建播放集") };
-    assert_eq!(playlist.playlist_id.as_deref(), Some("source-9"), "没有歌单标识时用来源条目标识，来源缺省是 source");
+    let FilePluginDispatch::CreatePlaylist(playlist) = &actions[1].dispatch else {
+        panic!("不是本地建播放集")
+    };
+    assert_eq!(
+        playlist.playlist_id.as_deref(),
+        Some("source-9"),
+        "没有歌单标识时用来源条目标识，来源缺省是 source"
+    );
     assert_eq!(playlist.name, "夜曲合集", "没有歌单名时用目录名");
 
     directory.provider_item_id = None;
     let actions = actions_for(&[manifest()], &directory, &ready());
-    let FilePluginDispatch::CreatePlaylist(playlist) = &actions[1].dispatch else { panic!("不是本地建播放集") };
+    let FilePluginDispatch::CreatePlaylist(playlist) = &actions[1].dispatch else {
+        panic!("不是本地建播放集")
+    };
     assert_eq!(playlist.playlist_id, None, "两样标识都没有：点了只报错");
 }
 
@@ -229,26 +329,50 @@ fn only_the_entry_own_identifier_falls_back_to_the_provider_item_id() {
     track.provider_item_id = Some("77".into());
     track.source_payload = Some(serde_json::json!({"entryKind": "track"}));
     let actions = actions_for(&[manifest()], &track, &ready());
-    assert_eq!(labels(&actions), ["清理播放缓存", "重新获取播放资源", "下载单曲到本地", "下载单曲到其他资源库"]);
+    assert_eq!(
+        labels(&actions),
+        [
+            "清理播放缓存",
+            "重新获取播放资源",
+            "下载单曲到本地",
+            "下载单曲到其他资源库"
+        ]
+    );
     for action in &actions {
         let payload = payload_of(action).expect("单曲动作都调用插件");
-        assert_eq!(payload["songId"], 77, "{}：歌曲标识退回条目的来源标识", action.label);
-        assert!(payload.get("playlistId").is_none(), "{}：单曲不拿自己的标识去填歌单标识", action.label);
+        assert_eq!(
+            payload["songId"], 77,
+            "{}：歌曲标识退回条目的来源标识",
+            action.label
+        );
+        assert!(
+            payload.get("playlistId").is_none(),
+            "{}：单曲不拿自己的标识去填歌单标识",
+            action.label
+        );
     }
 
     let mut folder = directory();
     folder.provider_item_id = Some("55".into());
-    folder.source_payload = Some(serde_json::json!({"entryKind": "playlist-folder", "playlistName": "夜曲"}));
+    folder.source_payload =
+        Some(serde_json::json!({"entryKind": "playlist-folder", "playlistName": "夜曲"}));
     let actions = actions_for(&[manifest()], &folder, &ready());
     let payload = payload_of(&actions[0]).expect("下载歌单调用插件");
     assert_eq!(payload["playlistId"], 55, "歌单标识退回目录的来源标识");
-    assert!(payload.get("songId").is_none(), "歌单目录不拿自己的标识去填歌曲标识");
-    let FilePluginDispatch::CreatePlaylist(playlist) = &actions[1].dispatch else { panic!("不是本地建播放集") };
+    assert!(
+        payload.get("songId").is_none(),
+        "歌单目录不拿自己的标识去填歌曲标识"
+    );
+    let FilePluginDispatch::CreatePlaylist(playlist) = &actions[1].dispatch else {
+        panic!("不是本地建播放集")
+    };
     assert_eq!(playlist.playlist_id.as_deref(), Some("netease-55"));
 
     folder.provider_item_id = Some("  ".into());
     let actions = actions_for(&[manifest()], &folder, &ready());
-    let FilePluginDispatch::CreatePlaylist(playlist) = &actions[1].dispatch else { panic!("不是本地建播放集") };
+    let FilePluginDispatch::CreatePlaylist(playlist) = &actions[1].dispatch else {
+        panic!("不是本地建播放集")
+    };
     assert_eq!(playlist.playlist_id, None, "空白的来源标识不算，点了只报错");
 }
 
@@ -259,16 +383,33 @@ fn legacy_payloads_match_by_the_entry_own_identifier() {
     let mut track = row();
     track.source_payload = Some(serde_json::json!({}));
     track.provider_item_id = Some("77".into());
-    assert_eq!(labels(&actions_for(&[manifest()], &track, &ready())), ["清理播放缓存", "重新获取播放资源", "下载单曲到本地", "下载单曲到其他资源库"]);
+    assert_eq!(
+        labels(&actions_for(&[manifest()], &track, &ready())),
+        [
+            "清理播放缓存",
+            "重新获取播放资源",
+            "下载单曲到本地",
+            "下载单曲到其他资源库"
+        ]
+    );
     track.provider_item_id = None;
-    assert!(actions_for(&[manifest()], &track, &ready()).is_empty(), "没有歌曲标识的文件不算单曲");
+    assert!(
+        actions_for(&[manifest()], &track, &ready()).is_empty(),
+        "没有歌曲标识的文件不算单曲"
+    );
 
     let mut folder = directory();
     folder.source_payload = Some(serde_json::json!({"playlistName": "夜曲"}));
     folder.provider_item_id = Some("55".into());
-    assert_eq!(labels(&actions_for(&[manifest()], &folder, &ready())), ["下载歌单", "创建播放列表"]);
+    assert_eq!(
+        labels(&actions_for(&[manifest()], &folder, &ready())),
+        ["下载歌单", "创建播放列表"]
+    );
     folder.provider_item_id = None;
-    assert!(actions_for(&[manifest()], &folder, &ready()).is_empty(), "没有歌单标识的目录不算歌单目录");
+    assert!(
+        actions_for(&[manifest()], &folder, &ready()).is_empty(),
+        "没有歌单标识的目录不算歌单目录"
+    );
 }
 
 /// 插件 SDK 只约定了五种 operation 和两种下载去处。约定以外的 operation 不出菜单，声明了 method 也不调用（Vue
@@ -291,7 +432,17 @@ fn declarations_outside_the_sdk_contract_are_not_offered() {
     });
     let actions = actions_for(&[plugin], &row(), &ready());
     let values: Vec<&str> = actions.iter().map(|action| action.value.as_str()).collect();
-    assert_eq!(values, ["plugin/momobako.netease.source/clear", "plugin/momobako.netease.source/download"], "只剩约定里、写了 scope 的");
+    assert_eq!(
+        values,
+        [
+            "plugin/momobako.netease.source/clear",
+            "plugin/momobako.netease.source/download"
+        ],
+        "只剩约定里、写了 scope 的"
+    );
     assert_eq!(actions[1].label, "下载", "剩一个去处时不加后缀");
-    assert!(matches!(actions[1].dispatch, FilePluginDispatch::AskFolder { .. }));
+    assert!(matches!(
+        actions[1].dispatch,
+        FilePluginDispatch::AskFolder { .. }
+    ));
 }

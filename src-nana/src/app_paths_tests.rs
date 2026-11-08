@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use nana_ui_platform::{ApplicationPaths, PathEnvironment, PathPlatform, RuntimeLayout};
 
-use super::{identity, HostLocations, LegacyInputs, APP_ID};
+use super::{APP_ID, HostLocations, LegacyInputs, identity};
 
 const ROAMING: &str = "C:/Users/u/AppData/Roaming";
 const LOCAL: &str = "C:/Users/u/AppData/Local";
@@ -68,7 +68,11 @@ fn the_binary_carries_the_identity_marker_the_packager_checks() {
         "NANA-IDENTITY-V1\0com.momobako.desktop\0MomoBako\0{}\0Sena\0END\0",
         env!("CARGO_PKG_VERSION")
     );
-    assert!(binary.windows(marker.len()).any(|window| window == marker.as_bytes()));
+    assert!(
+        binary
+            .windows(marker.len())
+            .any(|window| window == marker.as_bytes())
+    );
 }
 
 #[test]
@@ -83,11 +87,24 @@ fn installed_layout_writes_only_to_user_directories() {
     assert_eq!(locations.service_root, data.join("service-data"));
     assert_eq!(locations.settings_dir, data.join("config"));
     assert_eq!(locations.window_state_dir, Some(data));
-    assert_eq!(locations.bundled_plugins, Some(install_root.join("runtime").join("plugins")));
-    assert_eq!(locations.bundled_tools, Some(install_root.join("runtime").join("tools")));
-    assert_eq!(locations.tool_downloads, Some(Path::new(LOCAL).join(APP_ID).join("Cache").join("tools")));
+    assert_eq!(
+        locations.bundled_plugins,
+        Some(install_root.join("runtime").join("plugins"))
+    );
+    assert_eq!(
+        locations.bundled_tools,
+        Some(install_root.join("runtime").join("tools"))
+    );
+    assert_eq!(
+        locations.tool_downloads,
+        Some(Path::new(LOCAL).join(APP_ID).join("Cache").join("tools"))
+    );
     for path in writable(&locations) {
-        assert!(!path.starts_with(install_root), "{} 在安装目录里", path.display());
+        assert!(
+            !path.starts_with(install_root),
+            "{} 在安装目录里",
+            path.display()
+        );
     }
 }
 
@@ -103,10 +120,20 @@ fn portable_layout_keeps_everything_under_root_data() {
     assert_eq!(locations.service_root, data.join("service-data"));
     assert_eq!(locations.settings_dir, data.join("config"));
     assert_eq!(locations.window_state_dir, Some(data.clone()));
-    assert_eq!(locations.tool_downloads, Some(data.join("cache").join("tools")));
-    assert_eq!(locations.bundled_plugins, Some(root.join("runtime").join("plugins")));
+    assert_eq!(
+        locations.tool_downloads,
+        Some(data.join("cache").join("tools"))
+    );
+    assert_eq!(
+        locations.bundled_plugins,
+        Some(root.join("runtime").join("plugins"))
+    );
     for path in writable(&locations) {
-        assert!(path.starts_with(&data), "{} 不在便携版的 data 里", path.display());
+        assert!(
+            path.starts_with(&data),
+            "{} 不在便携版的 data 里",
+            path.display()
+        );
     }
 }
 
@@ -117,12 +144,24 @@ fn development_keeps_the_old_locations_and_reads_the_plugin_packages() {
 
     assert_eq!(locations.layout, Some(RuntimeLayout::Development));
     assert!(!locations.is_packaged());
-    assert_eq!(locations.service_root, Path::new("D:/work").join(".service-data"));
+    assert_eq!(
+        locations.service_root,
+        Path::new("D:/work").join(".service-data")
+    );
     assert_eq!(locations.settings_dir, Path::new(LOCAL).join("MomoBako"));
-    assert_eq!(locations.window_state_dir, Some(Path::new(ROAMING).join(APP_ID)));
-    assert_eq!(locations.bundled_plugins, Some(PathBuf::from("D:/repo/External/Plugins/.packages")));
+    assert_eq!(
+        locations.window_state_dir,
+        Some(Path::new(ROAMING).join(APP_ID))
+    );
+    assert_eq!(
+        locations.bundled_plugins,
+        Some(PathBuf::from("D:/repo/External/Plugins/.packages"))
+    );
     assert_eq!(locations.bundled_tools, None);
-    assert_eq!(locations.tool_downloads, Some(Path::new(LOCAL).join(APP_ID).join("Cache").join("tools")));
+    assert_eq!(
+        locations.tool_downloads,
+        Some(Path::new(LOCAL).join(APP_ID).join("Cache").join("tools"))
+    );
 }
 
 #[test]
@@ -130,13 +169,29 @@ fn unresolved_paths_fall_back_without_bundled_plugins() {
     let mut inputs = legacy();
     let locations = HostLocations::resolve(None, &inputs);
     assert_eq!(locations.layout, None);
-    assert_eq!(locations.service_root, Path::new("D:/work").join(".service-data"));
+    assert_eq!(
+        locations.service_root,
+        Path::new("D:/work").join(".service-data")
+    );
     assert_eq!(locations.settings_dir, Path::new(LOCAL).join("MomoBako"));
-    assert_eq!(locations.window_state_dir, Some(Path::new(ROAMING).join(APP_ID)));
-    assert_eq!((locations.bundled_plugins, locations.bundled_tools, locations.tool_downloads), (None, None, None));
+    assert_eq!(
+        locations.window_state_dir,
+        Some(Path::new(ROAMING).join(APP_ID))
+    );
+    assert_eq!(
+        (
+            locations.bundled_plugins,
+            locations.bundled_tools,
+            locations.tool_downloads
+        ),
+        (None, None, None)
+    );
 
     inputs.local_app_data = None;
-    assert_eq!(HostLocations::resolve(None, &inputs).settings_dir, Path::new(ROAMING).join("MomoBako"));
+    assert_eq!(
+        HostLocations::resolve(None, &inputs).settings_dir,
+        Path::new(ROAMING).join("MomoBako")
+    );
     inputs.app_data = None;
     let bare = HostLocations::resolve(None, &inputs);
     assert_eq!(bare.settings_dir, Path::new("D:/work").join("MomoBako"));

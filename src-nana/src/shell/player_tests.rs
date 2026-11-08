@@ -6,17 +6,22 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::backend::services::repository::{
-    AssetDetail, AssetSummary, FileBrowserSnapshot, PlaylistDetail, PlaylistItem, PlaylistMembershipSnapshot, PlaylistPlayerContribution, PlaylistSummary,
-    RepositoryBackendSummary, RepositoryOverview, RepositorySnapshot, RepositoryStructureCacheState, RepositorySummary,
+    AssetDetail, AssetSummary, FileBrowserSnapshot, PlaylistDetail, PlaylistItem,
+    PlaylistMembershipSnapshot, PlaylistPlayerContribution, PlaylistSummary,
+    RepositoryBackendSummary, RepositoryOverview, RepositorySnapshot,
+    RepositoryStructureCacheState, RepositorySummary,
 };
 
-use super::support::{
-    normalize_image_duration_ms, normalize_object_fit, normalize_volume, read_preferences_file, read_sessions_file,
-    read_settings_file, resolution_notice, resolve_player, shuffle_order, system_media_session_available, NextStep,
-    AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE, OFFICIAL_AUDIO_PLUGIN,
-};
 use super::super::workspace::{LibraryCategory, WorkspacePanel, WorkspaceRepository};
-use super::super::{InspectEffect, InspectMessage, ShellMessage, ShellPage, ShellViewModel, SidebarMessage};
+use super::super::{
+    InspectEffect, InspectMessage, ShellMessage, ShellPage, ShellViewModel, SidebarMessage,
+};
+use super::support::{
+    AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE, NextStep, OFFICIAL_AUDIO_PLUGIN,
+    normalize_image_duration_ms, normalize_object_fit, normalize_volume, read_preferences_file,
+    read_sessions_file, read_settings_file, resolution_notice, resolve_player, shuffle_order,
+    system_media_session_available,
+};
 use super::{PlaybackMode, PlayerCandidate, PlayerEffect, PlayerMessage, QueueItem};
 
 fn shell(writable: bool) -> ShellViewModel {
@@ -28,7 +33,11 @@ fn shell(writable: bool) -> ShellViewModel {
         path: "C:/repo".into(),
         status: "ready".into(),
         backend_plugin_id: "filesystem".into(),
-        capabilities: if writable { vec!["write".into()] } else { Vec::new() },
+        capabilities: if writable {
+            vec!["write".into()]
+        } else {
+            Vec::new()
+        },
         cache_required: false,
         cache_status: String::new(),
         cache_path: None,
@@ -45,7 +54,12 @@ fn load_list(model: &mut ShellViewModel, playlists: Vec<PlaylistSummary>) {
         model.bind_sidebar_repository();
         model.sidebar.take_effects();
     }
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::SidebarPlaylistsLoaded { repo_id: "repo".into(), result: Ok(playlists) }));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::SidebarPlaylistsLoaded {
+            repo_id: "repo".into(),
+            result: Ok(playlists),
+        },
+    ));
 }
 
 /// 发一条播放消息。当前项的读取请求像 `player_dispatch` 一样当场读文件送回。
@@ -54,7 +68,12 @@ fn send(model: &mut ShellViewModel, message: PlayerMessage) {
     super::fulfill_loads(model);
 }
 
-fn summary(repo_id: &str, playlist_id: &str, player_type_id: &str, file_class: &str) -> PlaylistSummary {
+fn summary(
+    repo_id: &str,
+    playlist_id: &str,
+    player_type_id: &str,
+    file_class: &str,
+) -> PlaylistSummary {
     PlaylistSummary {
         playlist_id: playlist_id.into(),
         repo_id: repo_id.into(),
@@ -92,17 +111,29 @@ fn item(id: &str, status: &str) -> PlaylistItem {
     }
 }
 
-fn detail(repo_id: &str, playlist_id: &str, player_type_id: &str, file_class: &str, items: Vec<PlaylistItem>) -> PlaylistDetail {
+fn detail(
+    repo_id: &str,
+    playlist_id: &str,
+    player_type_id: &str,
+    file_class: &str,
+    items: Vec<PlaylistItem>,
+) -> PlaylistDetail {
     let mut playlist = summary(repo_id, playlist_id, player_type_id, file_class);
     playlist.item_count = items.len() as i64;
     PlaylistDetail { playlist, items }
 }
 
-fn candidate(plugin_id: &str, player_type_id: &str, class: &str, extensions: &[&str]) -> PlayerCandidate {
+fn candidate(
+    plugin_id: &str,
+    player_type_id: &str,
+    class: &str,
+    extensions: &[&str],
+) -> PlayerCandidate {
     PlayerCandidate {
         plugin_id: plugin_id.into(),
         player_type_id: player_type_id.into(),
-        capability_id: (player_type_id == AUDIO_SEQUENCE_TYPE).then(|| AUDIO_CAPABILITY.to_string()),
+        capability_id: (player_type_id == AUDIO_SEQUENCE_TYPE)
+            .then(|| AUDIO_CAPABILITY.to_string()),
         label: plugin_id.into(),
         file_class: class.into(),
         extensions: extensions.iter().map(|item| (*item).to_string()).collect(),
@@ -111,7 +142,11 @@ fn candidate(plugin_id: &str, player_type_id: &str, class: &str, extensions: &[&
     }
 }
 
-fn contribution(player_type_id: &str, class: &str, extensions: &[&str]) -> PlaylistPlayerContribution {
+fn contribution(
+    player_type_id: &str,
+    class: &str,
+    extensions: &[&str],
+) -> PlaylistPlayerContribution {
     PlaylistPlayerContribution {
         player_type_id: player_type_id.into(),
         label: "Vue 播放器".into(),
@@ -140,15 +175,21 @@ fn queue_item(id: &str, class: &str) -> QueueItem {
         file_class: class.into(),
         thumbnail_path: None,
         is_virtual: false,
+        local_absolute_path: None,
     }
 }
 
 fn load_playlist(model: &mut ShellViewModel, repo_id: &str, items: Vec<PlaylistItem>) {
-    model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(detail(repo_id, "pl", "audio", "audio", items))));
+    model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(detail(
+        repo_id, "pl", "audio", "audio", items,
+    ))));
 }
 
 fn temp_dir(name: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!("momobako-nana-player-{name}-{}", std::process::id()));
+    let path = std::env::temp_dir().join(format!(
+        "momobako-nana-player-{name}-{}",
+        std::process::id()
+    ));
     let _ = std::fs::remove_dir_all(&path);
     std::fs::create_dir_all(&path).expect("创建临时目录");
     path
@@ -212,7 +253,11 @@ fn duration_object_fit_and_corrupt_files_fall_back_to_defaults() {
     assert!(player.preferences.is_empty());
 
     std::fs::write(&sessions, r#"{"repo":{"playlistId":"","currentItemId":"a"},"kept":{"playlistId":"pl","currentItemId":"item","playerTypeId":"audio","currentTimeMs":12,"durationMs":34,"mode":"shuffle","volume":0.25,"isPlaying":true}}"#).unwrap();
-    player.load_files(&dir.join("missing.json"), &sessions, &dir.join("missing-prefs.json"));
+    player.load_files(
+        &dir.join("missing.json"),
+        &sessions,
+        &dir.join("missing-prefs.json"),
+    );
     assert_eq!(player.stored.len(), 1);
     assert_eq!(player.stored["kept"].mode, PlaybackMode::Shuffle);
     assert_eq!(player.stored["kept"].volume, 0.25);
@@ -220,148 +265,279 @@ fn duration_object_fit_and_corrupt_files_fall_back_to_defaults() {
 
     player.settings.image_duration_ms = 8000;
     player.settings.object_fit_cover = true;
-    player.preferences.insert(AUDIO_CAPABILITY.into(), OFFICIAL_AUDIO_PLUGIN.into());
+    player
+        .preferences
+        .insert(AUDIO_CAPABILITY.into(), OFFICIAL_AUDIO_PLUGIN.into());
     player.save_settings_file(&settings);
     player.save_sessions_file(&sessions);
     player.save_preferences_file(&preferences);
     assert_eq!(read_settings_file(&settings).image_duration_ms, 8000);
     assert!(read_settings_file(&settings).object_fit_cover);
-    assert_eq!(read_sessions_file(&sessions)["kept"].current_item_id, "item");
-    assert_eq!(read_preferences_file(&preferences).get(AUDIO_CAPABILITY).map(String::as_str), Some(OFFICIAL_AUDIO_PLUGIN));
+    assert_eq!(
+        read_sessions_file(&sessions)["kept"].current_item_id,
+        "item"
+    );
+    assert_eq!(
+        read_preferences_file(&preferences)
+            .get(AUDIO_CAPABILITY)
+            .map(String::as_str),
+        Some(OFFICIAL_AUDIO_PLUGIN)
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 
 #[test]
 fn player_resolution_keeps_audio_off_unselected_third_parties() {
-    let official = candidate(OFFICIAL_AUDIO_PLUGIN, AUDIO_SEQUENCE_TYPE, "audio", &["mp3"]);
+    let official = candidate(
+        OFFICIAL_AUDIO_PLUGIN,
+        AUDIO_SEQUENCE_TYPE,
+        "audio",
+        &["mp3"],
+    );
     let third = candidate("other.player", AUDIO_SEQUENCE_TYPE, "audio", &["mp3"]);
     let mut preferences = BTreeMap::new();
     let missing = resolve_player(AUDIO_SEQUENCE_TYPE, &[third.clone()], &preferences);
     assert!(missing.player.is_none());
     assert!(!missing.fallback_used);
-    assert_eq!(resolution_notice(&missing), "官方音频播放器未启用或缺失，音频播放暂不可用。");
+    assert_eq!(
+        resolution_notice(&missing),
+        "官方音频播放器未启用或缺失，音频播放暂不可用。"
+    );
 
     preferences.insert(AUDIO_CAPABILITY.into(), "missing.plugin".into());
-    let fallback = resolve_player(AUDIO_SEQUENCE_TYPE, &[official.clone(), third.clone()], &preferences);
-    assert_eq!(fallback.player.as_ref().map(|player| player.plugin_id.as_str()), Some(OFFICIAL_AUDIO_PLUGIN));
+    let fallback = resolve_player(
+        AUDIO_SEQUENCE_TYPE,
+        &[official.clone(), third.clone()],
+        &preferences,
+    );
+    assert_eq!(
+        fallback
+            .player
+            .as_ref()
+            .map(|player| player.plugin_id.as_str()),
+        Some(OFFICIAL_AUDIO_PLUGIN)
+    );
     assert!(fallback.fallback_used);
     assert!(resolution_notice(&fallback).contains("已回退到"));
 
     preferences.insert(AUDIO_CAPABILITY.into(), "other.player".into());
     let preferred = resolve_player(AUDIO_SEQUENCE_TYPE, &[official, third], &preferences);
-    assert_eq!(preferred.player.as_ref().map(|player| player.plugin_id.as_str()), Some("other.player"));
+    assert_eq!(
+        preferred
+            .player
+            .as_ref()
+            .map(|player| player.plugin_id.as_str()),
+        Some("other.player")
+    );
     assert!(!preferred.fallback_used);
 
     let slides = candidate("slides.player", "slides", "image", &["png"]);
     let chosen = resolve_player("slides", &[slides], &BTreeMap::new());
-    assert_eq!(chosen.player.as_ref().map(|player| player.plugin_id.as_str()), Some("slides.player"));
+    assert_eq!(
+        chosen
+            .player
+            .as_ref()
+            .map(|player| player.plugin_id.as_str()),
+        Some("slides.player")
+    );
 
     let mut model = shell(true);
-    send(&mut model, PlayerMessage::SetPreference { capability_id: "  ".into(), plugin_id: Some("x".into()) });
+    send(
+        &mut model,
+        PlayerMessage::SetPreference {
+            capability_id: "  ".into(),
+            plugin_id: Some("x".into()),
+        },
+    );
     assert!(model.player.preferences.is_empty());
     assert!(model.player.take_effects().is_empty());
-    send(&mut model, PlayerMessage::SetPreference { capability_id: AUDIO_CAPABILITY.into(), plugin_id: Some(" other.player ".into()) });
-    assert_eq!(model.player.preferences.get(AUDIO_CAPABILITY).map(String::as_str), Some("other.player"));
-    send(&mut model, PlayerMessage::SetPreference { capability_id: AUDIO_CAPABILITY.into(), plugin_id: None });
+    send(
+        &mut model,
+        PlayerMessage::SetPreference {
+            capability_id: AUDIO_CAPABILITY.into(),
+            plugin_id: Some(" other.player ".into()),
+        },
+    );
+    assert_eq!(
+        model
+            .player
+            .preferences
+            .get(AUDIO_CAPABILITY)
+            .map(String::as_str),
+        Some("other.player")
+    );
+    send(
+        &mut model,
+        PlayerMessage::SetPreference {
+            capability_id: AUDIO_CAPABILITY.into(),
+            plugin_id: None,
+        },
+    );
     assert!(model.player.preferences.is_empty());
-    assert!(matches!(model.player.take_effects().last(), Some(PlayerEffect::PersistPreferences)));
+    assert!(matches!(
+        model.player.take_effects().last(),
+        Some(PlayerEffect::PersistPreferences)
+    ));
 }
 
 #[test]
 fn membership_follows_kind_extension_and_write_permission() {
     let mut model = shell(true);
-    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution("audio", "audio", &["mp3"])])));
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution(
+        "audio",
+        "audio",
+        &["mp3"],
+    )])));
     load_list(&mut model, vec![summary("repo", "pl", "audio", "audio")]);
-    assert!(matches!(model.player.take_effects().last(), Some(PlayerEffect::LoadMemberships { repo_id }) if repo_id == "repo"));
+    assert!(
+        matches!(model.player.take_effects().last(), Some(PlayerEffect::LoadMemberships { repo_id }) if repo_id == "repo")
+    );
 
-    send(&mut model, PlayerMessage::ToggleMembership {
-        playlist_id: "pl".into(),
-        kind: "file".into(),
-        extension: "mp3".into(),
-        asset_id: "asset-1".into(),
-        is_virtual: false,
-        path: "a.mp3".into(),
-    });
+    send(
+        &mut model,
+        PlayerMessage::ToggleMembership {
+            playlist_id: "pl".into(),
+            kind: "file".into(),
+            extension: "mp3".into(),
+            asset_id: "asset-1".into(),
+            is_virtual: false,
+            path: "a.mp3".into(),
+        },
+    );
     match model.player.take_effects().pop() {
         Some(PlayerEffect::SetMembership(request)) => assert_eq!(request.playlist_ids, ["pl"]),
         other => panic!("期望成员更新，得到 {other:?}"),
     }
     assert!(model.player.memberships.is_empty());
-    send(&mut model, PlayerMessage::MembershipSaved(Ok(PlaylistMembershipSnapshot { asset_id: "asset-1".into(), playlist_ids: vec!["pl".into()] })));
-    assert_eq!(model.player.memberships.get("asset-1").cloned().unwrap_or_default(), vec!["pl".to_string()]);
-    send(&mut model, PlayerMessage::ToggleMembership {
-        playlist_id: "pl".into(),
-        kind: "file".into(),
-        extension: "MP3".into(),
-        asset_id: "asset-1".into(),
-        is_virtual: false,
-        path: "a.mp3".into(),
-    });
+    send(
+        &mut model,
+        PlayerMessage::MembershipSaved(Ok(PlaylistMembershipSnapshot {
+            asset_id: "asset-1".into(),
+            playlist_ids: vec!["pl".into()],
+        })),
+    );
+    assert_eq!(
+        model
+            .player
+            .memberships
+            .get("asset-1")
+            .cloned()
+            .unwrap_or_default(),
+        vec!["pl".to_string()]
+    );
+    send(
+        &mut model,
+        PlayerMessage::ToggleMembership {
+            playlist_id: "pl".into(),
+            kind: "file".into(),
+            extension: "MP3".into(),
+            asset_id: "asset-1".into(),
+            is_virtual: false,
+            path: "a.mp3".into(),
+        },
+    );
     match model.player.take_effects().pop() {
         Some(PlayerEffect::SetMembership(request)) => assert!(request.playlist_ids.is_empty()),
         other => panic!("期望移出成员，得到 {other:?}"),
     }
 
-    send(&mut model, PlayerMessage::ToggleMembership {
-        playlist_id: "pl".into(),
-        kind: "file".into(),
-        extension: "mp3".into(),
-        asset_id: "virtual".into(),
-        is_virtual: true,
-        path: "virtual.mp3".into(),
-    });
-    assert!(matches!(model.player.take_effects().pop(), Some(PlayerEffect::AddByPaths(_))));
-    send(&mut model, PlayerMessage::ToggleMembership {
-        playlist_id: "pl".into(),
-        kind: "directory".into(),
-        extension: String::new(),
-        asset_id: String::new(),
-        is_virtual: false,
-        path: "folder".into(),
-    });
-    assert!(matches!(model.player.take_effects().pop(), Some(PlayerEffect::AddByPaths(_))));
+    send(
+        &mut model,
+        PlayerMessage::ToggleMembership {
+            playlist_id: "pl".into(),
+            kind: "file".into(),
+            extension: "mp3".into(),
+            asset_id: "virtual".into(),
+            is_virtual: true,
+            path: "virtual.mp3".into(),
+        },
+    );
+    assert!(matches!(
+        model.player.take_effects().pop(),
+        Some(PlayerEffect::AddByPaths(_))
+    ));
+    send(
+        &mut model,
+        PlayerMessage::ToggleMembership {
+            playlist_id: "pl".into(),
+            kind: "directory".into(),
+            extension: String::new(),
+            asset_id: String::new(),
+            is_virtual: false,
+            path: "folder".into(),
+        },
+    );
+    assert!(matches!(
+        model.player.take_effects().pop(),
+        Some(PlayerEffect::AddByPaths(_))
+    ));
 
-    send(&mut model, PlayerMessage::ToggleMembership {
-        playlist_id: "pl".into(),
-        kind: "file".into(),
-        extension: String::new(),
-        asset_id: "asset-1".into(),
-        is_virtual: false,
-        path: "bare".into(),
-    });
+    send(
+        &mut model,
+        PlayerMessage::ToggleMembership {
+            playlist_id: "pl".into(),
+            kind: "file".into(),
+            extension: String::new(),
+            asset_id: "asset-1".into(),
+            is_virtual: false,
+            path: "bare".into(),
+        },
+    );
     assert!(model.player.take_effects().is_empty());
 
     let saved = model.player.memberships.clone();
-    send(&mut model, PlayerMessage::MembershipSaved(Err("写入失败".into())));
+    send(
+        &mut model,
+        PlayerMessage::MembershipSaved(Err("写入失败".into())),
+    );
     assert_eq!(model.player.memberships, saved);
     let failure = model.status.failure().expect("成员写入失败要进状态区");
     assert_eq!(failure.message, "更新播放集成员失败：写入失败");
 
-    send(&mut model, PlayerMessage::MembershipsLoaded {
-        repo_id: "other".into(),
-        result: Ok(BTreeMap::from([("asset-1".into(), vec!["gone".into()])])),
-    });
+    send(
+        &mut model,
+        PlayerMessage::MembershipsLoaded {
+            repo_id: "other".into(),
+            result: Ok(BTreeMap::from([("asset-1".into(), vec!["gone".into()])])),
+        },
+    );
     assert_eq!(model.player.memberships, saved);
-    send(&mut model, PlayerMessage::MembershipsLoaded { repo_id: "repo".into(), result: Err("读取失败".into()) });
+    send(
+        &mut model,
+        PlayerMessage::MembershipsLoaded {
+            repo_id: "repo".into(),
+            result: Err("读取失败".into()),
+        },
+    );
     assert!(model.player.memberships.is_empty());
 
-    model.player.memberships.insert("asset-1".into(), vec!["pl".into()]);
+    model
+        .player
+        .memberships
+        .insert("asset-1".into(), vec!["pl".into()]);
     load_list(&mut model, Vec::new());
     assert!(model.player.memberships.is_empty());
     assert!(model.player.take_effects().is_empty());
 
     let mut readonly = shell(false);
     load_list(&mut readonly, vec![summary("repo", "pl", "audio", "audio")]);
-    readonly.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution("audio", "audio", &["mp3"])])));
+    readonly.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution(
+        "audio",
+        "audio",
+        &["mp3"],
+    )])));
     readonly.player.take_effects();
-    send(&mut readonly, PlayerMessage::ToggleMembership {
-        playlist_id: "pl".into(),
-        kind: "file".into(),
-        extension: "mp3".into(),
-        asset_id: "asset-1".into(),
-        is_virtual: false,
-        path: "a.mp3".into(),
-    });
+    send(
+        &mut readonly,
+        PlayerMessage::ToggleMembership {
+            playlist_id: "pl".into(),
+            kind: "file".into(),
+            extension: "mp3".into(),
+            asset_id: "asset-1".into(),
+            is_virtual: false,
+            path: "a.mp3".into(),
+        },
+    );
     assert!(readonly.player.take_effects().is_empty());
 }
 
@@ -370,23 +546,53 @@ fn reorder_uses_the_page_order_and_skips_noops() {
     let mut model = shell(true);
     model.selected_playlist_id = Some("pl".into());
     model.playlist_item_ids = vec!["a".into(), "b".into(), "c".into()];
-    send(&mut model, PlayerMessage::Reorder { source: "c".into(), before: Some("a".into()) });
+    send(
+        &mut model,
+        PlayerMessage::Reorder {
+            source: "c".into(),
+            before: Some("a".into()),
+        },
+    );
     match model.player.take_effects().pop() {
         Some(PlayerEffect::Reorder(request)) => assert_eq!(request.item_ids, ["c", "a", "b"]),
         other => panic!("期望排序请求，得到 {other:?}"),
     }
     assert_eq!(model.playlist_item_ids, ["a", "b", "c"]);
-    send(&mut model, PlayerMessage::Reorder { source: "a".into(), before: None });
+    send(
+        &mut model,
+        PlayerMessage::Reorder {
+            source: "a".into(),
+            before: None,
+        },
+    );
     match model.player.take_effects().pop() {
         Some(PlayerEffect::Reorder(request)) => assert_eq!(request.item_ids, ["b", "c", "a"]),
         other => panic!("期望移到末尾，得到 {other:?}"),
     }
-    send(&mut model, PlayerMessage::Reorder { source: "a".into(), before: Some("b".into()) });
-    send(&mut model, PlayerMessage::Reorder { source: "missing".into(), before: None });
+    send(
+        &mut model,
+        PlayerMessage::Reorder {
+            source: "a".into(),
+            before: Some("b".into()),
+        },
+    );
+    send(
+        &mut model,
+        PlayerMessage::Reorder {
+            source: "missing".into(),
+            before: None,
+        },
+    );
     assert!(model.player.take_effects().is_empty());
 
     model.workspace.repositories[0].capabilities.clear();
-    send(&mut model, PlayerMessage::Reorder { source: "c".into(), before: Some("a".into()) });
+    send(
+        &mut model,
+        PlayerMessage::Reorder {
+            source: "c".into(),
+            before: Some("a".into()),
+        },
+    );
     assert!(model.player.take_effects().is_empty());
 }
 
@@ -404,7 +610,10 @@ fn playback_modes_shuffle_and_transients_follow_the_queue() {
         super::support::next_ready_id(PlaybackMode::SingleLoop, Some("c"), &ready, &[], true),
         NextStep::Item("c".into())
     );
-    assert_eq!(super::support::next_ready_id(PlaybackMode::SingleLoop, Some("c"), &ready, &[], false), NextStep::None);
+    assert_eq!(
+        super::support::next_ready_id(PlaybackMode::SingleLoop, Some("c"), &ready, &[], false),
+        NextStep::None
+    );
     assert_eq!(
         super::support::next_ready_id(PlaybackMode::Shuffle, Some("a"), &ready, &[], false),
         NextStep::ReshuffleMissing
@@ -416,7 +625,11 @@ fn playback_modes_shuffle_and_transients_follow_the_queue() {
 
     let mut model = shell(true);
     model.player.candidates = vec![candidate("native.audio", "audio", "audio", &["mp3"])];
-    model.player.queue = vec![queue_item("a", "mp3"), queue_item("b", "mp3"), queue_item("c", "mp3")];
+    model.player.queue = vec![
+        queue_item("a", "mp3"),
+        queue_item("b", "mp3"),
+        queue_item("c", "mp3"),
+    ];
     model.player.current_id = Some("a".into());
     model.player.repo_id = Some("repo".into());
     send(&mut model, PlayerMessage::PlayNext { natural_end: false });
@@ -463,7 +676,13 @@ fn playback_modes_shuffle_and_transients_follow_the_queue() {
     assert!(model.player.queue.iter().all(|item| item.id != "t"));
     assert!(model.player.history.iter().all(|id| id != "t"));
 
-    model.player.listed = Some(detail("repo", "pl", "audio", "audio", vec![item("a", "ready")]));
+    model.player.listed = Some(detail(
+        "repo",
+        "pl",
+        "audio",
+        "audio",
+        vec![item("a", "ready")],
+    ));
     let mut kept = queue_item("keep", "mp3");
     kept.transient = true;
     let mut dropped = queue_item("drop", "mp3");
@@ -471,8 +690,19 @@ fn playback_modes_shuffle_and_transients_follow_the_queue() {
     model.player.queue = vec![queue_item("a", "mp3"), kept, dropped];
     model.player.current_id = Some("keep".into());
     model.player.history = vec!["keep".into()];
-    model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(detail("repo", "pl", "audio", "audio", vec![item("a", "ready")]))));
-    let ids: Vec<_> = model.player.queue.iter().map(|item| item.id.as_str()).collect();
+    model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(detail(
+        "repo",
+        "pl",
+        "audio",
+        "audio",
+        vec![item("a", "ready")],
+    ))));
+    let ids: Vec<_> = model
+        .player
+        .queue
+        .iter()
+        .map(|item| item.id.as_str())
+        .collect();
     assert_eq!(ids, ["a", "keep"]);
 }
 
@@ -482,7 +712,15 @@ fn listed_playback_distinguishes_missing_plugin_upgrade_and_decoder_failure() {
     load_playlist(&mut missing, "repo", vec![item("a", "ready")]);
     send(&mut missing, PlayerMessage::PlayListed { item_id: None });
     assert_eq!(missing.player.session.status, "failed");
-    assert!(missing.player.session.error.as_deref().unwrap_or_default().contains("缺少对应播放插件"));
+    assert!(
+        missing
+            .player
+            .session
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("缺少对应播放插件")
+    );
     assert!(!missing.player.can_play);
     assert!(missing.player.stored.contains_key("repo"));
 
@@ -492,8 +730,24 @@ fn listed_playback_distinguishes_missing_plugin_upgrade_and_decoder_failure() {
     load_playlist(&mut upgrade, "repo", vec![item("a", "ready")]);
     send(&mut upgrade, PlayerMessage::PlayListed { item_id: None });
     // 条目路径是仓库内相对路径，经仓库服务读取；这里读不到就写明读取失败。
-    assert!(upgrade.player.session.error.as_deref().unwrap_or_default().contains("无法读取当前项"));
-    assert!(!upgrade.player.session.error.as_deref().unwrap_or_default().contains("需要升级"));
+    assert!(
+        upgrade
+            .player
+            .session
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("无法读取当前项")
+    );
+    assert!(
+        !upgrade
+            .player
+            .session
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("需要升级")
+    );
     assert_ne!(upgrade.player.session.status, "playing");
 
     let mut decoded = shell(true);
@@ -501,22 +755,53 @@ fn listed_playback_distinguishes_missing_plugin_upgrade_and_decoder_failure() {
     load_playlist(&mut decoded, "repo", vec![item("a", "ready")]);
     send(&mut decoded, PlayerMessage::PlayListed { item_id: None });
     assert_eq!(decoded.player.session.status, "failed");
-    assert!(decoded.player.session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
+    assert!(
+        decoded
+            .player
+            .session
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("没有原生解码器")
+    );
     let time = decoded.player.session.current_time_ms;
     // 和 Vue 一样，音量先记下来留给下一项；跳转在没装好的条目上不动，也不改掉原来的错误。
     send(&mut decoded, PlayerMessage::SetVolume(0.2));
     send(&mut decoded, PlayerMessage::Seek(1_500));
     assert_eq!(decoded.player.session.volume, 0.2);
     assert_eq!(decoded.player.session.current_time_ms, time);
-    assert!(decoded.player.session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
+    assert!(
+        decoded
+            .player
+            .session
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("没有原生解码器")
+    );
     assert_ne!(decoded.player.session.status, "playing");
     // 没装好的条目没有控制落点：暂停不动，播放重新装载、照样报没有原生解码器，不读文件。
     decoded.player.take_effects();
     send(&mut decoded, PlayerMessage::SetPlaying(false));
     send(&mut decoded, PlayerMessage::SetPlaying(true));
     assert_eq!(decoded.player.session.status, "failed");
-    assert!(decoded.player.session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
-    assert!(!decoded.player.take_effects().iter().any(|effect| matches!(effect, PlayerEffect::LoadItem { .. })), "不读文件");
+    assert!(
+        decoded
+            .player
+            .session
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("没有原生解码器")
+    );
+    assert!(
+        !decoded
+            .player
+            .take_effects()
+            .iter()
+            .any(|effect| matches!(effect, PlayerEffect::LoadItem { .. })),
+        "不读文件"
+    );
 
     let mut image = shell(true);
     image.player.candidates = vec![candidate("native.image", "audio", "image", &["png"])];
@@ -524,7 +809,13 @@ fn listed_playback_distinguishes_missing_plugin_upgrade_and_decoder_failure() {
     picture.extension = "png".into();
     picture.filename = "pic.png".into();
     picture.path = "pics/pic.png".into();
-    image.reduce(ShellMessage::PlaylistDetailLoaded(Ok(detail("repo", "pl", "audio", "image", vec![picture]))));
+    image.reduce(ShellMessage::PlaylistDetailLoaded(Ok(detail(
+        "repo",
+        "pl",
+        "audio",
+        "image",
+        vec![picture],
+    ))));
     send(&mut image, PlayerMessage::PlayListed { item_id: None });
     assert_eq!(image.player.session.duration_ms, Some(5000));
     image.player.session.current_time_ms = 9_000;
@@ -534,7 +825,10 @@ fn listed_playback_distinguishes_missing_plugin_upgrade_and_decoder_failure() {
     assert_eq!(image.player.session.current_time_ms, 2000);
     send(&mut image, PlayerMessage::SetObjectFit { cover: true });
     assert_eq!(image.player.object_fit_text(), "填充");
-    assert!(matches!(image.player.take_effects().last(), Some(PlayerEffect::PersistSettings)));
+    assert!(matches!(
+        image.player.take_effects().last(),
+        Some(PlayerEffect::PersistSettings)
+    ));
 
     send(&mut decoded, PlayerMessage::CycleMode);
     assert_eq!(decoded.player.mode, PlaybackMode::Shuffle);
@@ -551,29 +845,72 @@ fn listed_playback_distinguishes_missing_plugin_upgrade_and_decoder_failure() {
 fn preview_takeover_keeps_the_other_repository_session() {
     let mut model = shell(true);
     model.player.repo_id = Some("repo-a".into());
-    model.player.stored.insert("repo-a".into(), super::support::StoredSession {
-        repo_id: "repo-a".into(),
-        playlist_id: "pl".into(),
-        player_type_id: "audio".into(),
-        current_item_id: "a".into(),
-        current_time_ms: 10,
-        duration_ms: 20,
-        mode: PlaybackMode::ListLoop,
-        volume: 1.0,
-        is_playing: true,
-    });
+    model.player.stored.insert(
+        "repo-a".into(),
+        super::support::StoredSession {
+            repo_id: "repo-a".into(),
+            playlist_id: "pl".into(),
+            player_type_id: "audio".into(),
+            current_item_id: "a".into(),
+            current_time_ms: 10,
+            duration_ms: 20,
+            mode: PlaybackMode::ListLoop,
+            volume: 1.0,
+            is_playing: true,
+        },
+    );
     let mut session = super::fresh_session("repo-b");
     session.status = "paused".into();
-    let entry = super::PreviewEntry { repo_id: "repo-b", path: "b.mp3", extension: "mp3", asset_id: "asset-b", is_virtual: false };
-    assert!(model.player.take_over_preview(entry, session, None, &mut model.inspect), "有能放 mp3 的内置候选时接管");
-    assert!(model.player.stored.contains_key("repo-a"), "不删别的仓库存下的会话");
+    let entry = super::PreviewEntry {
+        repo_id: "repo-b",
+        path: "b.mp3",
+        extension: "mp3",
+        asset_id: "asset-b",
+        is_virtual: false,
+    };
+    assert!(
+        model
+            .player
+            .take_over_preview(entry, session, None, &mut model.inspect),
+        "有能放 mp3 的内置候选时接管"
+    );
+    assert!(
+        model.player.stored.contains_key("repo-a"),
+        "不删别的仓库存下的会话"
+    );
     assert_eq!(model.player.repo_id.as_deref(), Some("repo-b"));
-    assert!(model.player.current_item().is_some_and(|item| item.transient && item.path == "b.mp3"));
-    assert!(!model.player.take_effects().iter().any(|effect| matches!(effect, PlayerEffect::PersistSessions)), "临时条目不写会话");
+    assert!(
+        model
+            .player
+            .current_item()
+            .is_some_and(|item| item.transient && item.path == "b.mp3")
+    );
+    assert!(
+        !model
+            .player
+            .take_effects()
+            .iter()
+            .any(|effect| matches!(effect, PlayerEffect::PersistSessions)),
+        "临时条目不写会话"
+    );
 
     model.player.candidates.clear();
-    let entry = super::PreviewEntry { repo_id: "repo-b", path: "c.mp3", extension: "mp3", asset_id: "asset-c", is_virtual: false };
-    assert!(!model.player.take_over_preview(entry, super::fresh_session("repo-b"), None, &mut model.inspect), "没有播放器时不接管");
+    let entry = super::PreviewEntry {
+        repo_id: "repo-b",
+        path: "c.mp3",
+        extension: "mp3",
+        asset_id: "asset-c",
+        is_virtual: false,
+    };
+    assert!(
+        !model.player.take_over_preview(
+            entry,
+            super::fresh_session("repo-b"),
+            None,
+            &mut model.inspect
+        ),
+        "没有播放器时不接管"
+    );
 }
 
 #[test]
@@ -583,17 +920,38 @@ fn switching_repository_clears_only_the_previous_session() {
     load_playlist(&mut model, "repo-a", vec![item("a", "ready")]);
     send(&mut model, PlayerMessage::PlayListed { item_id: None });
     assert!(model.player.stored.contains_key("repo-a"));
-    model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(detail("repo-b", "pl-b", "audio", "audio", vec![item("b", "ready")]))));
+    model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(detail(
+        "repo-b",
+        "pl-b",
+        "audio",
+        "audio",
+        vec![item("b", "ready")],
+    ))));
     send(&mut model, PlayerMessage::PlayListed { item_id: None });
     assert!(!model.player.stored.contains_key("repo-a"));
     assert!(model.player.stored.contains_key("repo-b"));
     assert_eq!(model.player.current_id.as_deref(), Some("b"));
 
-    model.player.stored.insert("repo-a".into(), model.player.stored["repo-b"].clone());
-    send(&mut model, PlayerMessage::Stop { repo_id: Some("repo-a".into()), clear_stored: true });
+    model
+        .player
+        .stored
+        .insert("repo-a".into(), model.player.stored["repo-b"].clone());
+    send(
+        &mut model,
+        PlayerMessage::Stop {
+            repo_id: Some("repo-a".into()),
+            clear_stored: true,
+        },
+    );
     assert!(!model.player.stored.contains_key("repo-a"));
     assert_eq!(model.player.session.status, "failed");
-    send(&mut model, PlayerMessage::Stop { repo_id: Some("repo-b".into()), clear_stored: true });
+    send(
+        &mut model,
+        PlayerMessage::Stop {
+            repo_id: Some("repo-b".into()),
+            clear_stored: true,
+        },
+    );
     assert_eq!(model.player.session.status, "ended");
     assert_eq!(model.player.session.current_time_ms, 0);
     assert!(model.player.session.duration_ms.is_none());
@@ -613,51 +971,108 @@ fn restore_accepts_a_ready_known_item_and_rejects_the_rest() {
     )
     .unwrap();
     let mut model = shell(true);
-    model.player.load_files(&dir.join("missing-settings.json"), &sessions, &dir.join("missing-prefs.json"));
+    model.player.load_files(
+        &dir.join("missing-settings.json"),
+        &sessions,
+        &dir.join("missing-prefs.json"),
+    );
     model.player.candidates = vec![candidate("native.audio", "audio", "audio", &["mp3"])];
     load_list(&mut model, vec![summary("repo", "pl", "audio", "audio")]);
     assert!(matches!(
         model.player.take_effects().iter().find(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. })),
         Some(PlayerEffect::RestoreDetail { playlist_id, .. }) if playlist_id == "pl"
     ));
-    send(&mut model, PlayerMessage::RestoreDetail(Ok(detail("repo", "pl", "audio", "audio", vec![item("a", "ready")]))));
+    send(
+        &mut model,
+        PlayerMessage::RestoreDetail(Ok(detail(
+            "repo",
+            "pl",
+            "audio",
+            "audio",
+            vec![item("a", "ready")],
+        ))),
+    );
     assert_eq!(model.player.current_id.as_deref(), Some("a"));
     assert_eq!(model.player.mode, PlaybackMode::SingleLoop);
     assert_eq!(model.player.session.volume, 0.4);
     assert_eq!(model.player.session.current_time_ms, 1200);
     assert!(model.player.wants_playing);
     assert_eq!(model.player.session.status, "failed");
-    assert!(model.player.session.error.as_deref().unwrap_or_default().contains("没有原生解码器"));
+    assert!(
+        model
+            .player
+            .session
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("没有原生解码器")
+    );
 
     let mut rejected = shell(true);
-    rejected.player.stored.insert("repo".into(), model.player.stored["repo"].clone());
+    rejected
+        .player
+        .stored
+        .insert("repo".into(), model.player.stored["repo"].clone());
     rejected.player.candidates = vec![candidate("native.audio", "audio", "audio", &["mp3"])];
     load_list(&mut rejected, vec![summary("repo", "pl", "audio", "audio")]);
-    assert!(rejected.player.take_effects().iter().any(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. })));
-    send(&mut rejected, PlayerMessage::RestoreDetail(Ok(detail("repo", "pl", "audio", "audio", vec![item("a", "missing")]))));
+    assert!(
+        rejected
+            .player
+            .take_effects()
+            .iter()
+            .any(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. }))
+    );
+    send(
+        &mut rejected,
+        PlayerMessage::RestoreDetail(Ok(detail(
+            "repo",
+            "pl",
+            "audio",
+            "audio",
+            vec![item("a", "missing")],
+        ))),
+    );
     assert!(!rejected.player.stored.contains_key("repo"));
     assert!(rejected.player.current_id.is_none());
 
     let mut mismatch = shell(true);
-    mismatch.player.stored.insert("repo".into(), super::support::StoredSession {
-        repo_id: "repo".into(),
-        playlist_id: "other".into(),
-        player_type_id: "audio".into(),
-        current_item_id: "a".into(),
-        current_time_ms: 0,
-        duration_ms: 0,
-        mode: PlaybackMode::ListLoop,
-        volume: 1.0,
-        is_playing: false,
-    });
+    mismatch.player.stored.insert(
+        "repo".into(),
+        super::support::StoredSession {
+            repo_id: "repo".into(),
+            playlist_id: "other".into(),
+            player_type_id: "audio".into(),
+            current_item_id: "a".into(),
+            current_time_ms: 0,
+            duration_ms: 0,
+            mode: PlaybackMode::ListLoop,
+            volume: 1.0,
+            is_playing: false,
+        },
+    );
     mismatch.player.restore_playlist_id = Some("pl".into());
     mismatch.player.candidates = vec![candidate("native.audio", "audio", "audio", &["mp3"])];
-    send(&mut mismatch, PlayerMessage::RestoreDetail(Ok(detail("repo", "pl", "audio", "audio", vec![item("a", "ready")]))));
+    send(
+        &mut mismatch,
+        PlayerMessage::RestoreDetail(Ok(detail(
+            "repo",
+            "pl",
+            "audio",
+            "audio",
+            vec![item("a", "ready")],
+        ))),
+    );
     assert!(!mismatch.player.stored.contains_key("repo"));
 
     model.player.repo_id = Some("repo".into());
     load_list(&mut model, vec![summary("repo", "pl", "audio", "audio")]);
-    assert!(!model.player.take_effects().iter().any(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. })));
+    assert!(
+        !model
+            .player
+            .take_effects()
+            .iter()
+            .any(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. }))
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -676,43 +1091,86 @@ fn restore_waits_for_plugin_player_types() {
         volume: 0.5,
         is_playing: false,
     };
-    let restores = |model: &mut ShellViewModel| model.player.take_effects().into_iter().filter(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. })).count();
+    let restores = |model: &mut ShellViewModel| {
+        model
+            .player
+            .take_effects()
+            .into_iter()
+            .filter(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. }))
+            .count()
+    };
 
     let mut model = shell(true);
     model.player.stored.insert("repo".into(), stored.clone());
-    load_list(&mut model, vec![summary("repo", "pl", "plugin.audio", "audio")]);
+    load_list(
+        &mut model,
+        vec![summary("repo", "pl", "plugin.audio", "audio")],
+    );
     assert_eq!(restores(&mut model), 0, "播放器类型读回之前不读详情");
     assert!(model.player.stored.contains_key("repo"), "也不丢会话");
-    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution("plugin.audio", "audio", &["mp3"])])));
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution(
+        "plugin.audio",
+        "audio",
+        &["mp3"],
+    )])));
     assert_eq!(restores(&mut model), 1, "读回认得的类型以后读详情");
-    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution("plugin.audio", "audio", &["mp3"])])));
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution(
+        "plugin.audio",
+        "audio",
+        &["mp3"],
+    )])));
     assert_eq!(restores(&mut model), 0, "详情在读时不重复读");
 
     let mut players_first = shell(true);
-    players_first.player.stored.insert("repo".into(), stored.clone());
-    players_first.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution("plugin.audio", "audio", &["mp3"])])));
+    players_first
+        .player
+        .stored
+        .insert("repo".into(), stored.clone());
+    players_first.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![contribution(
+        "plugin.audio",
+        "audio",
+        &["mp3"],
+    )])));
     assert_eq!(restores(&mut players_first), 0, "还没有播放集列表");
-    load_list(&mut players_first, vec![summary("repo", "pl", "plugin.audio", "audio")]);
+    load_list(
+        &mut players_first,
+        vec![summary("repo", "pl", "plugin.audio", "audio")],
+    );
     assert_eq!(restores(&mut players_first), 1);
 
     let mut gone = shell(true);
     gone.player.stored.insert("repo".into(), stored);
-    load_list(&mut gone, vec![summary("repo", "pl", "plugin.audio", "audio")]);
+    load_list(
+        &mut gone,
+        vec![summary("repo", "pl", "plugin.audio", "audio")],
+    );
     gone.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(Vec::new())));
     assert_eq!(restores(&mut gone), 0);
-    assert!(!gone.player.stored.contains_key("repo"), "读回了还不认得的类型就丢掉会话");
+    assert!(
+        !gone.player.stored.contains_key("repo"),
+        "读回了还不认得的类型就丢掉会话"
+    );
 }
 
 #[test]
 fn preview_and_player_share_one_media_session() {
     let mut model = shell(true);
     model.player.session.volume = 0.3;
-    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("pics/a.png", "png"))));
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset(
+        "pics/a.png",
+        "png",
+    ))));
     assert_eq!(model.player.session.volume, 0.3);
     assert!(model.inspect.media_session().is_none());
 
-    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("audio/a.mp3", "mp3"))));
-    let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().unwrap() else {
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset(
+        "audio/a.mp3",
+        "mp3",
+    ))));
+    let InspectEffect::LoadMedia {
+        path, generation, ..
+    } = model.inspect.take_effects().pop().unwrap()
+    else {
         panic!("没有音视频请求");
     };
     model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded {
@@ -724,17 +1182,38 @@ fn preview_and_player_share_one_media_session() {
         prep: crate::shell::SourcePrep::default(),
     }));
     // 读不出来的预览不接管播放条，播放器那份会话不受影响；预览页只显示自己的失败。
-    assert_eq!(model.inspect.media_session().map(|session| session.status.as_str()), Some("failed"));
+    assert_eq!(
+        model
+            .inspect
+            .media_session()
+            .map(|session| session.status.as_str()),
+        Some("failed")
+    );
     assert!(model.player.current_item().is_none());
     assert_ne!(model.player.session.status, "failed");
     send(&mut model, PlayerMessage::SetVolume(0.2));
     assert_eq!(model.player.session.volume, 0.2);
-    assert_eq!(model.inspect.media_session().map(|session| session.volume), Some(1.0));
+    assert_eq!(
+        model.inspect.media_session().map(|session| session.volume),
+        Some(1.0)
+    );
     assert_ne!(model.player.session.status, "playing");
     // 播放器没在这个仓库里放东西，停止不改它；预览页的失败也留着。
-    send(&mut model, PlayerMessage::Stop { repo_id: Some("repo".into()), clear_stored: true });
+    send(
+        &mut model,
+        PlayerMessage::Stop {
+            repo_id: Some("repo".into()),
+            clear_stored: true,
+        },
+    );
     assert_eq!(model.player.session.status, "idle");
-    assert_eq!(model.inspect.media_session().map(|session| session.status.as_str()), Some("failed"));
+    assert_eq!(
+        model
+            .inspect
+            .media_session()
+            .map(|session| session.status.as_str()),
+        Some("failed")
+    );
 
     model.player.candidates = vec![candidate("native.audio", "audio", "audio", &["mp3"])];
     load_playlist(&mut model, "repo", vec![item("a", "ready")]);
@@ -748,6 +1227,69 @@ fn preview_and_player_share_one_media_session() {
         Some(InspectEffect::LoadAsset { asset_id, .. }) if asset_id == "asset-a"
     ));
     assert!(!model.player.system_media_supported());
+}
+
+/// 播放条或播放集打开预览：照 Vue `setPreviewFilePath`，预览页立刻换上。
+///
+/// 单击选中的同一条也要打开，不等素材详情回来；随后回来的详情留在预览页，不退回「只在右侧看」。
+#[test]
+fn opening_the_player_preview_shows_the_page_at_once() {
+    let mut model = shell(true);
+    model.player.candidates = vec![candidate("native.audio", "audio", "audio", &["mp3"])];
+    load_playlist(&mut model, "repo", vec![item("a", "ready")]);
+    send(&mut model, PlayerMessage::PlayListed { item_id: None });
+
+    model.page = ShellPage::FileList;
+    model.workspace.panel = WorkspacePanel::Playlist;
+    model.workspace.library_category = LibraryCategory::Recent;
+    model.files.select_only = Some("audio/a.mp3".into());
+    model.files.click_load = Some("audio/a.mp3".into());
+    model.files.selected = vec!["other.png".into()];
+    model.files.primary = Some("other.png".into());
+    assert!(
+        !super::super::files_view::previewing(&model),
+        "单击选中时还在文件列表"
+    );
+
+    send(&mut model, PlayerMessage::OpenPreview { item_id: None });
+
+    assert_eq!(model.workspace.panel, WorkspacePanel::Files);
+    assert_eq!(model.workspace.library_category, LibraryCategory::All);
+    assert_eq!(model.page, ShellPage::SelectedFile);
+    assert_eq!(model.selected_path.as_deref(), Some("audio/a.mp3"));
+    assert!(
+        model.files.select_only.is_none() && model.files.click_load.is_none(),
+        "单击选中不再挡住预览"
+    );
+    assert_eq!(
+        model.files.selected,
+        vec!["audio/a.mp3".to_string()],
+        "选择换成正在打开的这一条"
+    );
+    assert!(
+        super::super::files_view::previewing(&model),
+        "预览页立刻换上，不等详情"
+    );
+
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset(
+        "audio/a.mp3",
+        "mp3",
+    ))));
+    assert!(
+        super::super::files_view::previewing(&model),
+        "随后回来的详情仍留在预览页"
+    );
+    assert!(
+        model.inspect.take_effects().iter().any(|effect| matches!(effect, InspectEffect::LoadMedia { path, .. } if path == "audio/a.mp3")),
+        "详情回来以后才读预览内容"
+    );
+
+    let mut bare = shell(true);
+    bare.page = ShellPage::FileList;
+    bare.files.selected = vec!["keep.png".into()];
+    send(&mut bare, PlayerMessage::OpenPreview { item_id: None });
+    assert_eq!(bare.page, ShellPage::FileList, "没有正在放的条目时不换页");
+    assert_eq!(bare.files.selected, vec!["keep.png".to_string()]);
 }
 
 /// 播放条量到的宽度只在真的变了时记下，半像素抖动和无效值不算。
@@ -787,27 +1329,36 @@ fn acceptance_pages_use_the_player_surface() {
         local_cache: None,
         authentication: None,
     };
-    model.reduce(ShellMessage::WorkspaceListLoaded { generation: 0, result: Ok(vec![repository.clone()]) });
-    model.reduce(ShellMessage::RepositorySynced { generation: 0, result: Ok(crate::shell::SyncCounts::default()) });
-    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation: 0, result: Ok(RepositorySnapshot {
-        repository,
-        folder_label: String::new(),
-        folders: Vec::new(),
-        assets: Vec::new(),
-        playlists: Vec::new(),
-        quick_access: Vec::new(),
-        tag_groups: Vec::new(),
-        metadata_fields: Vec::new(),
-        recent_revision_count: 0,
-        overview: RepositoryOverview {
-            total_size_bytes: 0,
-            total_size_label: "0 B".into(),
-            file_count: 0,
-            folder_count: 0,
-            trash_count: 0,
-            readme_content: None,
-        },
-    }) });
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation: 0,
+        result: Ok(vec![repository.clone()]),
+    });
+    model.reduce(ShellMessage::RepositorySynced {
+        generation: 0,
+        result: Ok(crate::shell::SyncCounts::default()),
+    });
+    model.reduce(ShellMessage::RepositorySnapshotLoaded {
+        generation: 0,
+        result: Ok(RepositorySnapshot {
+            repository,
+            folder_label: String::new(),
+            folders: Vec::new(),
+            assets: Vec::new(),
+            playlists: Vec::new(),
+            quick_access: Vec::new(),
+            tag_groups: Vec::new(),
+            metadata_fields: Vec::new(),
+            recent_revision_count: 0,
+            overview: RepositoryOverview {
+                total_size_bytes: 0,
+                total_size_label: "0 B".into(),
+                file_count: 0,
+                folder_count: 0,
+                trash_count: 0,
+                readme_content: None,
+            },
+        }),
+    });
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(FileBrowserSnapshot {
         repo_id: "repo".into(),
         root_path: "C:/repo".into(),
@@ -830,18 +1381,168 @@ fn acceptance_pages_use_the_player_surface() {
     model.workspace.panel = WorkspacePanel::Playlist;
     assert!(model.player_surface_visible());
     model.workspace.panel = WorkspacePanel::Trash;
-    assert!(!model.player_surface_visible());
+    assert!(
+        model.player_surface_visible(),
+        "回收站仍是文件浏览面板，播放条留在列表下面"
+    );
 
     let mut stale = shell(true);
     stale.sidebar.bind_repository(Some("repo-a"), false);
-    stale.reduce(ShellMessage::PlaylistDetailLoaded(Ok(detail("repo-b", "pl", "audio", "audio", vec![item("a", "ready")]))));
+    stale.reduce(ShellMessage::PlaylistDetailLoaded(Ok(detail(
+        "repo-b",
+        "pl",
+        "audio",
+        "audio",
+        vec![item("a", "ready")],
+    ))));
     assert!(stale.player.listed.is_none());
 }
 
-#[path = "player_wav_tests.rs"]
-mod wav;
+/// 侧栏「播放」照 Vue `playPlaylist`：从第一条就绪条目自动播放，不把正在看的播放集页换成这一张。
+/// 没点开过播放集时也不打开页面。正在看的就是这一张时，页上的条目跟着读回的详情换。
+/// 之后刷新正在看的那张，不把已经在放的另一张队列换掉。
+#[test]
+fn sidebar_play_starts_that_playlist_and_leaves_the_open_page() {
+    fn row(playlist_id: &str, id: &str, status: &str) -> PlaylistItem {
+        let mut row = item(id, status);
+        row.playlist_id = playlist_id.into();
+        row
+    }
+
+    let mut model = shell(true);
+    model.workspace.panel = WorkspacePanel::Playlist;
+    model.selected_playlist_id = Some("pl-a".into());
+    model.playlist_item_ids = vec!["morning".into()];
+    model.sidebar.active_playlist_id = Some("pl-a".into());
+    model.player.listed = Some(detail(
+        "repo",
+        "pl-a",
+        "audio",
+        "audio",
+        vec![row("pl-a", "morning", "ready")],
+    ));
+    model.sidebar.pending_play = Some("pl-b".into());
+    model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(detail(
+        "repo",
+        "pl-b",
+        "audio",
+        "audio",
+        vec![
+            row("pl-b", "broken", "missing"),
+            row("pl-b", "night", "ready"),
+        ],
+    ))));
+    assert_eq!(
+        model.player.current_id.as_deref(),
+        Some("night"),
+        "跳过还没就绪的第一条"
+    );
+    assert!(model.player.wants_playing, "侧栏播放是自动播放");
+    assert!(
+        model
+            .player
+            .queue
+            .iter()
+            .all(|item| item.playlist_id == "pl-b")
+    );
+    assert_eq!(
+        model
+            .player
+            .listed
+            .as_ref()
+            .map(|page| page.playlist.playlist_id.as_str()),
+        Some("pl-a")
+    );
+    assert_eq!(model.selected_playlist_id.as_deref(), Some("pl-a"));
+    assert_eq!(model.playlist_item_ids, ["morning"]);
+    assert_eq!(model.sidebar.active_playlist_id.as_deref(), Some("pl-a"));
+    assert_eq!(model.workspace.panel, WorkspacePanel::Playlist);
+    assert!(model.sidebar.pending_play.is_none());
+
+    model.reduce(ShellMessage::PlaylistDetailLoaded(Ok(detail(
+        "repo",
+        "pl-a",
+        "audio",
+        "audio",
+        vec![
+            row("pl-a", "morning", "ready"),
+            row("pl-a", "extra", "ready"),
+        ],
+    ))));
+    assert_eq!(
+        model.player.current_id.as_deref(),
+        Some("night"),
+        "刷新正在看的播放集不换播放队列"
+    );
+    assert!(
+        model
+            .player
+            .queue
+            .iter()
+            .all(|item| item.playlist_id == "pl-b")
+    );
+    let page = model.player.listed.as_ref().expect("正在看的播放集还在");
+    assert_eq!(page.playlist.playlist_id, "pl-a");
+    assert_eq!(page.items.len(), 2);
+    assert_eq!(model.playlist_item_ids, ["morning", "extra"]);
+
+    let mut bare = shell(true);
+    bare.workspace.panel = WorkspacePanel::Files;
+    bare.sidebar.pending_play = Some("pl-b".into());
+    bare.reduce(ShellMessage::PlaylistDetailLoaded(Ok(detail(
+        "repo",
+        "pl-b",
+        "audio",
+        "audio",
+        vec![row("pl-b", "night", "ready")],
+    ))));
+    assert!(
+        bare.player.listed.is_none(),
+        "没点开播放集时，播放不打开页面"
+    );
+    assert!(bare.selected_playlist_id.is_none());
+    assert_eq!(bare.workspace.panel, WorkspacePanel::Files);
+    assert_eq!(bare.player.current_id.as_deref(), Some("night"));
+
+    let mut same = shell(true);
+    same.workspace.panel = WorkspacePanel::Playlist;
+    same.selected_playlist_id = Some("pl-a".into());
+    same.player.listed = Some(detail(
+        "repo",
+        "pl-a",
+        "audio",
+        "audio",
+        vec![row("pl-a", "morning", "ready")],
+    ));
+    same.sidebar.pending_play = Some("pl-a".into());
+    same.reduce(ShellMessage::PlaylistDetailLoaded(Ok(detail(
+        "repo",
+        "pl-a",
+        "audio",
+        "audio",
+        vec![
+            row("pl-a", "broken", "missing"),
+            row("pl-a", "morning", "ready"),
+        ],
+    ))));
+    assert_eq!(same.player.current_id.as_deref(), Some("morning"));
+    assert_eq!(
+        same.player
+            .listed
+            .as_ref()
+            .map(|page| page.playlist.playlist_id.as_str()),
+        Some("pl-a")
+    );
+    assert_eq!(same.playlist_item_ids, ["broken", "morning"]);
+    assert_eq!(same.workspace.panel, WorkspacePanel::Playlist);
+}
+
 #[path = "player_membership_tests.rs"]
 mod membership;
+#[path = "player_playlist_cache_tests.rs"]
+mod playlist_cache;
+#[path = "player_wav_tests.rs"]
+mod wav;
 
 /// 新建播放集默认选的播放类型：照 Vue `listRegisteredPlaylistPlayers` 按名称的 zh-CN 顺序排
 /// （拼音：视频 < 图片 < 音频），取第一项。宿主给的顺序不算数。
@@ -849,13 +1550,23 @@ mod membership;
 #[test]
 fn playlist_players_follow_the_vue_name_order() {
     let mut model = shell(true);
-    let player = |id: &str, label: &str| PlaylistPlayerContribution { label: label.into(), ..contribution(id, id, &[]) };
+    let player = |id: &str, label: &str| PlaylistPlayerContribution {
+        label: label.into(),
+        ..contribution(id, id, &[])
+    };
     model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![
         player("image", "图片幻灯片"),
         player("audio", "音频顺序播放"),
         player("video", "视频顺序播放"),
     ])));
-    let order = model.playlist_players.iter().map(|player| player.player_type_id.as_str()).collect::<Vec<_>>();
+    let order = model
+        .playlist_players
+        .iter()
+        .map(|player| player.player_type_id.as_str())
+        .collect::<Vec<_>>();
     assert_eq!(order, ["video", "image", "audio"]);
-    assert_eq!(model.selected_new_playlist_player_type_id.as_deref(), Some("video"));
+    assert_eq!(
+        model.selected_new_playlist_player_type_id.as_deref(),
+        Some("video")
+    );
 }

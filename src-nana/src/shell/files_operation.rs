@@ -19,13 +19,22 @@ pub(in crate::shell) struct FileOperation {
 
 impl FileOperation {
     /// Vue 文件变更开始以后的第一步：种类、阶段说明和百分比。
-    pub(in crate::shell) fn step(label: impl Into<String>, detail: impl Into<String>, value: f64, refresh_value: Option<f64>) -> Self {
-        Self { start: OperationStart::new(label, detail, value), refresh_value }
+    pub(in crate::shell) fn step(
+        label: impl Into<String>,
+        detail: impl Into<String>,
+        value: f64,
+        refresh_value: Option<f64>,
+    ) -> Self {
+        Self {
+            start: OperationStart::new(label, detail, value),
+            refresh_value,
+        }
     }
 
     /// 从文件夹导入，对话框和拖入都是（Vue `importEntriesToWorkspace`）。
     pub(in crate::shell) fn import() -> Self {
-        Self::step("导入文件", "导入文件到当前资源库", 24.0, Some(84.0)).runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_ENTRY_IMPORT])
+        Self::step("导入文件", "导入文件到当前资源库", 24.0, Some(84.0))
+            .runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_ENTRY_IMPORT])
     }
 
     /// 这次变更在后台跑的任务协议：任务弹层不再把这些任务单列一行（`OperationStart::runs`）。
@@ -70,22 +79,29 @@ impl FilesState {
         } else {
             "正在读取根目录".into()
         };
-        self.operation.start(OperationStart::new(label, detail, 14.0).indeterminate());
+        self.operation
+            .start(OperationStart::new(label, detail, 14.0).indeterminate());
         self.operation_kind = Some(FilesOperation::Read);
     }
 
     /// 变更开始：排下这次变更的进度行。
     pub(super) fn report_mutation(&mut self, operation: FileOperation) {
         self.operation.start(operation.start);
-        self.operation_kind = Some(FilesOperation::Mutation { refresh_value: operation.refresh_value });
+        self.operation_kind = Some(FilesOperation::Mutation {
+            refresh_value: operation.refresh_value,
+        });
     }
 
     /// 协议完成以后重读目录时怎么报进度：复制、导入走到「刷新文件索引」，返回这一步的百分比和静默读取；
     /// 别的变更返回 `None` 和非静默读取（进度行换成「读取目录」）；没有进度行的变更静默读取。
     pub(super) fn reload_progress(&self) -> (Option<f64>, ReadProgress) {
         match self.operation_kind {
-            Some(FilesOperation::Mutation { refresh_value: Some(value) }) => (Some(value), ReadProgress::Silent),
-            Some(FilesOperation::Mutation { refresh_value: None }) => (None, ReadProgress::Directory),
+            Some(FilesOperation::Mutation {
+                refresh_value: Some(value),
+            }) => (Some(value), ReadProgress::Silent),
+            Some(FilesOperation::Mutation {
+                refresh_value: None,
+            }) => (None, ReadProgress::Directory),
             _ => (None, ReadProgress::Silent),
         }
     }
@@ -101,7 +117,8 @@ impl FilesState {
             return;
         }
         if kind == FilesOperation::Read {
-            self.operation.update(OperationPatch::step("整理目录条目", 92.0));
+            self.operation
+                .update(OperationPatch::step("整理目录条目", 92.0));
         }
         self.operation.finish();
     }
@@ -126,6 +143,7 @@ impl FilesState {
         self.virtual_rows.clear();
         self.prune_decode_requests();
         self.current_path.clear();
+        self.shown_directory = None;
         self.total_entries = 0;
         self.has_more = false;
         self.trash = false;
@@ -135,6 +153,11 @@ impl FilesState {
         self.selected.clear();
         self.primary = None;
         self.anchor = None;
+        self.reload_trash_on_success = false;
+        self.rename_select = None;
+        self.adopted_tree = None;
+        self.multi_delete_paths = None;
+        self.folder_tree_reread = None;
         self.dialog = FileDialog::Closed;
         self.pending = None;
         self.entry_menu = None;
@@ -149,11 +172,14 @@ impl FilesState {
         self.import_open = false;
         self.eagle_open = false;
         self.copy_sources.clear();
+        self.copy_reselect = None;
         self.hardlinks.clear();
         self.skipped_hardlinks.clear();
         self.forget_hardlink_reads();
         self.tag_draft.clear();
         self.tags_open = None;
+        self.detail_asset_id.clear();
+        self.detail_metadata.clear();
         if self.operation_kind.take().is_some() {
             self.operation.cancel();
         }

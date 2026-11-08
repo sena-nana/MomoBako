@@ -43,7 +43,10 @@ fn seed_base(model: &mut ShellViewModel) {
 
 /// 按产品帧时钟推进搜索和自动保存的延时，直到排下 `pick` 认得的请求。
 /// 同一批里别的请求和场景无关，一起丢掉。等满 `TIMER_FRAMES` 帧还没有就返回空。
-fn await_inspect_effect<T>(model: &mut ShellViewModel, pick: impl Fn(InspectEffect) -> Option<T>) -> Option<T> {
+fn await_inspect_effect<T>(
+    model: &mut ShellViewModel,
+    pick: impl Fn(InspectEffect) -> Option<T>,
+) -> Option<T> {
     for _ in 0..TIMER_FRAMES {
         super::poll_timers(model, SCENE_FRAME);
         if let Some(found) = model.inspect.take_effects().into_iter().find_map(&pick) {
@@ -56,26 +59,28 @@ fn await_inspect_effect<T>(model: &mut ShellViewModel, pick: impl Fn(InspectEffe
 use base_scene::Base;
 use files_scenes::PAGE_PDF;
 
+#[path = "acceptance_admin.rs"]
+mod admin_scenes;
 #[path = "acceptance_base.rs"]
 mod base_scene;
-#[path = "acceptance_plugins.rs"]
-mod plugin_fixtures;
-#[path = "acceptance_shell.rs"]
-mod shell_scenes;
 #[path = "acceptance_files.rs"]
 mod files_scenes;
 #[path = "acceptance_player.rs"]
 mod player_scenes;
-#[path = "acceptance_admin.rs"]
-mod admin_scenes;
+#[path = "acceptance_plugins.rs"]
+mod plugin_fixtures;
 #[path = "acceptance_search.rs"]
 mod search_scenes;
+#[path = "acceptance_shell.rs"]
+mod shell_scenes;
 #[path = "acceptance_source.rs"]
 mod source_scenes;
 
 /// 补上的表面，给离屏验收出画面。数字和像素都不编造。
 /// 各面板的对照场景放在各自的 `acceptance_*.rs` 里，这里只汇总。
 pub fn gap_models() -> Vec<(&'static str, ShellViewModel)> {
+    #[cfg(test)]
+    super::files_view::reset_row_click_state();
     let mut scenes = Vec::new();
     scenes.extend(shell_scenes::models());
     scenes.extend(files_scenes::models());
@@ -83,5 +88,7 @@ pub fn gap_models() -> Vec<(&'static str, ShellViewModel)> {
     scenes.extend(admin_scenes::models());
     scenes.extend(search_scenes::models());
     scenes.extend(source_scenes::models());
+    #[cfg(test)]
+    super::files_view::reset_row_click_state();
     scenes
 }

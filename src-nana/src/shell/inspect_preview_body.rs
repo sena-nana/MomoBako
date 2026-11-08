@@ -1,22 +1,17 @@
 //! 预览框里的内容：文本、图片、音视频、PDF / Office、压缩包、3D 模型，以及读取中、失败和不支持。
 //!
-//! 结构对齐各预览插件（text-preview、media-preview、office-preview、preview-archive、
-//! three-model-preview）和播放器挂载（player-audio 运行时）。Vue 里插件文字继承成白色、
-//! 浮层定位到外层祖先、唱片尺寸按视口算而溢出预览框这类缺陷，这里按设计意图改正。
-//!
-//! 常驻：预览框外框常驻，框里的内容按身份整块换。同步时先沿着和画面同一棵判断树取出借用 ViewModel 的
-//! [`ContentRef`]，算出身份（大块像素和文本按缓冲区地址和长度认，它们整份替换，不原地改）；身份变了
-//! 才抄成自有的 [`PreviewContent`] 写进信号，预览框里的 `dynamic` 换出新内容。播放推进只换纹理，不改身份。
+//! 外框常驻，框里按身份整块换。同步时先取出借用 ViewModel 的 [`ContentRef`] 算身份，变了才抄成
+//! [`PreviewContent`]。播放推进只换纹理；歌词当前行、标题、艺人、专辑、封面或主题变了才重画舞台。
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::REFRESH;
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::view::{AnyView, IntoView, widget};
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, GpuTextureView, IconGlyph, JustifySpec, LengthSpec, RadiusTier, ScrollAxes, ScrollView,
-    SemanticColorRole, Stack, Text, TextHorizontalAlignment, Thumbnail,
+    Activate, AlignSpec, Button, GpuTextureView, IconGlyph, JustifySpec, LengthSpec, RadiusTier,
+    ScrollAxes, ScrollView, SemanticColorRole, Stack, Text, TextHorizontalAlignment, Thumbnail,
 };
 use nana_ui::{ButtonKind, ContentFit};
 use nana_ui_core::Icon;
@@ -26,6 +21,11 @@ use super::super::inspect_library::{self, DocumentBar};
 use super::super::player_view::icons;
 use super::super::{ShellMessage, ShellViewModel};
 use super::frame::text;
+
+#[path = "inspect_preview_archive_entry.rs"]
+mod archive_entry;
+
+use archive_entry::{ArchiveShown, ArchiveShownOwned};
 
 /// 一块像素：宽、高和 RGBA。
 #[derive(Clone, Copy, Debug)]
@@ -55,11 +55,21 @@ impl Pixels {
 
 impl PixelsRef<'_> {
     fn to_owned(self) -> Pixels {
-        Pixels { width: self.width, height: self.height, rgba: self.rgba.into() }
+        Pixels {
+            width: self.width,
+            height: self.height,
+            rgba: self.rgba.into(),
+        }
     }
 
     fn identity(&self, hasher: &mut DefaultHasher) {
-        (self.width, self.height, self.rgba.as_ptr() as usize, self.rgba.len()).hash(hasher);
+        (
+            self.width,
+            self.height,
+            self.rgba.as_ptr() as usize,
+            self.rgba.len(),
+        )
+            .hash(hasher);
     }
 }
 
@@ -74,7 +84,12 @@ enum FallbackRef<'a> {
 #[derive(Clone, Debug)]
 enum LoadingRef<'a> {
     /// 左上角的状态胶囊；`progress` 时多一条进度。PDF 和 Office 在顶栏下面。
-    Pill { title: &'static str, detail: String, progress: bool, toolbar: Option<DocumentBar> },
+    Pill {
+        title: &'static str,
+        detail: String,
+        progress: bool,
+        toolbar: Option<DocumentBar>,
+    },
     /// 压缩包：居中的两行。
     Archive { detail: String },
     /// 音视频：居中的准备卡，写文件名。
@@ -86,20 +101,74 @@ enum LoadingRef<'a> {
 #[derive(Clone, Debug)]
 enum ContentRef<'a> {
     /// 播放列表当前图片的这一帧，按「适应 / 填充」铺。
-    Still { pixels: PixelsRef<'a>, cover: bool },
-    Text { markdown: bool, text: &'a str, truncated_at: Option<u64>, extension: &'a str },
+    Still {
+        pixels: PixelsRef<'a>,
+        cover: bool,
+    },
+    Text {
+        markdown: bool,
+        text: &'a str,
+        truncated_at: Option<u64>,
+        extension: &'a str,
+    },
     /// 宿主已经上传纹理的图片。
     ImageTexture,
     ImagePixels(PixelsRef<'a>),
-    Video { cover: bool },
-    Audio { name: &'a str, viewport: f32 },
-    Archive(&'a str),
-    Model { extension: &'a str, raster: Option<PixelsRef<'a>>, content: &'a str, mesh: bool },
+    /// 宿主纹理槽 `file-preview` 上的视频画面。
+    Video {
+        cover: bool,
+    },
+    /// 离屏没有宿主纹理时，直接画解码出的这一帧。
+    VideoPixels {
+        pixels: PixelsRef<'a>,
+        cover: bool,
+    },
+    Audio {
+        name: &'a str,
+        viewport: f32,
+        lines: &'a [super::super::inspect_lyrics::LyricLine],
+        active: Option<usize>,
+        /// 歌词文件还在读。没有行时写「读取歌词...」。
+        pending: bool,
+        caption: super::audio_stage::AudioCaption,
+        /// 本地封面路径。空表示没有可读的图，舞台画封面圆。
+        cover_path: Option<&'a str>,
+        accent: nana_ui::theme::ThemeAppearance,
+    },
+    /// 压缩包：左边名单，右边舞台。`shown` 有值时舞台是这一条；否则标题和说明是空闲、准备、不能内联或失败。
+    Archive {
+        content: &'a str,
+        picked: Option<&'a str>,
+        stage_title: &'a str,
+        stage_detail: &'a str,
+        stage_failed: bool,
+        name: &'a str,
+        shown: Option<ArchiveShown<'a>>,
+    },
+    Model {
+        extension: &'a str,
+        raster: Option<PixelsRef<'a>>,
+        content: &'a str,
+        mesh: bool,
+        extent: &'a str,
+    },
     /// PDF 和 Office：`nav` 是当前页和总页，有就画翻页（失败的页也画，才翻得过去）；`page` 是这一页的位图。
-    Document { toolbar: Option<DocumentBar>, nav: Option<(usize, usize)>, page: Option<PixelsRef<'a>>, error: Option<&'a str>, text: &'a str },
+    Document {
+        toolbar: Option<DocumentBar>,
+        nav: Option<(usize, usize)>,
+        page: Option<PixelsRef<'a>>,
+        error: Option<&'a str>,
+        text: &'a str,
+    },
     /// 失败浮层。`document` 是 PDF / Office：外面多包一层整列，顶栏可有可无。`retry` 是在线条目的播放源准备
     /// 失败，原因下面给「重试」。
-    Failed { title: &'static str, message: &'a str, toolbar: Option<DocumentBar>, document: bool, retry: bool },
+    Failed {
+        title: &'static str,
+        message: &'a str,
+        toolbar: Option<DocumentBar>,
+        document: bool,
+        retry: bool,
+    },
     Loading(LoadingRef<'a>),
     Fallback(FallbackRef<'a>),
     /// 读取中、还不知道类型。
@@ -118,19 +187,78 @@ pub(super) struct PreviewContent {
 
 #[derive(Clone, Debug)]
 enum Body {
-    Still { pixels: Pixels, cover: bool },
-    Text { markdown: bool, text: Arc<str>, truncated_at: Option<u64>, extension: String },
+    Still {
+        pixels: Pixels,
+        cover: bool,
+    },
+    Text {
+        markdown: bool,
+        text: Arc<str>,
+        truncated_at: Option<u64>,
+        extension: String,
+    },
     ImageTexture,
     ImagePixels(Pixels),
-    Video { cover: bool },
-    Audio { name: String, viewport: f32 },
-    Archive(String),
-    Model { extension: String, raster: Option<Pixels>, content: String, mesh: bool },
-    Document { toolbar: Option<DocumentBar>, nav: Option<(usize, usize)>, page: Option<Pixels>, error: Option<String>, text: String },
-    Failed { title: &'static str, message: String, toolbar: Option<DocumentBar>, document: bool, retry: bool },
-    Pill { title: &'static str, detail: String, progress: bool, toolbar: Option<DocumentBar> },
-    ArchiveLoading { detail: String },
-    MediaLoading { name: String, video: bool },
+    Video {
+        cover: bool,
+    },
+    VideoPixels {
+        pixels: Pixels,
+        cover: bool,
+    },
+    Audio {
+        viewport: f32,
+        lines: Vec<super::super::inspect_lyrics::LyricLine>,
+        active: Option<usize>,
+        pending: bool,
+        caption: super::audio_stage::AudioCaption,
+        /// 封面 data URL。空表示没有真实像素，舞台画封面圆。
+        cover: Option<String>,
+        accent: nana_ui::theme::ThemeAppearance,
+    },
+    Archive {
+        content: String,
+        picked: Option<String>,
+        stage_title: String,
+        stage_detail: String,
+        stage_failed: bool,
+        name: String,
+        shown: Option<ArchiveShownOwned>,
+    },
+    Model {
+        extension: String,
+        raster: Option<Pixels>,
+        content: String,
+        mesh: bool,
+        extent: String,
+    },
+    Document {
+        toolbar: Option<DocumentBar>,
+        nav: Option<(usize, usize)>,
+        page: Option<Pixels>,
+        error: Option<String>,
+        text: String,
+    },
+    Failed {
+        title: &'static str,
+        message: String,
+        toolbar: Option<DocumentBar>,
+        document: bool,
+        retry: bool,
+    },
+    Pill {
+        title: &'static str,
+        detail: String,
+        progress: bool,
+        toolbar: Option<DocumentBar>,
+    },
+    ArchiveLoading {
+        detail: String,
+    },
+    MediaLoading {
+        name: String,
+        video: bool,
+    },
     FallbackTexture(String),
     FallbackIcon(Icon),
     Pending,
@@ -155,12 +283,22 @@ impl PartialEq for PreviewSnapshot {
 impl PreviewSnapshot {
     /// 按 ViewModel 取预览框内容；`previous` 的身份没变时原样沿用，不抄大块数据。
     /// 不在预览时预览页藏着，内容是空的，不抄也不编码任何像素。
-    pub(super) fn project(model: &ShellViewModel, previous: Option<&PreviewSnapshot>) -> PreviewSnapshot {
+    pub(super) fn project(
+        model: &ShellViewModel,
+        previous: Option<&PreviewSnapshot>,
+    ) -> PreviewSnapshot {
         if !super::super::files_view::previewing(model) {
-            let idle = PreviewContent { plugin: true, scope: String::new(), body: Body::Pending };
+            let idle = PreviewContent {
+                plugin: true,
+                scope: String::new(),
+                body: Body::Pending,
+            };
             return match previous.filter(|previous| previous.key == IDLE) {
                 Some(previous) => previous.clone(),
-                None => PreviewSnapshot { key: IDLE, content: Arc::new(idle) },
+                None => PreviewSnapshot {
+                    key: IDLE,
+                    content: Arc::new(idle),
+                },
             };
         }
         let (content, plugin) = resolve(model);
@@ -173,14 +311,29 @@ impl PreviewSnapshot {
         if let Some(previous) = previous.filter(|previous| previous.key == key) {
             return previous.clone();
         }
-        PreviewSnapshot { key, content: Arc::new(PreviewContent { plugin, scope, body: content.to_owned() }) }
+        PreviewSnapshot {
+            key,
+            content: Arc::new(PreviewContent {
+                plugin,
+                scope,
+                body: content.to_owned(),
+            }),
+        }
     }
 }
 
 /// 滚动区键里的仓库和路径。
 pub(super) fn scope(model: &ShellViewModel) -> String {
-    let repo = super::super::player_view::key_part(model.workspace.active_repo_id.as_deref().unwrap_or_default());
-    let path = super::super::player_view::key_part(model.inspect.target_path.as_deref().unwrap_or_default());
+    let repo = super::super::player_view::key_part(
+        model
+            .workspace
+            .active_repo_id
+            .as_deref()
+            .unwrap_or_default(),
+    );
+    let path = super::super::player_view::key_part(
+        model.inspect.target_path.as_deref().unwrap_or_default(),
+    );
     format!("{repo}-{path}")
 }
 
@@ -192,31 +345,78 @@ fn resolve(model: &ShellViewModel) -> (ContentRef<'_>, bool) {
     let inspect = &model.inspect;
     let kind = inspect.kind.as_ref();
     match &inspect.body {
-        PreviewBody::Document { markdown, text, truncated_at } => {
+        PreviewBody::Document {
+            markdown,
+            text,
+            truncated_at,
+        } => {
             let extension = inspect.facts.extension.as_str();
-            (ContentRef::Text { markdown: *markdown, text, truncated_at: *truncated_at, extension }, true)
+            (
+                ContentRef::Text {
+                    markdown: *markdown,
+                    text,
+                    truncated_at: *truncated_at,
+                    extension,
+                },
+                true,
+            )
         }
         PreviewBody::Image => (image_ref(model), true),
-        PreviewBody::Media(session) if session.status == "failed" => (media_failed_ref(model, session.error.as_deref()), false),
+        PreviewBody::Media(session) if session.status == "failed" => {
+            (media_failed_ref(model, session.error.as_deref()), false)
+        }
         PreviewBody::Media(_) => (media_ref(model), false),
-        PreviewBody::Native { view_id, label, content } => (native_ref(model, view_id, label, content), true),
+        PreviewBody::Native {
+            view_id,
+            label,
+            content,
+        } => (native_ref(model, view_id, label, content), true),
         PreviewBody::Failed(message) => match kind {
-            Some(PreviewKind::Unsupported) | None => (ContentRef::Fallback(fallback_ref(model)), false),
-            Some(kind) => (failed_ref(model, kind, message), !matches!(kind, PreviewKind::Media)),
+            Some(PreviewKind::Unsupported) | None => {
+                (ContentRef::Fallback(fallback_ref(model)), false)
+            }
+            Some(kind) => (
+                failed_ref(model, kind, message),
+                !matches!(kind, PreviewKind::Media),
+            ),
         },
         PreviewBody::Empty => match kind {
-            Some(PreviewKind::Unsupported) | None if !inspect.loading => (ContentRef::Fallback(fallback_ref(model)), false),
-            Some(kind) => (loading_ref(model, kind), !matches!(kind, PreviewKind::Media)),
+            Some(PreviewKind::Unsupported) | None if !inspect.loading => {
+                (ContentRef::Fallback(fallback_ref(model)), false)
+            }
+            Some(kind) => (
+                loading_ref(model, kind),
+                !matches!(kind, PreviewKind::Media),
+            ),
             None => (ContentRef::Pending, true),
         },
     }
 }
 
-/// 预览框这一帧是不是从宿主纹理槽 `file-preview` 取画面：预览页开着，画的是图片纹理或视频画面。
-/// 宿主只在这时上传 `preview_pixels`（`thumbnail_host::publish_preview`）。单击只选中时预览页藏着；
-/// 预览的正是幻灯片当前项时画幻灯片的帧；PDF 和模型页图编成内容图。这几种都不从纹理槽取。
+/// 预览框这一帧是不是从宿主纹理槽 `file-preview` 取画面：预览页开着，画的是图片纹理或视频纹理。
+/// 宿主只在这时上传 `preview_pixels`（`thumbnail_host::publish_preview`）。离屏没有宿主纹理、只有解码像素时
+/// 不取槽，直接把那一帧画进预览。单击只选中时预览页藏着；预览的正是幻灯片当前项时画幻灯片的帧；
+/// PDF 和模型页图编成内容图。这几种都不从纹理槽取。
 pub(crate) fn wants_preview_texture(model: &ShellViewModel) -> bool {
-    super::super::files_view::previewing(model) && matches!(resolve(model).0, ContentRef::ImageTexture | ContentRef::Video { .. })
+    if !super::super::files_view::previewing(model) {
+        return false;
+    }
+    match resolve(model).0 {
+        ContentRef::ImageTexture | ContentRef::Video { .. } => true,
+        ContentRef::Archive {
+            shown: Some(shown), ..
+        } if shown.uses_host_video() => true,
+        _ => false,
+    }
+}
+
+/// 不定进度色条正在预览框里：音视频准备卡，或图片读取中的状态胶囊。扫动只在这时要帧。
+pub(crate) fn shows_preview_sweep(model: &ShellViewModel) -> bool {
+    super::super::files_view::previewing(model)
+        && matches!(
+            resolve(model).0,
+            ContentRef::Loading(LoadingRef::Media { .. } | LoadingRef::Pill { progress: true, .. })
+        )
 }
 
 /// 预览的正是播放列表当前的图片：和 Vue 的播放器挂载一样画幻灯片这一帧，按「适应 / 填充」铺。
@@ -224,19 +424,31 @@ pub(crate) fn wants_preview_texture(model: &ShellViewModel) -> bool {
 fn current_still(model: &ShellViewModel) -> Option<ContentRef<'_>> {
     let still = model.player.still.as_ref()?;
     let frame = still.frame.as_ref()?;
-    let same_repo = model.player.repo_id.is_some() && model.player.repo_id == model.workspace.active_repo_id;
+    let same_repo =
+        model.player.repo_id.is_some() && model.player.repo_id == model.workspace.active_repo_id;
     if !same_repo || model.inspect.target_path.as_deref() != Some(still.path.as_str()) {
         return None;
     }
-    let pixels = PixelsRef { width: frame.width, height: frame.height, rgba: &frame.rgba };
-    Some(ContentRef::Still { pixels, cover: model.player.settings.object_fit_cover })
+    let pixels = PixelsRef {
+        width: frame.width,
+        height: frame.height,
+        rgba: &frame.rgba,
+    };
+    Some(ContentRef::Still {
+        pixels,
+        cover: model.player.settings.object_fit_cover,
+    })
 }
 
 /// 图片：宿主已经上传纹理时用纹理槽，离屏只有像素时画成内容图，都没有时是读取中。
 fn image_ref(model: &ShellViewModel) -> ContentRef<'_> {
     match (&model.preview_token, &model.preview_pixels) {
         (Some(_), Some(_)) => ContentRef::ImageTexture,
-        (_, Some(pixels)) => ContentRef::ImagePixels(PixelsRef { width: pixels.width, height: pixels.height, rgba: &pixels.rgba }),
+        (_, Some(pixels)) => ContentRef::ImagePixels(PixelsRef {
+            width: pixels.width,
+            height: pixels.height,
+            rgba: &pixels.rgba,
+        }),
         (_, None) => loading_ref(model, &PreviewKind::Image),
     }
 }
@@ -248,22 +460,66 @@ fn image_ref(model: &ShellViewModel) -> ContentRef<'_> {
 /// （来源登录失效、网络不通、缓存不可用）时原因是来源交回的原话，下面多一个「重试」重新准备。
 fn media_failed_ref<'a>(model: &'a ShellViewModel, error: Option<&'a str>) -> ContentRef<'a> {
     let video = super::super::inspect::support::is_video_extension(&model.inspect.facts.extension);
-    let (title, fallback) = if video { ("无法预览该媒体", "视频无法播放") } else { ("无法预览该音频", "音频无法播放") };
-    let message = error.map(str::trim).filter(|error| !error.is_empty()).unwrap_or(fallback);
-    ContentRef::Failed { title, message, toolbar: None, document: false, retry: model.inspect.media_retry }
+    let (title, fallback) = if video {
+        ("无法预览该媒体", "视频无法播放")
+    } else {
+        ("无法预览该音频", "音频无法播放")
+    };
+    let message = error
+        .map(str::trim)
+        .filter(|error| !error.is_empty())
+        .unwrap_or(fallback);
+    ContentRef::Failed {
+        title,
+        message,
+        toolbar: None,
+        document: false,
+        retry: model.inspect.media_retry,
+    }
 }
 
-/// 播放器挂载：视频文件画当前这一帧；还没有画面（离屏没有宿主纹理、解码只得到音轨）时画缩略图或视频图标，
-/// 是明确的占位，不当成音频画唱片舞台。音频文件是唱片舞台。按文件的扩展名分，不按有没有画面分。
+/// 播放器挂载：视频文件有宿主纹理时画纹理槽；离屏没有宿主纹理、但已经解出画面时，把这一帧像素画进预览。
+/// 还没有画面（只解出音轨，或帧被清掉）时画缩略图或视频图标，是明确的占位，不当成音频画唱片舞台。
+/// 音频文件是唱片舞台。按文件的扩展名分，不按有没有画面分。
 fn media_ref(model: &ShellViewModel) -> ContentRef<'_> {
-    let frame = model.preview_token.as_deref().is_some_and(|token| token.starts_with("video:")) && model.preview_pixels.is_some();
-    if frame {
-        return ContentRef::Video { cover: model.player.settings.object_fit_cover };
+    let cover = model.player.settings.object_fit_cover;
+    let host = model
+        .preview_token
+        .as_deref()
+        .is_some_and(|token| token.starts_with("video:"));
+    if host && model.preview_pixels.is_some() {
+        return ContentRef::Video { cover };
     }
     if is_video_file(model) {
+        if let Some(pixels) = model.preview_pixels.as_ref() {
+            let pixels = PixelsRef {
+                width: pixels.width,
+                height: pixels.height,
+                rgba: &pixels.rgba,
+            };
+            return ContentRef::VideoPixels { pixels, cover };
+        }
         return ContentRef::Fallback(fallback_ref(model));
     }
-    ContentRef::Audio { name: target_name(model), viewport: model.viewport_width }
+    let name = target_name(model);
+    let entry = super::audio_stage::preview_entry(model);
+    ContentRef::Audio {
+        caption: super::audio_stage::audio_caption(
+            name,
+            &model.inspect.facts.extension,
+            entry.meta,
+        ),
+        cover_path: entry.cover,
+        name,
+        viewport: model.viewport_width,
+        lines: &model.inspect.lyrics,
+        active: super::super::inspect_lyrics::active_index(
+            &model.inspect.lyrics,
+            media_time(model),
+        ),
+        pending: model.inspect.lyrics_pending,
+        accent: crate::appearance::theme_mode(&model.settings.theme, None),
+    }
 }
 
 /// 预览的是视频文件（mp4、mov、mkv、webm、avi、m4v）。
@@ -272,18 +528,77 @@ fn is_video_file(model: &ShellViewModel) -> bool {
 }
 
 /// PDF 和 Office：顶栏、翻页和整页；压缩包是目录；模型是画面和尺寸标签。
-fn native_ref<'a>(model: &'a ShellViewModel, view_id: &str, label: &'a str, content: &'a str) -> ContentRef<'a> {
+fn native_ref<'a>(
+    model: &'a ShellViewModel,
+    view_id: &str,
+    label: &'a str,
+    content: &'a str,
+) -> ContentRef<'a> {
     let inspect = &model.inspect;
     if inspect_library::is_archive(view_id) {
-        return ContentRef::Archive(content);
+        let picked = inspect.archive_selected.as_deref();
+        let (stage_title, stage_detail, stage_failed) = inspect_library::archive_stage(inspect);
+        let listing = inspect
+            .archive_nests
+            .last()
+            .map(|nest| nest.text.as_str())
+            .unwrap_or(content);
+        return ContentRef::Archive {
+            content: listing,
+            picked,
+            stage_title,
+            stage_detail,
+            stage_failed,
+            name: target_name(model),
+            shown: archive_shown(model),
+        };
     }
-    let raster = inspect.raster_frame().map(|(width, height, rgba)| PixelsRef { width, height, rgba });
+    let raster = inspect
+        .raster_frame()
+        .map(|(width, height, rgba)| PixelsRef {
+            width,
+            height,
+            rgba,
+        });
     if inspect_library::is_model(view_id) {
-        return ContentRef::Model { extension: &inspect.facts.extension, raster, content, mesh: inspect.has_mesh() };
+        return ContentRef::Model {
+            extension: &inspect.facts.extension,
+            raster,
+            content,
+            mesh: inspect.has_mesh(),
+            extent: inspect.mesh_extent(),
+        };
     }
     let toolbar = document_toolbar(model, view_id, label);
     let text = if content.is_empty() { label } else { content };
-    ContentRef::Document { toolbar, nav: inspect.page_nav(), page: raster, error: inspect.raster_error(), text }
+    ContentRef::Document {
+        toolbar,
+        nav: inspect.page_nav(),
+        page: raster,
+        error: inspect.raster_error(),
+        text,
+    }
+}
+
+/// 包内文件已经取出、并且没有更新的取出在路上时，舞台画这一条。正在取下一条时先让出舞台。
+/// 音频舞台跟窗口宽走，和单独打开音频时同一套。
+fn archive_shown(model: &ShellViewModel) -> Option<ArchiveShown<'_>> {
+    if model.inspect.archive_request.is_some() {
+        return None;
+    }
+    let entry = model.inspect.archive_entry.as_ref()?;
+    let host_video = model
+        .preview_token
+        .as_deref()
+        .is_some_and(|token| token.starts_with("video:"))
+        && model.preview_pixels.is_some();
+    archive_entry::shown(
+        &entry.path,
+        &entry.kind,
+        model.viewport_width,
+        host_video,
+        model.player.settings.object_fit_cover,
+    )
 }
 
 /// PDF 和 Office 才有种类、扩展名和页数这条顶栏；别的插件视图没有。
@@ -295,31 +610,71 @@ fn document_toolbar(model: &ShellViewModel, view_id: &str, label: &str) -> Optio
 }
 
 /// 失败：浮层中间一行红色标题和一行弱色原因。PDF 保留顶栏。
-fn failed_ref<'a>(model: &'a ShellViewModel, kind: &'a PreviewKind, message: &'a str) -> ContentRef<'a> {
+fn failed_ref<'a>(
+    model: &'a ShellViewModel,
+    kind: &'a PreviewKind,
+    message: &'a str,
+) -> ContentRef<'a> {
     let (title, toolbar, document) = match kind {
         PreviewKind::Markdown | PreviewKind::Text => ("无法预览该文本", None, false),
         PreviewKind::Image | PreviewKind::Media => ("无法预览该媒体", None, false),
-        PreviewKind::Native { view_id, .. } if inspect_library::is_archive(view_id) => ("无法预览该压缩包", None, false),
-        PreviewKind::Native { view_id, .. } if inspect_library::is_model(view_id) => ("无法预览该模型", None, false),
-        PreviewKind::Native { view_id, label } => ("无法预览该文档", document_toolbar(model, view_id, label), true),
+        PreviewKind::Native { view_id, .. } if inspect_library::is_archive(view_id) => {
+            ("无法预览该压缩包", None, false)
+        }
+        PreviewKind::Native { view_id, .. } if inspect_library::is_model(view_id) => {
+            ("无法预览该模型", None, false)
+        }
+        PreviewKind::Native { view_id, label } => (
+            "无法预览该文档",
+            document_toolbar(model, view_id, label),
+            true,
+        ),
         PreviewKind::Unsupported => return ContentRef::Fallback(fallback_ref(model)),
     };
-    ContentRef::Failed { title, message, toolbar, document, retry: false }
+    ContentRef::Failed {
+        title,
+        message,
+        toolbar,
+        document,
+        retry: false,
+    }
 }
 
 /// 读取中。文本、图片、模型是左上角的状态胶囊；音视频是居中的准备卡；PDF 保留顶栏。
 fn loading_ref<'a>(model: &'a ShellViewModel, kind: &'a PreviewKind) -> ContentRef<'a> {
     let size = model.inspect.facts.size_label.trim();
-    let sized = |empty: &str| if size.is_empty() { empty.to_string() } else { format!("准备 {size}") };
-    let pill = |title, detail, progress, toolbar| ContentRef::Loading(LoadingRef::Pill { title, detail, progress, toolbar });
-    match kind {
-        PreviewKind::Markdown | PreviewKind::Text => pill("读取文本", sized("准备文本内容"), false, None),
-        PreviewKind::Image => pill("准备播放", "准备媒体".to_string(), true, None),
-        PreviewKind::Media => ContentRef::Loading(LoadingRef::Media { name: target_name(model), video: is_video_file(model) }),
-        PreviewKind::Native { view_id, .. } if inspect_library::is_archive(view_id) => {
-            ContentRef::Loading(LoadingRef::Archive { detail: sized("准备内部目录") })
+    let sized = |empty: &str| {
+        if size.is_empty() {
+            empty.to_string()
+        } else {
+            format!("准备 {size}")
         }
-        PreviewKind::Native { view_id, .. } if inspect_library::is_model(view_id) => pill("读取模型", "准备读取文件".to_string(), false, None),
+    };
+    let pill = |title, detail, progress, toolbar| {
+        ContentRef::Loading(LoadingRef::Pill {
+            title,
+            detail,
+            progress,
+            toolbar,
+        })
+    };
+    match kind {
+        PreviewKind::Markdown | PreviewKind::Text => {
+            pill("读取文本", sized("准备文本内容"), false, None)
+        }
+        PreviewKind::Image => pill("准备播放", "准备媒体".to_string(), true, None),
+        PreviewKind::Media => ContentRef::Loading(LoadingRef::Media {
+            name: target_name(model),
+            video: is_video_file(model),
+        }),
+        PreviewKind::Native { view_id, .. } if inspect_library::is_archive(view_id) => {
+            ContentRef::Loading(LoadingRef::Archive {
+                detail: sized("准备内部目录"),
+            })
+        }
+        PreviewKind::Native { view_id, .. } if inspect_library::is_model(view_id) => {
+            pill("读取模型", "准备读取文件".to_string(), false, None)
+        }
         PreviewKind::Native { view_id, label } => {
             let title = if inspect_library::is_pdf(view_id) {
                 "载入 PDF"
@@ -328,7 +683,12 @@ fn loading_ref<'a>(model: &'a ShellViewModel, kind: &'a PreviewKind) -> ContentR
             } else {
                 "读取预览"
             };
-            pill(title, sized("建立预览"), false, document_toolbar(model, view_id, label))
+            pill(
+                title,
+                sized("建立预览"),
+                false,
+                document_toolbar(model, view_id, label),
+            )
         }
         PreviewKind::Unsupported => ContentRef::Fallback(fallback_ref(model)),
     }
@@ -338,7 +698,13 @@ fn loading_ref<'a>(model: &'a ShellViewModel, kind: &'a PreviewKind) -> ContentR
 /// 缩略图取自当前列表里同一路径的行；不在列表里的文件（例如从搜索打开）只画图标。
 fn fallback_ref(model: &ShellViewModel) -> FallbackRef<'_> {
     thumbnail_ref(model).unwrap_or_else(|| {
-        let extension = model.inspect.facts.extension.trim().trim_start_matches('.').to_ascii_lowercase();
+        let extension = model
+            .inspect
+            .facts
+            .extension
+            .trim()
+            .trim_start_matches('.')
+            .to_ascii_lowercase();
         let icon = match extension.as_str() {
             "mp4" | "mov" | "mkv" | "webm" | "avi" | "m4v" => icons::FILE_VIDEO,
             "mp3" | "wav" | "ogg" | "flac" | "m4a" | "aac" | "opus" => icons::FILE_AUDIO,
@@ -351,11 +717,34 @@ fn fallback_ref(model: &ShellViewModel) -> FallbackRef<'_> {
 fn thumbnail_ref(model: &ShellViewModel) -> Option<FallbackRef<'_>> {
     let path = model.inspect.target_path.as_deref()?;
     // 素材详情说没有缩略图就不画；有的话纹理取自列表里同一路径的行。
-    model.inspect.facts.thumbnail_path.as_deref().map(str::trim).filter(|slot| !slot.is_empty())?;
+    model
+        .inspect
+        .facts
+        .thumbnail_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|slot| !slot.is_empty())?;
     let files = &model.files;
-    let row = files.rows.iter().chain(files.virtual_rows.iter()).find(|row| row.path == path)?;
-    let slot = row.thumbnail_path.as_deref().map(str::trim).filter(|slot| !slot.is_empty())?;
+    let row = files
+        .rows
+        .iter()
+        .chain(files.virtual_rows.iter())
+        .find(|row| row.path == path)?;
+    let slot = row
+        .thumbnail_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|slot| !slot.is_empty())?;
     row.texture_ready.then_some(FallbackRef::Texture(slot))
+}
+
+/// 预览会话的播放头。歌词用它决定哪一行是当前行。
+fn media_time(model: &ShellViewModel) -> u64 {
+    model
+        .inspect
+        .media_session()
+        .map(|session| session.current_time_ms)
+        .unwrap_or(0)
 }
 
 /// 预览目标的文件名。
@@ -373,25 +762,112 @@ impl ContentRef<'_> {
                 pixels.identity(hasher);
                 cover.hash(hasher);
             }
-            Self::Text { markdown, text, truncated_at, extension } => {
-                (markdown, text.as_ptr() as usize, text.len(), truncated_at, extension).hash(hasher);
+            Self::Text {
+                markdown,
+                text,
+                truncated_at,
+                extension,
+            } => {
+                (
+                    markdown,
+                    text.as_ptr() as usize,
+                    text.len(),
+                    truncated_at,
+                    extension,
+                )
+                    .hash(hasher);
             }
             Self::ImageTexture | Self::Pending => {}
             Self::ImagePixels(pixels) => pixels.identity(hasher),
             Self::Video { cover } => cover.hash(hasher),
-            Self::Audio { name, viewport } => (name, viewport.to_bits()).hash(hasher),
-            Self::Archive(content) => content.hash(hasher),
-            Self::Model { extension, raster, content, mesh } => {
-                (extension, content, mesh).hash(hasher);
+            Self::VideoPixels { pixels, cover } => {
+                pixels.identity(hasher);
+                cover.hash(hasher);
+            }
+            Self::Audio {
+                name,
+                viewport,
+                lines,
+                active,
+                pending,
+                caption,
+                cover_path,
+                accent,
+            } => {
+                (
+                    name,
+                    viewport.to_bits(),
+                    active,
+                    pending,
+                    accent,
+                    &caption.title,
+                    &caption.subtitle,
+                    &caption.album,
+                    cover_path,
+                )
+                    .hash(hasher);
+                if let Some(path) = cover_path {
+                    super::audio_stage::cover_stamp(path).hash(hasher);
+                }
+                for line in lines.iter() {
+                    line.text.hash(hasher);
+                    line.time_ms.hash(hasher);
+                }
+            }
+            Self::Archive {
+                content,
+                picked,
+                stage_title,
+                stage_detail,
+                stage_failed,
+                name,
+                shown,
+            } => {
+                (
+                    content,
+                    picked,
+                    stage_title,
+                    stage_detail,
+                    stage_failed,
+                    name,
+                )
+                    .hash(hasher);
+                shown.iter().for_each(|shown| shown.identity(hasher));
+            }
+            Self::Model {
+                extension,
+                raster,
+                content,
+                mesh,
+                extent,
+            } => {
+                (extension, content, mesh, extent).hash(hasher);
                 raster.iter().for_each(|raster| raster.identity(hasher));
             }
-            Self::Document { toolbar, nav, page, error, text } => {
+            Self::Document {
+                toolbar,
+                nav,
+                page,
+                error,
+                text,
+            } => {
                 (toolbar, nav, error, text).hash(hasher);
                 page.iter().for_each(|raster| raster.identity(hasher));
             }
-            Self::Failed { title, message, toolbar, document, retry } => (title, message, toolbar, document, retry).hash(hasher),
+            Self::Failed {
+                title,
+                message,
+                toolbar,
+                document,
+                retry,
+            } => (title, message, toolbar, document, retry).hash(hasher),
             Self::Loading(loading) => match loading {
-                LoadingRef::Pill { title, detail, progress, toolbar } => (0u8, title, detail, progress, toolbar).hash(hasher),
+                LoadingRef::Pill {
+                    title,
+                    detail,
+                    progress,
+                    toolbar,
+                } => (0u8, title, detail, progress, toolbar).hash(hasher),
                 LoadingRef::Archive { detail } => (1u8, detail).hash(hasher),
                 LoadingRef::Media { name, video } => (2u8, name, video).hash(hasher),
             },
@@ -405,31 +881,118 @@ impl ContentRef<'_> {
     /// 抄成自有的内容。只在身份变了时调用。
     fn to_owned(self) -> Body {
         match self {
-            Self::Still { pixels, cover } => Body::Still { pixels: pixels.to_owned(), cover },
-            Self::Text { markdown, text, truncated_at, extension } => {
-                Body::Text { markdown, text: text.into(), truncated_at, extension: extension.to_string() }
-            }
+            Self::Still { pixels, cover } => Body::Still {
+                pixels: pixels.to_owned(),
+                cover,
+            },
+            Self::Text {
+                markdown,
+                text,
+                truncated_at,
+                extension,
+            } => Body::Text {
+                markdown,
+                text: text.into(),
+                truncated_at,
+                extension: extension.to_string(),
+            },
             Self::ImageTexture => Body::ImageTexture,
             Self::ImagePixels(pixels) => Body::ImagePixels(pixels.to_owned()),
             Self::Video { cover } => Body::Video { cover },
-            Self::Audio { name, viewport } => Body::Audio { name: name.to_string(), viewport },
-            Self::Archive(content) => Body::Archive(content.to_string()),
-            Self::Model { extension, raster, content, mesh } => {
-                Body::Model { extension: extension.to_string(), raster: raster.map(PixelsRef::to_owned), content: content.to_string(), mesh }
-            }
-            Self::Document { toolbar, nav, page, error, text } => Body::Document {
+            Self::VideoPixels { pixels, cover } => Body::VideoPixels {
+                pixels: pixels.to_owned(),
+                cover,
+            },
+            Self::Audio {
+                viewport,
+                lines,
+                active,
+                pending,
+                caption,
+                cover_path,
+                accent,
+                ..
+            } => Body::Audio {
+                viewport,
+                lines: lines.to_vec(),
+                active,
+                pending,
+                caption,
+                accent,
+                cover: cover_path.and_then(super::audio_stage::cover_data_url),
+            },
+            Self::Archive {
+                content,
+                picked,
+                stage_title,
+                stage_detail,
+                stage_failed,
+                name,
+                shown,
+            } => Body::Archive {
+                content: content.to_string(),
+                picked: picked.map(str::to_string),
+                stage_title: stage_title.to_string(),
+                stage_detail: stage_detail.to_string(),
+                stage_failed,
+                name: name.to_string(),
+                shown: shown.map(ArchiveShown::to_owned),
+            },
+            Self::Model {
+                extension,
+                raster,
+                content,
+                mesh,
+                extent,
+            } => Body::Model {
+                extension: extension.to_string(),
+                raster: raster.map(PixelsRef::to_owned),
+                content: content.to_string(),
+                mesh,
+                extent: extent.to_string(),
+            },
+            Self::Document {
+                toolbar,
+                nav,
+                page,
+                error,
+                text,
+            } => Body::Document {
                 toolbar,
                 nav,
                 page: page.map(PixelsRef::to_owned),
                 error: error.map(str::to_string),
                 text: text.to_string(),
             },
-            Self::Failed { title, message, toolbar, document, retry } => {
-                Body::Failed { title, message: message.to_string(), toolbar, document, retry }
-            }
-            Self::Loading(LoadingRef::Pill { title, detail, progress, toolbar }) => Body::Pill { title, detail, progress, toolbar },
+            Self::Failed {
+                title,
+                message,
+                toolbar,
+                document,
+                retry,
+            } => Body::Failed {
+                title,
+                message: message.to_string(),
+                toolbar,
+                document,
+                retry,
+            },
+            Self::Loading(LoadingRef::Pill {
+                title,
+                detail,
+                progress,
+                toolbar,
+            }) => Body::Pill {
+                title,
+                detail,
+                progress,
+                toolbar,
+            },
             Self::Loading(LoadingRef::Archive { detail }) => Body::ArchiveLoading { detail },
-            Self::Loading(LoadingRef::Media { name, video }) => Body::MediaLoading { name: name.to_string(), video },
+            Self::Loading(LoadingRef::Media { name, video }) => Body::MediaLoading {
+                name: name.to_string(),
+                video,
+            },
             Self::Fallback(FallbackRef::Texture(slot)) => Body::FallbackTexture(slot.to_string()),
             Self::Fallback(FallbackRef::Icon(icon)) => Body::FallbackIcon(icon),
             Self::Pending => Body::Pending,
@@ -442,42 +1005,126 @@ pub(super) fn content_view(content: &PreviewContent) -> AnyView {
     let scope = &content.scope;
     match &content.body {
         Body::Still { pixels, cover } => pixel_image(pixels, *cover, "inspect-player-still"),
-        Body::Text { markdown, text, truncated_at, extension } => text_plugin(*markdown, text, *truncated_at, extension, scope),
+        Body::Text {
+            markdown,
+            text,
+            truncated_at,
+            extension,
+        } => text_plugin(*markdown, text, *truncated_at, extension, scope),
         Body::ImageTexture => {
             // `.media-preview { background: var(--bg) }`：留白处是 bg，不透出预览框的插件光晕。
             widget(Stack::fill_column(0.0).surface(SemanticColorRole::Background))
-                .children((widget(GpuTextureView::new("file-preview").contain()).key("inspect-image"),))
+                .children((
+                    widget(GpuTextureView::new("file-preview").contain()).key("inspect-image"),
+                ))
                 .key("inspect-image-frame")
                 .into_any()
         }
         Body::ImagePixels(pixels) => pixel_image(pixels, false, "inspect-image"),
-        Body::Video { cover } => {
-            let fit = if *cover { ContentFit::Cover } else { ContentFit::Contain };
-            widget(Stack::fill_column(0.0).with_layout(|layout| layout.background = Some([0.02, 0.02, 0.02, 1.0])))
-                .children((widget(GpuTextureView::new("file-preview").fit(fit)).key("inspect-video"),))
-                .key("inspect-video-frame")
-                .into_any()
+        Body::Video { cover } => host_video(*cover),
+        Body::VideoPixels { pixels, cover } => {
+            frame_pixels(pixels, *cover, "inspect-video-pixels", true)
         }
-        Body::Audio { name, viewport } => super::audio_stage::audio_stage(name, *viewport),
-        Body::Archive(content) => inspect_library::archive_list(content),
-        Body::Model { extension, raster, content, mesh } => model_view(extension, raster.as_ref(), content, *mesh),
-        Body::Document { toolbar, nav, page, error, text } => document_view(toolbar.as_ref(), *nav, page.as_ref(), error.as_deref(), text, scope),
-        Body::Failed { title, message, toolbar, document, retry } => {
-            let overlay = if *retry { retry_overlay(title, message) } else { overlay(title, message, "inspect-failed") };
+        Body::Audio {
+            viewport,
+            lines,
+            active,
+            pending,
+            caption,
+            cover,
+            accent,
+        } => {
+            super::audio_stage::lyric_lift::note_accent(*accent);
+            super::audio_stage::audio_stage(
+                *viewport,
+                lines,
+                *active,
+                caption,
+                cover.as_deref(),
+                *pending,
+            )
+        }
+        Body::Archive {
+            content,
+            picked,
+            stage_title,
+            stage_detail,
+            stage_failed,
+            name,
+            shown,
+        } => {
+            let opened = shown
+                .as_ref()
+                .map(|shown| archive_entry::view(shown, scope));
+            inspect_library::archive_list(
+                content,
+                picked.as_deref(),
+                inspect_library::ArchiveStage {
+                    title: stage_title,
+                    detail: stage_detail,
+                    failed: *stage_failed,
+                },
+                name,
+                opened,
+            )
+        }
+        Body::Model {
+            extension,
+            raster,
+            content,
+            mesh,
+            extent,
+        } => model_view(extension, raster.as_ref(), content, *mesh, extent),
+        Body::Document {
+            toolbar,
+            nav,
+            page,
+            error,
+            text,
+        } => document_view(
+            toolbar.as_ref(),
+            *nav,
+            page.as_ref(),
+            error.as_deref(),
+            text,
+            scope,
+        ),
+        Body::Failed {
+            title,
+            message,
+            toolbar,
+            document,
+            retry,
+        } => {
+            let overlay = if *retry {
+                retry_overlay(title, message)
+            } else {
+                overlay(title, message, "inspect-failed")
+            };
             if !document {
                 return overlay;
             }
-            let mut rows = toolbar.iter().map(inspect_library::document_toolbar_view).collect::<Vec<_>>();
+            let mut rows = toolbar
+                .iter()
+                .map(inspect_library::document_toolbar_view)
+                .collect::<Vec<_>>();
             rows.push(overlay);
             widget(Stack::fill_column(0.0)).children(rows).into_any()
         }
-        Body::Pill { title, detail, progress, toolbar } => {
-            status_layer(status_pill(title, detail, *progress), toolbar.as_ref().map(inspect_library::document_toolbar_view))
-        }
+        Body::Pill {
+            title,
+            detail,
+            progress,
+            toolbar,
+        } => status_layer(
+            status_pill(title, detail, *progress),
+            toolbar.as_ref().map(inspect_library::document_toolbar_view),
+        ),
         Body::ArchiveLoading { detail } => centered_status("读取压缩包", detail),
         Body::MediaLoading { name, video } => super::audio_stage::loading_card(name, *video),
         Body::FallbackTexture(slot) => {
-            let mut thumb = Thumbnail::new(super::super::thumbs::thumbnail_slot(slot)).fit(ContentFit::Contain);
+            let mut thumb =
+                Thumbnail::new(super::super::thumbs::thumbnail_slot(slot)).fit(ContentFit::Contain);
             {
                 let layout = std::sync::Arc::make_mut(&mut thumb.style.layout);
                 layout.width = Some(LengthSpec::Fill);
@@ -488,17 +1135,37 @@ pub(super) fn content_view(content: &PreviewContent) -> AnyView {
                 .key("inspect-thumbnail")
                 .into_any()
         }
-        Body::FallbackIcon(icon) => widget(Stack::fill_column(0.0).align(AlignSpec::Center).justify(JustifySpec::Center))
-            .children((widget(IconGlyph::new(*icon).size(54.0).role(SemanticColorRole::Faint)).key("inspect-fallback-icon"),))
-            .key("inspect-fallback")
+        Body::FallbackIcon(icon) => widget(
+            Stack::fill_column(0.0)
+                .align(AlignSpec::Center)
+                .justify(JustifySpec::Center),
+        )
+        .children((widget(
+            IconGlyph::new(*icon)
+                .size(54.0)
+                .role(SemanticColorRole::Faint),
+        )
+        .key("inspect-fallback-icon"),))
+        .key("inspect-fallback")
+        .into_any(),
+        Body::Pending => widget(Stack::fill_column(0.0))
+            .key("inspect-pending")
             .into_any(),
-        Body::Pending => widget(Stack::fill_column(0.0)).key("inspect-pending").into_any(),
     }
 }
 
 /// 文本插件：上面一条种类和行数，下面是等宽原文。Markdown 也按原文显示。
-fn text_plugin(markdown: bool, source: &str, truncated_at: Option<u64>, extension: &str, scope: &str) -> AnyView {
-    let extension = extension.trim().trim_start_matches('.').to_ascii_uppercase();
+fn text_plugin(
+    markdown: bool,
+    source: &str,
+    truncated_at: Option<u64>,
+    extension: &str,
+    scope: &str,
+) -> AnyView {
+    let extension = extension
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_uppercase();
     let kind = if markdown {
         "Markdown".to_string()
     } else if extension.is_empty() {
@@ -506,13 +1173,35 @@ fn text_plugin(markdown: bool, source: &str, truncated_at: Option<u64>, extensio
     } else {
         extension
     };
-    let lines = if source.is_empty() { 0 } else { source.replace("\r\n", "\n").replace('\r', "\n").split('\n').count() };
-    let mut chips = vec![chip(&kind, true, "inspect-text-kind"), chip(&format!("{lines} 行"), false, "inspect-text-lines")];
+    let lines = if source.is_empty() {
+        0
+    } else {
+        source
+            .replace("\r\n", "\n")
+            .replace('\r', "\n")
+            .split('\n')
+            .count()
+    };
+    let mut chips = vec![
+        chip(&kind, true, "inspect-text-kind"),
+        chip(&format!("{lines} 行"), false, "inspect-text-lines"),
+    ];
     if let Some(read) = truncated_at {
-        chips.push(chip(&format!("仅显示前 {}", format_byte_count(read)), false, "inspect-text-truncated"));
+        chips.push(chip(
+            &format!("仅显示前 {}", format_byte_count(read)),
+            false,
+            "inspect-text-truncated",
+        ));
     }
-    let shown = if source.is_empty() { "空文件" } else { source };
-    let mut body = Text::new(shown).color(SemanticColorRole::Text).font_size(13.0).line_height(21.45);
+    let shown = if source.is_empty() {
+        "空文件"
+    } else {
+        source
+    };
+    let mut body = Text::new(shown)
+        .color(SemanticColorRole::Text)
+        .font_size(13.0)
+        .line_height(21.45);
     {
         let layout = std::sync::Arc::make_mut(&mut body.style.layout);
         layout.font_family = Some("monospace".into());
@@ -553,31 +1242,45 @@ fn text_plugin(markdown: bool, source: &str, truncated_at: Option<u64>, extensio
         layout.padding_left = Some(LengthSpec::Px(22.0));
         layout.padding_right = Some(LengthSpec::Px(22.0));
     }))
-    .children((widget(Stack::fill_column(0.0).min_height(LengthSpec::Percent(100.0))).children((sheet,)),))
+    .children((
+        widget(Stack::fill_column(0.0).min_height(LengthSpec::Percent(100.0))).children((sheet,)),
+    ))
     .key(format!("preview-text-{scope}"));
     // 插件根自带 bg 底，盖住预览框顶部的插件光晕，和 `.text-preview { background: var(--bg) }` 一致。
-    widget(Stack::fill_column(0.0).min_height(LengthSpec::Px(0.0)).surface(SemanticColorRole::Background))
-        .children((toolbar(chips, "inspect-text-toolbar"), content.into_any()))
-        .key("inspect-text-plugin")
-        .into_any()
+    widget(
+        Stack::fill_column(0.0)
+            .min_height(LengthSpec::Px(0.0))
+            .surface(SemanticColorRole::Background),
+    )
+    .children((toolbar(chips, "inspect-text-toolbar"), content.into_any()))
+    .key("inspect-text-plugin")
+    .into_any()
 }
 
 /// 插件顶栏：42px 起，8/12 内边距，底边 border-soft，标签可折行。
 fn toolbar(chips: Vec<AnyView>, key: &'static str) -> AnyView {
     let bar = super::super::workbench::with_bottom_divider(
-        Stack::bar(8.0).wrap(true).align(AlignSpec::Center).min_height(LengthSpec::Px(42.0)).with_layout(|layout| {
-            layout.padding_top = Some(LengthSpec::Px(8.0));
-            layout.padding_bottom = Some(LengthSpec::Px(8.0));
-            layout.padding_left = Some(LengthSpec::Px(12.0));
-            layout.padding_right = Some(LengthSpec::Px(12.0));
-        }),
+        Stack::bar(8.0)
+            .wrap(true)
+            .align(AlignSpec::Center)
+            .min_height(LengthSpec::Px(42.0))
+            .with_layout(|layout| {
+                layout.padding_top = Some(LengthSpec::Px(8.0));
+                layout.padding_bottom = Some(LengthSpec::Px(8.0));
+                layout.padding_left = Some(LengthSpec::Px(12.0));
+                layout.padding_right = Some(LengthSpec::Px(12.0));
+            }),
     );
     widget(bar).children(chips).key(key).into_any()
 }
 
 /// 顶栏标签：bg-elev 底、border 细边、8px 圆角，12px 字。第一枚是种类，正文色半粗。
 fn chip(label: &str, emphasis: bool, key: &str) -> AnyView {
-    let role = if emphasis { SemanticColorRole::Text } else { SemanticColorRole::Muted };
+    let role = if emphasis {
+        SemanticColorRole::Text
+    } else {
+        SemanticColorRole::Muted
+    };
     let weight = if emphasis { 600 } else { 400 };
     widget(
         Stack::row(6.0)
@@ -597,20 +1300,56 @@ fn chip(label: &str, emphasis: bool, key: &str) -> AnyView {
 
 /// 把 RGBA 按 contain（或 cover）画进铺满的盒子，底色是 bg。
 fn pixel_image(pixels: &Pixels, cover: bool, key: &'static str) -> AnyView {
-    let Some(url) = super::super::inspect::rgba_png_data_url(pixels.width, pixels.height, &pixels.rgba) else {
+    frame_pixels(pixels, cover, key, false)
+}
+
+/// 宿主纹理槽上的视频画面，和文件预览的 `inspect-video` 同一棵。近黑底，适应或填充跟 `cover`。
+pub(super) fn host_video(cover: bool) -> AnyView {
+    let fit = if cover {
+        ContentFit::Cover
+    } else {
+        ContentFit::Contain
+    };
+    widget(
+        Stack::fill_column(0.0)
+            .with_layout(|layout| layout.background = Some([0.02, 0.02, 0.02, 1.0])),
+    )
+    .children((widget(GpuTextureView::new("file-preview").fit(fit)).key("inspect-video"),))
+    .key("inspect-video-frame")
+    .into_any()
+}
+
+/// 把一块像素编成内容图。`video` 时底色是视频画面的近黑（`.media-preview__video`），否则是 bg。
+/// 像素来自已经解出的缓冲区，编不成图时记日志并留空，不另涂一块同色矩形。
+fn frame_pixels(pixels: &Pixels, cover: bool, key: &'static str, video: bool) -> AnyView {
+    let Some(url) =
+        super::super::inspect::rgba_png_data_url(pixels.width, pixels.height, pixels.rgba())
+    else {
         eprintln!("Nana 预览图编码失败：{}x{}", pixels.width, pixels.height);
         return widget(Stack::fill_column(0.0)).key(key).into_any();
     };
     let image = nana_ui_core::BackgroundImage::Url {
         url,
-        fit: if cover { nana_ui_core::BackgroundImageFit::Cover } else { nana_ui_core::BackgroundImageFit::Contain },
+        fit: if cover {
+            nana_ui_core::BackgroundImageFit::Cover
+        } else {
+            nana_ui_core::BackgroundImageFit::Contain
+        },
         size_width: None,
         size_height: None,
         position: nana_ui_core::BackgroundPosition::center(),
         repeat: nana_ui_core::BackgroundRepeat::NoRepeat,
         sampling: nana_ui_core::ImageSampling::Resample,
     };
-    widget(Stack::fill_column(0.0).surface(SemanticColorRole::Background).with_layout(|layout| {
+    let stack = if video {
+        Stack::fill_column(0.0)
+    } else {
+        Stack::fill_column(0.0).surface(SemanticColorRole::Background)
+    };
+    widget(stack.with_layout(|layout| {
+        if video {
+            layout.background = Some([0.02, 0.02, 0.02, 1.0]);
+        }
         layout.paint.content_image = Some(image);
     }))
     .key(key)
@@ -635,50 +1374,89 @@ fn document_view(
     if let Some(raster) = page {
         let index = nav.map(|(index, _)| index).unwrap_or(0);
         let key = format!("preview-page-{scope}-{index}");
-        rows.push(super::page::page_scroller(super::page::page_bitmap(raster), nav, key));
+        rows.push(super::page::page_scroller(
+            super::page::page_bitmap(raster),
+            nav,
+            key,
+        ));
     } else if let Some(error) = error {
         if let Some((index, total)) = nav {
             rows.push(
-                widget(Stack::column(0.0).padding(18.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
-                    .children((super::page::page_nav(index, total),))
-                    .key(format!("inspect-page-failed-{scope}-{index}"))
-                    .into_any(),
+                widget(
+                    Stack::column(0.0)
+                        .padding(18.0)
+                        .width(LengthSpec::Fill)
+                        .min_width(LengthSpec::Px(0.0)),
+                )
+                .children((super::page::page_nav(index, total),))
+                .key(format!("inspect-page-failed-{scope}-{index}"))
+                .into_any(),
             );
         }
         rows.push(overlay("无法预览该文档", error, "inspect-native-error"));
     } else {
         rows.push(
             widget(Stack::fill_column(0.0).padding(18.0))
-                .children((widget(text(body, 13.0, 400, SemanticColorRole::Text, 20.15)).key("inspect-native"),))
+                .children((
+                    widget(text(body, 13.0, 400, SemanticColorRole::Text, 20.15))
+                        .key("inspect-native"),
+                ))
                 .key("inspect-native-text")
                 .into_any(),
         );
     }
     // `.office-preview { background: var(--bg) }`：插件根自带 bg 底，盖住预览框的插件光晕。
-    widget(Stack::fill_column(0.0).min_height(LengthSpec::Px(0.0)).surface(SemanticColorRole::Background))
-        .children(rows)
-        .key("inspect-native-view")
-        .into_any()
+    widget(
+        Stack::fill_column(0.0)
+            .min_height(LengthSpec::Px(0.0))
+            .surface(SemanticColorRole::Background),
+    )
+    .children(rows)
+    .key("inspect-native-view")
+    .into_any()
 }
 
 /// 3D 模型：画面铺满，左下角是扩展名和尺寸标签。旋转、缩放按钮在右上角。
-fn model_view(extension: &str, raster: Option<&Pixels>, content: &str, mesh: bool) -> AnyView {
-    let extension = extension.trim().trim_start_matches('.').to_ascii_uppercase();
+/// `extent` 是包围盒三轴尺寸，没有网格时为空，不编一个数。
+fn model_view(
+    extension: &str,
+    raster: Option<&Pixels>,
+    content: &str,
+    mesh: bool,
+    extent: &str,
+) -> AnyView {
+    let extension = extension
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_uppercase();
     let picture = match raster {
         Some(raster) => super::page::page_bitmap(raster),
         None => widget(Stack::fill_column(0.0).padding(18.0))
-            .children((widget(text(content, 13.0, 400, SemanticColorRole::Muted, 20.15)),))
+            .children((widget(text(
+                content,
+                13.0,
+                400,
+                SemanticColorRole::Muted,
+                20.15,
+            )),))
             .into_any(),
     };
     let mut layers = vec![picture];
+    let mut chips = Vec::new();
     if !extension.is_empty() {
+        chips.push(hud_chip(&extension, "inspect-model-hud-ext"));
+    }
+    if !extent.is_empty() {
+        chips.push(hud_chip(extent, "inspect-model-hud-size"));
+    }
+    if !chips.is_empty() {
         layers.push(
             widget(Stack::row(8.0).with_layout(|layout| {
                 layout.position = nana_ui_core::PositionSpec::Absolute;
                 layout.offset_left = Some(LengthSpec::Px(12.0));
                 layout.offset_bottom = Some(LengthSpec::Px(12.0));
             }))
-            .children((hud_chip(&extension, "inspect-model-hud-ext"),))
+            .children(chips)
             .key("inspect-model-hud")
             .into_any(),
         );
@@ -686,22 +1464,30 @@ fn model_view(extension: &str, raster: Option<&Pixels>, content: &str, mesh: boo
     if mesh {
         layers.push(orbit_controls());
     }
-    widget(Stack::fill_column(0.0).surface(SemanticColorRole::Background)).children(layers).key("inspect-model").into_any()
+    widget(Stack::fill_column(0.0).surface(SemanticColorRole::Background))
+        .children(layers)
+        .key("inspect-model")
+        .into_any()
 }
 
 /// 模型的旋转和缩放。Vue 用拖拽手势，这里给同样功能的按钮。
 fn orbit_controls() -> AnyView {
-    let buttons = [("左转", -0.4, 1.0, "inspect-orbit-left"), ("右转", 0.4, 1.0, "inspect-orbit-right"), ("放大", 0.0, 1.25, "inspect-orbit-in"), ("缩小", 0.0, 0.8, "inspect-orbit-out")]
-        .into_iter()
-        .map(|(label, yaw, zoom, key)| {
-            widget(nana_ui::runtime::Button::new(label).kind(nana_ui::ButtonKind::Ghost))
-                .key(key)
-                .on_cx(move |_, _: &Activate, cx| {
-                    cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::Orbit { yaw, zoom }));
-                })
-                .into_any()
-        })
-        .collect::<Vec<_>>();
+    let buttons = [
+        ("左转", -0.4, 1.0, "inspect-orbit-left"),
+        ("右转", 0.4, 1.0, "inspect-orbit-right"),
+        ("放大", 0.0, 1.25, "inspect-orbit-in"),
+        ("缩小", 0.0, 0.8, "inspect-orbit-out"),
+    ]
+    .into_iter()
+    .map(|(label, yaw, zoom, key)| {
+        widget(nana_ui::runtime::Button::new(label).kind(nana_ui::ButtonKind::Ghost))
+            .key(key)
+            .on_cx(move |_, _: &Activate, cx| {
+                cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::Orbit { yaw, zoom }));
+            })
+            .into_any()
+    })
+    .collect::<Vec<_>>();
     widget(Stack::row(4.0).with_layout(|layout| {
         layout.position = nana_ui_core::PositionSpec::Absolute;
         layout.offset_right = Some(LengthSpec::Px(12.0));
@@ -712,44 +1498,84 @@ fn orbit_controls() -> AnyView {
     .into_any()
 }
 
-/// 画面上的小标签：26px 高，bg-elev 底、border 细边、8px 圆角，12px 半粗弱色字。
+/// 画面上的小标签：26px 高、border 细边、8px 圆角，12px 半粗弱色字。尺寸底是 bg-elev 的 88%。
 fn hud_chip(label: &str, key: &'static str) -> AnyView {
-    widget(
-        Stack::row(0.0)
-            .align(AlignSpec::Center)
-            .min_height(LengthSpec::Px(26.0))
-            .padding_xy(8.0, 4.0)
-            .surface(SemanticColorRole::Surface)
-            .outline(SemanticColorRole::Border, 1.0)
-            .radius(RadiusTier::Md),
-    )
-    .children((widget(text(label, 12.0, 600, SemanticColorRole::Muted, 18.6)),))
-    .key(key)
-    .into_any()
-}
-
-/// 浮层：铺满预览框，标题红色、原因弱色，最宽 520px，居中。
-fn overlay(title: &str, message: &str, key: &'static str) -> AnyView {
-    widget(Stack::fill_column(8.0).align(AlignSpec::Center).justify(JustifySpec::Center).padding(24.0))
-        .children((widget(overlay_heading(title)).key(key), widget(overlay_reason(message)).key(format!("{key}-reason"))))
-        .key(format!("{key}-overlay"))
+    let frame = Stack::row(0.0)
+        .align(AlignSpec::Center)
+        .min_height(LengthSpec::Px(26.0))
+        .padding_xy(8.0, 4.0)
+        .outline(SemanticColorRole::Border, 1.0)
+        .radius(RadiusTier::Md);
+    let frame = if key == "inspect-model-hud-size" {
+        let style = frame
+            .node_style()
+            .surface_mix(nana_ui_core::SemanticColorMix::alpha(
+                SemanticColorRole::Surface,
+                0.88,
+            ));
+        frame.style(style)
+    } else {
+        frame.surface(SemanticColorRole::Surface)
+    };
+    widget(frame)
+        .children((widget(text(
+            label,
+            12.0,
+            600,
+            SemanticColorRole::Muted,
+            18.6,
+        )),))
+        .key(key)
         .into_any()
 }
 
-/// 在线条目的播放源准备失败：同一个浮层，原因下面多一个「重试」（和启动页失败的「重试」同一种按钮），
-/// 点了重新准备播放源。
+/// 失败浮层铺满预览框。底是 Vue `.media-preview__overlay` 的 `color-mix(in srgb, var(--bg) 74%, transparent)`，失败时才画。
+fn overlay(title: &str, message: &str, key: &'static str) -> AnyView {
+    failed_mask(title, message, key, None)
+}
+/// 在线条目的播放源准备失败：同一个浮层，原因下面多一个「重试」，点了重新准备播放源。
 fn retry_overlay(title: &str, message: &str) -> AnyView {
-    let retry = Button::new("重试").kind(ButtonKind::Ghost).icon(REFRESH).icon_size(14.0);
-    let retry = widget(retry)
-        .key("inspect-failed-retry")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::RetryMedia)));
-    widget(Stack::fill_column(8.0).align(AlignSpec::Center).justify(JustifySpec::Center).padding(24.0))
-        .children((
-            widget(overlay_heading(title)).key("inspect-failed"),
-            widget(overlay_reason(message)).key("inspect-failed-reason"),
-            widget(Stack::row(0.0).justify(JustifySpec::Center)).children((retry,)),
-        ))
-        .key("inspect-failed-overlay")
+    let retry = widget(
+        Button::new("重试")
+            .kind(ButtonKind::Ghost)
+            .icon(REFRESH)
+            .icon_size(14.0),
+    )
+    .key("inspect-failed-retry")
+    .on_cx(|_, _: &Activate, cx| {
+        cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::RetryMedia))
+    })
+    .into_any();
+    failed_mask(title, message, "inspect-failed", Some(retry))
+}
+/// 遮罩写在浮层上：背景色占 74%，其余透明。没有失败时不会进到这里。标题和原因仍是调用处的原文。
+fn failed_mask(title: &str, message: &str, key: &'static str, retry: Option<AnyView>) -> AnyView {
+    let mut children = vec![
+        widget(overlay_heading(title)).key(key).into_any(),
+        widget(overlay_reason(message))
+            .key(format!("{key}-reason"))
+            .into_any(),
+    ];
+    if let Some(retry) = retry {
+        children.push(
+            widget(Stack::row(0.0).justify(JustifySpec::Center))
+                .children((retry,))
+                .into_any(),
+        );
+    }
+    let frame = Stack::fill_column(8.0)
+        .align(AlignSpec::Center)
+        .justify(JustifySpec::Center)
+        .padding(24.0);
+    let style = frame
+        .node_style()
+        .surface_mix(nana_ui_core::SemanticColorMix::alpha(
+            SemanticColorRole::Background,
+            0.74,
+        ));
+    widget(frame.style(style))
+        .children(children)
+        .key(format!("{key}-overlay"))
         .into_any()
 }
 
@@ -773,13 +1599,17 @@ fn overlay_reason(message: &str) -> Text {
 
 /// 居中的两行状态：压缩包读取中用它。
 fn centered_status(title: &str, detail: &str) -> AnyView {
-    widget(Stack::fill_column(8.0).align(AlignSpec::Center).justify(JustifySpec::Center))
-        .children((
-            widget(text(title, 14.0, 600, SemanticColorRole::Text, 21.7)),
-            widget(text(detail, 14.0, 400, SemanticColorRole::Muted, 21.7)),
-        ))
-        .key("inspect-status-center")
-        .into_any()
+    widget(
+        Stack::fill_column(8.0)
+            .align(AlignSpec::Center)
+            .justify(JustifySpec::Center),
+    )
+    .children((
+        widget(text(title, 14.0, 600, SemanticColorRole::Text, 21.7)),
+        widget(text(detail, 14.0, 400, SemanticColorRole::Muted, 21.7)),
+    ))
+    .key("inspect-status-center")
+    .into_any()
 }
 
 /// 状态胶囊盖在预览框左上角（PDF 在顶栏下面）。
@@ -789,7 +1619,10 @@ fn status_layer(pill: AnyView, toolbar: Option<AnyView>) -> AnyView {
         layout.position = nana_ui_core::PositionSpec::Absolute;
         layout.offset_left = Some(LengthSpec::Px(12.0));
         layout.offset_top = Some(LengthSpec::Px(top));
-        layout.max_width = Some(LengthSpec::CalcPercentOffset { percent: 100.0, offset_px: -24.0 });
+        layout.max_width = Some(LengthSpec::CalcPercentOffset {
+            percent: 100.0,
+            offset_px: -24.0,
+        });
     }))
     .children((pill,))
     .key("inspect-status-layer")
@@ -799,29 +1632,32 @@ fn status_layer(pill: AnyView, toolbar: Option<AnyView>) -> AnyView {
         rows.push(toolbar);
     }
     rows.push(pill);
-    widget(Stack::fill_column(0.0)).children(rows).key("inspect-loading").into_any()
+    widget(Stack::fill_column(0.0))
+        .children(rows)
+        .key("inspect-loading")
+        .into_any()
 }
 
-/// 状态胶囊：bg-elev 底、border-soft 细边、8px 圆角，第一段正文色半粗。媒体多一条 132×6 的进度。
+/// 状态胶囊：底是 bg-elev 的 84%，border-soft 细边。图片读取多一条 132×6 的扫动进度。
 fn status_pill(title: &str, detail: &str, progress: bool) -> AnyView {
     let mut children = vec![
         widget(text(title, 12.0, 600, SemanticColorRole::Text, 18.6)).into_any(),
         widget(text(detail, 12.0, 400, SemanticColorRole::Muted, 18.6).truncating()).into_any(),
     ];
     if progress {
-        children.push(super::audio_stage::progress_track(132.0, "inspect-status-progress"));
+        children.push(super::preview_paint::status_progress());
     }
-    widget(
-        Stack::row(8.0)
-            .align(AlignSpec::Center)
-            .padding_xy(8.0, 5.0)
-            .surface(SemanticColorRole::Surface)
-            .outline(SemanticColorRole::BorderSoft, 1.0)
-            .radius(RadiusTier::Md),
-    )
-    .children(children)
-    .key("inspect-status-pill")
-    .into_any()
+    let frame = Stack::row(8.0)
+        .align(AlignSpec::Center)
+        .padding_xy(8.0, 5.0)
+        .outline(SemanticColorRole::BorderSoft, 1.0)
+        .radius(RadiusTier::Md);
+    let fill = nana_ui_core::SemanticColorMix::alpha(SemanticColorRole::Surface, 0.84);
+    let style = frame.node_style().surface_mix(fill);
+    widget(frame.style(style))
+        .children(children)
+        .key("inspect-status-pill")
+        .into_any()
 }
 
 /// 和 Vue `formatByteCount` 一致：1024 以下写字节，其余保留一位小数。

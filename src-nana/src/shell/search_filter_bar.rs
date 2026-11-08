@@ -11,21 +11,25 @@
 
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{computed, css, each, fields, widget, AnyView, El, InlineStyle, IntoView, Signal};
+use nana_ui::runtime::view::{
+    AnyView, El, InlineStyle, IntoView, Signal, computed, css, each, fields, widget,
+};
 use nana_ui::runtime::{
-    Activate, AlignSpec, JustifySpec, LengthSpec, RadiusTier, Select, SelectChanged, SelectOption, SemanticColorRole,
-    Stack, TextChanged, TextSubmitted, Toolbar,
+    Activate, AlignSpec, JustifySpec, LengthSpec, RadiusTier, Select, SelectChanged, SelectOption,
+    SemanticColorRole, Stack, TextChanged, TextSubmitted, Toolbar,
 };
 use nana_ui_core::{DisplaySpec, GridLine, GridRepeatAuto, GridTrack, GridTrackListUnsupported};
 
+use super::super::ShellMessage;
 use super::super::admin::style::key_part;
 use super::super::hot::ModelField;
-use super::super::inspect::{AdvancedField, FilterList, InspectMessage, MetadataInput, SortDirection};
+use super::super::inspect::{
+    AdvancedField, FilterList, InspectMessage, MetadataInput, SortDirection,
+};
 use super::super::inspect_shortcuts::SearchShortcut;
-use super::super::ShellMessage;
 use super::filter_state::{FilterBarSignals, FilterSelection};
 use super::presenter::{self, RATING_OPTIONS};
-use super::widgets::{self, ChipActive, CONTROL_HEIGHT, INPUT_WIDTH};
+use super::widgets::{self, CONTROL_HEIGHT, ChipActive, INPUT_WIDTH};
 
 /// 高级区一个输入：字段、稳定键、无障碍名称、占位文字和是否占两列。
 /// 键只用 ASCII，按键路径找得到。
@@ -39,13 +43,55 @@ struct AdvancedInput {
 
 /// Vue 高级区输入的顺序和文案。排序方向下拉在「排序字段」之后，「结果数量」之前。
 const ADVANCED_INPUTS: [AdvancedInput; 12] = [
-    AdvancedInput { field: AdvancedField::ExcludeQuery, key: "exclude-query", name: "排除关键词", placeholder: "排除关键词", wide: false },
-    AdvancedInput { field: AdvancedField::ExcludePaths, key: "exclude-paths", name: "排除路径", placeholder: "排除路径", wide: false },
-    AdvancedInput { field: AdvancedField::ExcludeTags, key: "exclude-tags", name: "排除标签", placeholder: "排除标签", wide: false },
-    AdvancedInput { field: AdvancedField::ExcludeFormats, key: "exclude-formats", name: "排除格式", placeholder: "排除格式", wide: false },
-    AdvancedInput { field: AdvancedField::Metadata, key: "metadata", name: "元数据", placeholder: "libraryKind=audio", wide: true },
-    AdvancedInput { field: AdvancedField::ExcludeMetadata, key: "exclude-metadata", name: "排除元数据", placeholder: "status=archived", wide: true },
-    AdvancedInput { field: AdvancedField::ExcludeNumber, key: "exclude-number", name: "排除数值范围", placeholder: "排除 width=0..640", wide: true },
+    AdvancedInput {
+        field: AdvancedField::ExcludeQuery,
+        key: "exclude-query",
+        name: "排除关键词",
+        placeholder: "排除关键词",
+        wide: false,
+    },
+    AdvancedInput {
+        field: AdvancedField::ExcludePaths,
+        key: "exclude-paths",
+        name: "排除路径",
+        placeholder: "排除路径",
+        wide: false,
+    },
+    AdvancedInput {
+        field: AdvancedField::ExcludeTags,
+        key: "exclude-tags",
+        name: "排除标签",
+        placeholder: "排除标签",
+        wide: false,
+    },
+    AdvancedInput {
+        field: AdvancedField::ExcludeFormats,
+        key: "exclude-formats",
+        name: "排除格式",
+        placeholder: "排除格式",
+        wide: false,
+    },
+    AdvancedInput {
+        field: AdvancedField::Metadata,
+        key: "metadata",
+        name: "元数据",
+        placeholder: "libraryKind=audio",
+        wide: true,
+    },
+    AdvancedInput {
+        field: AdvancedField::ExcludeMetadata,
+        key: "exclude-metadata",
+        name: "排除元数据",
+        placeholder: "status=archived",
+        wide: true,
+    },
+    AdvancedInput {
+        field: AdvancedField::ExcludeNumber,
+        key: "exclude-number",
+        name: "排除数值范围",
+        placeholder: "排除 width=0..640",
+        wide: true,
+    },
     AdvancedInput {
         field: AdvancedField::ExcludeDate,
         key: "exclude-date",
@@ -53,10 +99,34 @@ const ADVANCED_INPUTS: [AdvancedInput; 12] = [
         placeholder: "排除 fileCreatedAt=2024-01-01T00:00:00Z..",
         wide: true,
     },
-    AdvancedInput { field: AdvancedField::Number, key: "number", name: "数值范围", placeholder: "width=1024..4096", wide: true },
-    AdvancedInput { field: AdvancedField::Date, key: "date", name: "日期范围", placeholder: "fileCreatedAt=2024-01-01T00:00:00Z..", wide: true },
-    AdvancedInput { field: AdvancedField::SortField, key: "sort-field", name: "排序字段", placeholder: "排序字段", wide: false },
-    AdvancedInput { field: AdvancedField::Limit, key: "limit", name: "结果数量", placeholder: "数量", wide: false },
+    AdvancedInput {
+        field: AdvancedField::Number,
+        key: "number",
+        name: "数值范围",
+        placeholder: "width=1024..4096",
+        wide: true,
+    },
+    AdvancedInput {
+        field: AdvancedField::Date,
+        key: "date",
+        name: "日期范围",
+        placeholder: "fileCreatedAt=2024-01-01T00:00:00Z..",
+        wide: true,
+    },
+    AdvancedInput {
+        field: AdvancedField::SortField,
+        key: "sort-field",
+        name: "排序字段",
+        placeholder: "排序字段",
+        wide: false,
+    },
+    AdvancedInput {
+        field: AdvancedField::Limit,
+        key: "limit",
+        name: "结果数量",
+        placeholder: "数量",
+        wide: false,
+    },
 ];
 
 /// 常驻筛选栏：只读 `signals`，不读 ViewModel，别的常驻首页路由直接嵌进首页外框的筛选栏位置。
@@ -79,8 +149,22 @@ pub(crate) fn resident_filter_bar(signals: FilterBarSignals) -> AnyView {
         head(signals),
         widget(Stack::column(8.0))
             .children((
-                chip_group("格式", "格式筛选", "format", FilterList::Formats, signals.formats, signals),
-                chip_group("标签", "文件标签筛选", "tag", FilterList::Tags, signals.tags, signals),
+                chip_group(
+                    "格式",
+                    "格式筛选",
+                    "format",
+                    FilterList::Formats,
+                    signals.formats,
+                    signals,
+                ),
+                chip_group(
+                    "标签",
+                    "文件标签筛选",
+                    "tag",
+                    FilterList::Tags,
+                    signals.tags,
+                    signals,
+                ),
                 metadata_group(MetadataInput::Colors, signals),
                 metadata_group(MetadataInput::Shapes, signals),
                 rating_group(signals.min_rating),
@@ -96,36 +180,66 @@ pub(crate) fn resident_filter_bar(signals: FilterBarSignals) -> AnyView {
 /// 头部：左边眉题和仓库名，右边条件数、清除和关闭。
 fn head(signals: FilterBarSignals) -> AnyView {
     let head = signals.head;
-    let count = widgets::stat(move || head.with(|head| format!("{} 个条件", head.count)), "workspace-filter-count")
-        .visible(move || head.with(|head| head.count > 0));
+    let count = widgets::stat(
+        move || head.with(|head| format!("{} 个条件", head.count)),
+        "workspace-filter-count",
+    )
+    .visible(move || head.with(|head| head.count > 0));
     let clear = widget(widgets::bar_button("清除", false))
         .prop::<bool, fields::button::disabled>(move || head.with(|head| head.clear_disabled))
         .key("workspace-filter-clear")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(message(InspectMessage::ClearFilters)));
+        .on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program_all(message(InspectMessage::ClearFilters))
+        });
     let close = widget(widgets::close_button("关闭筛选栏"))
         .key("workspace-filter-close")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(message(InspectMessage::CloseFilterBar)));
-    let title = widget(Stack::column(3.0).width(LengthSpec::Shrink).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0))
-        .children((
-            widget(widgets::eyebrow("当前资源库筛选")).key("workspace-filter-eyebrow"),
-            widgets::bound(widgets::label(String::new(), 13.0, 700, SemanticColorRole::Text), move || {
-                head.with(|head| head.repository.clone())
-            })
-            .key("workspace-filter-repository"),
-        ));
-    widget(Stack::bar(12.0).align(AlignSpec::Start).justify(JustifySpec::SpaceBetween))
-        .children((
-            title,
-            widget(Stack::row(8.0).align(AlignSpec::Center).grow(0.0).shrink(0.0).wrap(true).justify(JustifySpec::End))
-                .children((count, clear, close))
-                .key("workspace-filter-actions"),
-        ))
-        .key("workspace-filter-head")
-        .into_any()
+        .on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program_all(message(InspectMessage::CloseFilterBar))
+        });
+    let title = widget(
+        Stack::column(3.0)
+            .width(LengthSpec::Shrink)
+            .min_width(LengthSpec::Px(0.0))
+            .grow(1.0)
+            .shrink(1.0),
+    )
+    .children((
+        widget(widgets::eyebrow("当前资源库筛选")).key("workspace-filter-eyebrow"),
+        widgets::bound(
+            widgets::label(String::new(), 13.0, 700, SemanticColorRole::Text),
+            move || head.with(|head| head.repository.clone()),
+        )
+        .key("workspace-filter-repository"),
+    ));
+    widget(
+        Stack::bar(12.0)
+            .align(AlignSpec::Start)
+            .justify(JustifySpec::SpaceBetween),
+    )
+    .children((
+        title,
+        widget(
+            Stack::row(8.0)
+                .align(AlignSpec::Center)
+                .grow(0.0)
+                .shrink(0.0)
+                .wrap(true)
+                .justify(JustifySpec::End),
+        )
+        .children((count, clear, close))
+        .key("workspace-filter-actions"),
+    ))
+    .key("workspace-filter-head")
+    .into_any()
 }
 
 /// 一组：左边 42px 的组名，右边内容。组名在 26px 的行盒里垂直居中。
-fn group(title: &'static str, name: &'static str, key: &'static str, body: AnyView) -> El<Toolbar, (AnyView, AnyView)> {
+fn group(
+    title: &'static str,
+    name: &'static str,
+    key: &'static str,
+    body: AnyView,
+) -> El<Toolbar, (AnyView, AnyView)> {
     let caption = widget(
         Stack::row(0.0)
             .align(AlignSpec::Center)
@@ -135,11 +249,16 @@ fn group(title: &'static str, name: &'static str, key: &'static str, body: AnyVi
             .grow(0.0)
             .shrink(0.0),
     )
-    .children((widget(widgets::label(title, 12.0, 700, SemanticColorRole::Muted)).key(format!("workspace-filter-{key}-title")),))
+    .children((
+        widget(widgets::label(title, 12.0, 700, SemanticColorRole::Muted))
+            .key(format!("workspace-filter-{key}-title")),
+    ))
     .key(format!("workspace-filter-{key}-caption"))
     .into_any();
     let style = Stack::bar(8.0).align(AlignSpec::Start).node_style();
-    widget(Toolbar::new().label(name).chrome(false).style(style)).children((caption, body)).key(format!("workspace-filter-{key}"))
+    widget(Toolbar::new().label(name).chrome(false).style(style))
+        .children((caption, body))
+        .key(format!("workspace-filter-{key}"))
 }
 
 /// 芯片行的排版：6px 间距、可折行、占满组名右侧。芯片行是 `each` 的容器，`horizontal(6)` 之外
@@ -158,11 +277,15 @@ fn chip_group(
     signals: FilterBarSignals,
 ) -> AnyView {
     let selected = signals.selected;
-    let chips = each(options, String::clone, move |value| toggle_chip(list, key, value, selected, None))
-        .horizontal(6.0)
-        .css(options_row_style())
-        .key(format!("workspace-filter-{key}-options"));
-    group(title, name, key, chips.into_any()).visible(move || options.with(|options| !options.is_empty())).into_any()
+    let chips = each(options, String::clone, move |value| {
+        toggle_chip(list, key, value, selected, None)
+    })
+    .horizontal(6.0)
+    .css(options_row_style())
+    .key(format!("workspace-filter-{key}-options"));
+    group(title, name, key, chips.into_any())
+        .visible(move || options.with(|options| !options.is_empty()))
+        .into_any()
 }
 
 /// 一枚可切换的候选芯片。值是行的身份，处理器只带它和所属的列表。
@@ -176,10 +299,15 @@ fn toggle_chip(
     let current = value.clone();
     let toggled = value.clone();
     widget(widgets::chip(&value, false, swatch))
-        .prop::<bool, ChipActive>(move || selected.with(|selected| selected_in(selected, list).contains(&current)))
+        .prop::<bool, ChipActive>(move || {
+            selected.with(|selected| selected_in(selected, list).contains(&current))
+        })
         .key(format!("workspace-filter-{key}-{}", key_part(&value)))
         .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program_all(message(InspectMessage::ToggleFilter { key: list, value: toggled.clone() }));
+            cx.dispatch_program_all(message(InspectMessage::ToggleFilter {
+                key: list,
+                value: toggled.clone(),
+            }));
         })
         .into_any()
 }
@@ -214,7 +342,13 @@ fn metadata_group(input: MetadataInput, signals: FilterBarSignals) -> AnyView {
         MetadataInput::Shapes => (signals.shapes, signals.shape),
     };
     let items = computed(move || {
-        let mut items = options.with(|options| options.iter().cloned().map(MetadataItem::Chip).collect::<Vec<_>>());
+        let mut items = options.with(|options| {
+            options
+                .iter()
+                .cloned()
+                .map(MetadataItem::Chip)
+                .collect::<Vec<_>>()
+        });
         items.push(MetadataItem::Field);
         items
     });
@@ -240,35 +374,57 @@ fn metadata_field(input: MetadataInput, key: &'static str, draft: ModelField) ->
     };
     let value = draft.signal();
     // 初值照信号建，光标在末尾，和旧视图一样；之后由 `.model` 受控。
-    let field = widget(widgets::pill_input(&value.get_untracked(), placeholder, field_name, Some(INPUT_WIDTH)))
-        .model(value)
-        .key(format!("workspace-filter-{key}-input"))
-        .on_cx(move |_, event: &TextChanged, cx| {
-            cx.dispatch_program_all(message(InspectMessage::SetMetadataInput { key: input, value: event.value.to_string() }));
-        })
-        .on_cx(move |_, _: &TextSubmitted, cx| cx.dispatch_program_all(message(InspectMessage::SubmitMetadataInput(input))));
+    let field = widget(widgets::pill_input(
+        &value.get_untracked(),
+        placeholder,
+        field_name,
+        Some(INPUT_WIDTH),
+    ))
+    .model(value)
+    .key(format!("workspace-filter-{key}-input"))
+    .on_cx(move |_, event: &TextChanged, cx| {
+        cx.dispatch_program_all(message(InspectMessage::SetMetadataInput {
+            key: input,
+            value: event.value.to_string(),
+        }));
+    })
+    .on_cx(move |_, _: &TextSubmitted, cx| {
+        cx.dispatch_program_all(message(InspectMessage::SubmitMetadataInput(input)))
+    });
     let add = widget(widgets::pill_button("添加", false))
         .prop::<bool, fields::button::disabled>(move || value.with(|value| value.trim().is_empty()))
         .key(format!("workspace-filter-{key}-add"))
-        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(message(InspectMessage::SubmitMetadataInput(input))));
+        .on_cx(move |_, _: &Activate, cx| {
+            cx.dispatch_program_all(message(InspectMessage::SubmitMetadataInput(input)))
+        });
     widget(widgets::input_pill(false))
-        .children((field, widget(widgets::pill_divider()).key(format!("workspace-filter-{key}-divider")), add))
+        .children((
+            field,
+            widget(widgets::pill_divider()).key(format!("workspace-filter-{key}-divider")),
+            add,
+        ))
         .key(format!("workspace-filter-{key}-field"))
         .into_any()
 }
 
 /// 评分：「全部」清掉最低评分，「N 星+」设成 N。芯片固定，选中态绑在最低评分上。
 fn rating_group(min_rating: Signal<Option<f64>>) -> AnyView {
-    let mut chips = vec![widget(widgets::chip("全部", false, None))
-        .prop::<bool, ChipActive>(move || min_rating.with(Option::is_none))
-        .key("workspace-filter-rating-all")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(message(InspectMessage::SetMinimumRating(None))))
-        .into_any()];
+    let mut chips = vec![
+        widget(widgets::chip("全部", false, None))
+            .prop::<bool, ChipActive>(move || min_rating.with(Option::is_none))
+            .key("workspace-filter-rating-all")
+            .on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program_all(message(InspectMessage::SetMinimumRating(None)))
+            })
+            .into_any(),
+    ];
     for rating in RATING_OPTIONS {
         let value = f64::from(rating);
         chips.push(
             widget(widgets::chip(&format!("{rating} 星+"), false, None))
-                .prop::<bool, ChipActive>(move || min_rating.with(|current| *current == Some(value)))
+                .prop::<bool, ChipActive>(move || {
+                    min_rating.with(|current| *current == Some(value))
+                })
                 .key(format!("workspace-filter-rating-{rating}"))
                 .on_cx(move |_, _: &Activate, cx| {
                     cx.dispatch_program_all(message(InspectMessage::SetMinimumRating(Some(value))));
@@ -291,7 +447,9 @@ fn rating_group(min_rating: Signal<Option<f64>>) -> AnyView {
 }
 
 /// 一个快捷方式芯片的身份：插件、标识和它带的全部条件。条件变了芯片重建，处理器带的值不会过期。
-fn shortcut_key(shortcut: &SearchShortcut) -> (String, String, String, String, String, &'static str) {
+fn shortcut_key(
+    shortcut: &SearchShortcut,
+) -> (String, String, String, String, String, &'static str) {
     (
         shortcut.plugin_id.clone(),
         shortcut.id.clone(),
@@ -310,7 +468,11 @@ fn shortcut_group(shortcuts: Signal<Vec<SearchShortcut>>) -> AnyView {
         let sort_field = shortcut.sort_field.clone();
         let sort_direction = shortcut.sort_direction;
         widget(widgets::chip(&shortcut.label, false, None))
-            .key(format!("workspace-filter-shortcut-{}-{}", key_part(&shortcut.plugin_id), key_part(&shortcut.id)))
+            .key(format!(
+                "workspace-filter-shortcut-{}-{}",
+                key_part(&shortcut.plugin_id),
+                key_part(&shortcut.id)
+            ))
             .on_cx(move |_, _: &Activate, cx| {
                 cx.dispatch_program_all(message(InspectMessage::ApplyShortcut {
                     metadata: metadata.clone(),
@@ -340,19 +502,32 @@ fn advanced_group(signals: FilterBarSignals) -> AnyView {
     cells.push(
         widget(widgets::bar_button("应用", false))
             .key("workspace-filter-apply")
-            .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(message(InspectMessage::ApplyAdvanced)))
+            .on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program_all(message(InspectMessage::ApplyAdvanced))
+            })
             .into_any(),
     );
-    let grid = widget(Stack::column(0.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0).with_layout(|layout| {
-        layout.display = Some(DisplaySpec::Grid);
-        layout.grid_columns_repeat = Some(GridRepeatAuto {
-            kind: GridTrackListUnsupported::RepeatAutoFit,
-            tracks: vec![GridTrack::MinMax { min_px: 132.0, fr: 1.0, max_px: None }],
-            ..GridRepeatAuto::default()
-        });
-        layout.row_gap = Some(LengthSpec::Px(6.0));
-        layout.column_gap = Some(LengthSpec::Px(6.0));
-    }))
+    let grid = widget(
+        Stack::column(0.0)
+            .width(LengthSpec::Fill)
+            .min_width(LengthSpec::Px(0.0))
+            .grow(1.0)
+            .shrink(1.0)
+            .with_layout(|layout| {
+                layout.display = Some(DisplaySpec::Grid);
+                layout.grid_columns_repeat = Some(GridRepeatAuto {
+                    kind: GridTrackListUnsupported::RepeatAutoFit,
+                    tracks: vec![GridTrack::MinMax {
+                        min_px: 132.0,
+                        fr: 1.0,
+                        max_px: None,
+                    }],
+                    ..GridRepeatAuto::default()
+                });
+                layout.row_gap = Some(LengthSpec::Px(6.0));
+                layout.column_gap = Some(LengthSpec::Px(6.0));
+            }),
+    )
     .children(cells)
     .key("workspace-filter-advanced-grid")
     .into_any();
@@ -370,13 +545,23 @@ fn advanced_input(input: &AdvancedInput, draft: ModelField) -> AnyView {
         }
     });
     widget(pill)
-        .children((widget(widgets::pill_input(&draft.signal().get_untracked(), input.placeholder, input.name, None))
-            .model(draft.signal())
-            .key(format!("workspace-filter-advanced-{}-input", input.key))
-            .on_cx(move |_, event: &TextChanged, cx| {
-                cx.dispatch_program_all(message(InspectMessage::SetAdvanced { field, value: event.value.to_string() }));
-            })
-            .on_cx(|_, _: &TextSubmitted, cx| cx.dispatch_program_all(message(InspectMessage::ApplyAdvanced))),))
+        .children((widget(widgets::pill_input(
+            &draft.signal().get_untracked(),
+            input.placeholder,
+            input.name,
+            None,
+        ))
+        .model(draft.signal())
+        .key(format!("workspace-filter-advanced-{}-input", input.key))
+        .on_cx(move |_, event: &TextChanged, cx| {
+            cx.dispatch_program_all(message(InspectMessage::SetAdvanced {
+                field,
+                value: event.value.to_string(),
+            }));
+        })
+        .on_cx(|_, _: &TextSubmitted, cx| {
+            cx.dispatch_program_all(message(InspectMessage::ApplyAdvanced))
+        }),))
         .key(format!("workspace-filter-advanced-{}", input.key))
         .into_any()
 }
@@ -387,7 +572,9 @@ fn sort_direction_select(direction: Signal<SortDirection>) -> AnyView {
         .into_iter()
         .map(|item| SelectOption::new(item.value(), item.label()))
         .collect::<Vec<_>>();
-    let mut select = Select::new(Some(direction.get_untracked().value())).options(options).label("排序方向");
+    let mut select = Select::new(Some(direction.get_untracked().value()))
+        .options(options)
+        .label("排序方向");
     select.style.background = None;
     select.style.border = None;
     select.style.radius = None;
@@ -410,10 +597,14 @@ fn sort_direction_select(direction: Signal<SortDirection>) -> AnyView {
     }
     widget(widgets::input_pill(true))
         .children((widget(select)
-            .prop::<Option<Arc<str>>, fields::select::value>(move || Some(Arc::from(direction.with(|direction| direction.value()))))
+            .prop::<Option<Arc<str>>, fields::select::value>(move || {
+                Some(Arc::from(direction.with(|direction| direction.value())))
+            })
             .key("workspace-filter-sort-direction")
             .on_cx(|_, event: &SelectChanged, cx| {
-                cx.dispatch_program_all(message(InspectMessage::SetSortDirection(SortDirection::parse(&event.value))));
+                cx.dispatch_program_all(message(InspectMessage::SetSortDirection(
+                    SortDirection::parse(&event.value),
+                )));
             }),))
         .key("workspace-filter-sort-direction-field")
         .into_any()

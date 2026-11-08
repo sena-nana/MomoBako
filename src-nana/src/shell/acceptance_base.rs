@@ -12,8 +12,9 @@ use std::collections::BTreeMap;
 use serde_json::Value;
 
 use crate::backend::services::repository::{
-    AssetSummary, FileBrowserEntry, FileBrowserSnapshot, FileTreeNode, FolderSummary, PlaylistPlayerContribution, PlaylistSummary,
-    RepositoryAuthenticationStatus, RepositoryBackendSummary, RepositoryLocalCacheStatus, RepositoryOverview, RepositorySnapshot,
+    AssetSummary, FileBrowserEntry, FileBrowserSnapshot, FileTreeNode, FolderSummary,
+    PlaylistPlayerContribution, PlaylistSummary, RepositoryAuthenticationStatus,
+    RepositoryBackendSummary, RepositoryLocalCacheStatus, RepositoryOverview, RepositorySnapshot,
     RepositoryStructureCacheState, RepositorySummary,
 };
 
@@ -71,8 +72,15 @@ impl Default for Base {
     fn default() -> Self {
         Self {
             name: REPO_NAME,
-            entries: vec![dir("assets"), file("cover.png", 2_400_000), file("notes/page.pdf", 1_820)],
-            tree: vec![tree_node("assets", vec![tree_node("assets/covers", Vec::new())])],
+            entries: vec![
+                dir("assets"),
+                file("cover.png", 2_400_000),
+                file("notes/page.pdf", 1_820),
+            ],
+            tree: vec![tree_node(
+                "assets",
+                vec![tree_node("assets/covers", Vec::new())],
+            )],
             mode: DisplayMode::Grid,
             playlists: Vec::new(),
             players: playlist_players(),
@@ -102,18 +110,41 @@ impl Base {
         let generation = model.workspace.prepare_initial_list();
         let mut repositories = vec![self.repository()];
         repositories.extend(self.others.iter().cloned());
-        model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(repositories) });
+        model.reduce(ShellMessage::WorkspaceListLoaded {
+            generation,
+            result: Ok(repositories),
+        });
         let scanned_files = self.assets().len() as i64;
-        model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(SyncCounts { scanned_files, ..SyncCounts::default() }) });
-        model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(self.snapshot()) });
-        model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser(self.entries.clone()))));
+        model.reduce(ShellMessage::RepositorySynced {
+            generation,
+            result: Ok(SyncCounts {
+                scanned_files,
+                ..SyncCounts::default()
+            }),
+        });
+        model.reduce(ShellMessage::RepositorySnapshotLoaded {
+            generation,
+            result: Ok(self.snapshot()),
+        });
+        model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser(
+            self.entries.clone(),
+        ))));
         answer_admin_reads(model, &self.players, self.plugins_error);
         let repo_id = REPO_ID.to_string();
         let playlists = self.playlists.clone();
         for message in [
-            SidebarMessage::SidebarTreeLoaded { repo_id: repo_id.clone(), result: Ok(SidebarTree::from_nodes(&self.tree)) },
-            SidebarMessage::SidebarSmartFoldersLoaded { repo_id: repo_id.clone(), result: Ok(Vec::new()) },
-            SidebarMessage::SidebarPlaylistsLoaded { repo_id, result: Ok(playlists) },
+            SidebarMessage::SidebarTreeLoaded {
+                repo_id: repo_id.clone(),
+                result: Ok(SidebarTree::from_nodes(&self.tree)),
+            },
+            SidebarMessage::SidebarSmartFoldersLoaded {
+                repo_id: repo_id.clone(),
+                result: Ok(Vec::new()),
+            },
+            SidebarMessage::SidebarPlaylistsLoaded {
+                repo_id,
+                result: Ok(playlists),
+            },
         ] {
             model.reduce(ShellMessage::Sidebar(message));
         }
@@ -131,7 +162,11 @@ impl Base {
             repository.backend.plugin_id = source.plugin_id.into();
             repository.backend.kind = source.kind.into();
             repository.backend.capabilities = ["list", "read", "sync"].map(String::from).to_vec();
-            repository.local_cache = Some(RepositoryLocalCacheStatus { required: true, path: Some(source.cache_path.into()), status: "ready".into() });
+            repository.local_cache = Some(RepositoryLocalCacheStatus {
+                required: true,
+                path: Some(source.cache_path.into()),
+                status: "ready".into(),
+            });
             repository.authentication = Some(RepositoryAuthenticationStatus {
                 required: true,
                 logged_in: source.logged_in,
@@ -143,7 +178,11 @@ impl Base {
 
     /// 仓库摘要里的素材：条目里的文件，标签跟着条目走。
     fn assets(&self) -> Vec<AssetSummary> {
-        self.entries.iter().filter(|entry| entry.kind == "file").map(asset).collect()
+        self.entries
+            .iter()
+            .filter(|entry| entry.kind == "file")
+            .map(asset)
+            .collect()
     }
 
     /// Vue 模拟 IPC 的 `get_repository_snapshot` 应答，总大小照模拟写死。
@@ -155,7 +194,11 @@ impl Base {
             folders: self
                 .tree
                 .iter()
-                .map(|node| FolderSummary { path: node.path.clone(), label: node.label.clone(), asset_count: node.file_count as i64 })
+                .map(|node| FolderSummary {
+                    path: node.path.clone(),
+                    label: node.label.clone(),
+                    asset_count: node.file_count as i64,
+                })
                 .collect(),
             playlists: self.playlists.clone(),
             quick_access: Vec::new(),
@@ -179,14 +222,24 @@ impl Base {
 /// 以及插件列表到了以后的播放器类型；这两样都回来，首屏启动才结束。`plugins_error` 有值时设置包读失败，插件列表
 /// 没到也就不读播放器类型。没排下的读取不编造应答，只记日志：说明产品启动已经不读它们了。
 /// 后台的硬链接候选和成员索引在夹具里都是空的，不回答也是同样的状态。
-pub(super) fn answer_admin_reads(model: &mut ShellViewModel, players: &[PlaylistPlayerContribution], plugins_error: Option<&str>) {
+pub(super) fn answer_admin_reads(
+    model: &mut ShellViewModel,
+    players: &[PlaylistPlayerContribution],
+    plugins_error: Option<&str>,
+) {
     let effects = model.admin.take_effects();
     for effect in &effects {
         if let AdminEffect::LoadActions { repo_id } = effect {
-            model.reduce(ShellMessage::Admin(AdminMessage::ActionsLoaded { repo_id: repo_id.clone(), result: Ok(Vec::new()) }));
+            model.reduce(ShellMessage::Admin(AdminMessage::ActionsLoaded {
+                repo_id: repo_id.clone(),
+                result: Ok(Vec::new()),
+            }));
         }
     }
-    if !effects.iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)) {
+    if !effects
+        .iter()
+        .any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle))
+    {
         eprintln!("Nana 验收底子：首屏启动没有读设置包");
         return;
     }
@@ -195,8 +248,15 @@ pub(super) fn answer_admin_reads(model: &mut ShellViewModel, players: &[Playlist
         model.admin.take_effects();
         return;
     }
-    model.reduce(ShellMessage::Admin(bundle_loaded(bundled_plugins(|_| true))));
-    if !model.admin.take_effects().iter().any(|effect| matches!(effect, AdminEffect::LoadPlaylistPlayers)) {
+    model.reduce(ShellMessage::Admin(bundle_loaded(bundled_plugins(|_| {
+        true
+    }))));
+    if !model
+        .admin
+        .take_effects()
+        .iter()
+        .any(|effect| matches!(effect, AdminEffect::LoadPlaylistPlayers))
+    {
         eprintln!("Nana 验收底子：插件列表到了以后没有读播放器类型");
         return;
     }
@@ -213,7 +273,9 @@ pub(super) fn acceptance_model() -> ShellViewModel {
 
 /// 把动效时钟拨过所有过渡，日志时间换成夹具的固定时刻，截图拿到静止画面。
 pub(super) fn settle(model: &mut ShellViewModel) {
-    model.motion.set_startup_percent(f32::from(model.workspace.startup.percent));
+    model
+        .motion
+        .set_startup_percent(f32::from(model.workspace.startup.percent));
     // 场景直接推仓库操作行（`operation.tick`），不经过准备帧，任务弹层进度条的目标在这里跟上。
     model.follow_task_fills();
     let now = model.motion.now_ms();
@@ -233,7 +295,17 @@ pub(super) fn summary(name: &str, status: &str) -> RepositorySummary {
             plugin_id: BACKEND_PLUGIN_ID.into(),
             kind: "local-filesystem".into(),
             name: "本地文件系统".into(),
-            capabilities: ["write", "localRootPath", "list", "read", "move", "delete", "watch"].map(String::from).to_vec(),
+            capabilities: [
+                "write",
+                "localRootPath",
+                "list",
+                "read",
+                "move",
+                "delete",
+                "watch",
+            ]
+            .map(String::from)
+            .to_vec(),
         },
         status: status.into(),
         asset_count: 2,
@@ -254,14 +326,28 @@ pub(super) fn file(path: &str, size_bytes: i64) -> FileBrowserEntry {
 }
 
 /// 带标签和文本元数据的文件，Vue 场景里 `{ ...file(..), tags, metadata }` 的写法。
-pub(super) fn tagged_file(path: &str, size_bytes: i64, tags: &[&str], metadata: BTreeMap<String, Value>) -> FileBrowserEntry {
-    FileBrowserEntry { tags: tags.iter().map(|tag| tag.to_string()).collect(), metadata, ..file(path, size_bytes) }
+pub(super) fn tagged_file(
+    path: &str,
+    size_bytes: i64,
+    tags: &[&str],
+    metadata: BTreeMap<String, Value>,
+) -> FileBrowserEntry {
+    FileBrowserEntry {
+        tags: tags.iter().map(|tag| tag.to_string()).collect(),
+        metadata,
+        ..file(path, size_bytes)
+    }
 }
 
 fn entry(path: &str, kind: &str, size_bytes: Option<i64>) -> FileBrowserEntry {
     let name = path.rsplit('/').next().unwrap_or(path).to_string();
     let is_file = kind == "file";
-    let extension = if is_file { name.rsplit_once('.').map(|(_, extension)| extension.to_ascii_lowercase()) } else { None };
+    let extension = if is_file {
+        name.rsplit_once('.')
+            .map(|(_, extension)| extension.to_ascii_lowercase())
+    } else {
+        None
+    };
     FileBrowserEntry {
         path: path.into(),
         name,
@@ -289,7 +375,12 @@ fn entry(path: &str, kind: &str, size_bytes: Option<i64>) -> FileBrowserEntry {
 }
 
 fn tree_node(path: &str, children: Vec<FileTreeNode>) -> FileTreeNode {
-    FileTreeNode { path: path.into(), label: path.rsplit('/').next().unwrap_or(path).into(), file_count: 0, children }
+    FileTreeNode {
+        path: path.into(),
+        label: path.rsplit('/').next().unwrap_or(path).into(),
+        file_count: 0,
+        children,
+    }
 }
 
 /// Vue 夹具 `asset(entry)`：仓库摘要里的一条素材。

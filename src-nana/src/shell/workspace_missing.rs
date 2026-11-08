@@ -5,7 +5,9 @@
 //! 能不能选、说明文案和删除结果。重定向的结果在 `workspace_switch.rs`。
 
 use super::super::repo_operation::OperationStart;
-use super::{DeleteDialog, DeleteMode, WorkspaceDialog, WorkspaceEffect, WorkspaceRepository, WorkspaceState};
+use super::{
+    DeleteDialog, DeleteMode, WorkspaceDialog, WorkspaceEffect, WorkspaceRepository, WorkspaceState,
+};
 
 impl WorkspaceState {
     pub fn refresh_missing(&mut self) {
@@ -44,9 +46,11 @@ impl WorkspaceState {
         self.relocating = true;
         self.missing_error.clear();
         self.operation.start(
-            OperationStart::new("重定向资源库", "校验资源库位置", 12.0).runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_RELOCATE]),
+            OperationStart::new("重定向资源库", "校验资源库位置", 12.0)
+                .runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_RELOCATE]),
         );
-        self.effects.push(WorkspaceEffect::RelocateRepository { repo_id, path });
+        self.effects
+            .push(WorkspaceEffect::RelocateRepository { repo_id, path });
     }
 
     /// 来源缓存没就绪时「打开来源设置」：返回要打开设置的来源插件。忙着或不是缓存问题时不打开。
@@ -63,14 +67,21 @@ impl WorkspaceState {
     }
 
     pub fn delete_dialog_open(&self) -> bool {
-        self.dialogs.iter().any(|dialog| matches!(dialog, WorkspaceDialog::Delete(_)))
+        self.dialogs
+            .iter()
+            .any(|dialog| matches!(dialog, WorkspaceDialog::Delete(_)))
     }
 
     pub fn open_delete_dialog(&mut self) {
         let Some(repo_id) = self.active_repo_id.clone() else {
             return;
         };
-        if self.missing_busy() || !self.repositories.iter().any(|repository| repository.repo_id == repo_id) {
+        if self.missing_busy()
+            || !self
+                .repositories
+                .iter()
+                .any(|repository| repository.repo_id == repo_id)
+        {
             return;
         }
         self.missing_error.clear();
@@ -79,7 +90,10 @@ impl WorkspaceState {
             dialog.error.clear();
             return;
         }
-        self.dialogs.push(WorkspaceDialog::Delete(DeleteDialog { repo_id, error: String::new() }));
+        self.dialogs.push(WorkspaceDialog::Delete(DeleteDialog {
+            repo_id,
+            error: String::new(),
+        }));
     }
 
     pub fn close_delete_dialog(&mut self) {
@@ -98,7 +112,8 @@ impl WorkspaceState {
         };
         let repo_id = dialog.repo_id.clone();
         self.deleting_mode = Some(mode);
-        self.effects.push(WorkspaceEffect::DeleteRepository { repo_id, mode });
+        self.effects
+            .push(WorkspaceEffect::DeleteRepository { repo_id, mode });
         true
     }
 
@@ -131,7 +146,11 @@ impl WorkspaceState {
         let Some(WorkspaceDialog::Delete(dialog)) = self.dialogs.last() else {
             return false;
         };
-        let Some(repository) = self.repositories.iter().find(|item| item.repo_id == dialog.repo_id) else {
+        let Some(repository) = self
+            .repositories
+            .iter()
+            .find(|item| item.repo_id == dialog.repo_id)
+        else {
             return false;
         };
         match mode {
@@ -146,24 +165,40 @@ impl WorkspaceState {
             .dialogs
             .last()
             .and_then(|dialog| match dialog {
-                WorkspaceDialog::Delete(dialog) => self.repositories.iter().find(|item| item.repo_id == dialog.repo_id),
+                WorkspaceDialog::Delete(dialog) => self
+                    .repositories
+                    .iter()
+                    .find(|item| item.repo_id == dialog.repo_id),
             })
             .is_some_and(|repository| repository.cache_required);
         let enabled = self.delete_mode_enabled(mode);
         match mode {
-            DeleteMode::RecordOnly => "只从 MomoBako 移除这条资源库记录，保留文件夹、.momo 和应用托管数据。".into(),
+            DeleteMode::RecordOnly => {
+                "只从 MomoBako 移除这条资源库记录，保留文件夹、.momo 和应用托管数据。".into()
+            }
             DeleteMode::DeleteMetadata if enabled && cache_required => {
                 "删除该资源库的 Momo 元数据目录与索引缓存，保留缓存文件夹中的其他用户内容。".into()
             }
-            DeleteMode::DeleteMetadata if enabled => "删除该资源库的 .momo 数据目录，保留原文件夹与用户文件。".into(),
-            DeleteMode::DeleteMetadata => "当前资源库的 .momo 目录不可直接访问，请先恢复路径后再删除元数据。".into(),
-            DeleteMode::DeleteFolder if enabled => "递归删除当前资源库文件夹，目录内的 .momo 数据与用户文件会一起删除。".into(),
-            DeleteMode::DeleteFolder => "当前资源库目录不可直接访问，暂时不能删除整个文件夹。".into(),
+            DeleteMode::DeleteMetadata if enabled => {
+                "删除该资源库的 .momo 数据目录，保留原文件夹与用户文件。".into()
+            }
+            DeleteMode::DeleteMetadata => {
+                "当前资源库的 .momo 目录不可直接访问，请先恢复路径后再删除元数据。".into()
+            }
+            DeleteMode::DeleteFolder if enabled => {
+                "递归删除当前资源库文件夹，目录内的 .momo 数据与用户文件会一起删除。".into()
+            }
+            DeleteMode::DeleteFolder => {
+                "当前资源库目录不可直接访问，暂时不能删除整个文件夹。".into()
+            }
         }
     }
 
     pub fn missing_primary_label(&self) -> &'static str {
-        if self.active_repository().is_some_and(|repository| repository.is_source_cache_issue()) {
+        if self
+            .active_repository()
+            .is_some_and(|repository| repository.is_source_cache_issue())
+        {
             "打开来源设置"
         } else if self.relocating {
             "重定向中..."
@@ -173,12 +208,19 @@ impl WorkspaceState {
     }
 
     pub fn missing_delete_label(&self) -> &'static str {
-        if self.deleting_mode.is_some() { "删除中..." } else { "删除资源库" }
+        if self.deleting_mode.is_some() {
+            "删除中..."
+        } else {
+            "删除资源库"
+        }
     }
 }
 
 fn repository_uses_local_metadata(repository: &WorkspaceRepository) -> bool {
-    repository.capabilities.iter().any(|capability| capability == "localRootPath")
+    repository
+        .capabilities
+        .iter()
+        .any(|capability| capability == "localRootPath")
         || (repository.cache_required && repository.cache_status != "unconfigured")
 }
 

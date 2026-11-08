@@ -58,12 +58,12 @@ mod sync_engine;
 mod sync_hardlink;
 mod sync_incremental;
 mod sync_metadata;
+#[cfg(test)]
+mod test_plugin;
 pub(crate) mod test_support;
 mod thumbnail;
 mod trash;
 mod utils;
-#[cfg(test)]
-mod test_plugin;
 
 use self::api_design::*;
 use self::asset_mutation::*;
@@ -114,12 +114,12 @@ use self::sync_engine::*;
 use self::sync_hardlink::*;
 use self::sync_incremental::sync_repository_changed_paths as sync_repository_changed_paths_incremental;
 use self::sync_metadata::*;
-use self::thumbnail::*;
-pub use self::thumbnail::preview_media_type_for_extension;
-use self::trash::*;
-use self::utils::*;
 #[cfg(test)]
 pub(crate) use self::test_plugin::{
     call_local_filesystem, disable_local_filesystem_adapter, enable_local_filesystem_adapter,
     local_filesystem_adapter_enabled,
 };
+pub use self::thumbnail::preview_media_type_for_extension;
+use self::thumbnail::*;
+use self::trash::*;
+use self::utils::*;

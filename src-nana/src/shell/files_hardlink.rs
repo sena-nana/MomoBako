@@ -44,7 +44,9 @@ pub(crate) fn hardlink_label(state: Option<&str>) -> &'static str {
 
 impl FilesState {
     pub(in crate::shell) fn current_hardlink(&self) -> Option<&HardlinkPrompt> {
-        self.hardlinks.iter().find(|prompt| !self.skipped_hardlinks.iter().any(|id| id == &prompt.id))
+        self.hardlinks
+            .iter()
+            .find(|prompt| !self.skipped_hardlinks.iter().any(|id| id == &prompt.id))
     }
 
     /// 候选列表现在的版本。新发出的读取带上它，回来时据此认过期。
@@ -84,7 +86,10 @@ impl FilesState {
             return false;
         };
         self.begin(None);
-        self.effects.push(FilesEffect::ConfirmHardlink { repo_id, candidate_id: prompt.id });
+        self.effects.push(FilesEffect::ConfirmHardlink {
+            repo_id,
+            candidate_id: prompt.id,
+        });
         true
     }
 
@@ -103,7 +108,11 @@ impl FilesState {
     }
 
     /// 复制以后读到的候选：换掉列表、清掉跳过，有候选就弹出确认；失败写进文件列。过期的结果丢掉。
-    pub(in crate::shell) fn note_hardlinks(&mut self, epoch: u64, result: Result<Vec<HardlinkPrompt>, String>) {
+    pub(in crate::shell) fn note_hardlinks(
+        &mut self,
+        epoch: u64,
+        result: Result<Vec<HardlinkPrompt>, String>,
+    ) {
         if !self.accepts_hardlinks(epoch, "复制以后") {
             return;
         }
@@ -126,7 +135,10 @@ impl FilesState {
     /// 启动和换仓库后在后台查一次硬链接候选，和 Vue 后台读 `listHardlinkCandidates` 一致：
     /// 启动同步刚建出来的候选要让用户确认。
     pub(in crate::shell) fn check_hardlinks(&mut self, repo_id: &str) {
-        self.effects.push(FilesEffect::CheckHardlinks { repo_id: repo_id.to_string(), epoch: self.hardlink_epoch });
+        self.effects.push(FilesEffect::CheckHardlinks {
+            repo_id: repo_id.to_string(),
+            epoch: self.hardlink_epoch,
+        });
     }
 
     /// 结构更新静默重读硬链接候选。空仓库只记日志。
@@ -136,12 +148,19 @@ impl FilesState {
             eprintln!("Nana 静默刷新硬链接候选缺少仓库");
             return;
         }
-        self.effects.push(FilesEffect::RefreshHardlinks { repo_id: repo_id.to_string(), epoch: self.hardlink_epoch });
+        self.effects.push(FilesEffect::RefreshHardlinks {
+            repo_id: repo_id.to_string(),
+            epoch: self.hardlink_epoch,
+        });
     }
 
     /// 后台查到（启动、换仓库、确认以后）或刷新文件夹树同步以后重读的候选：换掉列表，跳过的留着；没有别的对话框
     /// 开着时，有候选就弹出确认。Vue 的确认框按「第一个没跳过的候选」算出来，候选一到就出现。过期的结果丢掉。
-    pub(in crate::shell) fn note_hardlinks_synced(&mut self, epoch: u64, prompts: Vec<HardlinkPrompt>) {
+    pub(in crate::shell) fn note_hardlinks_synced(
+        &mut self,
+        epoch: u64,
+        prompts: Vec<HardlinkPrompt>,
+    ) {
         if !self.accepts_hardlinks(epoch, "后台") {
             return;
         }
@@ -161,7 +180,11 @@ impl FilesState {
 
     /// 静默替换硬链接候选。成功只换列表，不打开确认框（换掉以后没有候选可显示时收起）；失败只记日志。
     /// 不改已跳过候选和页面错误。过期的结果丢掉。
-    pub(in crate::shell) fn note_hardlinks_silent(&mut self, epoch: u64, result: Result<Vec<HardlinkPrompt>, String>) {
+    pub(in crate::shell) fn note_hardlinks_silent(
+        &mut self,
+        epoch: u64,
+        result: Result<Vec<HardlinkPrompt>, String>,
+    ) {
         if !self.accepts_hardlinks(epoch, "静默") {
             return;
         }
@@ -198,7 +221,10 @@ impl FilesState {
     /// 等着的重读就此结束，确认框放开。
     fn accepts_hardlinks(&mut self, epoch: u64, kind: &str) -> bool {
         if epoch < self.hardlink_epoch {
-            eprintln!("Nana 忽略过期的{kind}硬链接候选：版本 {epoch}，当前 {}", self.hardlink_epoch);
+            eprintln!(
+                "Nana 忽略过期的{kind}硬链接候选：版本 {epoch}，当前 {}",
+                self.hardlink_epoch
+            );
             return false;
         }
         self.hardlink_rereading = false;
@@ -221,7 +247,11 @@ impl FilesState {
 /// - 失败照 Vue 静默重读候选（读失败只记日志），确认框按最新的列表走，错误留在文件列。
 ///
 /// 两种都照 Vue 在候选重读回来之前让确认框处理中：确认掉或已经失效的候选不会被再点一次。
-pub(in crate::shell) fn finish_confirm(model: &mut ShellViewModel, repo_id: &str, result: Result<String, String>) {
+pub(in crate::shell) fn finish_confirm(
+    model: &mut ShellViewModel,
+    repo_id: &str,
+    result: Result<String, String>,
+) {
     let confirmed = result.is_ok();
     model.files.note_hardlink_confirmed(result);
     if repo_id.is_empty() || model.workspace.active_repo_id.as_deref() != Some(repo_id) {

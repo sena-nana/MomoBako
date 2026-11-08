@@ -8,18 +8,23 @@ use std::sync::Arc;
 
 use crate::shell::sidebar::{SidebarSmartFolder, SmartFolderField};
 use crate::shell::view_part_overlay::dialog::{
-    action, action_button, error_line, footer, select_field, text_area_field, text_field, two_columns, Choices, DialogFrame, MessageFn,
+    Choices, DialogFrame, MessageFn, action, action_button, error_line, footer, select_field,
+    text_area_field, text_field, two_columns,
 };
 use crate::shell::view_part_overlay::session::{Draft, Projected};
 use crate::shell::{ShellMessage, ShellViewModel, SidebarMessage};
-use nana_ui::runtime::view::{fields, signal, widget, AnyView, IntoView, Signal};
+use nana_ui::runtime::view::{AnyView, IntoView, Signal, fields, signal, widget};
 use nana_ui::runtime::{LengthAtom, LengthSpec, ScrollAxes, ScrollView, Stack, ViewportAxis};
 use nana_ui::{ButtonKind, DialogSize};
 
 /// `.smart-folder-dialog { width: min(720px, calc(100vw - 40px)) }`。
 const SMART_FOLDER_DIALOG: DialogSize = DialogSize::Width(LengthSpec::Min2(
     LengthAtom::Px(720.0),
-    LengthAtom::CalcViewport { axis: ViewportAxis::Width, value: 100.0, offset_px: -40.0 },
+    LengthAtom::CalcViewport {
+        axis: ViewportAxis::Width,
+        value: 100.0,
+        offset_px: -40.0,
+    },
 ));
 
 /// 智能文件夹对话框要显示的东西。各输入框的草稿不在这里，见 [`Draft`]。
@@ -82,60 +87,188 @@ fn draft(model: &ShellViewModel, field: SmartFolderField) -> Signal<String> {
     })
 }
 
-/// 新建或编辑智能文件夹：名称、父级和全部筛选字段。名称为空或保存中时主按钮不可用。
-/// 名称框里按回车和点主按钮一样提交（Vue 名称输入框的 `@keydown.enter.prevent`），别的输入框不提交。
+/// 新建或编辑智能文件夹：名称、父级和全部筛选字段。名称为空或保存中时主按钮不可用，取消也不可用。
+/// 这些输入框、下拉和多行照 Vue 没有 `disabled`，保存中仍可改下一份草稿；已经发出的请求用提交当时的草稿。
+/// 名称框里按回车和点主按钮一样提交（Vue 名称输入框的 `@keydown.enter.prevent`），保存中回车不再提交。
+/// 别的输入框不提交。
 pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let view = signal(SmartDialogView::project(model)?);
     Projected::register(view, SmartDialogView::project);
     let busy = move || view.with(|view| view.busy);
-    let input = |field: SmartFolderField, label: &'static str, key: &'static str, placeholder: &'static str| -> AnyView {
-        let submit: Option<MessageFn> = (field == SmartFolderField::Name).then(|| Arc::new(submit_message) as MessageFn);
-        text_field(label, key, draft(model, field), placeholder, false, busy, set_field(field), submit)
+    let input = |field: SmartFolderField,
+                 label: &'static str,
+                 key: &'static str,
+                 placeholder: &'static str|
+     -> AnyView {
+        let submit: Option<MessageFn> =
+            (field == SmartFolderField::Name).then(|| Arc::new(submit_message) as MessageFn);
+        text_field(
+            label,
+            key,
+            draft(model, field),
+            placeholder,
+            false,
+            false,
+            set_field(field),
+            submit,
+        )
     };
-    let area = |field: SmartFolderField, label: &'static str, key: &'static str, placeholder: &'static str, rows: f32| -> AnyView {
-        text_area_field(label, key, draft(model, field), placeholder, rows, busy, set_field(field))
+    let area = |field: SmartFolderField,
+                label: &'static str,
+                key: &'static str,
+                placeholder: &'static str,
+                rows: f32|
+     -> AnyView {
+        text_area_field(
+            label,
+            key,
+            draft(model, field),
+            placeholder,
+            rows,
+            false,
+            set_field(field),
+        )
     };
-    let choice = |field: SmartFolderField, label: &'static str, key: &'static str, read: fn(&SmartDialogView) -> String, choices: Choices| -> AnyView {
+    let choice = |field: SmartFolderField,
+                  label: &'static str,
+                  key: &'static str,
+                  read: fn(&SmartDialogView) -> String,
+                  choices: Choices|
+     -> AnyView {
         let fixed = choices.clone();
         let parents = field == SmartFolderField::Parent;
         select_field(
             label,
             key,
             move || Some(view.with(read)),
-            move || if parents { view.with(|view| view.parents.clone()) } else { fixed.clone() },
-            busy,
+            move || {
+                if parents {
+                    view.with(|view| view.parents.clone())
+                } else {
+                    fixed.clone()
+                }
+            },
+            false,
             set_field(field),
         )
     };
-    let pairs = |items: &[(&str, &str)]| -> Choices { items.iter().map(|(value, text)| ((*value).to_string(), (*text).to_string())).collect() };
+    let pairs = |items: &[(&str, &str)]| -> Choices {
+        items
+            .iter()
+            .map(|(value, text)| ((*value).to_string(), (*text).to_string()))
+            .collect()
+    };
     // `.smart-folder-dialog__grid`：两列等宽，行列间距 12px。
     let body = vec![
-        input(SmartFolderField::Name, "名称", "smart-field-name", "例如 高评分 PSD"),
-        choice(SmartFolderField::Parent, "父级", "smart-field-parent", |view| view.parent.clone(), Vec::new()),
+        input(
+            SmartFolderField::Name,
+            "名称",
+            "smart-field-name",
+            "例如 高评分 PSD",
+        ),
+        choice(
+            SmartFolderField::Parent,
+            "父级",
+            "smart-field-parent",
+            |view| view.parent.clone(),
+            Vec::new(),
+        ),
         two_columns(
             "smart-filter-grid",
             12.0,
             vec![
-                input(SmartFolderField::Query, "关键词", "smart-field-query", "文件名、标签或元数据"),
-                input(SmartFolderField::Path, "路径前缀", "smart-field-path", "Campaigns/Summer"),
-                input(SmartFolderField::Formats, "格式", "smart-field-formats", "psd，png"),
-                input(SmartFolderField::Tags, "标签", "smart-field-tags", "封面，主视觉"),
-                input(SmartFolderField::Colors, "颜色", "smart-field-colors", "红色，绿色"),
-                input(SmartFolderField::Shapes, "形状", "smart-field-shapes", "方形，横版"),
-                input(SmartFolderField::MinRating, "最低评分", "smart-field-rating", "4"),
-                choice(SmartFolderField::Match, "匹配方式", "smart-field-match", |view| view.match_mode.clone(), pairs(&[("and", "全部匹配"), ("or", "任一匹配")])),
+                input(
+                    SmartFolderField::Query,
+                    "关键词",
+                    "smart-field-query",
+                    "文件名、标签或元数据",
+                ),
+                input(
+                    SmartFolderField::Path,
+                    "路径前缀",
+                    "smart-field-path",
+                    "Campaigns/Summer",
+                ),
+                input(
+                    SmartFolderField::Formats,
+                    "格式",
+                    "smart-field-formats",
+                    "psd，png",
+                ),
+                input(
+                    SmartFolderField::Tags,
+                    "标签",
+                    "smart-field-tags",
+                    "封面，主视觉",
+                ),
+                input(
+                    SmartFolderField::Colors,
+                    "颜色",
+                    "smart-field-colors",
+                    "红色，绿色",
+                ),
+                input(
+                    SmartFolderField::Shapes,
+                    "形状",
+                    "smart-field-shapes",
+                    "方形，横版",
+                ),
+                input(
+                    SmartFolderField::MinRating,
+                    "最低评分",
+                    "smart-field-rating",
+                    "4",
+                ),
+                choice(
+                    SmartFolderField::Match,
+                    "匹配方式",
+                    "smart-field-match",
+                    |view| view.match_mode.clone(),
+                    pairs(&[("and", "全部匹配"), ("or", "任一匹配")]),
+                ),
             ],
         ),
-        area(SmartFolderField::Metadata, "元数据键值", "smart-field-metadata", "artist=demo\nsource=reference", 3.0),
+        area(
+            SmartFolderField::Metadata,
+            "元数据键值",
+            "smart-field-metadata",
+            "artist=demo\nsource=reference",
+            3.0,
+        ),
         two_columns(
             "smart-exclude-grid",
             12.0,
             vec![
-                input(SmartFolderField::ExcludeQuery, "排除关键词", "smart-field-exclude-query", "draft，archive"),
-                input(SmartFolderField::ExcludePaths, "排除路径", "smart-field-exclude-paths", "Archive，Temp"),
-                input(SmartFolderField::ExcludeTags, "排除标签", "smart-field-exclude-tags", "草稿，临时"),
-                input(SmartFolderField::ExcludeFormats, "排除格式", "smart-field-exclude-formats", "gif，webp"),
-                input(SmartFolderField::SortField, "排序字段", "smart-field-sort-field", "modifiedAt / rating / metadata.width"),
+                input(
+                    SmartFolderField::ExcludeQuery,
+                    "排除关键词",
+                    "smart-field-exclude-query",
+                    "draft，archive",
+                ),
+                input(
+                    SmartFolderField::ExcludePaths,
+                    "排除路径",
+                    "smart-field-exclude-paths",
+                    "Archive，Temp",
+                ),
+                input(
+                    SmartFolderField::ExcludeTags,
+                    "排除标签",
+                    "smart-field-exclude-tags",
+                    "草稿，临时",
+                ),
+                input(
+                    SmartFolderField::ExcludeFormats,
+                    "排除格式",
+                    "smart-field-exclude-formats",
+                    "gif，webp",
+                ),
+                input(
+                    SmartFolderField::SortField,
+                    "排序字段",
+                    "smart-field-sort-field",
+                    "modifiedAt / rating / metadata.width",
+                ),
                 choice(
                     SmartFolderField::SortDirection,
                     "排序方向",
@@ -143,15 +276,32 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
                     |view| view.sort_direction.clone(),
                     pairs(&[("asc", "升序"), ("desc", "降序")]),
                 ),
-                input(SmartFolderField::Limit, "结果数量", "smart-field-limit", "100"),
+                input(
+                    SmartFolderField::Limit,
+                    "结果数量",
+                    "smart-field-limit",
+                    "100",
+                ),
             ],
         ),
-        area(SmartFolderField::ExcludeMetadata, "排除元数据", "smart-field-exclude-metadata", "status=archived", 2.0),
+        area(
+            SmartFolderField::ExcludeMetadata,
+            "排除元数据",
+            "smart-field-exclude-metadata",
+            "status=archived",
+            2.0,
+        ),
         two_columns(
             "smart-range-grid",
             12.0,
             vec![
-                area(SmartFolderField::ExcludeNumbers, "排除数值范围", "smart-field-exclude-numbers", "width=0..640", 2.0),
+                area(
+                    SmartFolderField::ExcludeNumbers,
+                    "排除数值范围",
+                    "smart-field-exclude-numbers",
+                    "width=0..640",
+                    2.0,
+                ),
                 area(
                     SmartFolderField::ExcludeDates,
                     "排除日期范围",
@@ -161,12 +311,29 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
                 ),
             ],
         ),
-        area(SmartFolderField::Numbers, "数值范围", "smart-field-numbers", "width=1024..4096\noriginalSizeBytes=..10485760", 2.0),
-        area(SmartFolderField::Dates, "日期范围", "smart-field-dates", "fileCreatedAt=2024-01-01T00:00:00Z..2024-12-31T23:59:59Z", 2.0),
-        error_line(move || view.with(|view| view.error.clone()), "smart-dialog-error"),
+        area(
+            SmartFolderField::Numbers,
+            "数值范围",
+            "smart-field-numbers",
+            "width=1024..4096\noriginalSizeBytes=..10485760",
+            2.0,
+        ),
+        area(
+            SmartFolderField::Dates,
+            "日期范围",
+            "smart-field-dates",
+            "fileCreatedAt=2024-01-01T00:00:00Z..2024-12-31T23:59:59Z",
+            2.0,
+        ),
+        error_line(
+            move || view.with(|view| view.error.clone()),
+            "smart-dialog-error",
+        ),
     ];
     // `.smart-folder-dialog__body`：竖排、间距 12，右边留 4 给滚动条。
-    let column = Stack::column(12.0).width(LengthSpec::Fill).with_layout(|layout| layout.padding_right = Some(LengthSpec::Px(4.0)));
+    let column = Stack::column(12.0)
+        .width(LengthSpec::Fill)
+        .with_layout(|layout| layout.padding_right = Some(LengthSpec::Px(4.0)));
     let scroll = widget(ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
         layout.width = Some(LengthSpec::Fill);
         layout.min_height = Some(LengthSpec::Px(0.0));
@@ -175,14 +342,24 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
     .children((widget(column).children(body),));
     let close = || ShellMessage::Sidebar(SidebarMessage::CloseSmartFolderDialog);
     let buttons = vec![
-        action("取消", ButtonKind::Ghost, busy, "smart-dialog-cancel", close),
+        action(
+            "取消",
+            ButtonKind::Ghost,
+            busy,
+            "smart-dialog-cancel",
+            close,
+        ),
         smart_submit(view),
     ];
     Some(
-        DialogFrame::new("smart-folder-dialog", move || view.with(|view| view.title.to_string()), close)
-            .size(SMART_FOLDER_DIALOG)
-            .busy(busy)
-            .dialog(scroll, footer(None, buttons)),
+        DialogFrame::new(
+            "smart-folder-dialog",
+            move || view.with(|view| view.title.to_string()),
+            close,
+        )
+        .size(SMART_FOLDER_DIALOG)
+        .busy(busy)
+        .dialog(scroll, footer(None, buttons)),
     )
 }
 

@@ -121,7 +121,9 @@ impl SettingsSync {
 /// 应用设置文件的位置：发布包在应用路径的 config 下，开发时照旧在 `%LOCALAPPDATA%\MomoBako`，见 `app_paths.rs`。
 /// 侧栏、展示方式、圆角、播放和上次资源库这些界面偏好都放在它旁边。
 pub fn default_path() -> PathBuf {
-    crate::app_paths::current().settings_dir.join("settings.json")
+    crate::app_paths::current()
+        .settings_dir
+        .join("settings.json")
 }
 
 impl Default for ApplicationSettings {
@@ -285,7 +287,8 @@ mod tests {
 
     #[test]
     fn corrupted_settings_are_backed_up_and_recovered() {
-        let root = std::env::temp_dir().join(format!("momobako-settings-corrupt-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("momobako-settings-corrupt-{}", std::process::id()));
         let path = root.join("settings.json");
         fs::create_dir_all(&root).expect("settings test directory should exist");
         fs::write(&path, b"{broken").expect("corrupt settings should be written");

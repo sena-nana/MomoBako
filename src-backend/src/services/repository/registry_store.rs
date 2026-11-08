@@ -470,7 +470,10 @@ fn infer_backend_plugin_id_for_path(service_root: &Path, path: &str) -> Result<S
         [manifest] => Ok(manifest.plugin_id.clone()),
         [] if requires_local_root => {
             if unavailable.is_empty() {
-                Err("no installed repository source plugin supports local repository roots".to_string())
+                Err(
+                    "no installed repository source plugin supports local repository roots"
+                        .to_string(),
+                )
             } else {
                 Err(format!(
                     "repository source plugin runtime is not available: {}",
@@ -1419,7 +1422,11 @@ pub(super) fn hide_repository_meta_dir(path: &Path) {
         {
             return;
         }
-        let failure = match child_process::command("attrib").arg("+H").arg(path).status() {
+        let failure = match child_process::command("attrib")
+            .arg("+H")
+            .arg(path)
+            .status()
+        {
             Ok(status) if status.success() => None,
             Ok(status) => Some(format!("attrib exited with {status}")),
             Err(error) => Some(error.to_string()),

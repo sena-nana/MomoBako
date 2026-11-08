@@ -11,7 +11,9 @@
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{CHECK, PLUS, TRASH, X};
-use nana_ui::runtime::view::{computed, each, fields, signal, widget, AnyView, FieldWrite, IntoProp, IntoView, Signal};
+use nana_ui::runtime::view::{
+    AnyView, FieldWrite, IntoProp, IntoView, Signal, computed, each, fields, signal, widget,
+};
 use nana_ui::runtime::{
     Activate, AlignSpec, IconButton, LengthSpec, ListItem, RadiusTier, SemanticColorRole, Stack,
 };
@@ -19,8 +21,8 @@ use nana_ui::{ButtonKind, ControlSize, Icon};
 
 use super::super::hot::{self, LayerPaint, LayerPaintField};
 use super::super::menu_focus::MENU_KEYS;
-use super::super::sidebar::{backend_options, BackendOption, GapMessage, PopoverMode};
-use super::super::view_part_overlay::dialog::{action, text_field, wrapping_text, DimmedDisabled};
+use super::super::sidebar::{BackendOption, GapMessage, PopoverMode, backend_options};
+use super::super::view_part_overlay::dialog::{DimmedDisabled, action, text_field, wrapping_text};
 use super::super::view_part_overlay::session::{Draft, Projected};
 use super::super::{ShellMessage, ShellViewModel, SidebarMessage};
 use super::parts::{self, ActiveTone};
@@ -56,7 +58,11 @@ impl Placement {
             PopoverMode::BackendForm => FORM_WIDTH,
         };
         let max_left = (model.viewport_width - width - VIEWPORT_MARGIN).max(VIEWPORT_MARGIN);
-        Some(Self { left: ANCHOR_LEFT.clamp(VIEWPORT_MARGIN, max_left), top: ANCHOR_TOP + ANCHOR_HEIGHT + ANCHOR_GAP, width })
+        Some(Self {
+            left: ANCHOR_LEFT.clamp(VIEWPORT_MARGIN, max_left),
+            top: ANCHOR_TOP + ANCHOR_HEIGHT + ANCHOR_GAP,
+            width,
+        })
     }
 }
 
@@ -72,16 +78,22 @@ pub fn repository_popover(model: &ShellViewModel) -> Option<AnyView> {
     };
     // 淡入和上移逐帧走，绑在热信号上，开合动效不重挂弹层。
     let paint = hot::prop(|signals| signals.panel, LayerPaint::panel(&model.motion));
-    let positioned = widget(Stack::column(0.0).with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Absolute))
-        .prop::<Placement, PlacementField>(placement)
-        .prop::<LayerPaint, LayerPaintField>(paint)
-        .children((panel,))
-        .into_any();
+    let positioned = widget(
+        Stack::column(0.0)
+            .with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Absolute),
+    )
+    .prop::<Placement, PlacementField>(placement)
+    .prop::<LayerPaint, LayerPaintField>(paint)
+    .children((panel,))
+    .into_any();
     Some(
-        widget(Stack::fill_column(0.0).with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative))
-            .children((dismiss_layer(), positioned))
-            .key("repository-popover-layer")
-            .into_any(),
+        widget(
+            Stack::fill_column(0.0)
+                .with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative),
+        )
+        .children((dismiss_layer(), positioned))
+        .key("repository-popover-layer")
+        .into_any(),
     )
 }
 
@@ -92,7 +104,9 @@ impl FieldWrite<Stack, Placement> for PlacementField {
     const FIELD: &'static str = "Stack.style.layout.offset+width";
 
     fn write(target: &mut Stack, value: Placement) {
-        let layout = Arc::make_mut(&mut <Stack as nana_ui::runtime::view::StyledComponent>::node_style_mut(target).layout);
+        let layout = Arc::make_mut(
+            &mut <Stack as nana_ui::runtime::view::StyledComponent>::node_style_mut(target).layout,
+        );
         layout.offset_left = Some(LengthSpec::Px(value.left));
         layout.offset_top = Some(LengthSpec::Px(value.top));
         layout.width = Some(LengthSpec::Px(value.width));
@@ -120,13 +134,21 @@ fn dismiss_layer() -> AnyView {
     widget(ListItem::new("关闭资源库弹层").style(style))
         .content(widget(Stack::row(0.0)))
         .key("repository-popover-dismiss")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(sidebar_message(SidebarMessage::CloseRepositoryPopover)))
+        .on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program_all(sidebar_message(SidebarMessage::CloseRepositoryPopover))
+        })
         .into_any()
 }
 
 /// 弹层外框：`--bg-elev` 底、`--border-strong` 描边、`--radius-md`、投影。`menu` 为真时（切换列表、添加菜单）
 /// 里面的项是一个方向键焦点组，上下键在项之间走。
-fn surface(padding: f32, gap: f32, children: Vec<AnyView>, label_key: &'static str, menu: bool) -> AnyView {
+fn surface(
+    padding: f32,
+    gap: f32,
+    children: Vec<AnyView>,
+    label_key: &'static str,
+    menu: bool,
+) -> AnyView {
     let surface = widget(
         Stack::column(gap)
             .padding(padding)
@@ -210,52 +232,103 @@ fn switcher(model: &ShellViewModel) -> AnyView {
     let view = signal(initial);
     Projected::register(view, SwitcherView::project);
     let rows = computed(move || view.with(|view| view.rows.clone()));
-    let list = widget(Stack::column(0.0)).children((each(rows, Clone::clone, repository_row).gap(2.0),)).key("repository-switch-list").into_any();
+    let list = widget(Stack::column(0.0))
+        .children((each(rows, Clone::clone, repository_row).gap(2.0),))
+        .key("repository-switch-list")
+        .into_any();
     let actions = widget(top_divider(Stack::column(2.0), 6.0))
         .children((
-            menu_item(Some(PLUS), "添加资源库", "repository-add", false, move || view.with(|view| view.submitting), || {
-                sidebar_message(SidebarMessage::ShowRepositoryAddMenu)
-            }),
-            menu_item(Some(TRASH), "删除当前资源库", "repository-delete", true, move || view.with(|view| view.submitting || !view.can_delete), || {
-                sidebar_message(SidebarMessage::DeleteRepositoryFromSwitcher)
-            }),
+            menu_item(
+                Some(PLUS),
+                "添加资源库",
+                "repository-add",
+                false,
+                move || view.with(|view| view.submitting),
+                || sidebar_message(SidebarMessage::ShowRepositoryAddMenu),
+            ),
+            menu_item(
+                Some(TRASH),
+                "删除当前资源库",
+                "repository-delete",
+                true,
+                move || view.with(|view| view.submitting || !view.can_delete),
+                || sidebar_message(SidebarMessage::DeleteRepositoryFromSwitcher),
+            ),
         ))
         .into_any();
-    surface(6.0, 6.0, vec![list, actions, popover_error(move || view.with(|view| view.error.clone()))], "repository-switcher-popover", true)
+    surface(
+        6.0,
+        6.0,
+        vec![
+            list,
+            actions,
+            popover_error(move || view.with(|view| view.error.clone())),
+        ],
+        "repository-switcher-popover",
+        true,
+    )
 }
 
 /// 一个资源库：勾选列、名称和丢失标记。当前库只铺 `--accent-soft` 底，文字仍是正文色。
 fn repository_row(row: RepositoryRow) -> AnyView {
-    let check = widget(Stack::row(0.0).width(LengthSpec::Px(16.0)).shrink(0.0).justify(nana_ui::runtime::JustifySpec::Center))
-        .children(row.active.then(|| widget(nana_ui::runtime::IconGlyph::new(CHECK).size(13.0).role(SemanticColorRole::Accent))));
-    let mut name = parts::label_text(row.name.clone(), 13.0, 600, Some(SemanticColorRole::Text)).truncating();
+    let check = widget(
+        Stack::row(0.0)
+            .width(LengthSpec::Px(16.0))
+            .shrink(0.0)
+            .justify(nana_ui::runtime::JustifySpec::Center),
+    )
+    .children(row.active.then(|| {
+        widget(
+            nana_ui::runtime::IconGlyph::new(CHECK)
+                .size(13.0)
+                .role(SemanticColorRole::Accent),
+        )
+    }));
+    let mut name =
+        parts::label_text(row.name.clone(), 13.0, 600, Some(SemanticColorRole::Text)).truncating();
     {
         let layout = Arc::make_mut(&mut name.style.layout);
         layout.flex_shrink = Some(1.0);
         layout.min_width = Some(LengthSpec::Px(0.0));
     }
     let missing = row.missing.then(missing_badge);
-    let content = widget(Stack::fill_row(8.0).align(AlignSpec::Center))
-        .children((check, widget(Stack::fill_row(6.0).align(AlignSpec::Center)).children((widget(name), missing))));
+    let content = widget(Stack::fill_row(8.0).align(AlignSpec::Center)).children((
+        check,
+        widget(Stack::fill_row(6.0).align(AlignSpec::Center)).children((widget(name), missing)),
+    ));
     let mut style = parts::row_style(30.0, 8.0, 8.0, 8.0, ActiveTone::Accent, row.disabled);
     style.interaction.selected.foreground = Some(SemanticColorRole::Text);
     style.interaction.selected_hovered = style.interaction.selected;
     style.interaction.selected_pressed = style.interaction.selected;
     let repo_id = row.repo_id.clone();
-    widget(ListItem::new(format!("切换资源库 {}", row.name)).selected(row.active).disabled(row.disabled).style(style))
-        .content(content)
-        .key(format!("repository-switch-{}", row.repo_id))
-        .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program_all(sidebar_message(SidebarMessage::SelectRepositoryFromSwitcher(repo_id.clone())));
-        })
-        .into_any()
+    widget(
+        ListItem::new(format!("切换资源库 {}", row.name))
+            .selected(row.active)
+            .disabled(row.disabled)
+            .style(style),
+    )
+    .content(content)
+    .key(format!("repository-switch-{}", row.repo_id))
+    .on_cx(move |_, _: &Activate, cx| {
+        cx.dispatch_program_all(sidebar_message(
+            SidebarMessage::SelectRepositoryFromSwitcher(repo_id.clone()),
+        ));
+    })
+    .into_any()
 }
 
 /// 「丢失」小标记：`--err-soft` 胶囊、`--err` 11px 字。
 fn missing_badge() -> AnyView {
-    widget(Stack::row(0.0).padding_xy(5.0, 1.0).shrink(0.0).painter(super::super::shell_tint::SoftFill::err().pill()))
-        .children((widget(parts::label_text("丢失", 11.0, 400, Some(SemanticColorRole::Danger)).line_height(15.0)),))
-        .into_any()
+    widget(
+        Stack::row(0.0)
+            .padding_xy(5.0, 1.0)
+            .shrink(0.0)
+            .painter(super::super::shell_tint::SoftFill::err().pill()),
+    )
+    .children((widget(
+        parts::label_text("丢失", 11.0, 400, Some(SemanticColorRole::Danger)).line_height(15.0),
+    ),))
+    .into_any()
 }
 
 /// 添加菜单里的一个来源后端。
@@ -283,7 +356,11 @@ impl AddMenuView {
         Some(Self {
             options: backend_options(&model.admin.plugins)
                 .into_iter()
-                .map(|option| BackendRow { plugin_id: option.plugin_id, label: option.label, disabled: submitting || !option.enabled })
+                .map(|option| BackendRow {
+                    plugin_id: option.plugin_id,
+                    label: option.label,
+                    disabled: submitting || !option.enabled,
+                })
                 .collect(),
             error: model.sidebar.popover_error.clone(),
         })
@@ -300,18 +377,30 @@ fn add_menu(model: &ShellViewModel) -> AnyView {
     let options = computed(move || view.with(|view| view.options.clone()));
     let rows = each(options, Clone::clone, |option: BackendRow| {
         let plugin_id = option.plugin_id.clone();
-        menu_item(None, &option.label, "repository-backend", false, option.disabled, move || {
-            sidebar_message(SidebarMessage::SelectRepositoryBackend(plugin_id.clone()))
-        })
+        menu_item(
+            None,
+            &option.label,
+            "repository-backend",
+            false,
+            option.disabled,
+            move || sidebar_message(SidebarMessage::SelectRepositoryBackend(plugin_id.clone())),
+        )
     })
     .gap(1.0);
     let empty = widget(Stack::column(0.0))
         .visible(move || view.with(|view| view.options.is_empty()))
-        .children((parts::empty_hint("没有可用的资源库来源插件。", "repository-backend-empty"),));
+        .children((parts::empty_hint(
+            "没有可用的资源库来源插件。",
+            "repository-backend-empty",
+        ),));
     surface(
         4.0,
         1.0,
-        vec![widget(Stack::column(0.0)).children((rows,)).into_any(), empty.into_any(), popover_error(move || view.with(|view| view.error.clone()))],
+        vec![
+            widget(Stack::column(0.0)).children((rows,)).into_any(),
+            empty.into_any(),
+            popover_error(move || view.with(|view| view.error.clone())),
+        ],
         "repository-add-menu",
         true,
     )
@@ -365,10 +454,17 @@ impl BackendFormView {
             return None;
         }
         let options = backend_options(&model.admin.plugins);
-        let option: Option<&BackendOption> = options.iter().find(|option| option.plugin_id == sidebar.backend_plugin_id);
+        let option: Option<&BackendOption> = options
+            .iter()
+            .find(|option| option.plugin_id == sidebar.backend_plugin_id);
         Some(Self {
-            title: option.map(|option| option.name.clone()).unwrap_or_else(|| "添加资源库".into()),
-            summary: option.map(|option| option.description.clone()).filter(|text| !text.is_empty()).unwrap_or_else(|| "填写资源库配置。".into()),
+            title: option
+                .map(|option| option.name.clone())
+                .unwrap_or_else(|| "添加资源库".into()),
+            summary: option
+                .map(|option| option.description.clone())
+                .filter(|text| !text.is_empty())
+                .unwrap_or_else(|| "填写资源库配置。".into()),
             submitting: sidebar.submitting,
             blocked: sidebar.submitting || sidebar.backend_submit_disabled(option),
             error: sidebar.popover_error.clone(),
@@ -378,7 +474,9 @@ impl BackendFormView {
 
 /// 表单里一个字段的草稿：表单开着时读侧栏里这一项。
 fn form_draft(model: &ShellViewModel, read: fn(&ShellViewModel) -> String) -> Signal<String> {
-    Draft::register(model, move |model| (model.sidebar.popover == PopoverMode::BackendForm).then(|| read(model)))
+    Draft::register(model, move |model| {
+        (model.sidebar.popover == PopoverMode::BackendForm).then(|| read(model))
+    })
 }
 
 /// 后端表单：名称、服务地址、根目录、用户名、密码，说明和「返回 / 取消 / 创建」。
@@ -389,46 +487,139 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
     let view = signal(initial);
     Projected::register(view, BackendFormView::project);
     let submitting = move || view.with(|view| view.submitting);
-    let mut close = IconButton::new(X, "关闭添加资源库").size(ControlSize::Small).with_tooltip("关闭");
+    let mut close = IconButton::new(X, "关闭添加资源库")
+        .size(ControlSize::Small)
+        .with_tooltip("关闭");
     close.style = parts::icon_button_style(22.0, RadiusTier::Sm, SemanticColorRole::Faint, None);
     // 提交中停用：照 Vue `button:disabled` 的 0.45 和弹层底色（`--bg-elev`）在 sRGB 里混。
-    close.style.interaction.disabled = crate::theme_map::disabled_paint(SemanticColorRole::Faint, SemanticColorRole::Surface);
-    let header = widget(Stack::bar(8.0).align(AlignSpec::Center).min_height(LengthSpec::Px(24.0))).children((
-        widget(parts::label_text(String::new(), 13.0, 700, Some(SemanticColorRole::Text)))
-            .prop::<String, fields::text::value>(move || view.with(|view| view.title.clone())),
+    close.style.interaction.disabled =
+        crate::theme_map::disabled_paint(SemanticColorRole::Faint, SemanticColorRole::Surface);
+    let header = widget(
+        Stack::bar(8.0)
+            .align(AlignSpec::Center)
+            .min_height(LengthSpec::Px(24.0)),
+    )
+    .children((
+        widget(parts::label_text(
+            String::new(),
+            13.0,
+            700,
+            Some(SemanticColorRole::Text),
+        ))
+        .prop::<String, fields::text::value>(move || view.with(|view| view.title.clone())),
         widget(Stack::spacer()),
         widget(close.colors_from_style())
             .key("repository-form-close")
             .prop::<bool, fields::icon_button::disabled>(submitting)
-            .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(sidebar_message(SidebarMessage::CloseRepositoryPopover))),
+            .on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program_all(sidebar_message(SidebarMessage::CloseRepositoryPopover))
+            }),
     ));
-    let gap = |message: fn(String) -> GapMessage| move |value: String| sidebar_message(SidebarMessage::Gap(message(value)));
-    let field = |label: &'static str, key: &'static str, placeholder: &'static str, read: fn(&ShellViewModel) -> String, secure: bool, message: fn(String) -> GapMessage| {
-        text_field(label, key, form_draft(model, read), placeholder, secure, submitting, gap(message), None)
+    let gap = |message: fn(String) -> GapMessage| {
+        move |value: String| sidebar_message(SidebarMessage::Gap(message(value)))
     };
-    let mut note = parts::label_text("当前仅完成后端配置入口与服务端抽象。远端适配器尚未实现，请先用于配置演进与契约联调。", 12.0, 400, Some(SemanticColorRole::Warning)).line_height(17.0);
+    let field = |label: &'static str,
+                 key: &'static str,
+                 placeholder: &'static str,
+                 read: fn(&ShellViewModel) -> String,
+                 secure: bool,
+                 message: fn(String) -> GapMessage| {
+        text_field(
+            label,
+            key,
+            form_draft(model, read),
+            placeholder,
+            secure,
+            submitting,
+            gap(message),
+            None,
+        )
+    };
+    let mut note = parts::label_text(
+        "当前仅完成后端配置入口与服务端抽象。远端适配器尚未实现，请先用于配置演进与契约联调。",
+        12.0,
+        400,
+        Some(SemanticColorRole::Warning),
+    )
+    .line_height(17.0);
     Arc::make_mut(&mut note.style.layout).width = Some(LengthSpec::Fill);
     let body: Vec<AnyView> = vec![
         widget(wrapping_text(12.0, 17.0, SemanticColorRole::Muted))
             .prop::<String, fields::text::value>(move || view.with(|view| view.summary.clone()))
             .into_any(),
-        field("资源库名称", "repository-form-name", "可选，默认使用后端名称", |model| model.sidebar.backend_name.clone(), false, GapMessage::SetBackendName),
-        field("服务地址", "repository-form-url", "https://example.com/dav/", |model| model.sidebar.backend_url.clone(), false, GapMessage::SetBackendUrl),
-        field("根目录", "repository-form-root", "/assets/anime", |model| model.sidebar.backend_root.clone(), false, GapMessage::SetBackendRoot),
-        field("用户名", "repository-form-user", "可选", |model| model.sidebar.backend_user.clone(), false, GapMessage::SetBackendUser),
-        field("密码 / Token", "repository-form-password", "可选", |model| model.sidebar.backend_password.clone(), true, GapMessage::SetBackendPassword),
-        widget(Stack::column(0.0).padding_xy(10.0, 8.0).radius(RadiusTier::Sm).surface(SemanticColorRole::WarningSoft))
-            .children((widget(note),))
-            .into_any(),
+        field(
+            "资源库名称",
+            "repository-form-name",
+            "可选，默认使用后端名称",
+            |model| model.sidebar.backend_name.clone(),
+            false,
+            GapMessage::SetBackendName,
+        ),
+        field(
+            "服务地址",
+            "repository-form-url",
+            "https://example.com/dav/",
+            |model| model.sidebar.backend_url.clone(),
+            false,
+            GapMessage::SetBackendUrl,
+        ),
+        field(
+            "根目录",
+            "repository-form-root",
+            "/assets/anime",
+            |model| model.sidebar.backend_root.clone(),
+            false,
+            GapMessage::SetBackendRoot,
+        ),
+        field(
+            "用户名",
+            "repository-form-user",
+            "可选",
+            |model| model.sidebar.backend_user.clone(),
+            false,
+            GapMessage::SetBackendUser,
+        ),
+        field(
+            "密码 / Token",
+            "repository-form-password",
+            "可选",
+            |model| model.sidebar.backend_password.clone(),
+            true,
+            GapMessage::SetBackendPassword,
+        ),
+        widget(
+            Stack::column(0.0)
+                .padding_xy(10.0, 8.0)
+                .radius(RadiusTier::Sm)
+                .surface(SemanticColorRole::WarningSoft),
+        )
+        .children((widget(note),))
+        .into_any(),
         popover_error(move || view.with(|view| view.error.clone())),
     ];
-    let actions = widget(Stack::bar(8.0).align(AlignSpec::Center).with_layout(|layout| {
-        layout.padding_top = Some(LengthSpec::Px(2.0));
-    }))
+    let actions = widget(
+        Stack::bar(8.0)
+            .align(AlignSpec::Center)
+            .with_layout(|layout| {
+                layout.padding_top = Some(LengthSpec::Px(2.0));
+            }),
+    )
     .children((
         widget(Stack::spacer()),
-        action("返回", ButtonKind::Ghost, submitting, "repository-form-back", || sidebar_message(SidebarMessage::BackToAddMenu)),
-        action("取消", ButtonKind::Ghost, submitting, "repository-form-cancel", || sidebar_message(SidebarMessage::CloseRepositoryPopover)),
+        action(
+            "返回",
+            ButtonKind::Ghost,
+            submitting,
+            "repository-form-back",
+            || sidebar_message(SidebarMessage::BackToAddMenu),
+        ),
+        action(
+            "取消",
+            ButtonKind::Ghost,
+            submitting,
+            "repository-form-cancel",
+            || sidebar_message(SidebarMessage::CloseRepositoryPopover),
+        ),
         action(
             move || if submitting() { "创建中" } else { "创建" }.to_string(),
             ButtonKind::Primary,
@@ -440,7 +631,11 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
     surface(
         10.0,
         10.0,
-        vec![header.into_any(), widget(Stack::column(10.0)).children(body).into_any(), actions.into_any()],
+        vec![
+            header.into_any(),
+            widget(Stack::column(10.0)).children(body).into_any(),
+            actions.into_any(),
+        ],
         "repository-backend-form",
         false,
     )
@@ -449,12 +644,18 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
 /// 弹层里的错误：`--err-soft` 底、`--err` 12px 字，没有错误时不占位。
 fn popover_error(error: impl Fn() -> String + Send + Clone + 'static) -> AnyView {
     let shown = error.clone();
-    widget(Stack::column(0.0).padding_xy(10.0, 8.0).painter(super::super::shell_tint::SoftFill::err()))
-        .visible(move || !shown().is_empty())
-        .children((widget(wrapping_text(12.0, 17.0, SemanticColorRole::Danger))
+    widget(
+        Stack::column(0.0)
+            .padding_xy(10.0, 8.0)
+            .painter(super::super::shell_tint::SoftFill::err()),
+    )
+    .visible(move || !shown().is_empty())
+    .children(
+        (widget(wrapping_text(12.0, 17.0, SemanticColorRole::Danger))
             .key("repository-popover-error")
-            .prop::<String, fields::text::value>(error),))
-        .into_any()
+            .prop::<String, fields::text::value>(error),),
+    )
+    .into_any()
 }
 
 /// 顶边一条 `--border-soft` 分隔线，线下留 `gap` 内边距。

@@ -20,7 +20,9 @@ use super::super::repo_operation::{OperationPatch, OperationStart};
 const SYNC: &[&str] = &[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_SYNC];
 use super::super::search_collate::compare_zh;
 use super::startup::{StartupMode, StartupStatus};
-use super::{RepositoryPresence, WorkspaceEffect, WorkspacePanel, WorkspaceRepository, WorkspaceState};
+use super::{
+    RepositoryPresence, WorkspaceEffect, WorkspacePanel, WorkspaceRepository, WorkspaceState,
+};
 
 /// 同一个仓库的刷新走到哪一步。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,7 +60,11 @@ impl WorkspaceState {
         self.list_generation = self.list_generation.saturating_add(1);
         self.list_loading = true;
         if self.startup.status == StartupStatus::Ready {
-            self.operation.start(OperationStart::new("加载资源库", "读取已注册资源库", 12.0).indeterminate().runs(SYNC));
+            self.operation.start(
+                OperationStart::new("加载资源库", "读取已注册资源库", 12.0)
+                    .indeterminate()
+                    .runs(SYNC),
+            );
             self.refresh = Some(RefreshRun {
                 generation: self.list_generation,
                 stage: RefreshStage::Listing,
@@ -70,7 +76,9 @@ impl WorkspaceState {
         } else if let Some(target) = target {
             eprintln!("Nana 启动还没完成，刷新资源库列表以后不另选仓库：{target}");
         }
-        self.effects.push(WorkspaceEffect::RefreshRepositories { generation: self.list_generation });
+        self.effects.push(WorkspaceEffect::RefreshRepositories {
+            generation: self.list_generation,
+        });
     }
 
     /// 来源下载收尾的刷新：和 [`Self::request_repository_refresh`] 一样重读列表、同步、读摘要和当前目录，只是这一轮
@@ -86,7 +94,8 @@ impl WorkspaceState {
     /// 仓库、当前仓库或第一项。选中别的仓库就是换仓库，选中同一个仓库接着同步。
     pub(super) fn apply_ready_list(&mut self, items: Vec<WorkspaceRepository>) {
         self.repositories = items;
-        self.operation.update(OperationPatch::step("加载资源库摘要", 38.0));
+        self.operation
+            .update(OperationPatch::step("加载资源库摘要", 38.0));
         if self.repositories.is_empty() {
             self.assign_active(None);
             self.remember_repository(None);
@@ -99,7 +108,11 @@ impl WorkspaceState {
         let next = [target, self.active_repo_id.clone()]
             .into_iter()
             .flatten()
-            .find(|repo_id| self.repositories.iter().any(|item| &item.repo_id == repo_id))
+            .find(|repo_id| {
+                self.repositories
+                    .iter()
+                    .any(|item| &item.repo_id == repo_id)
+            })
             .unwrap_or_else(|| self.repositories[0].repo_id.clone());
         self.select_repository(&next);
     }
@@ -107,13 +120,20 @@ impl WorkspaceState {
     /// 选一个资源库（Vue `selectRepository`）：换到别的仓库回到启动页走三步；同一个仓库先同步再重读。
     /// 启动或换仓库还在走时，让进行中的结果作废，从同步重新开始。返回有没有选上。
     pub fn select_repository(&mut self, repo_id: &str) -> bool {
-        let Some(repository) = self.repositories.iter().find(|item| item.repo_id == repo_id).cloned() else {
+        let Some(repository) = self
+            .repositories
+            .iter()
+            .find(|item| item.repo_id == repo_id)
+            .cloned()
+        else {
             eprintln!("Nana 资源库不在列表里，不能选择：{repo_id}");
             return false;
         };
         match self.startup.status {
             StartupStatus::Loading => self.restart_loading(repository),
-            StartupStatus::Ready if self.active_repo_id.as_deref() == Some(repo_id) => self.select_same(repository),
+            StartupStatus::Ready if self.active_repo_id.as_deref() == Some(repo_id) => {
+                self.select_same(repository)
+            }
             StartupStatus::Ready => self.begin_switch(repository),
             StartupStatus::Idle | StartupStatus::Error => {
                 eprintln!("Nana 启动还没完成，不能选择资源库：{repo_id}");
@@ -148,13 +168,20 @@ impl WorkspaceState {
         self.startup.begin_switch();
         self.assign_active(Some(repository.repo_id.clone()));
         self.reset_library_category();
-        if matches!(self.panel, WorkspacePanel::Trash | WorkspacePanel::SmartFolder | WorkspacePanel::Playlist) {
+        if matches!(
+            self.panel,
+            WorkspacePanel::Trash | WorkspacePanel::SmartFolder | WorkspacePanel::Playlist
+        ) {
             // 回收站、智能文件夹和播放集属于上一个仓库。Vue 换仓库不改面板，回收站面板会接着显示新仓库的
             // 根目录（不是回收站），这里回到文件面板。
             self.panel = WorkspacePanel::Files;
         }
         self.snapshot_loading = true;
-        self.operation.start(OperationStart::new("加载资源库", "读取资源库快照", 10.0).indeterminate().runs(SYNC));
+        self.operation.start(
+            OperationStart::new("加载资源库", "读取资源库快照", 10.0)
+                .indeterminate()
+                .runs(SYNC),
+        );
         if repository.status == "missing" {
             self.presence = RepositoryPresence::Missing;
             self.remember_repository(Some(repository.repo_id));
@@ -162,13 +189,17 @@ impl WorkspaceState {
             return;
         }
         self.presence = RepositoryPresence::Ready;
-        self.operation.update(OperationPatch::step("扫描资源库文件", 28.0));
+        self.operation
+            .update(OperationPatch::step("扫描资源库文件", 28.0));
         self.begin_sync(repository.repo_id);
     }
 
     /// 同一个仓库（Vue `selectRepository` 不换仓库）：缺失时回到缺失页；否则先同步，再读摘要、重读当前目录。
     fn select_same(&mut self, repository: WorkspaceRepository) {
-        let target_listing = self.refresh.as_ref().is_some_and(|run| run.stage == RefreshStage::Listing);
+        let target_listing = self
+            .refresh
+            .as_ref()
+            .is_some_and(|run| run.stage == RefreshStage::Listing);
         self.list_generation = self.list_generation.saturating_add(1);
         if repository.status == "missing" {
             self.presence = RepositoryPresence::Missing;
@@ -192,12 +223,22 @@ impl WorkspaceState {
         });
         run.generation = self.list_generation;
         run.stage = RefreshStage::Syncing;
-        self.effects.push(WorkspaceEffect::SyncRepository { repo_id: repository.repo_id, generation: self.list_generation });
+        self.effects.push(WorkspaceEffect::SyncRepository {
+            repo_id: repository.repo_id,
+            generation: self.list_generation,
+        });
     }
 
     /// 同仓库刷新的同步结果。成功接着读摘要；失败收尾，返回写进状态区的文案。过期的结果不算。
-    pub(super) fn note_refresh_synced(&mut self, generation: u64, result: Result<(), String>) -> Option<String> {
-        let run = self.refresh.as_mut().filter(|run| run.stage == RefreshStage::Syncing && run.generation == generation);
+    pub(super) fn note_refresh_synced(
+        &mut self,
+        generation: u64,
+        result: Result<(), String>,
+    ) -> Option<String> {
+        let run = self
+            .refresh
+            .as_mut()
+            .filter(|run| run.stage == RefreshStage::Syncing && run.generation == generation);
         if run.is_none() {
             eprintln!("Nana 忽略过期的资源库同步结果：代次 {generation}");
             return None;
@@ -227,7 +268,8 @@ impl WorkspaceState {
         if generation != self.list_generation {
             return false;
         }
-        let startup = self.startup.status == StartupStatus::Loading && self.startup.current_step == 3;
+        let startup =
+            self.startup.status == StartupStatus::Loading && self.startup.current_step == 3;
         startup || self.refresh_stage() == Some(RefreshStage::Snapshot)
     }
 
@@ -238,14 +280,20 @@ impl WorkspaceState {
 
     /// 同仓库刷新读完摘要：进入重读目录，返回要读的目录。
     pub(crate) fn begin_refresh_directory(&mut self) -> Option<String> {
-        let run = self.refresh.as_mut().filter(|run| run.stage == RefreshStage::Snapshot)?;
+        let run = self
+            .refresh
+            .as_mut()
+            .filter(|run| run.stage == RefreshStage::Snapshot)?;
         run.stage = RefreshStage::Directory;
         Some(run.directory.clone().unwrap_or_default())
     }
 
     /// 壳层记下刷新开始时的当前目录（Vue `previousDirectoryPath`）。已经记下的不改。
     pub(crate) fn note_refresh_directory(&mut self, directory: &str) {
-        if let Some(run) = self.refresh.as_mut().filter(|run| run.stage != RefreshStage::Listing)
+        if let Some(run) = self
+            .refresh
+            .as_mut()
+            .filter(|run| run.stage != RefreshStage::Listing)
             && run.directory.is_none()
         {
             run.directory = Some(directory.to_string());
@@ -254,7 +302,11 @@ impl WorkspaceState {
 
     /// 读当前目录失败、还没退回根目录过：记下退回，返回 true，壳层接着读根目录。
     pub(crate) fn fall_back_to_root(&mut self) -> bool {
-        let Some(run) = self.refresh.as_mut().filter(|run| run.stage == RefreshStage::Directory) else {
+        let Some(run) = self
+            .refresh
+            .as_mut()
+            .filter(|run| run.stage == RefreshStage::Directory)
+        else {
             return false;
         };
         if run.fell_back || run.directory.as_deref().unwrap_or_default().is_empty() {
@@ -291,15 +343,18 @@ impl WorkspaceState {
     /// 把附加、新建或重定向返回的仓库摘要放进列表（Vue `upsertRepositorySummary`，按名称排序）。
     pub fn upsert_repository(&mut self, summary: &RepositorySummary) {
         let repository = WorkspaceRepository::from_summary(summary);
-        self.repositories.retain(|item| item.repo_id != repository.repo_id);
+        self.repositories
+            .retain(|item| item.repo_id != repository.repo_id);
         self.repositories.push(repository);
-        self.repositories.sort_by(|left, right| compare_zh(&left.name, &right.name));
+        self.repositories
+            .sort_by(|left, right| compare_zh(&left.name, &right.name));
     }
 
     /// 删除当前资源库以后选下一个（Vue `selectNextRepositoryAfterRemoval`）：列表空了回到空库，
     /// 否则换到第一项。
     pub(super) fn remove_repository(&mut self, repo_id: &str) {
-        self.repositories.retain(|repository| repository.repo_id != repo_id);
+        self.repositories
+            .retain(|repository| repository.repo_id != repo_id);
         if self.active_repo_id.as_deref() != Some(repo_id) {
             return;
         }
@@ -321,7 +376,8 @@ impl WorkspaceState {
             Ok(summary) => {
                 self.missing_error.clear();
                 self.path_draft.clear();
-                self.operation.update(OperationPatch::step("更新资源库状态", 64.0));
+                self.operation
+                    .update(OperationPatch::step("更新资源库状态", 64.0));
                 self.upsert_repository(&summary);
                 if !self.select_repository(&summary.repo_id) {
                     self.operation.finish();

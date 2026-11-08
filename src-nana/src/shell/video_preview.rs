@@ -48,12 +48,18 @@ pub struct DecodedClip {
 }
 
 /// 解视频容器。成功时会话处于 paused，并能跳转。
-pub(super) fn open_clip(repo_id: &str, bytes: &[u8]) -> Result<(PlaybackSessionState, Option<PreviewPcm>, Vec<VideoFrame>), String> {
+pub(super) fn open_clip(
+    repo_id: &str,
+    bytes: &[u8],
+) -> Result<(PlaybackSessionState, Option<PreviewPcm>, Vec<VideoFrame>), String> {
     session_for(repo_id, decode(bytes)?)
 }
 
 /// 解出的片段换成会话：没有画面时只用音轨。没解到结尾时会话照样能放，`error` 写明只解出了多少（[`cut_note`]）。
-fn session_for(repo_id: &str, clip: DecodedClip) -> Result<(PlaybackSessionState, Option<PreviewPcm>, Vec<VideoFrame>), String> {
+fn session_for(
+    repo_id: &str,
+    clip: DecodedClip,
+) -> Result<(PlaybackSessionState, Option<PreviewPcm>, Vec<VideoFrame>), String> {
     let note = clip.cut.map(|cut| cut_note(clip.duration_ms, cut.total_ms));
     if let Some(note) = &note {
         eprintln!("Nana 媒体没有解到结尾：{note}");
@@ -94,14 +100,37 @@ fn session_for(repo_id: &str, clip: DecodedClip) -> Result<(PlaybackSessionState
 
 /// 没解到结尾时写在会话里的说明：「只解出前 0:05（全长 2:31），之后的部分暂不能播放」。全长读不到时不写括号。
 pub(super) fn cut_note(decoded_ms: u64, total_ms: Option<u64>) -> String {
-    let total = total_ms.filter(|total| *total > decoded_ms).map(|total| format!("（全长 {}）", clock(total))).unwrap_or_default();
-    format!("只解出前 {}{total}，之后的部分暂不能播放", clock(decoded_ms))
+    let total = total_ms
+        .filter(|total| *total > decoded_ms)
+        .map(|total| format!("（全长 {}）", clock(total)))
+        .unwrap_or_default();
+    format!(
+        "只解出前 {}{total}，之后的部分暂不能播放",
+        clock(decoded_ms)
+    )
 }
 
 /// 和播放条一样写成「分:秒」。
 fn clock(ms: u64) -> String {
     let seconds = ms / 1000;
     format!("{}:{:02}", seconds / 60, seconds % 60)
+}
+
+/// 包内预览只用这条：未压缩 AVI 的画面。不是这一类返回 `Ok(None)`。
+/// 不交给系统媒体基础。解出来的 PCM 在这里丢掉，不返回给播放条。
+pub(super) fn uncompressed_avi_frames(bytes: &[u8]) -> Result<Option<Vec<VideoFrame>>, String> {
+    match avi::try_decode_uncompressed(bytes) {
+        Ok(Some(clip)) if !clip.frames.is_empty() => Ok(Some(clip.frames)),
+        Ok(Some(_)) => {
+            eprintln!("Nana 未压缩 AVI 没有画面");
+            Ok(None)
+        }
+        Ok(None) => Ok(None),
+        Err(error) => {
+            eprintln!("Nana 未压缩 AVI 解码失败：{error}");
+            Err(error)
+        }
+    }
 }
 
 fn decode(bytes: &[u8]) -> Result<DecodedClip, String> {
@@ -192,6 +221,35 @@ mod tests {
         assert!(clip.pcm.is_some());
     }
 
+    /// 夹具 `clip.avi`：32×18、32 位未压缩、两帧各一种颜色。纯 Rust 路径交出真实像素。
+    /// 不走媒体基础，不打开窗口；测试构建也没有声卡模块。
+    #[test]
+    fn fixture_clip_avi_yields_real_frames() {
+        assert!(!crate::shell::player::sound_device_compiled_in());
+        let clip = decode(include_bytes!("preview_fixtures/clip.avi")).expect("clip.avi");
+        assert!(clip.frames.len() >= 2, "{}", clip.frames.len());
+        let first = &clip.frames[0];
+        assert_eq!(
+            (first.width, first.height, first.rgba.len()),
+            (32, 18, 32 * 18 * 4)
+        );
+        assert!(
+            first
+                .rgba
+                .chunks_exact(4)
+                .all(|pixel| pixel == [0x20, 0x22, 0x26, 0xFF]),
+            "第一帧应是文件里的深灰"
+        );
+        let second = &clip.frames[1];
+        assert!(
+            second
+                .rgba
+                .chunks_exact(4)
+                .all(|pixel| pixel == [0x2A, 0x2D, 0x33, 0xFF]),
+            "第二帧应是文件里的另一色"
+        );
+    }
+
     #[test]
     fn recognized_mp4_is_a_decode_failure_not_a_missing_decoder() {
         let mp4 = b"\x00\x00\x00\x18ftypmp42\x00\x00\x00\x00mp42isom";
@@ -205,7 +263,10 @@ mod tests {
     /// 交错的 16 位小端样本。
     #[cfg(windows)]
     fn le16(samples: &[i16]) -> Vec<u8> {
-        samples.iter().flat_map(|sample| sample.to_le_bytes()).collect()
+        samples
+            .iter()
+            .flat_map(|sample| sample.to_le_bytes())
+            .collect()
     }
 
     /// 媒体基础解出的 5.1 音轨下混成立体声。拿 WAV 当容器在真实的源读取器上走一遍音轨读取；产品里 WAV 由自有
@@ -219,7 +280,10 @@ mod tests {
         let clip = super::mf::decode(&bytes, "WAV").expect("媒体基础解 5.1 WAV");
         assert!(clip.frames.is_empty());
         let pcm = clip.pcm.expect("音轨");
-        assert_eq!((pcm.channels, pcm.bits_per_sample, pcm.duration_ms), (2, 16, 1_000));
+        assert_eq!(
+            (pcm.channels, pcm.bits_per_sample, pcm.duration_ms),
+            (2, 16, 1_000)
+        );
         let side = (1_000.0 / (1.0 + std::f32::consts::SQRT_2)).round() as i16;
         assert_eq!(&pcm.pcm[..4], le16(&[side, -side]).as_slice());
     }
@@ -229,7 +293,10 @@ mod tests {
     #[test]
     fn media_foundation_audio_is_not_cut_at_three_minutes() {
         use crate::shell::audio_decode::pcm::{fmt_chunk, wav_file};
-        let bytes = wav_file(&fmt_chunk(1, 2, 48_000, 16, None), &vec![0; 48_000 * 4 * 200]);
+        let bytes = wav_file(
+            &fmt_chunk(1, 2, 48_000, 16, None),
+            &vec![0; 48_000 * 4 * 200],
+        );
         let clip = super::mf::decode(&bytes, "WAV").expect("媒体基础解 200 秒的音轨");
         assert_eq!(clip.pcm.as_ref().map(|pcm| pcm.duration_ms), Some(200_000));
         assert_eq!(clip.duration_ms, 200_000);
@@ -238,7 +305,11 @@ mod tests {
     /// 只有一项上限很小的解码上限，其余照常。
     #[cfg(windows)]
     fn tight(frames: usize, audio_only: usize) -> super::mf::Budget {
-        super::mf::Budget { frames, video_audio: super::PCM_BYTE_BUDGET, audio_only }
+        super::mf::Budget {
+            frames,
+            video_audio: super::PCM_BYTE_BUDGET,
+            audio_only,
+        }
     }
 
     /// 音轨到了上限：只留前面一段，会话照样能放，时长是解出的这一段，`error` 写明只解出了多少、全长多少。
@@ -247,13 +318,31 @@ mod tests {
     fn a_cut_audio_track_says_how_much_was_decoded() {
         use crate::shell::audio_decode::pcm::{fmt_chunk, wav_file};
         let bytes = wav_file(&fmt_chunk(1, 1, 8_000, 16, None), &vec![0; 16_000 * 10]);
-        let clip = super::mf::decode_within(&bytes, "WAV", &tight(super::FRAME_BYTE_BUDGET, 32_000)).expect("解出前一段");
-        assert_eq!(clip.cut, Some(super::Cut { total_ms: Some(10_000) }));
-        assert!(clip.duration_ms > 0 && clip.duration_ms <= 2_000, "{}", clip.duration_ms);
+        let clip =
+            super::mf::decode_within(&bytes, "WAV", &tight(super::FRAME_BYTE_BUDGET, 32_000))
+                .expect("解出前一段");
+        assert_eq!(
+            clip.cut,
+            Some(super::Cut {
+                total_ms: Some(10_000)
+            })
+        );
+        assert!(
+            clip.duration_ms > 0 && clip.duration_ms <= 2_000,
+            "{}",
+            clip.duration_ms
+        );
         let decoded = clip.duration_ms;
         let (session, pcm, frames) = super::session_for("repo", clip).expect("会话");
         assert!(frames.is_empty() && pcm.is_some());
-        assert_eq!((session.status.as_str(), session.duration_ms, session.can_seek), ("paused", Some(decoded), true));
+        assert_eq!(
+            (
+                session.status.as_str(),
+                session.duration_ms,
+                session.can_seek
+            ),
+            ("paused", Some(decoded), true)
+        );
         assert_eq!(session.error, Some(super::cut_note(decoded, Some(10_000))));
     }
 
@@ -263,25 +352,58 @@ mod tests {
     fn a_cut_video_says_how_much_was_decoded() {
         let bytes = super::avi::sample_frames(30, 64, 36, 10);
         let whole = super::mf::decode(&bytes, "AVI").expect("媒体基础解 AVI");
-        assert_eq!((whole.frames.len(), whole.cut), (30, None), "上限够时整段解完");
-        let clip = super::mf::decode_within(&bytes, "AVI", &tight(40_000, super::AUDIO_PCM_BYTE_BUDGET)).expect("解出前几帧");
+        assert_eq!(
+            (whole.frames.len(), whole.cut),
+            (30, None),
+            "上限够时整段解完"
+        );
+        let clip =
+            super::mf::decode_within(&bytes, "AVI", &tight(40_000, super::AUDIO_PCM_BYTE_BUDGET))
+                .expect("解出前几帧");
         assert_eq!(clip.frames.len(), 4);
-        assert_eq!(clip.cut, Some(super::Cut { total_ms: Some(3_000) }));
+        assert_eq!(
+            clip.cut,
+            Some(super::Cut {
+                total_ms: Some(3_000)
+            })
+        );
         assert!(clip.duration_ms < 1_000, "{}", clip.duration_ms);
         let decoded = clip.duration_ms;
         let (session, _, _) = super::session_for("repo", clip).expect("会话");
-        assert_eq!((session.status.as_str(), session.duration_ms), ("paused", Some(decoded)));
+        assert_eq!(
+            (session.status.as_str(), session.duration_ms),
+            ("paused", Some(decoded))
+        );
         assert_eq!(session.error, Some(super::cut_note(decoded, Some(3_000))));
     }
 
     /// 说明写成「分:秒」；全长读不到、或者不比解出的长时不写括号。
     #[test]
     fn the_cut_note_names_the_decoded_part_and_the_whole() {
-        assert_eq!(super::cut_note(5_400, Some(151_000)), "只解出前 0:05（全长 2:31），之后的部分暂不能播放");
-        assert_eq!(super::cut_note(5_400, None), "只解出前 0:05，之后的部分暂不能播放");
-        assert_eq!(super::cut_note(5_400, Some(5_000)), "只解出前 0:05，之后的部分暂不能播放");
-        let clip = super::DecodedClip { duration_ms: 5_400, frames: Vec::new(), pcm: None, cut: Some(super::Cut { total_ms: Some(151_000) }) };
-        assert!(super::session_for("repo", clip).is_err(), "没有画面也没有音轨仍是解码失败");
+        assert_eq!(
+            super::cut_note(5_400, Some(151_000)),
+            "只解出前 0:05（全长 2:31），之后的部分暂不能播放"
+        );
+        assert_eq!(
+            super::cut_note(5_400, None),
+            "只解出前 0:05，之后的部分暂不能播放"
+        );
+        assert_eq!(
+            super::cut_note(5_400, Some(5_000)),
+            "只解出前 0:05，之后的部分暂不能播放"
+        );
+        let clip = super::DecodedClip {
+            duration_ms: 5_400,
+            frames: Vec::new(),
+            pcm: None,
+            cut: Some(super::Cut {
+                total_ms: Some(151_000),
+            }),
+        };
+        assert!(
+            super::session_for("repo", clip).is_err(),
+            "没有画面也没有音轨仍是解码失败"
+        );
     }
 
     #[test]

@@ -6,8 +6,8 @@
 
 use nana_ui::runtime::{FrameworkError, MountedView, RuntimeDocument, StableNodeId};
 
-use super::view_part::{first_root, mount_detached, BodyMode, PartCx, PartId, ShellPart, Swap};
 use super::ShellViewModel;
+use super::view_part::{BodyMode, PartCx, PartId, ShellPart, Swap, first_root, mount_detached};
 
 #[path = "sidebar_project.rs"]
 pub(super) mod project;
@@ -29,7 +29,10 @@ impl ShellPart for SidebarPart {
     }
 
     fn new(signals: Self::Signals) -> Self {
-        Self { signals, view: None }
+        Self {
+            signals,
+            view: None,
+        }
     }
 
     fn root(&self) -> Option<StableNodeId> {
@@ -37,7 +40,12 @@ impl ShellPart for SidebarPart {
     }
 
     /// 排法变了：第一次排成工作台时按当前投影建侧栏；之后不重建，收起时留在停放的工作区里。
-    fn mount(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel, mode: BodyMode) -> Result<Swap, FrameworkError> {
+    fn mount(
+        &mut self,
+        cx: &mut PartCx<'_>,
+        model: &ShellViewModel,
+        mode: BodyMode,
+    ) -> Result<Swap, FrameworkError> {
         self.sync(model);
         if mode == BodyMode::Workbench && self.view.is_none() {
             return self.remount(cx, model);
@@ -57,7 +65,9 @@ impl ShellPart for SidebarPart {
     /// 建侧栏。只在第一次排成工作台时由 [`Self::mount`] 调。
     fn remount(&mut self, cx: &mut PartCx<'_>, _: &ShellViewModel) -> Result<Swap, FrameworkError> {
         let (signals, hot) = (self.signals, cx.hot);
-        self.view = mount_detached(cx.document, cx.hot, Self::ID, move || Some(super::sidebar_view::sidebar(signals, hot)))?;
+        self.view = mount_detached(cx.document, cx.hot, Self::ID, move || {
+            Some(super::sidebar_view::sidebar(signals, hot))
+        })?;
         cx.stats.remounts += 1;
         Ok(Swap::default())
     }

@@ -2,14 +2,16 @@
 //!
 //! 服务请求只进入已有的移动、导入和附加效果。系统动作记到宿主请求里。
 
-use crate::host_api::{openable_url, HostInputRequest, HostRequest};
+use crate::host_api::{HostInputRequest, HostRequest, openable_url};
 use crate::shell::admin::AdminMessage;
 
 use super::support::{
-    absolute_drag_paths, can_drag_entries, dropped_source_paths, filter_external_import_paths, internal_drag_distance,
-    normalize_move_paths, resolve_drop_target, should_delegate_to_external_drag, DIALOG_EXPORT_ID, DIALOG_PLUGIN_ID,
-    DIALOG_ATTACH_ID, DIALOG_DOWNLOAD_ID, DIALOG_RELOCATE_ID, DIALOG_REPOSITORY_EXPORT_ID, DIALOG_SOURCE_CACHE_ID,
-    DIALOG_THUMBNAIL_ID, EXTERNAL_DRAG_SWITCH_DISTANCE,
+    DIALOG_ATTACH_ID, DIALOG_DOWNLOAD_ID, DIALOG_EAGLE_LIBRARY_ID, DIALOG_EXPORT_ID,
+    DIALOG_IMPORT_ARCHIVE_ID, DIALOG_IMPORT_FOLDER_ID, DIALOG_PLUGIN_ID, DIALOG_RELOCATE_ID,
+    DIALOG_REPOSITORY_EXPORT_ID, DIALOG_SOURCE_CACHE_ID, DIALOG_THUMBNAIL_ID,
+    EXTERNAL_DRAG_SWITCH_DISTANCE, absolute_drag_paths, can_drag_entries, dropped_source_paths,
+    filter_external_import_paths, internal_drag_distance, normalize_move_paths,
+    resolve_drop_target, should_delegate_to_external_drag,
 };
 use super::{HostDragPhase, InputMessage, InputState, InternalSession};
 use crate::shell::{ShellMessage, ShellViewModel, WindowAction, WorkspacePanel};
@@ -24,12 +26,17 @@ pub(crate) fn begin_relocate_dialog(model: &mut ShellViewModel) {
     model.input.queue_folder_dialog();
 }
 
-pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) -> Option<ShellMessage> {
+pub(crate) fn reduce_message(
+    model: &mut ShellViewModel,
+    message: ShellMessage,
+) -> Option<ShellMessage> {
     match message {
         ShellMessage::WindowAction(WindowAction::Close) => {
             let dirty = model.close_is_dirty();
             let behavior = model.settings.close_behavior.clone();
-            model.input.apply_close(super::support::decide_close(&behavior, dirty), dirty);
+            model
+                .input
+                .apply_close(super::support::decide_close(&behavior, dirty), dirty);
             None
         }
         ShellMessage::Input(message) => {
@@ -46,7 +53,10 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
     }
 }
 
-fn note_attach(model: &mut ShellViewModel, result: &Result<crate::backend::services::repository::RepositorySummary, String>) {
+fn note_attach(
+    model: &mut ShellViewModel,
+    result: &Result<crate::backend::services::repository::RepositorySummary, String>,
+) {
     if !model.input.pending_attach {
         return;
     }
@@ -74,32 +84,94 @@ fn reduce_input(model: &mut ShellViewModel, message: InputMessage) {
             repo_root,
             hover_folder,
             over_browser,
-        } => begin_drag(model, &path, &selected, x, y, writable, trash, smart_folder, &backend_kind, &repo_root, hover_folder, over_browser),
-        InputMessage::EntryDragMove { x, y, bounds_width, bounds_height, hover_folder, over_browser } => {
-            drag_move(model, x, y, bounds_width, bounds_height, hover_folder, over_browser);
+        } => begin_drag(
+            model,
+            &path,
+            &selected,
+            x,
+            y,
+            writable,
+            trash,
+            smart_folder,
+            &backend_kind,
+            &repo_root,
+            hover_folder,
+            over_browser,
+        ),
+        InputMessage::EntryDragMove {
+            x,
+            y,
+            bounds_width,
+            bounds_height,
+            hover_folder,
+            over_browser,
+        } => {
+            drag_move(
+                model,
+                x,
+                y,
+                bounds_width,
+                bounds_height,
+                hover_folder,
+                over_browser,
+            );
         }
-        InputMessage::EntryDragEnd { hover_folder, over_browser, has_pointer } => {
+        InputMessage::EntryDragEnd {
+            hover_folder,
+            over_browser,
+            has_pointer,
+        } => {
             drag_end(model, hover_folder, over_browser, has_pointer);
         }
         InputMessage::WindowPointerLeave { x, y } => pointer_leave(model, x, y),
         InputMessage::WindowBlur => window_blur(model),
-        InputMessage::DragOver { internal_transfer, writable, files_panel } => drag_over(model, internal_transfer, writable, files_panel),
+        InputMessage::DragOver {
+            internal_transfer,
+            writable,
+            files_panel,
+        } => drag_over(model, internal_transfer, writable, files_panel),
         InputMessage::DragLeave { nested } => drag_leave(model, nested),
-        InputMessage::BrowserDrop { internal_transfer, paths, writable, trash, has_snapshot, repo_root } => {
-            browser_drop(model, internal_transfer, &paths, writable, trash, has_snapshot, &repo_root);
+        InputMessage::BrowserDrop {
+            internal_transfer,
+            paths,
+            writable,
+            trash,
+            has_snapshot,
+            repo_root,
+        } => {
+            browser_drop(
+                model,
+                internal_transfer,
+                &paths,
+                writable,
+                trash,
+                has_snapshot,
+                &repo_root,
+            );
         }
         InputMessage::FolderHover { path, trash } => {
-            if !trash {
+            if !trash && model.input.hover_folder.as_deref() != Some(path.as_str()) {
                 model.input.hover_folder = Some(path);
+                model.mark_surface_dirty();
             }
         }
         InputMessage::FolderLeave(path) => {
             if model.input.hover_folder.as_deref() == Some(path.as_str()) {
                 model.input.hover_folder = None;
+                model.input.hover_on_sidebar = false;
+                model.mark_surface_dirty();
             }
         }
-        InputMessage::FolderDrop { path, internal_transfer, paths } => folder_drop(model, &path, internal_transfer, &paths),
-        InputMessage::EmptyDragOver { has_active_id, has_repository } => {
+        InputMessage::SidebarFileDrag { phase, paths } => sidebar_file_drag(model, phase, &paths),
+        InputMessage::FolderDrop {
+            path,
+            internal_transfer,
+            paths,
+        } => folder_drop(model, &path, internal_transfer, &paths),
+        InputMessage::EmptyDragOver {
+            has_active_id,
+            has_repository,
+        } => {
             if has_active_id || has_repository {
                 return;
             }
@@ -112,7 +184,11 @@ fn reduce_input(model: &mut ShellViewModel, message: InputMessage) {
             }
             model.input.dragging_repository_folder = false;
         }
-        InputMessage::EmptyDrop { has_active_id, has_repository, paths } => {
+        InputMessage::EmptyDrop {
+            has_active_id,
+            has_repository,
+            paths,
+        } => {
             model.input.dragging_repository_folder = false;
             if has_active_id || has_repository {
                 return;
@@ -130,23 +206,70 @@ fn reduce_input(model: &mut ShellViewModel, message: InputMessage) {
             files_panel,
             has_snapshot,
             repo_root,
-        } => host_drag(model, phase, &paths, has_repository, missing_repository, writable, files_panel, has_snapshot, &repo_root),
+        } => host_drag(
+            model,
+            phase,
+            &paths,
+            has_repository,
+            missing_repository,
+            writable,
+            files_panel,
+            has_snapshot,
+            &repo_root,
+        ),
         InputMessage::BoxSelect { paths, append } => box_select(model, &paths, append),
-        InputMessage::OpenEntry { has_repo, absolute_path, path } => open_entry(model, has_repo, &absolute_path, &path),
+        InputMessage::OpenEntry {
+            has_repo,
+            absolute_path,
+            path,
+        } => open_entry(model, has_repo, &absolute_path, &path),
         InputMessage::RevealEntry { absolute_path } => reveal_entry(model, &absolute_path),
         InputMessage::OpenExternalUrl { url } => open_url(model, &url),
-        InputMessage::StartExternalDrag { paths, trash, backend_kind, repo_root } => {
+        InputMessage::StartExternalDrag {
+            paths,
+            trash,
+            backend_kind,
+            repo_root,
+        } => {
             start_external_drag(&mut model.input, &paths, trash, &backend_kind, &repo_root);
         }
         InputMessage::ConfirmCloseAnswer(accept) => model.input.answer_close(accept),
-        InputMessage::FileDialogCompleted { request_id, paths, failed } => complete_dialog(model, request_id, &paths, failed),
-        InputMessage::BeginDownloadFolder { plugin_id, method, payload, repository_id, progress } => {
-            model.input.pending_download = Some(super::source_prompt::PendingDownload { plugin_id, method, payload, repository_id, progress });
+        InputMessage::FileDialogCompleted {
+            request_id,
+            paths,
+            failed,
+        } => complete_dialog(model, request_id, &paths, failed),
+        InputMessage::BeginDownloadFolder {
+            plugin_id,
+            method,
+            payload,
+            repository_id,
+            progress,
+        } => {
+            model.input.pending_download = Some(super::source_prompt::PendingDownload {
+                plugin_id,
+                method,
+                payload,
+                repository_id,
+                progress,
+            });
             model.input.queue_download_dialog();
         }
-        InputMessage::BeginThumbnailFile { repo_id, path, kind } => super::thumbnail_prompt::begin(model, repo_id, path, kind),
-        InputMessage::PasteThumbnail { repo_id, path, kind } => super::thumbnail_prompt::paste(model, repo_id, path, kind),
-        InputMessage::ClearThumbnail { repo_id, path, kind } => super::thumbnail_prompt::clear(model, repo_id, path, kind),
+        InputMessage::BeginThumbnailFile {
+            repo_id,
+            path,
+            kind,
+        } => super::thumbnail_prompt::begin(model, repo_id, path, kind),
+        InputMessage::PasteThumbnail {
+            repo_id,
+            path,
+            kind,
+        } => super::thumbnail_prompt::paste(model, repo_id, path, kind),
+        InputMessage::ClearThumbnail {
+            repo_id,
+            path,
+            kind,
+        } => super::thumbnail_prompt::clear(model, repo_id, path, kind),
         InputMessage::ClearDrag => model.input.clear_flags(),
     }
 }
@@ -171,11 +294,17 @@ fn begin_drag(
     let drag_paths = if selected.iter().any(|item| item == path) {
         selected.to_vec()
     } else {
-        model.files.set_drag_selection(vec![path.to_string()], Some(path.to_string()), Some(path.to_string()));
+        model.files.set_drag_selection(
+            vec![path.to_string()],
+            Some(path.to_string()),
+            Some(path.to_string()),
+        );
         vec![path.to_string()]
     };
     model.input.dragged_paths = drag_paths.clone();
     model.input.internal_active = true;
+    // 和 Vue 一样：拖动已经起步，松手时这一行上的点击丢掉。
+    super::super::files_view::suppress_row_click(path);
     model.input.session = Some(InternalSession {
         start_x: x,
         start_y: y,
@@ -191,7 +320,11 @@ fn begin_drag(
 
 fn store_hover(model: &mut ShellViewModel, hover_folder: Option<String>, over_browser: bool) {
     let current = model.files.current_path.clone();
-    model.input.hover_folder = resolve_drop_target(hover_folder.as_deref(), over_browser, &current);
+    let next = resolve_drop_target(hover_folder.as_deref(), over_browser, &current);
+    if model.input.hover_folder != next {
+        model.input.hover_folder = next;
+        model.mark_surface_dirty();
+    }
 }
 
 fn drag_move(
@@ -217,7 +350,17 @@ fn drag_move(
     if session.delegated || session.paths.is_empty() {
         return;
     }
-    if should_delegate_to_external_drag(session.start_x, session.start_y, session.last_x, session.last_y, x, y, width, height, EXTERNAL_DRAG_SWITCH_DISTANCE) {
+    if should_delegate_to_external_drag(
+        session.start_x,
+        session.start_y,
+        session.last_x,
+        session.last_y,
+        x,
+        y,
+        width,
+        height,
+        EXTERNAL_DRAG_SWITCH_DISTANCE,
+    ) {
         delegate(model, &session);
     }
 }
@@ -233,7 +376,12 @@ fn delegate(model: &mut ShellViewModel, session: &InternalSession) {
     start_external_drag(&mut model.input, &paths, false, &backend_kind, &repo_root);
 }
 
-fn drag_end(model: &mut ShellViewModel, hover_folder: Option<String>, over_browser: bool, has_pointer: bool) {
+fn drag_end(
+    model: &mut ShellViewModel,
+    hover_folder: Option<String>,
+    over_browser: bool,
+    has_pointer: bool,
+) {
     let Some(session) = model.input.session.clone() else {
         model.input.finish_internal();
         return;
@@ -263,7 +411,9 @@ fn move_paths(model: &mut ShellViewModel, target: &str) {
         return;
     }
     let repo_id = model.workspace.active_repo_id.clone().unwrap_or_default();
-    model.files.enqueue_move(repo_id, sources, target.to_string());
+    model
+        .files
+        .enqueue_move(repo_id, sources, target.to_string());
 }
 
 fn pointer_leave(model: &mut ShellViewModel, x: f32, y: f32) {
@@ -280,7 +430,13 @@ fn pointer_leave(model: &mut ShellViewModel, x: f32, y: f32) {
     let Some(session) = model.input.session.clone() else {
         return;
     };
-    if internal_drag_distance(session.start_x, session.start_y, session.last_x, session.last_y) >= EXTERNAL_DRAG_SWITCH_DISTANCE {
+    if internal_drag_distance(
+        session.start_x,
+        session.start_y,
+        session.last_x,
+        session.last_y,
+    ) >= EXTERNAL_DRAG_SWITCH_DISTANCE
+    {
         delegate(model, &session);
     }
 }
@@ -292,12 +448,23 @@ fn window_blur(model: &mut ShellViewModel) {
     if session.delegated || !model.input.internal_active {
         return;
     }
-    if internal_drag_distance(session.start_x, session.start_y, session.last_x, session.last_y) >= EXTERNAL_DRAG_SWITCH_DISTANCE {
+    if internal_drag_distance(
+        session.start_x,
+        session.start_y,
+        session.last_x,
+        session.last_y,
+    ) >= EXTERNAL_DRAG_SWITCH_DISTANCE
+    {
         delegate(model, &session);
     }
 }
 
-fn drag_over(model: &mut ShellViewModel, internal_transfer: bool, writable: bool, files_panel: bool) {
+fn drag_over(
+    model: &mut ShellViewModel,
+    internal_transfer: bool,
+    writable: bool,
+    files_panel: bool,
+) {
     if !writable || !files_panel {
         return;
     }
@@ -329,7 +496,11 @@ fn browser_drop(
     repo_root: &str,
 ) {
     if internal_transfer || model.input.internal_active {
-        let target = model.input.hover_folder.clone().unwrap_or_else(|| model.files.current_path.clone());
+        let target = model
+            .input
+            .hover_folder
+            .clone()
+            .unwrap_or_else(|| model.files.current_path.clone());
         move_paths(model, &target);
         return;
     }
@@ -345,10 +516,20 @@ fn browser_drop(
     import_external(model, &sources, has_snapshot, repo_root, None);
 }
 
-fn import_external(model: &mut ShellViewModel, paths: &[String], has_snapshot: bool, repo_root: &str, folder: Option<&str>) {
+fn import_external(
+    model: &mut ShellViewModel,
+    paths: &[String],
+    has_snapshot: bool,
+    repo_root: &str,
+    folder: Option<&str>,
+) {
     model.input.external_active = false;
-    let target = folder.map(str::to_string).or_else(|| model.input.hover_folder.clone()).unwrap_or_else(|| model.files.current_path.clone());
+    let target = folder
+        .map(str::to_string)
+        .or_else(|| model.input.hover_folder.clone())
+        .unwrap_or_else(|| model.files.current_path.clone());
     model.input.hover_folder = None;
+    model.input.hover_on_sidebar = false;
     if !has_snapshot {
         return;
     }
@@ -360,9 +541,64 @@ fn import_external(model: &mut ShellViewModel, paths: &[String], has_snapshot: b
     if sources.is_empty() {
         return;
     }
-    let parent = if target.is_empty() { None } else { Some(target) };
+    let parent = if target.is_empty() {
+        None
+    } else {
+        Some(target)
+    };
     let repo_id = model.workspace.active_repo_id.clone().unwrap_or_default();
     model.files.enqueue_import(repo_id, parent, sources);
+}
+
+/// 侧栏目录树的系统文件拖放。悬停和 450ms 由坐标归约记下；这里只接收放下，并且只在目标是树上的文件夹时导入。
+fn sidebar_file_drag(model: &mut ShellViewModel, phase: super::HostDragPhase, paths: &[String]) {
+    let repository = model.workspace.active_repository();
+    let writable = repository.is_some_and(|item| {
+        super::super::files::repository_is_writable(&item.status, &item.capabilities)
+    });
+    let files_panel = model.workspace.panel == WorkspacePanel::Files;
+    match phase {
+        super::HostDragPhase::Enter | super::HostDragPhase::Over => {
+            if writable && files_panel {
+                model.input.external_active = true;
+                model.input.dragging_files = true;
+            } else {
+                eprintln!("Nana 侧栏当前不接受拖入：writable={writable} files={files_panel}");
+            }
+        }
+        super::HostDragPhase::Leave => {
+            if model.input.hover_on_sidebar || model.input.internal_active {
+                return;
+            }
+            model.input.external_active = false;
+            model.input.dragging_files = false;
+        }
+        super::HostDragPhase::Drop => {
+            model.input.external_active = false;
+            model.input.dragging_files = false;
+            let path =
+                model.input.hover_folder.clone().filter(|path| {
+                    model.input.hover_on_sidebar && model.sidebar.contains_folder(path)
+                });
+            if !writable || !files_panel {
+                eprintln!("Nana 侧栏放下被拒绝：writable={writable} files={files_panel}");
+                model.input.hover_on_sidebar = false;
+                return;
+            }
+            let Some(path) = path else {
+                eprintln!("Nana 侧栏放下没有落在目录树上的文件夹");
+                model.input.hover_on_sidebar = false;
+                return;
+            };
+            if dropped_source_paths(paths).is_empty() {
+                eprintln!("Nana 侧栏放下没有文件");
+                model.input.hover_folder = None;
+                model.input.hover_on_sidebar = false;
+                return;
+            }
+            folder_drop(model, &path, false, paths);
+        }
+    }
 }
 
 fn folder_drop(model: &mut ShellViewModel, path: &str, internal_transfer: bool, paths: &[String]) {
@@ -377,7 +613,12 @@ fn folder_drop(model: &mut ShellViewModel, path: &str, internal_transfer: bool, 
     model.input.external_active = false;
     model.input.dragging_files = false;
     model.input.hover_folder = None;
-    let parent = if path.is_empty() { None } else { Some(path.to_string()) };
+    model.input.hover_on_sidebar = false;
+    let parent = if path.is_empty() {
+        None
+    } else {
+        Some(path.to_string())
+    };
     let repo_id = model.workspace.active_repo_id.clone().unwrap_or_default();
     model.files.enqueue_import(repo_id, parent, sources);
 }
@@ -405,7 +646,9 @@ fn host_drag(
 ) {
     if !has_repository && !missing_repository {
         match phase {
-            HostDragPhase::Enter | HostDragPhase::Over => model.input.dragging_repository_folder = true,
+            HostDragPhase::Enter | HostDragPhase::Over => {
+                model.input.dragging_repository_folder = true
+            }
             HostDragPhase::Leave => model.input.dragging_repository_folder = false,
             HostDragPhase::Drop => {
                 model.input.dragging_repository_folder = false;
@@ -425,9 +668,15 @@ fn host_drag(
             model.input.dragging_files = true;
         }
         HostDragPhase::Leave => {
-            model.input.external_active = false;
-            model.input.hover_folder = None;
-            model.input.dragging_files = false;
+            // 指针从文件列挪到侧栏文件夹上时，坐标已经把目标记在那一行，这里不能清掉。
+            if model.input.hover_on_sidebar {
+                model.input.external_active = true;
+                model.input.dragging_files = true;
+            } else {
+                model.input.external_active = false;
+                model.input.hover_folder = None;
+                model.input.dragging_files = false;
+            }
         }
         HostDragPhase::Drop => {
             model.input.external_active = false;
@@ -451,8 +700,14 @@ fn box_select(model: &mut ShellViewModel, paths: &[String], append: bool) {
                 next.push(path.clone());
             }
         }
-        let primary = model.files.primary.clone().or_else(|| paths.first().cloned());
-        model.files.set_drag_selection(next, primary.clone(), primary);
+        let primary = model
+            .files
+            .primary
+            .clone()
+            .or_else(|| paths.first().cloned());
+        model
+            .files
+            .set_drag_selection(next, primary.clone(), primary);
         return;
     }
     if paths.is_empty() {
@@ -460,13 +715,18 @@ fn box_select(model: &mut ShellViewModel, paths: &[String], append: bool) {
         return;
     }
     let primary = paths.first().cloned();
-    model.files.set_drag_selection(paths.to_vec(), primary.clone(), primary);
+    model
+        .files
+        .set_drag_selection(paths.to_vec(), primary.clone(), primary);
 }
 
 /// 照 Vue `openWorkspaceEntry`：记一次访问，再交给系统程序打开。两件事并行：访问记录在任务里写，回来再改
 /// 「最近使用」；记录失败只记日志，不挡住打开（Vue 记录失败时不打开，见 `nana-vue-parity.md`）。
 fn open_entry(model: &mut ShellViewModel, has_repo: bool, absolute_path: &str, path: &str) {
     if !has_repo || absolute_path.trim().is_empty() {
+        if has_repo && !path.trim().is_empty() && absolute_path.trim().is_empty() {
+            eprintln!("Nana 这条没有可打开的本地文件：{path}");
+        }
         return;
     }
     model.input.remember_external(absolute_path, false);
@@ -478,6 +738,7 @@ fn open_entry(model: &mut ShellViewModel, has_repo: bool, absolute_path: &str, p
 
 fn reveal_entry(model: &mut ShellViewModel, absolute_path: &str) {
     if absolute_path.trim().is_empty() {
+        eprintln!("Nana 没有可定位的本地文件");
         return;
     }
     model.input.remember_external(absolute_path, true);
@@ -497,7 +758,13 @@ fn open_url(model: &mut ShellViewModel, url: &str) {
 }
 
 /// 回收站、非 filesystem 或没有绝对路径时直接失败，不记请求。其余只排队 `DragOut`。
-fn start_external_drag(input: &mut InputState, paths: &[String], trash: bool, backend_kind: &str, repo_root: &str) {
+fn start_external_drag(
+    input: &mut InputState,
+    paths: &[String],
+    trash: bool,
+    backend_kind: &str,
+    repo_root: &str,
+) {
     if trash || backend_kind != "filesystem" {
         input.external_drag_result = Some(false);
         return;
@@ -508,10 +775,19 @@ fn start_external_drag(input: &mut InputState, paths: &[String], trash: bool, ba
         return;
     }
     input.external_drag_result = None;
-    input.host_requests.push(HostRequest::Input(HostInputRequest::DragOut { paths: absolute }));
+    input
+        .host_requests
+        .push(HostRequest::Input(HostInputRequest::DragOut {
+            paths: absolute,
+        }));
 }
 
-fn complete_dialog(model: &mut ShellViewModel, request_id: u64, paths: &[String], failed: Option<String>) {
+fn complete_dialog(
+    model: &mut ShellViewModel,
+    request_id: u64,
+    paths: &[String],
+    failed: Option<String>,
+) {
     if let Some(error) = failed {
         eprintln!("Nana 文件对话框失败：{error}");
         if request_id == DIALOG_EXPORT_ID {
@@ -523,7 +799,10 @@ fn complete_dialog(model: &mut ShellViewModel, request_id: u64, paths: &[String]
         } else if request_id == DIALOG_RELOCATE_ID {
             model.workspace.missing_error = format!("文件夹选择失败：{error}");
         } else if request_id == DIALOG_ATTACH_ID {
-            model.status.fail(crate::shell::status::FailureSource::Repository, format!("文件夹选择失败：{error}"));
+            model.status.fail(
+                crate::shell::status::FailureSource::Repository,
+                format!("文件夹选择失败：{error}"),
+            );
         } else if request_id == DIALOG_DOWNLOAD_ID {
             eprintln!("Nana 下载目录选择失败：{error}");
             model.input.pending_download = None;
@@ -531,10 +810,16 @@ fn complete_dialog(model: &mut ShellViewModel, request_id: u64, paths: &[String]
             super::thumbnail_prompt::complete(model, &[], Some(error));
         } else if request_id == DIALOG_SOURCE_CACHE_ID {
             eprintln!("Nana 来源缓存目录选择失败：{error}");
+        } else if request_id == DIALOG_EAGLE_LIBRARY_ID {
+            model.input.take_eagle_dialog_followup();
+            eprintln!("Nana EagleLibrary 目录选择失败：{error}");
         } else if request_id == DIALOG_REPOSITORY_EXPORT_ID {
             eprintln!("Nana 资源库导出路径选择失败：{error}");
             model.files.export.notice.clear();
             model.files.export.error = format!("导出路径选择失败：{error}");
+        } else if request_id == DIALOG_IMPORT_FOLDER_ID || request_id == DIALOG_IMPORT_ARCHIVE_ID {
+            eprintln!("Nana 导入路径选择失败：{error}");
+            crate::shell::admin::drop_tool_file_import(model);
         }
         return;
     }
@@ -591,6 +876,18 @@ fn complete_dialog(model: &mut ShellViewModel, request_id: u64, paths: &[String]
         model.reduce(ShellMessage::Admin(AdminMessage::SetSourceCachePath(path)));
         return;
     }
+    if request_id == DIALOG_EAGLE_LIBRARY_ID {
+        let followup = model.input.take_eagle_dialog_followup();
+        let Some(path) = path else {
+            eprintln!("Nana 取消 EagleLibrary 目录选择");
+            return;
+        };
+        model.reduce(ShellMessage::Admin(AdminMessage::SetEagleLibraryPath(path)));
+        if let Some(mode) = followup {
+            model.reduce(ShellMessage::Admin(AdminMessage::RunEagleImport(mode)));
+        }
+        return;
+    }
     if request_id == DIALOG_REPOSITORY_EXPORT_ID {
         let Some(path) = path else {
             eprintln!("Nana 取消资源库导出路径选择");
@@ -598,6 +895,27 @@ fn complete_dialog(model: &mut ShellViewModel, request_id: u64, paths: &[String]
         };
         model.files.set_export_field("output", path);
         model.files.export.error.clear();
+        return;
+    }
+    if request_id == DIALOG_IMPORT_FOLDER_ID || request_id == DIALOG_IMPORT_ARCHIVE_ID {
+        let folder = request_id == DIALOG_IMPORT_FOLDER_ID;
+        let Some(path) = path else {
+            eprintln!("Nana 取消导入路径选择");
+            crate::shell::admin::drop_tool_file_import(model);
+            return;
+        };
+        let ctx = crate::shell::files::FileContext::from_model(model);
+        let submitted = if folder {
+            model.files.import_picked_sources(&ctx, vec![path])
+        } else {
+            model.files.import_picked_archive(&ctx, &path)
+        };
+        if submitted {
+            crate::shell::admin::begin_tool_file_import(model, folder);
+        } else {
+            eprintln!("Nana 导入没有提交");
+            crate::shell::admin::drop_tool_file_import(model);
+        }
         return;
     }
     eprintln!("Nana 忽略未知的文件对话框：{request_id}");

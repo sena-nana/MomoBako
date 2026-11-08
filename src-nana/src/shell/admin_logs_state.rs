@@ -4,10 +4,10 @@
 //! [`LogsSignals`] 建在主区块的常驻作用域里，日志行放进 Store 按日志 id 做键。追踪时新日志到达，
 //! 只插入新的那一行（缓存满了再删掉掉出去的最旧一行），已有行的节点和绑定都不动。
 
-use nana_ui::runtime::view::{signal, store, Signal, Store};
+use nana_ui::runtime::view::{Signal, Store, signal, store};
 
-use super::super::hot::ModelField;
 use super::super::ShellViewModel;
+use super::super::hot::ModelField;
 use super::support;
 use crate::backend::services::repository::SystemLogRecord;
 
@@ -66,7 +66,10 @@ pub(crate) struct LogRowView {
 impl LogRowView {
     fn project(model: &ShellViewModel, record: &SystemLogRecord) -> Self {
         let open = model.admin.log_context_open.contains(&record.id);
-        let has_context = record.context.as_object().is_some_and(|object| !object.is_empty());
+        let has_context = record
+            .context
+            .as_object()
+            .is_some_and(|object| !object.is_empty());
         let location = support::location_label(record);
         Self {
             id: record.id.clone(),
@@ -78,13 +81,28 @@ impl LogRowView {
             action: record.action.clone(),
             message: record.message.clone(),
             category: record.category.clone(),
-            plugin: record.source.plugin_id.as_deref().map(|plugin_id| format!("插件 {plugin_id}")).unwrap_or_default(),
-            repo: record.source.repo_id.as_deref().map(|repo_id| format!("仓库 {repo_id}")).unwrap_or_default(),
-            location: if location.is_empty() { String::new() } else { format!("位置 {location}") },
+            plugin: record
+                .source
+                .plugin_id
+                .as_deref()
+                .map(|plugin_id| format!("插件 {plugin_id}"))
+                .unwrap_or_default(),
+            repo: record
+                .source
+                .repo_id
+                .as_deref()
+                .map(|repo_id| format!("仓库 {repo_id}"))
+                .unwrap_or_default(),
+            location: if location.is_empty() {
+                String::new()
+            } else {
+                format!("位置 {location}")
+            },
             has_context,
             context_open: open,
             context: if has_context && open {
-                serde_json::to_string_pretty(&record.context).unwrap_or_else(|_| record.context.to_string())
+                serde_json::to_string_pretty(&record.context)
+                    .unwrap_or_else(|_| record.context.to_string())
             } else {
                 String::new()
             },
@@ -122,23 +140,49 @@ impl LogsView {
         let empty = if loading {
             None
         } else if admin.logs.is_empty() {
-            Some(("还没有系统日志", "宿主、插件和辅助进程产生的关键操作会在这里持续汇总。"))
+            Some((
+                "还没有系统日志",
+                "宿主、插件和辅助进程产生的关键操作会在这里持续汇总。",
+            ))
         } else if filtered.is_empty() {
-            Some(("当前筛选没有命中", "保留最近日志缓存，调整级别、来源或关键字后可以继续查看。"))
+            Some((
+                "当前筛选没有命中",
+                "保留最近日志缓存，调整级别、来源或关键字后可以继续查看。",
+            ))
         } else {
             None
         };
-        let active = support::active_filter_count(&admin.log_levels, &admin.log_kinds, &admin.log_plugin_id, &admin.log_repo_id, &admin.log_search);
+        let active = support::active_filter_count(
+            &admin.log_levels,
+            &admin.log_kinds,
+            &admin.log_plugin_id,
+            &admin.log_repo_id,
+            &admin.log_search,
+        );
         Self {
-            head: LogsHead { cached: format!("{} 条缓存", admin.logs.len()), hits: format!("{} 条命中", filtered.len()) },
+            head: LogsHead {
+                cached: format!("{} 条缓存", admin.logs.len()),
+                hits: format!("{} 条命中", filtered.len()),
+            },
             toolbar: LogsToolbar {
-                plugins: support::unique_sorted(admin.logs.iter().filter_map(|record| record.source.plugin_id.clone())),
-                repos: support::unique_sorted(admin.logs.iter().filter_map(|record| record.source.repo_id.clone())),
+                plugins: support::unique_sorted(
+                    admin
+                        .logs
+                        .iter()
+                        .filter_map(|record| record.source.plugin_id.clone()),
+                ),
+                repos: support::unique_sorted(
+                    admin
+                        .logs
+                        .iter()
+                        .filter_map(|record| record.source.repo_id.clone()),
+                ),
                 plugin: admin.log_plugin_id.clone(),
                 repo: admin.log_repo_id.clone(),
                 paused: admin.log_paused,
                 no_filters: active == 0,
-                clear_disabled: admin.logs_clearing || (admin.logs.is_empty() && !admin.logs_loading),
+                clear_disabled: admin.logs_clearing
+                    || (admin.logs.is_empty() && !admin.logs_loading),
                 clearing: admin.logs_clearing,
             },
             search: admin.log_search.clone(),
@@ -146,7 +190,10 @@ impl LogsView {
             kinds: admin.log_kinds.clone(),
             empty,
             loading,
-            rows: filtered.iter().map(|record| LogRowView::project(model, record)).collect(),
+            rows: filtered
+                .iter()
+                .map(|record| LogRowView::project(model, record))
+                .collect(),
             follow_end: model.admin_logs_follow_end(),
         }
     }

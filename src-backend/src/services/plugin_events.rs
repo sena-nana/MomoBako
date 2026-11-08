@@ -57,7 +57,10 @@ fn error_text(error: &RuntimeError) -> String {
     if error.evidence.is_empty() {
         format!("插件调用失败（{}）：{}", error.code, error.route)
     } else {
-        format!("插件调用失败（{}）：{} {:?}", error.code, error.route, error.evidence)
+        format!(
+            "插件调用失败（{}）：{} {:?}",
+            error.code, error.route, error.evidence
+        )
     }
 }
 
@@ -104,7 +107,10 @@ fn plugin_log(plugin_id: &str, repo_id: Option<&str>, payload: &Value) -> System
         category: "plugin.backend".to_string(),
         action: text("action").unwrap_or("pluginLog").to_string(),
         message: text("message").unwrap_or("插件日志").to_string(),
-        context: payload.get("context").filter(|value| !value.is_null()).cloned(),
+        context: payload
+            .get("context")
+            .filter(|value| !value.is_null())
+            .cloned(),
         repo_id: repo_id.map(str::to_string),
         plugin_id: Some(plugin_id.to_string()),
         source_kind: Some("backend-plugin".to_string()),
@@ -132,7 +138,8 @@ fn dropped_event(plugin_id: &str, kind: &str) -> SystemLogWriteRequest {
         level: "warn".to_string(),
         category: "plugin.runtime".to_string(),
         action: "pluginEventDropped".to_string(),
-        message: "插件调用交回了宿主不处理的事件，已丢弃；同一插件的同一种事件只记这一次。".to_string(),
+        message: "插件调用交回了宿主不处理的事件，已丢弃；同一插件的同一种事件只记这一次。"
+            .to_string(),
         context: Some(serde_json::json!({ "pluginId": plugin_id, "kind": kind })),
         repo_id: None,
         plugin_id: Some(plugin_id.to_string()),

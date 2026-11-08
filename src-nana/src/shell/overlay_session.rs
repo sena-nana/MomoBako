@@ -60,7 +60,9 @@ pub(crate) fn collect<R>(build: impl FnOnce() -> R) -> (R, Vec<Box<dyn OverlaySe
     let outer = COLLECTING.with(|cell| cell.borrow_mut().replace(Vec::new()));
     let restore = Restore(outer);
     let built = build();
-    let collected = COLLECTING.with(|cell| cell.borrow_mut().take()).unwrap_or_default();
+    let collected = COLLECTING
+        .with(|cell| cell.borrow_mut().take())
+        .unwrap_or_default();
     drop(restore);
     (built, collected)
 }
@@ -74,7 +76,10 @@ pub(crate) struct Projected<P: 'static> {
 
 impl<P: Clone + PartialEq + 'static> Projected<P> {
     /// 登记一个投影会话。`signal` 在浮层的挂载作用域里建好，`project` 和建信号时用的是同一个函数。
-    pub(crate) fn register(signal: nana_ui::runtime::view::Signal<P>, project: fn(&ShellViewModel) -> Option<P>) {
+    pub(crate) fn register(
+        signal: nana_ui::runtime::view::Signal<P>,
+        project: fn(&ShellViewModel) -> Option<P>,
+    ) {
         register(Self { signal, project });
     }
 }
@@ -102,7 +107,10 @@ impl Draft {
     ) -> nana_ui::runtime::view::Signal<String> {
         let field = crate::shell::hot::ModelField::new(read(model).as_deref().unwrap_or_default());
         let signal = field.signal();
-        register(Self { field, read: Box::new(read) });
+        register(Self {
+            field,
+            read: Box::new(read),
+        });
         signal
     }
 }
@@ -117,7 +125,7 @@ impl OverlaySession for Draft {
 
 #[cfg(test)]
 mod tests {
-    use super::{collect, register, OverlaySession};
+    use super::{OverlaySession, collect, register};
     use crate::shell::ShellViewModel;
 
     struct Count(usize);

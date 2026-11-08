@@ -9,7 +9,11 @@ use nana_ui::Icon;
 use nana_ui_core::{IconData, IconShape};
 
 /// 只给命中和测试用的外框。图标绘制只读 `svg`。
-const FRAME: &[IconShape] = &[IconShape::Rect { origin: [2.0, 2.0], size: [20.0, 20.0], filled: false }];
+const FRAME: &[IconShape] = &[IconShape::Rect {
+    origin: [2.0, 2.0],
+    size: [20.0, 20.0],
+    filled: false,
+}];
 
 /// 把 lucide 的子元素包成完整 SVG 源。属性和 lucide 默认值一致：描边 2、圆头圆角。
 macro_rules! lucide {
@@ -27,9 +31,24 @@ macro_rules! lucide {
     };
 }
 
-lucide!(PLAY, PLAY_DATA, "play", r#"<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>"#);
-lucide!(PAUSE, PAUSE_DATA, "pause", r#"<rect x="14" y="3" width="5" height="18" rx="1"/><rect x="5" y="3" width="5" height="18" rx="1"/>"#);
-lucide!(REPEAT, REPEAT_DATA, "repeat", r#"<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>"#);
+lucide!(
+    PLAY,
+    PLAY_DATA,
+    "play",
+    r#"<path d="M5 5a2 2 0 0 1 3.008-1.728l11.997 6.998a2 2 0 0 1 .003 3.458l-12 7A2 2 0 0 1 5 19z"/>"#
+);
+lucide!(
+    PAUSE,
+    PAUSE_DATA,
+    "pause",
+    r#"<rect x="14" y="3" width="5" height="18" rx="1"/><rect x="5" y="3" width="5" height="18" rx="1"/>"#
+);
+lucide!(
+    REPEAT,
+    REPEAT_DATA,
+    "repeat",
+    r#"<path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/>"#
+);
 lucide!(
     REPEAT_1,
     REPEAT_1_DATA,
@@ -78,7 +97,12 @@ lucide!(
     "trash-2",
     r#"<path d="M10 11v6"/><path d="M14 11v6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>"#
 );
-lucide!(ARROW_LEFT, ARROW_LEFT_DATA, "arrow-left", r#"<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>"#);
+lucide!(
+    ARROW_LEFT,
+    ARROW_LEFT_DATA,
+    "arrow-left",
+    r#"<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>"#
+);
 lucide!(
     EYE,
     EYE_DATA,

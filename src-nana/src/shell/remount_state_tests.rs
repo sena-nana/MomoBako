@@ -1,16 +1,26 @@
 //! 重挂保留滚动位置的回归：文件列表滚到中间后整棵重挂、常驻的设置页同步之后，偏移和视口里的行都不变。
 
-use nana_ui::runtime::{component_descriptors, Entity, LayoutViewport, RuntimeDocument, ScrollOffset, ScrollView, StableNodeId};
 use nana_ui::NanaTextShaper;
+use nana_ui::runtime::{
+    Entity, LayoutViewport, RuntimeDocument, ScrollOffset, ScrollView, StableNodeId,
+    component_descriptors,
+};
 
-use crate::backend::services::repository::{FileBrowserEntry, FileBrowserSnapshot, RepositoryStructureCacheState};
+use crate::backend::services::repository::{
+    FileBrowserEntry, FileBrowserSnapshot, RepositoryStructureCacheState,
+};
 use crate::shell::files::DisplayMode;
-use crate::shell::{mount_shell, ShellMessage, ShellPage, ShellViewModel, WorkspaceRepository};
+use crate::shell::{ShellMessage, ShellPage, ShellViewModel, WorkspaceRepository, mount_shell};
 
 const WIDTH: f32 = 1200.0;
 
 fn layout(document: &mut RuntimeDocument, height: f32) {
-    document.flush(LayoutViewport::new(WIDTH, height), &mut NanaTextShaper::default()).expect("布局");
+    document
+        .flush(
+            LayoutViewport::new(WIDTH, height),
+            &mut NanaTextShaper::default(),
+        )
+        .expect("布局");
 }
 
 fn mounted(model: &ShellViewModel, height: f32) -> RuntimeDocument {
@@ -98,14 +108,23 @@ fn scroll_around(document: &RuntimeDocument, label: &str) -> StableNodeId {
     let node = world
         .project_accessibility(document.document())
         .into_iter()
-        .find(|node| node.label.as_deref().is_some_and(|text| text.starts_with(label)))
+        .find(|node| {
+            node.label
+                .as_deref()
+                .is_some_and(|text| text.starts_with(label))
+        })
         .unwrap_or_else(|| panic!("没有 {label}"));
     let mut cursor = node.id;
     loop {
-        if world.component_type(cursor).is_some_and(|kind| kind.as_str() == component_descriptors::SCROLL_VIEW.type_id) {
+        if world
+            .component_type(cursor)
+            .is_some_and(|kind| kind.as_str() == component_descriptors::SCROLL_VIEW.type_id)
+        {
             return cursor;
         }
-        cursor = world.parent_id(cursor).unwrap_or_else(|| panic!("{label} 不在滚动容器里"));
+        cursor = world
+            .parent_id(cursor)
+            .unwrap_or_else(|| panic!("{label} 不在滚动容器里"));
     }
 }
 
@@ -114,8 +133,15 @@ fn scroll_keyed(document: &RuntimeDocument, key: &str) -> StableNodeId {
     let context = document.context();
     context
         .world()
-        .nodes_of_component(document.document(), component_descriptors::SCROLL_VIEW.type_id)
-        .find(|id| context.assembly_path(*id).is_some_and(|path| path.ends_with(key)))
+        .nodes_of_component(
+            document.document(),
+            component_descriptors::SCROLL_VIEW.type_id,
+        )
+        .find(|id| {
+            context
+                .assembly_path(*id)
+                .is_some_and(|path| path.ends_with(key))
+        })
         .unwrap_or_else(|| panic!("没有键为 {key} 的滚动容器"))
 }
 
@@ -126,13 +152,24 @@ fn route_root(document: &RuntimeDocument) -> StableNodeId {
     let container = world
         .document_order(document.document())
         .into_iter()
-        .find(|id| context.assembly_path(*id).is_some_and(|path| path.ends_with("primary-route")))
+        .find(|id| {
+            context
+                .assembly_path(*id)
+                .is_some_and(|path| path.ends_with("primary-route"))
+        })
         .expect("主区路由容器");
-    world.node(container).and_then(|node| node.children.first().copied()).expect("路由分支")
+    world
+        .node(container)
+        .and_then(|node| node.children.first().copied())
+        .expect("路由分支")
 }
 
 fn offset(document: &RuntimeDocument, id: StableNodeId) -> ScrollOffset {
-    document.context().world().scroll_offset(id).unwrap_or_default()
+    document
+        .context()
+        .world()
+        .scroll_offset(id)
+        .unwrap_or_default()
 }
 
 /// 滚动容器视口里看得见的文件行：无障碍盒（已经减去滚动偏移）和容器的布局盒相交。
@@ -163,7 +200,10 @@ fn file_list_keeps_its_scroll_and_rows_across_a_remount() {
     let scroll = scroll_around(&document, "file-000.txt");
     document
         .context_mut()
-        .scroll_to(Entity::<ScrollView>::from_stable_id(scroll), ScrollOffset { x: 0.0, y: 3600.0 })
+        .scroll_to(
+            Entity::<ScrollView>::from_stable_id(scroll),
+            ScrollOffset { x: 0.0, y: 3600.0 },
+        )
         .expect("滚动");
     layout(&mut document, 800.0);
     layout(&mut document, 800.0);
@@ -171,14 +211,21 @@ fn file_list_keeps_its_scroll_and_rows_across_a_remount() {
     let rows = visible_rows(&document, scroll);
     assert_eq!(scrolled.y, 3600.0, "测试列表要能滚到 3600");
     assert!(!rows.is_empty(), "滚动后视口里要有行");
-    assert!(!rows.iter().any(|row| row.starts_with("file-000")), "滚动后视口里不该还是第一行：{rows:?}");
+    assert!(
+        !rows.iter().any(|row| row.starts_with("file-000")),
+        "滚动后视口里不该还是第一行：{rows:?}"
+    );
 
     unrelated_update(&mut model);
     mount_shell(&mut document, &model).expect("重挂");
     layout(&mut document, 800.0);
     let scroll = scroll_around(&document, rows.first().expect("滚动后有行"));
     assert_eq!(offset(&document, scroll), scrolled, "重挂后滚动位置变了");
-    assert_eq!(visible_rows(&document, scroll), rows, "重挂后视口里的行变了");
+    assert_eq!(
+        visible_rows(&document, scroll),
+        rows,
+        "重挂后视口里的行变了"
+    );
 }
 
 #[test]
@@ -189,7 +236,10 @@ fn settings_page_keeps_its_scroll_across_a_remount() {
     let scroll = route_root(&document);
     document
         .context_mut()
-        .scroll_to(Entity::<ScrollView>::from_stable_id(scroll), ScrollOffset { x: 0.0, y: 160.0 })
+        .scroll_to(
+            Entity::<ScrollView>::from_stable_id(scroll),
+            ScrollOffset { x: 0.0, y: 160.0 },
+        )
         .expect("滚动");
     layout(&mut document, 420.0);
     assert_eq!(offset(&document, scroll).y, 160.0, "设置页要能滚到 160");
@@ -207,5 +257,12 @@ fn settings_page_keeps_its_scroll_across_a_remount() {
     model.workspace.panel = crate::shell::WorkspacePanel::Extensions;
     mount_shell(&mut document, &model).expect("重挂");
     layout(&mut document, 420.0);
-    assert_eq!(offset(&document, scroll_keyed(&document, "workspace-page-scroll-HasRepository-Extensions")).y, 0.0);
+    assert_eq!(
+        offset(
+            &document,
+            scroll_keyed(&document, "workspace-page-scroll-HasRepository-Extensions")
+        )
+        .y,
+        0.0
+    );
 }

@@ -6,13 +6,16 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::shell::data_load_tests::{answer_settings, browser, snapshot, summary};
-use crate::shell::{ShellMessage, ShellViewModel, SidebarMessage, StartupStatus, SyncCounts, WorkspaceEffect};
+use crate::shell::{
+    ShellMessage, ShellViewModel, SidebarMessage, StartupStatus, SyncCounts, WorkspaceEffect,
+};
 
 use super::LAST_ACTIVE_REPOSITORY_KEY;
 
 /// 每个测试自己的临时目录。
 fn temp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("momobako-last-repo-{name}-{}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("momobako-last-repo-{name}-{}", std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("临时目录");
     dir
@@ -21,7 +24,11 @@ fn temp_dir(name: &str) -> PathBuf {
 /// 写一份记着 `repo_id` 的文件，和产品写出来的格式一样。
 fn remembered_file(dir: &std::path::Path, repo_id: &str) -> PathBuf {
     let file = dir.join("last-repository.json");
-    fs::write(&file, serde_json::json!({ LAST_ACTIVE_REPOSITORY_KEY: repo_id }).to_string()).expect("写记住的仓库");
+    fs::write(
+        &file,
+        serde_json::json!({ LAST_ACTIVE_REPOSITORY_KEY: repo_id }).to_string(),
+    )
+    .expect("写记住的仓库");
     file
 }
 
@@ -30,16 +37,28 @@ fn cold_start(file: &std::path::Path, repositories: &[(&str, &str)]) -> ShellVie
     let mut model = ShellViewModel::default();
     model.workspace.load_last_repository_file(file);
     let generation = model.workspace.prepare_initial_list();
-    let items = repositories.iter().map(|(repo_id, status)| summary(repo_id, status)).collect();
-    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(items) });
+    let items = repositories
+        .iter()
+        .map(|(repo_id, status)| summary(repo_id, status))
+        .collect();
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(items),
+    });
     model
 }
 
 /// 把首屏启动剩下的答完：同步、摘要、首屏目录，以及启动结束前等的设置包和播放器类型。
 fn finish_launch(model: &mut ShellViewModel, repo_id: &str) {
     let generation = model.workspace.list_generation;
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(SyncCounts::default()) });
-    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(repo_id)) });
+    model.reduce(ShellMessage::RepositorySynced {
+        generation,
+        result: Ok(SyncCounts::default()),
+    });
+    model.reduce(ShellMessage::RepositorySnapshotLoaded {
+        generation,
+        result: Ok(snapshot(repo_id)),
+    });
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser(repo_id))));
     answer_settings(model);
 }
@@ -57,7 +76,12 @@ fn persists(effects: &[WorkspaceEffect]) -> bool {
 
 /// 某条加载日志的明细。
 fn log_detail(model: &ShellViewModel, message: &str) -> String {
-    let log = model.workspace.startup.logs.iter().find(|log| log.message == message);
+    let log = model
+        .workspace
+        .startup
+        .logs
+        .iter()
+        .find(|log| log.message == message);
     log.and_then(|log| log.detail.clone()).unwrap_or_default()
 }
 
@@ -69,8 +93,15 @@ fn a_cold_start_opens_the_remembered_repository() {
     let file = remembered_file(&dir, "repo-b");
     let mut model = cold_start(&file, &[("repo-a", "ready"), ("repo-b", "ready")]);
     assert_eq!(model.workspace.active_repo_id.as_deref(), Some("repo-b"));
-    assert_eq!(synced(&model.workspace.take_effects()), Some("repo-b"), "同步记着的仓库");
-    assert_eq!(log_detail(&model, "首屏启动流程开始。"), "totalSteps: 4 · rememberedRepoId: repo-b");
+    assert_eq!(
+        synced(&model.workspace.take_effects()),
+        Some("repo-b"),
+        "同步记着的仓库"
+    );
+    assert_eq!(
+        log_detail(&model, "首屏启动流程开始。"),
+        "totalSteps: 4 · rememberedRepoId: repo-b"
+    );
     assert!(
         log_detail(&model, "首屏启动已选定资源库。").starts_with("repositoryCount: 2 · rememberedRepoId: repo-b · repositoryStatus: ready · repositoryName: 仓库 repo-b"),
         "{}",
@@ -80,7 +111,10 @@ fn a_cold_start_opens_the_remembered_repository() {
     finish_launch(&mut model, "repo-b");
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
     assert_eq!(model.repository_id.as_deref(), Some("repo-b"));
-    assert!(!persists(&model.workspace.take_effects()), "记着的就是它，不重写");
+    assert!(
+        !persists(&model.workspace.take_effects()),
+        "记着的就是它，不重写"
+    );
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -92,17 +126,35 @@ fn a_remembered_repository_that_is_gone_falls_back_to_the_first() {
     let mut model = cold_start(&file, &[("repo-a", "ready"), ("repo-b", "ready")]);
     assert_eq!(model.workspace.active_repo_id.as_deref(), Some("repo-a"));
     assert_eq!(synced(&model.workspace.take_effects()), Some("repo-a"));
-    assert!(log_detail(&model, "首屏启动已选定资源库。").contains("rememberedRepoId: gone"), "日志照实写记着的 id");
+    assert!(
+        log_detail(&model, "首屏启动已选定资源库。").contains("rememberedRepoId: gone"),
+        "日志照实写记着的 id"
+    );
 
     let generation = model.workspace.list_generation;
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(SyncCounts::default()) });
-    assert!(!persists(&model.workspace.take_effects()), "同步完还不记，Vue 读完摘要才记");
-    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot("repo-a")) });
-    assert!(persists(&model.workspace.take_effects()), "读完摘要记住 repo-a");
+    model.reduce(ShellMessage::RepositorySynced {
+        generation,
+        result: Ok(SyncCounts::default()),
+    });
+    assert!(
+        !persists(&model.workspace.take_effects()),
+        "同步完还不记，Vue 读完摘要才记"
+    );
+    model.reduce(ShellMessage::RepositorySnapshotLoaded {
+        generation,
+        result: Ok(snapshot("repo-a")),
+    });
+    assert!(
+        persists(&model.workspace.take_effects()),
+        "读完摘要记住 repo-a"
+    );
     model.workspace.save_last_repository_file(&file);
 
     let reopened = cold_start(&file, &[("repo-a", "ready"), ("repo-b", "ready")]);
-    assert_eq!(reopened.workspace.last_active_repo_id.as_deref(), Some("repo-a"));
+    assert_eq!(
+        reopened.workspace.last_active_repo_id.as_deref(),
+        Some("repo-a")
+    );
     assert_eq!(reopened.workspace.active_repo_id.as_deref(), Some("repo-a"));
     let _ = fs::remove_dir_all(dir);
 }
@@ -116,21 +168,44 @@ fn switching_writes_the_new_repository_after_its_summary() {
     finish_launch(&mut model, "alpha");
     model.workspace.take_effects();
 
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::OpenRepositorySwitcher));
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::SelectRepositoryFromSwitcher("beta".into())));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::OpenRepositorySwitcher,
+    ));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::SelectRepositoryFromSwitcher("beta".into()),
+    ));
     assert_eq!(model.workspace.active_repo_id.as_deref(), Some("beta"));
     let generation = model.workspace.list_generation;
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(SyncCounts::default()) });
+    model.reduce(ShellMessage::RepositorySynced {
+        generation,
+        result: Ok(SyncCounts::default()),
+    });
     assert!(!persists(&model.workspace.take_effects()), "同步完还不记");
-    assert_eq!(model.workspace.last_active_repo_id.as_deref(), Some("alpha"));
-    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot("beta")) });
-    assert!(persists(&model.workspace.take_effects()), "读完 beta 的摘要写文件");
+    assert_eq!(
+        model.workspace.last_active_repo_id.as_deref(),
+        Some("alpha")
+    );
+    model.reduce(ShellMessage::RepositorySnapshotLoaded {
+        generation,
+        result: Ok(snapshot("beta")),
+    });
+    assert!(
+        persists(&model.workspace.take_effects()),
+        "读完 beta 的摘要写文件"
+    );
     model.workspace.save_last_repository_file(&file);
     let raw = fs::read_to_string(&file).expect("记住的仓库");
-    assert_eq!(serde_json::from_str::<serde_json::Value>(&raw).expect("JSON")[LAST_ACTIVE_REPOSITORY_KEY], "beta");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&raw).expect("JSON")[LAST_ACTIVE_REPOSITORY_KEY],
+        "beta"
+    );
 
     let reopened = cold_start(&file, &[("alpha", "ready"), ("beta", "ready")]);
-    assert_eq!(reopened.workspace.active_repo_id.as_deref(), Some("beta"), "下次冷启动打开 beta");
+    assert_eq!(
+        reopened.workspace.active_repo_id.as_deref(),
+        Some("beta"),
+        "下次冷启动打开 beta"
+    );
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -143,8 +218,12 @@ fn switching_to_a_missing_repository_remembers_it_at_once() {
     finish_launch(&mut model, "alpha");
     model.workspace.take_effects();
 
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::OpenRepositorySwitcher));
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::SelectRepositoryFromSwitcher("gone".into())));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::OpenRepositorySwitcher,
+    ));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::SelectRepositoryFromSwitcher("gone".into()),
+    ));
     let effects = model.workspace.take_effects();
     assert_eq!(synced(&effects), None, "缺失的仓库不同步");
     assert!(persists(&effects));
@@ -173,14 +252,27 @@ fn an_empty_list_forgets_the_remembered_repository() {
 fn an_unreadable_file_means_nothing_is_remembered() {
     let dir = temp_dir("corrupt");
     let file = dir.join("last-repository.json");
-    for raw in ["{not json", r#"{"momobako.lastActiveRepositoryId": 7}"#, r#"{"momobako.lastActiveRepositoryId": "  "}"#, "[]"] {
+    for raw in [
+        "{not json",
+        r#"{"momobako.lastActiveRepositoryId": 7}"#,
+        r#"{"momobako.lastActiveRepositoryId": "  "}"#,
+        "[]",
+    ] {
         fs::write(&file, raw).expect("写坏文件");
         let model = cold_start(&file, &[("repo-a", "ready"), ("repo-b", "ready")]);
         assert_eq!(model.workspace.last_active_repo_id, None, "{raw}");
-        assert_eq!(model.workspace.active_repo_id.as_deref(), Some("repo-a"), "{raw}");
+        assert_eq!(
+            model.workspace.active_repo_id.as_deref(),
+            Some("repo-a"),
+            "{raw}"
+        );
     }
     let missing = cold_start(&dir.join("absent.json"), &[("repo-b", "ready")]);
-    assert_eq!(missing.workspace.active_repo_id.as_deref(), Some("repo-b"), "没有文件时打开第一项");
+    assert_eq!(
+        missing.workspace.active_repo_id.as_deref(),
+        Some("repo-b"),
+        "没有文件时打开第一项"
+    );
     let _ = fs::remove_dir_all(dir);
 }
 
@@ -196,7 +288,10 @@ fn a_failed_write_does_not_disturb_startup() {
     assert!(persists(&model.workspace.take_effects()));
     model.workspace.save_last_repository_file(&file);
     assert!(!file.exists());
-    assert_eq!(model.workspace.last_active_repo_id.as_deref(), Some("repo-a"));
+    assert_eq!(
+        model.workspace.last_active_repo_id.as_deref(),
+        Some("repo-a")
+    );
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
     let _ = fs::remove_dir_all(dir);
 }

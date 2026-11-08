@@ -51,7 +51,13 @@ pub struct SyncProgress {
 impl Default for SyncProgress {
     /// Vue `createInitialSyncProgress`：空闲，0 / 3 步。
     fn default() -> Self {
-        Self { phase: SyncPhase::Idle, label: String::new(), current: 0, total: SYNC_TOTAL_STEPS, percent: 0 }
+        Self {
+            phase: SyncPhase::Idle,
+            label: String::new(),
+            current: 0,
+            total: SYNC_TOTAL_STEPS,
+            percent: 0,
+        }
     }
 }
 
@@ -60,13 +66,22 @@ impl SyncProgress {
     fn set(&mut self, phase: SyncPhase, label: impl Into<String>, current: u8) {
         let total = SYNC_TOTAL_STEPS;
         let percent = (f32::from(current) / f32::from(total) * 100.0).round() as u8;
-        *self = Self { phase, label: label.into(), current, total, percent };
+        *self = Self {
+            phase,
+            label: label.into(),
+            current,
+            total,
+            percent,
+        };
     }
 
     /// 扫描、写入、刷新三档在状态区显示（Vue `isShowingSyncProgress`），返回文案和百分比。
     pub fn shown(&self) -> Option<(&str, u8)> {
-        matches!(self.phase, SyncPhase::Scanning | SyncPhase::Writing | SyncPhase::Refreshing)
-            .then_some((self.label.as_str(), self.percent))
+        matches!(
+            self.phase,
+            SyncPhase::Scanning | SyncPhase::Writing | SyncPhase::Refreshing
+        )
+        .then_some((self.label.as_str(), self.percent))
     }
 }
 
@@ -114,7 +129,9 @@ impl TreeSyncState {
 
     /// 这一轮还在等 `stage` 这一段的结果。
     fn awaiting(&self, token: u64, stage: Stage) -> bool {
-        self.run.as_ref().is_some_and(|run| run.token == token && run.stage == stage)
+        self.run
+            .as_ref()
+            .is_some_and(|run| run.token == token && run.stage == stage)
     }
 }
 
@@ -124,14 +141,21 @@ pub enum TreeSyncEffect {
     /// 同步仓库，和启动时的同步同一条协议。
     Sync { token: u64, repo_id: String },
     /// 重读仓库摘要和硬链接候选；`tree` 时再读目录树。
-    Refresh { token: u64, repo_id: String, tree: bool },
+    Refresh {
+        token: u64,
+        repo_id: String,
+        tree: bool,
+    },
 }
 
 /// 宿主送回的结果。
 #[derive(Clone, Debug)]
 pub enum TreeSyncMessage {
     /// 同步完成，成功时带扫描的文件数。
-    Synced { token: u64, result: Result<u64, String> },
+    Synced {
+        token: u64,
+        result: Result<u64, String>,
+    },
     /// 摘要、硬链接候选和目录树的结果。
     Refreshed { token: u64, result: TreeSyncRefresh },
 }
@@ -169,18 +193,28 @@ pub(super) fn begin(model: &mut ShellViewModel) {
         return;
     };
     let operation = model.operation.start(
-        OperationStart::new("刷新文件树", "同步并读取目录结构", 12.0).runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_SYNC]),
+        OperationStart::new("刷新文件树", "同步并读取目录结构", 12.0)
+            .runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_SYNC]),
     );
     let state = &mut model.tree_sync;
     state.issued += 1;
     let token = state.issued;
-    state.run = Some(Run { token, repo_id: repo_id.clone(), stage: Stage::Syncing, operation, hardlink_epoch: 0 });
+    state.run = Some(Run {
+        token,
+        repo_id: repo_id.clone(),
+        stage: Stage::Syncing,
+        operation,
+        hardlink_epoch: 0,
+    });
     state.progress.set(SyncPhase::Scanning, "扫描文件夹结构", 1);
     state.effects.push(TreeSyncEffect::Sync { token, repo_id });
 }
 
 /// 归约宿主送回的结果。不是这类消息时交回主归约。
-pub(super) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) -> Option<ShellMessage> {
+pub(super) fn reduce_message(
+    model: &mut ShellViewModel,
+    message: ShellMessage,
+) -> Option<ShellMessage> {
     let ShellMessage::TreeSync(message) = message else {
         return Some(message);
     };
@@ -193,7 +227,11 @@ pub(super) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
 
 /// 等目录读完的这一轮，目录不再在读时收尾。每次归约结束时调。
 pub(super) fn settle(model: &mut ShellViewModel) {
-    let waiting = model.tree_sync.run.as_ref().is_some_and(|run| run.stage == Stage::Directory);
+    let waiting = model
+        .tree_sync
+        .run
+        .as_ref()
+        .is_some_and(|run| run.stage == Stage::Directory);
     if waiting && !model.files.loading {
         complete(model);
     }
@@ -213,7 +251,10 @@ fn synced(model: &mut ShellViewModel, token: u64, result: Result<u64, String>) {
         Err(error) => return fail(model, error),
     };
     if let Some(operation) = model.tree_sync.run.as_ref().map(|run| run.operation) {
-        model.operation.update(operation, OperationPatch::step(format!("已扫描 {scanned} 个文件"), 58.0));
+        model.operation.update(
+            operation,
+            OperationPatch::step(format!("已扫描 {scanned} 个文件"), 58.0),
+        );
     }
     let tree = model.workspace.panel != WorkspacePanel::Trash;
     let hardlink_epoch = model.files.hardlink_epoch();
@@ -224,7 +265,11 @@ fn synced(model: &mut ShellViewModel, token: u64, result: Result<u64, String>) {
         run.stage = Stage::Refreshing;
         run.hardlink_epoch = hardlink_epoch;
     }
-    state.effects.push(TreeSyncEffect::Refresh { token, repo_id, tree });
+    state.effects.push(TreeSyncEffect::Refresh {
+        token,
+        repo_id,
+        tree,
+    });
 }
 
 /// 重读结果：照 Vue `Promise.all`，成功的几份先写进去，任何一份失败整轮按失败收尾；都成功时读当前目录。
@@ -236,7 +281,11 @@ fn refreshed(model: &mut ShellViewModel, token: u64, result: TreeSyncRefresh) {
     let Some(repo_id) = current_repo(model) else {
         return;
     };
-    let hardlink_epoch = model.tree_sync.run.as_ref().map_or(0, |run| run.hardlink_epoch);
+    let hardlink_epoch = model
+        .tree_sync
+        .run
+        .as_ref()
+        .map_or(0, |run| run.hardlink_epoch);
     let mut first_error: Option<String> = None;
     match result.snapshot {
         Ok(snapshot) => super::workspace_refresh::apply_snapshot(model, Ok(snapshot)),
@@ -266,7 +315,11 @@ fn refreshed(model: &mut ShellViewModel, token: u64, result: TreeSyncRefresh) {
 
 /// 发起这一轮的仓库仍是当前仓库时返回它；换了仓库就放弃这一轮，进度回到空闲。
 fn current_repo(model: &mut ShellViewModel) -> Option<String> {
-    let repo_id = model.tree_sync.run.as_ref().map(|run| run.repo_id.clone())?;
+    let repo_id = model
+        .tree_sync
+        .run
+        .as_ref()
+        .map(|run| run.repo_id.clone())?;
     if model.workspace.active_repo_id.as_deref() == Some(repo_id.as_str()) {
         return Some(repo_id);
     }
@@ -284,13 +337,18 @@ fn complete(model: &mut ShellViewModel) {
     if let Some(run) = model.tree_sync.run.take() {
         model.operation.finish(run.operation);
     }
-    model.tree_sync.progress.set(SyncPhase::Complete, "刷新完成", 3);
+    model
+        .tree_sync
+        .progress
+        .set(SyncPhase::Complete, "刷新完成", 3);
 }
 
 /// 失败：写进全局状态区，取消操作进度，同步进度标成失败。
 fn fail(model: &mut ShellViewModel, error: String) {
     eprintln!("Nana 刷新文件夹树失败：{error}");
-    model.status.fail(FailureSource::Sync, format!("刷新文件夹树失败：{error}"));
+    model
+        .status
+        .fail(FailureSource::Sync, format!("刷新文件夹树失败：{error}"));
     if let Some(run) = model.tree_sync.run.take() {
         model.operation.cancel(run.operation);
     }
@@ -299,7 +357,10 @@ fn fail(model: &mut ShellViewModel, error: String) {
 
 /// 操作进度的更新时间：墙钟毫秒。任务中心的条目按它排先后。
 pub(super) fn now_ms() -> i64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|elapsed| elapsed.as_millis() as i64).unwrap_or_default()
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as i64)
+        .unwrap_or_default()
 }
 
 #[cfg(test)]

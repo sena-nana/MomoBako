@@ -4,7 +4,7 @@
 //! 内容重挂后进行中的轨道还在，按已经走过的时间取样，不会从 0 重新开始。减少动效时全部立刻停在终点。
 //! 对话框的开合动效由 NanaUI 的对话框框架自己播，这里没有对话框的轨道。
 
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::view::{AnyView, IntoView, widget};
 
 use super::hot::{LayerPaint, LayerPaintField};
 
@@ -16,6 +16,8 @@ pub const PANEL_RISE_MS: u64 = 160;
 pub const PROGRESS_WIDTH_MS: u64 = 180;
 /// 不确定进度呼吸。`progress-pulse 1.15s ease-in-out`。
 pub const PULSE_MS: u64 = 1150;
+/// 准备卡色条扫动。`media-preview-progress-sweep 1.05s ease-in-out infinite`。
+pub const PREVIEW_SWEEP_MS: u64 = 1050;
 /// 忙指示旋转。`.spin` 的 `spin 0.8s linear`。
 pub const SPINNER_MS: u64 = 800;
 /// 侧栏分组工具。`.sb-section__tools` 的 `opacity 0.12s ease`。
@@ -32,6 +34,10 @@ pub const PREFETCH_IDLE_MS: u64 = 420;
 const PANEL_SHIFT: f32 = -4.0;
 const FOOTER_REST: f32 = 0.44;
 const PULSE_LOW: f32 = 0.42;
+/// 准备卡色条 `translateX(-120%)`，百分比相对色条自己的宽度。
+const SWEEP_FROM: f32 = -120.0;
+/// 准备卡色条 `translateX(250%)`。
+const SWEEP_TO: f32 = 250.0;
 
 /// 一条还没走完的过渡。`from`/`to` 是该轨道自己的标量。
 #[derive(Clone, Debug)]
@@ -65,6 +71,8 @@ pub struct MotionState {
     /// 任务弹层每一行进度条的填充宽度，按行键，见 [`MotionState::set_task_fills`]。
     task_fills: Vec<(String, Track)>,
     pulse: Option<Track>,
+    /// 准备卡色条的 `translateX`，从 -120 到 250，循环。
+    sweep: Option<Track>,
     spinner: Option<Track>,
     tools: Option<Track>,
     footer: Option<Track>,
@@ -74,6 +82,7 @@ pub struct MotionState {
     footer_hover: bool,
     spinner_on: bool,
     pulse_on: bool,
+    sweep_on: bool,
     sidebar_collapsed: bool,
     sidebar_expanded_width: f32,
 }
@@ -87,6 +96,7 @@ impl Default for MotionState {
             startup: None,
             task_fills: Vec::new(),
             pulse: None,
+            sweep: None,
             spinner: None,
             tools: None,
             footer: None,
@@ -96,6 +106,7 @@ impl Default for MotionState {
             footer_hover: false,
             spinner_on: false,
             pulse_on: false,
+            sweep_on: false,
             sidebar_collapsed: false,
             sidebar_expanded_width: crate::theme_map::SIDEBAR_DEFAULT_PX,
         }
@@ -132,15 +143,35 @@ impl MotionState {
         }
     }
 
-    /// 还有轨道需要下一帧。
+    /// 还有轨道需要下一帧。准备卡扫动不在 Vue 的减少动态效果名单里，减少动态效果时它仍要帧。
     pub fn active(&self) -> bool {
+        let sweep = self
+            .sweep
+            .as_ref()
+            .is_some_and(|track| !track.finished(self.now_ms));
         if self.reduced {
-            return false;
+            return sweep;
         }
-        [&self.panel, &self.startup, &self.pulse, &self.spinner, &self.tools, &self.footer, &self.sidebar]
+        sweep
+            || [
+                &self.panel,
+                &self.startup,
+                &self.pulse,
+                &self.spinner,
+                &self.tools,
+                &self.footer,
+                &self.sidebar,
+            ]
             .into_iter()
-            .any(|track| track.as_ref().is_some_and(|track| !track.finished(self.now_ms)))
-            || self.task_fills.iter().any(|(_, track)| !track.finished(self.now_ms))
+            .any(|track| {
+                track
+                    .as_ref()
+                    .is_some_and(|track| !track.finished(self.now_ms))
+            })
+            || self
+                .task_fills
+                .iter()
+                .any(|(_, track)| !track.finished(self.now_ms))
     }
 
     /// 开关有变化时返回 true，调用方据此把界面标成待重建。
@@ -153,23 +184,53 @@ impl MotionState {
         self.panel = Some(if self.reduced {
             settled_scalar(open)
         } else if open {
-            track(self.now_ms, 0.0, 1.0, PANEL_RISE_MS, EasingKind::Ease, false)
+            track(
+                self.now_ms,
+                0.0,
+                1.0,
+                PANEL_RISE_MS,
+                EasingKind::Ease,
+                false,
+            )
         } else {
-            track(self.now_ms, 1.0, 0.0, PANEL_RISE_MS, EasingKind::Ease, false)
+            track(
+                self.now_ms,
+                1.0,
+                0.0,
+                PANEL_RISE_MS,
+                EasingKind::Ease,
+                false,
+            )
         });
         changed
     }
 
     pub fn set_startup_percent(&mut self, percent: f32) {
         let percent = percent.clamp(0.0, 100.0);
-        let from = self.startup.as_ref().map(|track| track.value(self.now_ms)).unwrap_or(0.0);
-        if (from - percent).abs() < 0.01 && self.startup.as_ref().is_some_and(|track| (track.to - percent).abs() < 0.01) {
+        let from = self
+            .startup
+            .as_ref()
+            .map(|track| track.value(self.now_ms))
+            .unwrap_or(0.0);
+        if (from - percent).abs() < 0.01
+            && self
+                .startup
+                .as_ref()
+                .is_some_and(|track| (track.to - percent).abs() < 0.01)
+        {
             return;
         }
         self.startup = Some(if self.reduced {
             track(self.now_ms, percent, percent, 0, EasingKind::Linear, false)
         } else {
-            track(self.now_ms, from, percent, PROGRESS_WIDTH_MS, EasingKind::Ease, false)
+            track(
+                self.now_ms,
+                from,
+                percent,
+                PROGRESS_WIDTH_MS,
+                EasingKind::Ease,
+                false,
+            )
         });
     }
 
@@ -183,10 +244,21 @@ impl MotionState {
             .iter()
             .map(|(key, target)| {
                 let target = target.clamp(0.0, 100.0);
-                let existing = self.task_fills.iter().find(|(existing, _)| existing == key).map(|(_, fill)| fill);
+                let existing = self
+                    .task_fills
+                    .iter()
+                    .find(|(existing, _)| existing == key)
+                    .map(|(_, fill)| fill);
                 let fill = match existing {
                     Some(fill) if (fill.to - target).abs() < 0.01 => fill.clone(),
-                    Some(fill) if !reduced => track(now, fill.value(now), target, PROGRESS_WIDTH_MS, EasingKind::Ease, false),
+                    Some(fill) if !reduced => track(
+                        now,
+                        fill.value(now),
+                        target,
+                        PROGRESS_WIDTH_MS,
+                        EasingKind::Ease,
+                        false,
+                    ),
                     _ => track_done(target),
                 };
                 (key.clone(), fill)
@@ -200,7 +272,35 @@ impl MotionState {
             return;
         }
         self.spinner_on = on;
-        self.spinner = on.then(|| track(self.now_ms, 0.0, 1.0, SPINNER_MS, EasingKind::Linear, !self.reduced));
+        self.spinner = on.then(|| {
+            track(
+                self.now_ms,
+                0.0,
+                1.0,
+                SPINNER_MS,
+                EasingKind::Linear,
+                !self.reduced,
+            )
+        });
+    }
+
+    /// 准备卡和图片读取胶囊共用的扫动开关。一直开着时不重新起步（每次归约都会调到这里）。
+    /// `translateX` 从 -120% 到 250%，1.05 秒 ease-in-out，循环。减少动态效果不停这条。
+    pub fn set_preview_sweep(&mut self, on: bool) {
+        if on == self.sweep_on && on == self.sweep.is_some() {
+            return;
+        }
+        self.sweep_on = on;
+        self.sweep = on.then(|| {
+            track(
+                self.now_ms,
+                SWEEP_FROM,
+                SWEEP_TO,
+                PREVIEW_SWEEP_MS,
+                EasingKind::EaseInOut,
+                true,
+            )
+        });
     }
 
     /// 不确定进度的呼吸开关。一直开着时不重新起步（每次归约都会调到这里，重起会让呼吸跳回开头）；减少动态效果
@@ -211,20 +311,32 @@ impl MotionState {
             return;
         }
         self.pulse_on = on;
-        self.pulse = (on && !self.reduced).then(|| track(self.now_ms, 0.0, 1.0, PULSE_MS, EasingKind::EaseInOut, true));
+        self.pulse = (on && !self.reduced)
+            .then(|| track(self.now_ms, 0.0, 1.0, PULSE_MS, EasingKind::EaseInOut, true));
     }
 
     pub fn set_tools_hover(&mut self, hover: bool) {
         if hover == self.tools_hover && (self.tools.is_some() || !hover) {
             return;
         }
-        let from = self.tools.as_ref().map(|track| track.value(self.now_ms)).unwrap_or(0.0);
+        let from = self
+            .tools
+            .as_ref()
+            .map(|track| track.value(self.now_ms))
+            .unwrap_or(0.0);
         self.tools_hover = hover;
         let to = if hover { 1.0 } else { 0.0 };
         self.tools = Some(if self.reduced {
             track(self.now_ms, to, to, 0, EasingKind::Linear, false)
         } else {
-            track(self.now_ms, from, to, SIDEBAR_TOOL_FADE_MS, EasingKind::Ease, false)
+            track(
+                self.now_ms,
+                from,
+                to,
+                SIDEBAR_TOOL_FADE_MS,
+                EasingKind::Ease,
+                false,
+            )
         });
     }
 
@@ -232,13 +344,24 @@ impl MotionState {
         if hover == self.footer_hover && (self.footer.is_some() || !hover) {
             return;
         }
-        let from = self.footer.as_ref().map(|track| track.value(self.now_ms)).unwrap_or(FOOTER_REST);
+        let from = self
+            .footer
+            .as_ref()
+            .map(|track| track.value(self.now_ms))
+            .unwrap_or(FOOTER_REST);
         self.footer_hover = hover;
         let to = if hover { 1.0 } else { FOOTER_REST };
         self.footer = Some(if self.reduced {
             track(self.now_ms, to, to, 0, EasingKind::Linear, false)
         } else {
-            track(self.now_ms, from, to, FOOTER_FADE_MS, EasingKind::Ease, false)
+            track(
+                self.now_ms,
+                from,
+                to,
+                FOOTER_FADE_MS,
+                EasingKind::Ease,
+                false,
+            )
         });
     }
 
@@ -247,7 +370,12 @@ impl MotionState {
         self.sidebar_expanded_width = expanded_width;
         let to = if collapsed { 0.0 } else { expanded_width };
         if collapsed == self.sidebar_collapsed {
-            if !collapsed && self.sidebar.as_ref().is_none_or(|track| track.finished(self.now_ms) && (track.to - to).abs() > 0.5) {
+            if !collapsed
+                && self
+                    .sidebar
+                    .as_ref()
+                    .is_none_or(|track| track.finished(self.now_ms) && (track.to - to).abs() > 0.5)
+            {
                 self.sidebar = Some(track_done(to));
             }
             return;
@@ -257,12 +385,23 @@ impl MotionState {
         self.sidebar = Some(if self.reduced {
             track(self.now_ms, to, to, 0, EasingKind::Linear, false)
         } else {
-            track(self.now_ms, from, to, SIDEBAR_COLLAPSE_MS, EasingKind::Emphasis, false)
+            track(
+                self.now_ms,
+                from,
+                to,
+                SIDEBAR_COLLAPSE_MS,
+                EasingKind::Emphasis,
+                false,
+            )
         });
     }
 
     pub fn panel_frame(&self) -> PanelFrame {
-        let progress = self.panel.as_ref().map(|track| track.value(self.now_ms)).unwrap_or(0.0);
+        let progress = self
+            .panel
+            .as_ref()
+            .map(|track| track.value(self.now_ms))
+            .unwrap_or(0.0);
         let opacity = if self.reduced {
             if self.panel_wants_open { 1.0 } else { 0.0 }
         } else {
@@ -276,12 +415,18 @@ impl MotionState {
     }
 
     pub fn startup_percent(&self) -> f32 {
-        self.startup.as_ref().map(|track| track.value(self.now_ms)).unwrap_or(0.0)
+        self.startup
+            .as_ref()
+            .map(|track| track.value(self.now_ms))
+            .unwrap_or(0.0)
     }
 
     /// 任务弹层各行进度条这一刻的填充宽度，按行键。
     pub fn task_fills(&self) -> Vec<(String, f32)> {
-        self.task_fills.iter().map(|(key, fill)| (key.clone(), fill.value(self.now_ms))).collect()
+        self.task_fills
+            .iter()
+            .map(|(key, fill)| (key.clone(), fill.value(self.now_ms)))
+            .collect()
     }
 
     pub fn spinner_on(&self) -> bool {
@@ -290,22 +435,42 @@ impl MotionState {
 
     /// 悬停已经开始，或淡出还没走完。分组工具在这期间留在树上。
     pub fn tools_revealed(&self) -> bool {
-        self.tools_hover || self.tools.as_ref().is_some_and(|track| track.value(self.now_ms) > 0.01)
+        self.tools_hover
+            || self
+                .tools
+                .as_ref()
+                .is_some_and(|track| track.value(self.now_ms) > 0.01)
     }
 
     pub fn spinner_degrees(&self) -> f32 {
         if !self.spinner_on || self.reduced {
             return 0.0;
         }
-        let elapsed = self.spinner.as_ref().map(|track| self.now_ms.saturating_sub(track.started_ms)).unwrap_or(0);
+        let elapsed = self
+            .spinner
+            .as_ref()
+            .map(|track| self.now_ms.saturating_sub(track.started_ms))
+            .unwrap_or(0);
         (elapsed % SPINNER_MS) as f32 / SPINNER_MS as f32 * 360.0
+    }
+
+    /// 准备卡色条这一刻的 `translateX` 百分比，相对色条自己的宽度。卡没在显示时是 0。
+    pub fn preview_sweep_percent(&self) -> f32 {
+        self.sweep
+            .as_ref()
+            .map(|track| track.value(self.now_ms))
+            .unwrap_or(0.0)
     }
 
     pub fn pulse_opacity(&self) -> f32 {
         if !self.pulse_on || self.reduced {
             return 1.0;
         }
-        let progress = self.pulse.as_ref().map(|track| track.loop_progress(self.now_ms)).unwrap_or(0.0);
+        let progress = self
+            .pulse
+            .as_ref()
+            .map(|track| track.loop_progress(self.now_ms))
+            .unwrap_or(0.0);
         if progress < 0.5 {
             lerp(PULSE_LOW, 1.0, ease_in_out(progress / 0.5))
         } else {
@@ -317,22 +482,31 @@ impl MotionState {
         if self.reduced {
             return if self.tools_hover { 1.0 } else { 0.0 };
         }
-        self.tools.as_ref().map(|track| track.value(self.now_ms)).unwrap_or(0.0)
+        self.tools
+            .as_ref()
+            .map(|track| track.value(self.now_ms))
+            .unwrap_or(0.0)
     }
 
     pub fn footer_opacity(&self) -> f32 {
         if self.reduced {
             return if self.footer_hover { 1.0 } else { FOOTER_REST };
         }
-        self.footer.as_ref().map(|track| track.value(self.now_ms)).unwrap_or(FOOTER_REST)
+        self.footer
+            .as_ref()
+            .map(|track| track.value(self.now_ms))
+            .unwrap_or(FOOTER_REST)
     }
 
     pub fn sidebar_presented_width(&self) -> f32 {
-        self.sidebar.as_ref().map(|track| track.value(self.now_ms)).unwrap_or(if self.sidebar_collapsed {
-            0.0
-        } else {
-            self.sidebar_expanded_width
-        })
+        self.sidebar
+            .as_ref()
+            .map(|track| track.value(self.now_ms))
+            .unwrap_or(if self.sidebar_collapsed {
+                0.0
+            } else {
+                self.sidebar_expanded_width
+            })
     }
 
     fn snap_all(&mut self) {
@@ -354,12 +528,20 @@ impl MotionState {
             *track = track_done(if self.footer_hover { 1.0 } else { FOOTER_REST });
         }
         if let Some(track) = &mut self.sidebar {
-            *track = track_done(if self.sidebar_collapsed { 0.0 } else { self.sidebar_expanded_width });
+            *track = track_done(if self.sidebar_collapsed {
+                0.0
+            } else {
+                self.sidebar_expanded_width
+            });
         }
     }
 
     fn drop_finished(&mut self) {
-        if self.panel.as_ref().is_some_and(|track| track.finished(self.now_ms) && !self.panel_wants_open) {
+        if self
+            .panel
+            .as_ref()
+            .is_some_and(|track| track.finished(self.now_ms) && !self.panel_wants_open)
+        {
             self.panel = None;
         }
     }
@@ -370,11 +552,32 @@ fn settled_scalar(open: bool) -> Track {
 }
 
 fn track_done(value: f32) -> Track {
-    Track { started_ms: 0, from: value, to: value, duration_ms: 0, easing: EasingKind::Linear, looping: false }
+    Track {
+        started_ms: 0,
+        from: value,
+        to: value,
+        duration_ms: 0,
+        easing: EasingKind::Linear,
+        looping: false,
+    }
 }
 
-fn track(started_ms: u64, from: f32, to: f32, duration_ms: u64, easing: EasingKind, looping: bool) -> Track {
-    Track { started_ms, from, to, duration_ms, easing, looping }
+fn track(
+    started_ms: u64,
+    from: f32,
+    to: f32,
+    duration_ms: u64,
+    easing: EasingKind,
+    looping: bool,
+) -> Track {
+    Track {
+        started_ms,
+        from,
+        to,
+        duration_ms,
+        easing,
+        looping,
+    }
 }
 
 fn scalar_at(track: Option<&Track>, now_ms: u64, duration_ms: u64) -> f32 {
@@ -384,7 +587,11 @@ fn scalar_at(track: Option<&Track>, now_ms: u64, duration_ms: u64) -> f32 {
     let elapsed = now_ms.saturating_sub(track.started_ms);
     let span = duration_ms.max(1);
     let linear = (elapsed as f32 / span as f32).clamp(0.0, 1.0);
-    let eased = if track.to < track.from { 1.0 - apply_easing(EasingKind::Ease, 1.0 - linear) } else { apply_easing(EasingKind::Ease, linear) };
+    let eased = if track.to < track.from {
+        1.0 - apply_easing(EasingKind::Ease, 1.0 - linear)
+    } else {
+        apply_easing(EasingKind::Ease, linear)
+    };
     eased.clamp(0.0, 1.0)
 }
 
@@ -429,13 +636,27 @@ pub fn paint_panel(view: impl IntoView, motion: &MotionState) -> AnyView {
 
 /// 把平移动效写成绘制矩阵。`shift_y` 向下为正，缩放绕控件中心。
 pub fn shift_scale(shift_y: f32, scale: f32) -> nana_ui_core::PaintTransform {
-    nana_ui_core::PaintTransform { a: scale, b: 0.0, c: 0.0, d: scale, e: 0.0, f: shift_y }
+    nana_ui_core::PaintTransform {
+        a: scale,
+        b: 0.0,
+        c: 0.0,
+        d: scale,
+        e: 0.0,
+        f: shift_y,
+    }
 }
 
 /// 旋转绘制矩阵，角度为度。
 pub fn spin_transform(degrees: f32) -> nana_ui_core::PaintTransform {
     let (sin, cos) = degrees.to_radians().sin_cos();
-    nana_ui_core::PaintTransform { a: cos, b: sin, c: -sin, d: cos, e: 0.0, f: 0.0 }
+    nana_ui_core::PaintTransform {
+        a: cos,
+        b: sin,
+        c: -sin,
+        d: cos,
+        e: 0.0,
+        f: 0.0,
+    }
 }
 
 fn lerp(from: f32, to: f32, progress: f32) -> f32 {
@@ -504,12 +725,27 @@ pub fn note_sidebar_resize(
     let width = super::workspace::clamp_sidebar_width(extent + super::render::WORKBENCH_GAP_PX);
     let changed = (width - shell_width).abs() > 0.5;
     if dragging {
-        return SidebarResizeFrame { width, dragging: true, persist: false, dirty: dirty || changed };
+        return SidebarResizeFrame {
+            width,
+            dragging: true,
+            persist: false,
+            dirty: dirty || changed,
+        };
     }
     if was_dragging {
-        return SidebarResizeFrame { width, dragging: false, persist: dirty || changed, dirty: false };
+        return SidebarResizeFrame {
+            width,
+            dragging: false,
+            persist: dirty || changed,
+            dirty: false,
+        };
     }
-    SidebarResizeFrame { width, dragging: false, persist: changed, dirty: false }
+    SidebarResizeFrame {
+        width,
+        dragging: false,
+        persist: changed,
+        dirty: false,
+    }
 }
 
 #[cfg(test)]
@@ -557,9 +793,17 @@ mod tests {
         motion.advance(motion.now_ms() + PROGRESS_WIDTH_MS);
         assert_eq!(motion.startup_percent(), 50.0);
         motion.set_task_fills(&[("task".into(), 12.0)]);
-        assert_eq!(motion.task_fills(), vec![("task".to_string(), 12.0)], "新出现的行直接停在目标宽度");
+        assert_eq!(
+            motion.task_fills(),
+            vec![("task".to_string(), 12.0)],
+            "新出现的行直接停在目标宽度"
+        );
         motion.set_task_fills(&[("task".into(), 32.0)]);
-        assert_eq!(motion.task_fills(), vec![("task".to_string(), 12.0)], "目标变了从这一刻的宽度起步");
+        assert_eq!(
+            motion.task_fills(),
+            vec![("task".to_string(), 12.0)],
+            "目标变了从这一刻的宽度起步"
+        );
         assert!(motion.active());
         motion.advance(motion.now_ms() + PROGRESS_WIDTH_MS);
         assert_eq!(motion.task_fills(), vec![("task".to_string(), 32.0)]);
@@ -625,7 +869,10 @@ mod tests {
         assert!(released.persist);
         assert!(!released.dirty);
         let settled = note_sidebar_resize(false, false, 420.0 - gap, 420.0, false);
-        assert!(!settled.persist, "静止时资源区加间隙正好等于侧栏宽度，不再写入");
+        assert!(
+            !settled.persist,
+            "静止时资源区加间隙正好等于侧栏宽度，不再写入"
+        );
         let keyed = note_sidebar_resize(false, false, 428.0 - gap, 420.0, false);
         assert!(keyed.persist);
         assert_eq!(keyed.width, 428.0);

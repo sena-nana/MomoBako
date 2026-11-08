@@ -15,8 +15,15 @@ fn missing() -> ShellViewModel {
 
 /// 节点的无障碍状态里是不是禁用。
 fn disabled(harness: &ShellHarness, key: &str) -> bool {
-    let id = harness.keyed(key).unwrap_or_else(|| panic!("缺失仓库页缺少 {key}"));
-    harness.document().context().world().accessibility(id).is_some_and(|state| state.disabled)
+    let id = harness
+        .keyed(key)
+        .unwrap_or_else(|| panic!("缺失仓库页缺少 {key}"));
+    harness
+        .document()
+        .context()
+        .world()
+        .accessibility(id)
+        .is_some_and(|state| state.disabled)
 }
 
 #[test]
@@ -31,10 +38,18 @@ fn projection_follows_the_missing_state() {
     assert_eq!(MissingView::project(&model), view, "同一状态的投影相等");
 
     model.workspace.choose_missing_path();
-    assert!(MissingView::project(&model).prompt, "选了重定向以后显示输入");
+    assert!(
+        MissingView::project(&model).prompt,
+        "选了重定向以后显示输入"
+    );
 
     let repo_id = model.workspace.active_repo_id.clone().expect("场景有仓库");
-    let repository = model.workspace.repositories.iter_mut().find(|item| item.repo_id == repo_id).expect("当前仓库");
+    let repository = model
+        .workspace
+        .repositories
+        .iter_mut()
+        .find(|item| item.repo_id == repo_id)
+        .expect("当前仓库");
     repository.cache_required = true;
     let cached = MissingView::project(&model);
     assert!(cached.cache_issue);
@@ -57,11 +72,22 @@ fn unrelated_updates_keep_every_missing_node() {
         "missing-refresh",
         "missing-delete",
     ];
-    let nodes = keys.map(|key| harness.keyed(key).unwrap_or_else(|| panic!("缺失仓库页缺少 {key}")));
+    let nodes = keys.map(|key| {
+        harness
+            .keyed(key)
+            .unwrap_or_else(|| panic!("缺失仓库页缺少 {key}"))
+    });
     let branch = harness.route_branch();
     let remounts = harness.view_stats().remounts;
     let unrelated = [
-        ShellMessage::ThumbnailPixels(vec![ThumbnailFrame { path: "a.png".into(), natural_width: 1, natural_height: 1, width: 1, height: 1, rgba: vec![0; 4] }]),
+        ShellMessage::ThumbnailPixels(vec![ThumbnailFrame {
+            path: "a.png".into(),
+            natural_width: 1,
+            natural_height: 1,
+            width: 1,
+            height: 1,
+            rgba: vec![0; 4],
+        }]),
         ShellMessage::Player(crate::shell::player::PlayerMessage::SetVolume(0.3)),
         ShellMessage::Inspect(crate::shell::InspectMessage::SetQuery("封面".into())),
     ];
@@ -69,11 +95,19 @@ fn unrelated_updates_keep_every_missing_node() {
         harness.apply(message);
         harness.flush();
         for (key, id) in keys.iter().zip(nodes) {
-            assert_eq!(harness.keyed(key), Some(id), "无关更新换掉了缺失仓库页节点 {key}");
+            assert_eq!(
+                harness.keyed(key),
+                Some(id),
+                "无关更新换掉了缺失仓库页节点 {key}"
+            );
         }
     }
     assert_eq!(harness.route_branch(), branch, "常驻路由的分支不该重挂");
-    assert_eq!(harness.view_stats().remounts, remounts, "常驻缺失仓库页不该重挂");
+    assert_eq!(
+        harness.view_stats().remounts,
+        remounts,
+        "常驻缺失仓库页不该重挂"
+    );
     harness.assert_same_as_fresh_mount();
 }
 
@@ -89,7 +123,9 @@ fn a_background_message_does_not_roll_back_typed_text() {
     harness.focus(field);
     harness.type_text("E:");
     let typed = harness.take_messages();
-    harness.apply(ShellMessage::Player(crate::shell::player::PlayerMessage::SetVolume(0.4)));
+    harness.apply(ShellMessage::Player(
+        crate::shell::player::PlayerMessage::SetVolume(0.4),
+    ));
     harness.flush();
     assert_eq!(harness.value(field), "E:", "后台消息把刚打的字冲掉了");
     for message in typed {
@@ -106,12 +142,19 @@ fn a_background_message_does_not_roll_back_typed_text() {
 #[test]
 fn relocation_patches_fields_and_keeps_the_input() {
     let mut harness = ShellHarness::mount(missing());
-    assert!(harness.find("资源库新位置").is_none(), "没选重定向时不显示输入");
+    assert!(
+        harness.find("资源库新位置").is_none(),
+        "没选重定向时不显示输入"
+    );
     harness.model.workspace.choose_missing_path();
     harness.sync();
     harness.flush();
     let field = harness.input("资源库新位置");
-    assert_eq!(harness.keyed("missing-path-input"), Some(field), "输入框应是建好的那一个，只是显示出来");
+    assert_eq!(
+        harness.keyed("missing-path-input"),
+        Some(field),
+        "输入框应是建好的那一个，只是显示出来"
+    );
     harness.assert_same_as_fresh_mount();
 
     harness.focus(field);
@@ -133,12 +176,25 @@ fn relocation_patches_fields_and_keeps_the_input() {
     harness.apply(ShellMessage::MissingSubmitPath);
     harness.flush();
     assert!(harness.find("资源库新位置").is_none(), "提交后输入藏起来");
-    assert_eq!(harness.keyed("missing-primary"), Some(primary), "主按钮原地改字");
-    assert!(harness.find("重定向中...").is_some(), "主按钮没有写「重定向中...」");
-    assert!(disabled(&harness, "missing-primary") && disabled(&harness, "missing-refresh") && disabled(&harness, "missing-delete"));
+    assert_eq!(
+        harness.keyed("missing-primary"),
+        Some(primary),
+        "主按钮原地改字"
+    );
+    assert!(
+        harness.find("重定向中...").is_some(),
+        "主按钮没有写「重定向中...」"
+    );
+    assert!(
+        disabled(&harness, "missing-primary")
+            && disabled(&harness, "missing-refresh")
+            && disabled(&harness, "missing-delete")
+    );
     harness.assert_same_as_fresh_mount();
 
-    harness.apply(ShellMessage::MissingRelocateFinished(Err("路径无效".into())));
+    harness.apply(ShellMessage::MissingRelocateFinished(
+        Err("路径无效".into()),
+    ));
     harness.flush();
     assert!(harness.find("路径无效").is_some(), "错误条没有显示");
     assert!(!disabled(&harness, "missing-primary"), "失败后按钮恢复");

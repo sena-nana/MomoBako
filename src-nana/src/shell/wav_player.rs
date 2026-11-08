@@ -33,15 +33,30 @@ pub(super) fn builtin_candidate() -> PlayerCandidate {
 
 /// mp3、flac、ogg 共用一个候选。装载时解进和 WAV 相同的内存游标。
 pub(super) fn compressed_candidate() -> PlayerCandidate {
-    audio_candidate(COMPRESSED_PLUGIN_ID, COMPRESSED_PLAYER_TYPE_ID, "MP3 / FLAC / Ogg", COMPRESSED_EXTENSIONS)
+    audio_candidate(
+        COMPRESSED_PLUGIN_ID,
+        COMPRESSED_PLAYER_TYPE_ID,
+        "MP3 / FLAC / Ogg",
+        COMPRESSED_EXTENSIONS,
+    )
 }
 
 /// m4a、aac、opus 共用一个候选。媒体基础把音轨解成 PCM 后，同样装进 WAV 的内存游标。
 pub(super) fn system_candidate() -> PlayerCandidate {
-    audio_candidate(SYSTEM_PLUGIN_ID, SYSTEM_PLAYER_TYPE_ID, "M4A / AAC / Opus", SYSTEM_EXTENSIONS)
+    audio_candidate(
+        SYSTEM_PLUGIN_ID,
+        SYSTEM_PLAYER_TYPE_ID,
+        "M4A / AAC / Opus",
+        SYSTEM_EXTENSIONS,
+    )
 }
 
-fn audio_candidate(plugin_id: &str, player_type_id: &str, label: &str, extensions: &[&str]) -> PlayerCandidate {
+fn audio_candidate(
+    plugin_id: &str,
+    player_type_id: &str,
+    label: &str,
+    extensions: &[&str],
+) -> PlayerCandidate {
     PlayerCandidate {
         plugin_id: plugin_id.into(),
         player_type_id: player_type_id.into(),
@@ -274,7 +289,11 @@ impl Cursor {
     /// 毫秒换成帧：帧 = 毫秒 × 采样率 / 1000，夹在总帧数以内。
     fn frame_at(&self, position_ms: u64) -> u64 {
         let rate = u64::from(self.sample_rate);
-        let frame = if rate == 0 { 0 } else { position_ms.saturating_mul(rate) / 1000 };
+        let frame = if rate == 0 {
+            0
+        } else {
+            position_ms.saturating_mul(rate) / 1000
+        };
         frame.min(self.frame_count)
     }
 }
@@ -608,7 +627,8 @@ mod device {
     pub(super) fn start(cursor: &mut super::Cursor) {
         #[cfg(test)]
         {
-            cursor.sounding = (cursor.frame < cursor.frame_count).then_some((cursor.frame, cursor.volume));
+            cursor.sounding =
+                (cursor.frame < cursor.frame_count).then_some((cursor.frame, cursor.volume));
         }
         #[cfg(not(test))]
         let _ = cursor;

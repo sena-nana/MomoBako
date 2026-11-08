@@ -17,7 +17,10 @@ fn nodes(scene: &str) -> Vec<AccessibilityNode> {
 }
 
 fn find<'a>(nodes: &'a [AccessibilityNode], label: &str) -> Vec<&'a AccessibilityNode> {
-    nodes.iter().filter(|node| node.label.as_deref() == Some(label)).collect()
+    nodes
+        .iter()
+        .filter(|node| node.label.as_deref() == Some(label))
+        .collect()
 }
 
 fn has(nodes: &[AccessibilityNode], label: &str) -> bool {
@@ -34,14 +37,26 @@ fn button<'a>(nodes: &'a [AccessibilityNode], label: &str) -> &'a AccessibilityN
 #[test]
 fn active_filter_bar_lists_groups_candidates_and_inputs() {
     let nodes = nodes("filter-bar-active");
-    for group in ["格式筛选", "文件标签筛选", "文件颜色筛选", "形状筛选", "评分筛选", "高级筛选"] {
+    for group in [
+        "格式筛选",
+        "文件标签筛选",
+        "文件颜色筛选",
+        "形状筛选",
+        "评分筛选",
+        "高级筛选",
+    ] {
         assert!(
-            find(&nodes, group).iter().any(|node| node.role == AccessibilityRole::Toolbar),
+            find(&nodes, group)
+                .iter()
+                .any(|node| node.role == AccessibilityRole::Toolbar),
             "缺少分组 {group}"
         );
     }
     assert!(!has(&nodes, "库类型筛选"), "没有库类型条目时不显示快捷方式");
-    for chip in ["pdf", "png", "参考", "封面", "文档", "#3fa796", "红色", "横版", "竖版", "全部", "1 星+", "3 星+", "5 星+"] {
+    for chip in [
+        "pdf", "png", "参考", "封面", "文档", "#3fa796", "红色", "横版", "竖版", "全部", "1 星+",
+        "3 星+", "5 星+",
+    ] {
         button(&nodes, chip);
     }
     assert!(has(&nodes, "当前资源库筛选"));
@@ -51,7 +66,10 @@ fn active_filter_bar_lists_groups_candidates_and_inputs() {
     button(&nodes, "应用");
     let adds = find(&nodes, "添加");
     assert_eq!(adds.len(), 2, "颜色和形状各一个「添加」");
-    assert!(adds.iter().all(|node| node.disabled), "输入为空时「添加」禁用");
+    assert!(
+        adds.iter().all(|node| node.disabled),
+        "输入为空时「添加」禁用"
+    );
     for input in [
         "输入文件颜色",
         "输入形状",
@@ -68,7 +86,10 @@ fn active_filter_bar_lists_groups_candidates_and_inputs() {
         "排序字段",
         "结果数量",
     ] {
-        assert!(find(&nodes, input).iter().any(|node| node.editable), "缺少输入框 {input}");
+        assert!(
+            find(&nodes, input).iter().any(|node| node.editable),
+            "缺少输入框 {input}"
+        );
     }
     assert!(!has(&nodes, "加入筛选"), "Vue 没有「加入筛选」");
 }
@@ -78,9 +99,19 @@ fn plain_filter_bar_hides_empty_groups_and_disables_clear() {
     let nodes = nodes("filter-bar");
     assert!(has(&nodes, "格式筛选"), "格式候选来自仓库摘要");
     assert!(!has(&nodes, "文件标签筛选"), "没有标签候选时不显示标签组");
-    assert!(has(&nodes, "文件颜色筛选") && has(&nodes, "形状筛选"), "颜色和形状组总在");
-    assert!(!nodes.iter().any(|node| node.label.as_deref().is_some_and(|label| label.ends_with("个条件"))));
-    assert!(button(&nodes, "清除").disabled, "没有条件也没有查询时清除禁用");
+    assert!(
+        has(&nodes, "文件颜色筛选") && has(&nodes, "形状筛选"),
+        "颜色和形状组总在"
+    );
+    assert!(!nodes.iter().any(|node| {
+        node.label
+            .as_deref()
+            .is_some_and(|label| label.ends_with("个条件"))
+    }));
+    assert!(
+        button(&nodes, "清除").disabled,
+        "没有条件也没有查询时清除禁用"
+    );
     assert!(has(&nodes, "等待搜索条件"));
     assert!(has(&nodes, "全局搜索"));
 }
@@ -88,10 +119,22 @@ fn plain_filter_bar_hides_empty_groups_and_disables_clear() {
 #[test]
 fn results_panel_shows_scope_summary_counts_and_hit_context() {
     let nodes = nodes("search-results");
-    for label in ["默认资源库内筛选", "搜索结果", "当前资源库筛选: 封面", "1 个仓库", "1 条结果", "默认资源库 / cover.png"] {
+    for label in [
+        "默认资源库内筛选",
+        "搜索结果",
+        "当前资源库筛选: 封面",
+        "1 个仓库",
+        "1 条结果",
+        "默认资源库 / cover.png",
+    ] {
         assert!(has(&nodes, label), "缺少 {label}");
     }
-    assert!(find(&nodes, "cover.png").iter().any(|node| node.role == AccessibilityRole::ListItem), "结果行可以点");
+    assert!(
+        find(&nodes, "cover.png")
+            .iter()
+            .any(|node| node.role == AccessibilityRole::ListItem),
+        "结果行可以点"
+    );
     for chip in ["png", "封面", "参考", "红色", "横版", "4 星"] {
         assert!(has(&nodes, chip), "缺少结果芯片 {chip}");
     }
@@ -112,11 +155,15 @@ fn clicking_chips_and_submitting_inputs_drive_the_search() {
     let mut session = RuntimeAgentSession::new(document, 1200, 800).expect("离屏会话");
     session.flush().expect("布局");
 
-    let pump = |session: &mut RuntimeAgentSession, model: &mut super::super::ShellViewModel, step: &str| {
+    let pump = |session: &mut RuntimeAgentSession,
+                model: &mut super::super::ShellViewModel,
+                step: &str| {
         let queued = session.document_mut().context_mut().take_program_messages();
         assert!(!queued.is_empty(), "{step} 没有进入程序消息");
         for message in queued {
-            let message = message.downcast::<super::super::ShellMessage>().expect("壳层消息");
+            let message = message
+                .downcast::<super::super::ShellMessage>()
+                .expect("壳层消息");
             super::super::commit_interaction(model, *message, nana_ui_platform::WindowId(1), false);
         }
         super::super::mount_shell(session.document_mut(), model).expect("重新挂载");
@@ -145,14 +192,31 @@ fn clicking_chips_and_submitting_inputs_drive_the_search() {
     // mount_shell 重挂后按键路径恢复焦点，回车直接落在颜色输入框上。
     let color = node_id(&session, "输入文件颜色", "text-input");
     assert!(
-        session.accessibility_dump().iter().any(|node| node.id == color && node.focused),
+        session
+            .accessibility_dump()
+            .iter()
+            .any(|node| node.id == color && node.focused),
         "重挂后颜色输入框应保持焦点"
     );
-    session.key_press("Enter", "Enter", Default::default()).expect("回车提交");
+    session
+        .key_press("Enter", "Enter", Default::default())
+        .expect("回车提交");
     pump(&mut session, &mut model, "回车提交");
-    assert_eq!(model.inspect.filters.colors, ["青色"], "回车按「添加」提交颜色");
-    assert!(model.inspect.search_ui.draft.color.is_empty(), "提交后清空输入");
-    assert!(session.accessibility_dump().iter().any(|node| node.label.as_deref() == Some("青色") && node.role == "button"));
+    assert_eq!(
+        model.inspect.filters.colors,
+        ["青色"],
+        "回车按「添加」提交颜色"
+    );
+    assert!(
+        model.inspect.search_ui.draft.color.is_empty(),
+        "提交后清空输入"
+    );
+    assert!(
+        session
+            .accessibility_dump()
+            .iter()
+            .any(|node| node.label.as_deref() == Some("青色") && node.role == "button")
+    );
 
     let rating = node_id(&session, "4 星+", "button");
     assert!(session.click_node(rating).expect("点 4 星+"));
@@ -173,7 +237,35 @@ fn clicking_chips_and_submitting_inputs_drive_the_search() {
 }
 
 fn session_nodes(session: &nana_ui_devtools::agent::RuntimeAgentSession) -> Vec<AccessibilityNode> {
-    session.document().context().world().project_accessibility(session.document().document())
+    session
+        .document()
+        .context()
+        .world()
+        .project_accessibility(session.document().document())
+}
+
+/// 没有资源库的搜索页：画出 Vue 的标题和空文案，不画出仓库、命中或关键词结果。
+#[test]
+fn search_no_library_draws_the_vue_empty_copy() {
+    let nodes = nodes("search-no-library");
+    for label in [
+        "搜索结果",
+        "全局搜索",
+        "输入关键词、标签或评分条件后，这里会展示跨仓库结果。",
+        "0 个仓库",
+        "0 条结果",
+        "还没有可搜索的资源库",
+        "先在资源库页面添加一个仓库，再执行跨仓库搜索。",
+    ] {
+        assert!(has(&nodes, label), "缺少 {label}");
+    }
+    assert!(!has(&nodes, "还没有可用资源库"), "空库拖入页不该盖住搜索");
+    assert!(!has(&nodes, "没有匹配的文件"));
+    assert!(!has(&nodes, "等待搜索条件"));
+    assert!(!has(&nodes, "当前资源库筛选"));
+    assert!(!has(&nodes, "格式筛选"));
+    assert!(!has(&nodes, "默认资源库"));
+    assert!(!has(&nodes, "cover.png"));
 }
 
 /// 查询跑完没有命中：空状态写明全部资源库里没有匹配的文件，不再写「等待搜索条件」。
@@ -181,11 +273,40 @@ fn session_nodes(session: &nana_ui_devtools::agent::RuntimeAgentSession) -> Vec<
 fn empty_search_keeps_the_filter_bar_closed() {
     let nodes = nodes("search-empty");
     assert!(has(&nodes, "没有匹配的文件"));
-    assert!(has(&nodes, "全部资源库里没有符合当前条件的文件。调整关键词、标签或评分条件后再试。"));
+    assert!(has(
+        &nodes,
+        "全部资源库里没有符合当前条件的文件。调整关键词、标签或评分条件后再试。"
+    ));
     assert!(!has(&nodes, "等待搜索条件"), "搜索已经跑完");
     assert!(has(&nodes, "当前查询: 不存在的文件"));
     assert!(has(&nodes, "0 条结果"));
     assert!(!has(&nodes, "当前资源库筛选"), "筛选栏关闭");
+}
+
+/// 有资源库时搜索失败：错误行是服务没起来交回的原因，不写命中，也不说成没有匹配。
+#[test]
+fn search_failed_scene_shows_only_the_service_error() {
+    let model = acceptance_gap_models()
+        .into_iter()
+        .find(|(name, _)| *name == "search-failed")
+        .map(|(_, model)| model)
+        .expect("search-failed 场景");
+    assert!(!model.workspace.repositories.is_empty(), "场景里应有资源库");
+    assert!(model.inspect.results.is_empty(), "失败不该编造命中");
+    let error =
+        crate::task_guard::failure_when_services_missing("搜索").expect("服务没起来应有失败原因");
+    assert_eq!(model.inspect.search_error, error);
+    assert_eq!(error, "领域服务未启动");
+    let nodes = ShellHarness::mount(model).nodes();
+    assert!(has(&nodes, &error));
+    assert!(has(&nodes, "当前查询: 封面"));
+    assert!(has(&nodes, "1 个仓库"));
+    assert!(has(&nodes, "0 条结果"));
+    assert!(has(&nodes, "默认资源库"));
+    assert!(!has(&nodes, "没有匹配的文件"));
+    assert!(!has(&nodes, "等待搜索条件"));
+    assert!(!has(&nodes, "cover.png"));
+    assert!(!has(&nodes, "当前资源库筛选"));
 }
 
 /// 搜索失败且没有上一批结果：只写错误，不说成没有命中，也不说成在等条件。
@@ -196,15 +317,19 @@ fn failed_search_shows_only_the_error() {
         .find(|(name, _)| *name == "search-empty")
         .map(|(_, model)| model)
         .expect("search-empty 场景");
-    model.reduce(super::super::ShellMessage::Inspect(super::super::inspect::InspectMessage::RunSearch));
+    model.reduce(super::super::ShellMessage::Inspect(
+        super::super::inspect::InspectMessage::RunSearch,
+    ));
     let generation = match model.inspect.take_effects().pop() {
         Some(super::super::InspectEffect::Search { generation, .. }) => generation,
         other => panic!("没有搜索请求：{other:?}"),
     };
-    model.reduce(super::super::ShellMessage::Inspect(super::super::inspect::InspectMessage::SearchFinished {
-        generation,
-        result: Err("搜索失败：索引损坏".into()),
-    }));
+    model.reduce(super::super::ShellMessage::Inspect(
+        super::super::inspect::InspectMessage::SearchFinished {
+            generation,
+            result: Err("搜索失败：索引损坏".into()),
+        },
+    ));
     let nodes = ShellHarness::mount(model).nodes();
     assert!(has(&nodes, "搜索失败：索引损坏"));
     assert!(!has(&nodes, "没有匹配的文件"));

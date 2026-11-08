@@ -56,7 +56,13 @@ mod icu {
     use std::sync::{Mutex, OnceLock};
 
     type UcolOpen = unsafe extern "C" fn(locale: *const u8, status: *mut i32) -> *mut c_void;
-    type UcolStrcoll = unsafe extern "C" fn(collator: *const c_void, source: *const u16, source_len: i32, target: *const u16, target_len: i32) -> i32;
+    type UcolStrcoll = unsafe extern "C" fn(
+        collator: *const c_void,
+        source: *const u16,
+        source_len: i32,
+        target: *const u16,
+        target_len: i32,
+    ) -> i32;
 
     #[link(name = "kernel32")]
     unsafe extern "system" {
@@ -80,12 +86,21 @@ mod icu {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        let (Ok(left_len), Ok(right_len)) = (i32::try_from(left.len()), i32::try_from(right.len())) else {
+        let (Ok(left_len), Ok(right_len)) = (i32::try_from(left.len()), i32::try_from(right.len()))
+        else {
             eprintln!("Nana 筛选候选过长，改用近似排序");
             return None;
         };
         // SAFETY：排序器在进程内一直有效；两段 UTF-16 缓冲在调用期间存活，长度是真实长度。
-        let result = unsafe { (guard.strcoll)(guard.handle as *const c_void, left.as_ptr(), left_len, right.as_ptr(), right_len) };
+        let result = unsafe {
+            (guard.strcoll)(
+                guard.handle as *const c_void,
+                left.as_ptr(),
+                left_len,
+                right.as_ptr(),
+                right_len,
+            )
+        };
         Some(result.cmp(&0))
     }
 
@@ -105,7 +120,8 @@ mod icu {
             return None;
         }
         // SAFETY：两个导出的签名与 ICU C API 一致。
-        let (open, strcoll): (UcolOpen, UcolStrcoll) = unsafe { (std::mem::transmute(open), std::mem::transmute(strcoll)) };
+        let (open, strcoll): (UcolOpen, UcolStrcoll) =
+            unsafe { (std::mem::transmute(open), std::mem::transmute(strcoll)) };
         let mut status = 0i32;
         // SAFETY：区域名以 NUL 结尾；status 是有效的输出位置。
         let handle = unsafe { open(b"zh-CN\0".as_ptr(), &mut status) };
@@ -114,7 +130,10 @@ mod icu {
             eprintln!("Nana 打不开 ICU zh 排序器（状态 {status}），筛选候选改用近似排序");
             return None;
         }
-        Some(Mutex::new(Collator { handle: handle as usize, strcoll }))
+        Some(Mutex::new(Collator {
+            handle: handle as usize,
+            strcoll,
+        }))
     }
 }
 
@@ -122,7 +141,10 @@ mod icu {
 mod tests {
     use super::*;
 
-    const SAMPLE: [&str; 14] = ["png", "PNG", "参考", "#3fa796", "竖版", "jpg", "红色", "10", "封面", "9", "横版", "_x", "文档", "a"];
+    const SAMPLE: [&str; 14] = [
+        "png", "PNG", "参考", "#3fa796", "竖版", "jpg", "红色", "10", "封面", "9", "横版", "_x",
+        "文档", "a",
+    ];
 
     fn sorted(compare: fn(&str, &str) -> Ordering) -> Vec<&'static str> {
         let mut items = SAMPLE.to_vec();
@@ -135,7 +157,10 @@ mod tests {
     fn zh_order_puts_symbols_digits_han_then_latin() {
         assert_eq!(
             sorted(compare_zh),
-            ["_x", "#3fa796", "10", "9", "参考", "封面", "横版", "红色", "竖版", "文档", "a", "jpg", "png", "PNG"]
+            [
+                "_x", "#3fa796", "10", "9", "参考", "封面", "横版", "红色", "竖版", "文档", "a",
+                "jpg", "png", "PNG"
+            ]
         );
     }
 

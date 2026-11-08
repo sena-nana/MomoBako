@@ -13,13 +13,16 @@
 //! - 后端在播放源准备好时写下访问时间，结果里带上 [`SourcePrep::prepared`]，归约当场改「最近使用」。
 //! - 准备失败（登录失效、网络、缓存目录不可用）记进系统日志，交回来源的原话，预览框和播放条给「重试」。
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::backend::services::logging::write_log;
 use crate::backend::services::mutsuki_runner::PROTOCOL_PLAYBACK_PREPARE;
-use crate::backend::services::repository::{EntryPlaybackRequest, SystemLogLocationInput, SystemLogWriteRequest};
+use crate::backend::services::repository::{
+    EntryPlaybackRequest, SystemLogLocationInput, SystemLogWriteRequest,
+};
 use crate::backend::viewmodels::MutsukiTaskViewModel;
 use crate::shell::SourcePrep;
+use crate::shell::inspect_lyrics::{LyricHint, hint_from_prepare};
 
 /// 来源只交回网址、没有本地文件时的原因。
 pub(crate) const URL_ONLY: &str = "来源只交回了网络地址，没有本地文件，无法播放";
@@ -54,25 +57,46 @@ pub(crate) fn prepare_and_read(
     requester: Requester,
     repo_id: &str,
     path: &str,
-) -> (Result<Vec<u8>, String>, SourcePrep) {
-    let request = EntryPlaybackRequest { repo_id: repo_id.to_string(), path: path.to_string() };
-    let local = executor
-        .block_on(tasks.execute(PROTOCOL_PLAYBACK_PREPARE, request))
-        .and_then(|(output, _)| local_source(&output));
+) -> (Result<Vec<u8>, String>, SourcePrep, LyricHint) {
+    let request = EntryPlaybackRequest {
+        repo_id: repo_id.to_string(),
+        path: path.to_string(),
+    };
+    let executed = executor.block_on(tasks.execute(PROTOCOL_PLAYBACK_PREPARE, request));
+    let (output, exec_error) = match executed {
+        Ok((output, _)) => (Some(output), None),
+        Err(error) => (None, Some(error)),
+    };
+    let hint = output
+        .as_ref()
+        .map(hint_from_prepare)
+        .unwrap_or(LyricHint::Absent);
+    let local = match output {
+        Some(output) => local_source(&output),
+        None => Err(exec_error.unwrap_or_else(|| "播放源不可用".into())),
+    };
     let local = match local {
         Ok(local) => local,
         Err(error) => {
             report_failure(requester, repo_id, path, &error);
-            return (Err(error), SourcePrep::failed());
+            return (Err(error), SourcePrep::failed(), hint);
         }
     };
-    let prepared = SourcePrep::prepared(repo_id, path, &crate::shell::admin::support::now_iso8601());
+    let prepared =
+        SourcePrep::prepared(repo_id, path, &crate::shell::admin::support::now_iso8601());
     match std::fs::read(&local) {
-        Ok(bytes) => (Ok(bytes), prepared),
+        Ok(bytes) => (Ok(bytes), prepared, hint),
         Err(error) => {
             let reason = format!("读取播放源失败：{error}");
             report_failure(requester, repo_id, path, &format!("{reason}（{local}）"));
-            (Err(reason), SourcePrep { retryable: true, ..prepared })
+            (
+                Err(reason),
+                SourcePrep {
+                    retryable: true,
+                    ..prepared
+                },
+                hint,
+            )
         }
     }
 }
@@ -83,7 +107,14 @@ pub(crate) fn local_source(output: &Value) -> Result<String, String> {
     let Some(fields) = output.as_object() else {
         return Err(format!("播放源结果无法识别：{output}"));
     };
-    let filled = |key: &str| fields.get(key).and_then(Value::as_str).map(str::trim).filter(|value| !value.is_empty()).map(str::to_string);
+    let filled = |key: &str| {
+        fields
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+    };
     if let Some(local) = filled("localPath").or_else(|| filled("tempFilePath")) {
         return Ok(local);
     }
@@ -109,7 +140,11 @@ fn report_failure(requester: Requester, repo_id: &str, path: &str, error: &str) 
         plugin_id: None,
         source_kind: Some("host".into()),
         source_label: None,
-        location: Some(SystemLogLocationInput { module_path: Some(module_path!().into()), file: Some(file!().into()), line: Some(line!()) }),
+        location: Some(SystemLogLocationInput {
+            module_path: Some(module_path!().into()),
+            file: Some(file!().into()),
+            line: Some(line!()),
+        }),
     };
     if let Err(error) = write_log(request) {
         eprintln!("Nana 写入播放源失败日志失败：{error}");
@@ -132,8 +167,15 @@ mod tests {
     /// 只有网址时不去下载它，按失败交回；什么都没有、结果认不出也是失败。
     #[test]
     fn url_only_or_empty_sources_fail() {
-        assert_eq!(local_source(&json!({ "sourceUrl": "https://music.example/a.mp3" })), Err(URL_ONLY.to_string()));
+        assert_eq!(
+            local_source(&json!({ "sourceUrl": "https://music.example/a.mp3" })),
+            Err(URL_ONLY.to_string())
+        );
         assert_eq!(local_source(&json!({})), Err("播放源不可用".to_string()));
-        assert!(local_source(&json!("not an object")).unwrap_err().starts_with("播放源结果无法识别"));
+        assert!(
+            local_source(&json!("not an object"))
+                .unwrap_err()
+                .starts_with("播放源结果无法识别")
+        );
     }
 }

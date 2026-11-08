@@ -1,15 +1,16 @@
 //! ASMR 补全候选：从素材元数据 `providerCandidates` 读出候选画成卡片；「应用」把候选字段按原始 JSON 类型
 //! 写回素材，「导入候选」和「抓取候选」把新候选追加进当前素材的 `providerCandidates` 并保存。
 //!
-//! 对应 Vue `library-asmr/src/asmrCandidates.js` 和 `register.js` 的元数据面板。候选、导入框和抓取都只对着
-//! 正在看的素材：写入经 [`InspectState::apply_metadata_patch`](super::super::inspect::InspectState::apply_metadata_patch)，
-//! 素材换了就不写，候选不会串到别的文件上。抓取经插件调用 `provider.lookupMetadataCandidate`（DLsite、ASMR One）。
+//! 对应 Vue `library-asmr/src/asmrCandidates.js` 和 `register.js` 的元数据面板。候选从叠层后的
+//! `currentFileEntry.metadata` 读（`readMetadataCandidates(props.entry.metadata)`），不跟编辑器里还没保存的草稿。
+//! 导入框和抓取只对着正在看的文件：写入经 [`InspectState::apply_metadata_patch`](super::super::inspect::InspectState::apply_metadata_patch)，
+//! 文件换了就不写，候选不会串到别的文件上。抓取经插件调用 `provider.lookupMetadataCandidate`（DLsite、ASMR One）。
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use nana_ui::runtime::view::{fields, text, widget, AnyView, IntoView};
-use nana_ui::runtime::{Activate, Button, SelectOption, Stack};
 use nana_ui::ButtonKind;
+use nana_ui::runtime::view::{AnyView, IntoView, fields, text, widget};
+use nana_ui::runtime::{Activate, Button, SelectOption, Stack};
 use serde_json::{Map, Value};
 
 use super::super::admin::{AdminEffect, PluginCallOrigin};
@@ -23,13 +24,46 @@ const ASMR_ONE: &str = "momobako.service.provider.asmr-one";
 const LOOKUP_METHOD: &str = "provider.lookupMetadataCandidate";
 
 /// 候选不写的字段：注释、评分和收听进度归用户和播放器（Vue `protectedCandidateFields`）。
-const PROTECTED: &[&str] = &["comment", "rating", "listeningProgress", "listeningStatus", "lastListenedAt", "trackPositionMs", "trackDurationMs"];
+const PROTECTED: &[&str] = &[
+    "comment",
+    "rating",
+    "listeningProgress",
+    "listeningStatus",
+    "lastListenedAt",
+    "trackPositionMs",
+    "trackDurationMs",
+];
 
 /// 候选能写的作品字段（Vue `providerCandidateFields`）。别的键列在「跳过」里。
 const ALLOWED: &[&str] = &[
-    "workId", "rjCode", "title", "workTitle", "circle", "creator", "voiceActors", "characters", "series", "scenarioTags",
-    "audioTraits", "nsfw", "ageRating", "language", "releaseDate", "price", "dlCount", "sales", "reviewCount", "rateCount",
-    "rateAverage", "rateCountDetail", "rank", "cover", "coverUrl", "coverSourceWorkId", "sourceUrl", "purchaseSource",
+    "workId",
+    "rjCode",
+    "title",
+    "workTitle",
+    "circle",
+    "creator",
+    "voiceActors",
+    "characters",
+    "series",
+    "scenarioTags",
+    "audioTraits",
+    "nsfw",
+    "ageRating",
+    "language",
+    "releaseDate",
+    "price",
+    "dlCount",
+    "sales",
+    "reviewCount",
+    "rateCount",
+    "rateAverage",
+    "rateCountDetail",
+    "rank",
+    "cover",
+    "coverUrl",
+    "coverSourceWorkId",
+    "sourceUrl",
+    "purchaseSource",
 ];
 
 /// 候选对象自己的键，不算字段。
@@ -45,11 +79,12 @@ pub(super) struct CandidateState {
     lookups: BTreeSet<(String, String)>,
 }
 
-/// 导入框、候选 JSON 草稿、作品 ID 和就近显示的错误。属于 `asset` 这个素材：换了文件按初始状态显示，
+/// 导入框、候选 JSON 草稿、作品 ID 和就近显示的错误。属于 `file` 这条路径：换了文件按初始状态显示，
 /// 下一次改动先清空，上一个文件填的作品 ID 不会拿去抓别的文件的候选。
+/// 详情到达前后路径不变，不按素材 id 从空变成有值来换表单，正在输入的作品 ID 和导入框留着。
 #[derive(Clone, Debug, Default)]
 struct CandidateForm {
-    asset: Option<String>,
+    file: Option<String>,
     import_open: bool,
     import_draft: String,
     lookup_id: String,
@@ -69,6 +104,8 @@ pub(in crate::shell) struct CandidatesView {
     pub provider: String,
     pub import_error: String,
     pub candidates: Vec<CandidateCard>,
+    /// 当前文件不能保存封面，或已经有一张在保存：候选上的「封面」停用。
+    pub cover_locked: bool,
 }
 
 /// 一条候选。按序号和内容认，内容变了整张重建。
@@ -78,6 +115,8 @@ pub(in crate::shell) struct CandidateCard {
     pub title: String,
     pub fields: Vec<(String, String)>,
     pub skipped: Vec<String>,
+    /// 这条候选自己的 http(s) 封面。没有时不画「封面」。
+    pub cover_url: Option<String>,
 }
 
 /// 一条补全候选：来源、置信度和原始字段（保留 JSON 类型，应用时原样写回）。
@@ -95,7 +134,11 @@ impl Candidate {
             return None;
         };
         let fields = candidate_fields(object);
-        (!fields.is_empty()).then(|| Self { source: name(object.get("source")).unwrap_or_else(|| "provider".into()), confidence: name(object.get("confidence")), fields })
+        (!fields.is_empty()).then(|| Self {
+            source: name(object.get("source")).unwrap_or_else(|| "provider".into()),
+            confidence: name(object.get("confidence")),
+            fields,
+        })
     }
 
     /// 导入框里的 JSON（Vue `parseCandidateJson`）：必须是有字段的对象，来源和置信度缺省是 manual。
@@ -126,7 +169,10 @@ impl Candidate {
     /// 没有 `candidate` 时整个结果就是候选（Vue `response.payload.candidate ?? response.payload`）。
     /// 来源缺省用结果里的 `provider`。没有字段时报错，不存一条空候选。
     fn looked_up(payload: &Value) -> Result<Self, String> {
-        let candidate = payload.get("candidate").filter(|candidate| candidate.is_object()).unwrap_or(payload);
+        let candidate = payload
+            .get("candidate")
+            .filter(|candidate| candidate.is_object())
+            .unwrap_or(payload);
         let Value::Object(object) = candidate else {
             eprintln!("Nana ASMR 抓取结果不是对象：{payload}");
             return Err("抓取结果格式不正确".into());
@@ -136,8 +182,14 @@ impl Candidate {
             eprintln!("Nana ASMR 抓取结果没有字段：{payload}");
             return Err("抓取结果没有可读取字段".into());
         }
-        let source = name(object.get("source")).or_else(|| name(payload.get("provider"))).unwrap_or_else(|| "provider".into());
-        Ok(Self { source, confidence: name(object.get("confidence")), fields })
+        let source = name(object.get("source"))
+            .or_else(|| name(payload.get("provider")))
+            .unwrap_or_else(|| "provider".into());
+        Ok(Self {
+            source,
+            confidence: name(object.get("confidence")),
+            fields,
+        })
     }
 
     /// 存进 `providerCandidates` 的样子（Vue `appendMetadataCandidate`）：来源、置信度（有时）和字段。
@@ -170,13 +222,24 @@ impl Candidate {
 /// Vue `normalizeCandidateFields`：字段在 `fields` 里，没有时在 `metadata` 里，都没有时就是候选对象本身；
 /// 去掉候选自己的四个键。
 fn candidate_fields(object: &Map<String, Value>) -> Map<String, Value> {
-    let source = ["fields", "metadata"].iter().find_map(|key| object.get(*key).and_then(Value::as_object)).unwrap_or(object);
-    source.iter().filter(|(key, _)| !ENVELOPE.contains(&key.as_str())).map(|(key, value)| (key.clone(), value.clone())).collect()
+    let source = ["fields", "metadata"]
+        .iter()
+        .find_map(|key| object.get(*key).and_then(Value::as_object))
+        .unwrap_or(object);
+    source
+        .iter()
+        .filter(|(key, _)| !ENVELOPE.contains(&key.as_str()))
+        .map(|(key, value)| (key.clone(), value.clone()))
+        .collect()
 }
 
 /// Vue `normalizeProviderName`：去掉首尾空白的非空文字。
 fn name(value: Option<&Value>) -> Option<String> {
-    value.and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty()).map(str::to_string)
+    value
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
 }
 
 fn has_content(value: &Value) -> bool {
@@ -219,64 +282,117 @@ fn editable_asset(model: &ShellViewModel) -> Option<(String, String)> {
     if !inspect.can_edit() || !inspect.conflict.is_empty() {
         return None;
     }
-    Some((inspect.current_repo_id()?.to_string(), inspect.current_asset_id()?.to_string()))
+    Some((
+        inspect.current_repo_id()?.to_string(),
+        inspect.current_asset_id()?.to_string(),
+    ))
 }
 
 impl CandidateForm {
-    /// 属于 `asset` 的初始表单。
-    fn fresh(asset: Option<&str>) -> Self {
-        Self { asset: asset.map(str::to_string), ..Self::default() }
+    /// 属于这条路径的初始表单。
+    fn fresh(file: Option<&str>) -> Self {
+        Self {
+            file: file.map(str::to_string),
+            ..Self::default()
+        }
     }
 }
 
 impl CandidateState {
-    /// 表单属于当前素材时的样子；属于别的素材时按初始状态。
-    fn form_for(&self, asset: Option<&str>) -> CandidateForm {
-        if self.form.asset.as_deref() == asset { self.form.clone() } else { CandidateForm::fresh(asset) }
+    /// 表单属于当前文件时的样子；属于别的文件时按初始状态。
+    fn form_for(&self, file: Option<&str>) -> CandidateForm {
+        if self.form.file.as_deref() == file {
+            self.form.clone()
+        } else {
+            CandidateForm::fresh(file)
+        }
     }
 
-    /// 要改表单：表单属于别的素材时先回到初始状态。
-    fn form_mut(&mut self, asset: Option<&str>) -> &mut CandidateForm {
-        if self.form.asset.as_deref() != asset {
-            self.form = CandidateForm::fresh(asset);
+    /// 要改表单：表单属于别的文件时先回到初始状态。
+    fn form_mut(&mut self, file: Option<&str>) -> &mut CandidateForm {
+        if self.form.file.as_deref() != file {
+            self.form = CandidateForm::fresh(file);
         }
         &mut self.form
     }
 
     fn provider(&self) -> String {
-        if self.provider.is_empty() { DLSITE.to_string() } else { self.provider.clone() }
+        if self.provider.is_empty() {
+            DLSITE.to_string()
+        } else {
+            self.provider.clone()
+        }
     }
 }
 
+/// 表单认正在看的路径，不认素材 id。详情还没读回时素材 id 是空的，读回以后才有；按 id 换表单会把正在输入的字清掉。
 fn form_mut(model: &mut ShellViewModel) -> &mut CandidateForm {
-    let asset = model.inspect.current_asset_id().map(str::to_string);
-    model.asmr.candidates.form_mut(asset.as_deref())
+    let file = model.inspect.target_path.clone();
+    model.asmr.candidates.form_mut(file.as_deref())
+}
+
+/// 补全候选读的元数据，和详情卡作品信息同一份（Vue `props.entry.metadata`，即叠层后的 `currentFileEntry`）。
+/// 详情卡在素材编号对得上时把详情盖到列表上；预览页和播放集只用条目自己的。没有的键不补，也不跟未保存草稿。
+fn card_metadata(model: &ShellViewModel) -> BTreeMap<String, Value> {
+    super::super::inspect_metadata_view::current_card_metadata(model)
+}
+
+/// 叠层里能当成文字的字段。作品 ID 没手填时用它，空值不收，没有的键不补。
+fn card_text(model: &ShellViewModel) -> BTreeMap<String, String> {
+    card_metadata(model)
+        .iter()
+        .map(|(key, value)| (key.clone(), display_value(value)))
+        .filter(|(_, text)| !text.is_empty())
+        .collect()
 }
 
 /// 下拉框的两个来源。
 pub(in crate::shell) fn provider_options() -> Vec<SelectOption> {
-    vec![SelectOption::new(DLSITE, "DLsite"), SelectOption::new(ASMR_ONE, "ASMR One")]
+    vec![
+        SelectOption::new(DLSITE, "DLsite"),
+        SelectOption::new(ASMR_ONE, "ASMR One"),
+    ]
 }
 
 /// 元数据列里的补全候选。不是 ASMR 条目或扩展没开时整块不占位；没有候选就写「暂无候选」，不造一条来源。
-pub(in crate::shell) fn candidates_view(model: &ShellViewModel, custom: &BTreeMap<String, String>) -> CandidatesView {
+/// 候选从 [`card_metadata`] 读，不跟未保存草稿。
+pub(in crate::shell) fn candidates_view(
+    model: &ShellViewModel,
+    custom: &BTreeMap<String, String>,
+) -> CandidatesView {
     if !super::asmr_entry(model, custom) {
         return CandidatesView::default();
     }
     let state = &model.asmr.candidates;
     let asset = model.inspect.current_asset_id();
-    let form = state.form_for(asset);
-    let looking_up = model.inspect.current_repo_id().zip(asset).is_some_and(|(repo, asset)| state.lookups.contains(&(repo.to_string(), asset.to_string())));
-    let candidates = listed_candidates(&super::current_metadata(model))
+    let form = state.form_for(model.inspect.target_path.as_deref());
+    let looking_up = model
+        .inspect
+        .current_repo_id()
+        .zip(asset)
+        .is_some_and(|(repo, asset)| {
+            state
+                .lookups
+                .contains(&(repo.to_string(), asset.to_string()))
+        });
+    let candidates = listed_candidates(&card_metadata(model))
         .into_iter()
         .enumerate()
         .map(|(index, candidate)| {
             let (patch, skipped) = candidate.patch();
             CandidateCard {
                 index,
-                title: format!("{} {}", candidate.source, candidate.confidence.as_deref().unwrap_or("候选")),
-                fields: patch.iter().map(|(key, value)| (key.clone(), display_value(value))).collect(),
+                title: format!(
+                    "{} {}",
+                    candidate.source,
+                    candidate.confidence.as_deref().unwrap_or("候选")
+                ),
+                fields: patch
+                    .iter()
+                    .map(|(key, value)| (key.clone(), display_value(value)))
+                    .collect(),
                 skipped,
+                cover_url: super::cover::remote_cover(&patch),
             }
         })
         .collect();
@@ -288,47 +404,109 @@ pub(in crate::shell) fn candidates_view(model: &ShellViewModel, custom: &BTreeMa
         provider: state.provider(),
         import_error: form.error,
         candidates,
+        cover_locked: super::cover::busy(model) || !super::cover::editable_for_button(model),
     }
 }
 
-/// 作品 ID 输入框里显示的值：没填过时取元数据里的 RJ 号或作品 ID（Vue 的 `workId`：`rjCode || workId`）。
-pub(in crate::shell) fn lookup_id_shown(model: &ShellViewModel, custom: &BTreeMap<String, String>) -> String {
-    let form = model.asmr.candidates.form_for(model.inspect.current_asset_id());
+/// 作品 ID 输入框里显示的值。手填过的留着，详情到达不冲掉。
+/// 没填过时取叠层里的 RJ 号或作品 ID（Vue 的 `workId`：`rjCode || workId`，只在输入还是空的时候填）。
+pub(in crate::shell) fn lookup_id_shown(model: &ShellViewModel) -> String {
+    let form = model
+        .asmr
+        .candidates
+        .form_for(model.inspect.target_path.as_deref());
     if form.lookup_id.is_empty() {
-        default_work_id(custom)
+        default_work_id(&card_text(model))
     } else {
         form.lookup_id
     }
 }
 
 fn default_work_id(custom: &BTreeMap<String, String>) -> String {
-    ["rjCode", "workId"].iter().find_map(|key| custom.get(*key).map(|value| value.trim()).filter(|value| !value.is_empty())).unwrap_or_default().to_string()
+    ["rjCode", "workId"]
+        .iter()
+        .find_map(|key| {
+            custom
+                .get(*key)
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or_default()
+        .to_string()
 }
 
-/// 导入框里的候选 JSON 草稿。
+/// 候选上能拿去保存的 http(s) 封面。作品信息的按钮只接受这里或文件自己的地址。
+pub(super) fn cover_urls(metadata: &BTreeMap<String, Value>) -> Vec<String> {
+    listed_candidates(metadata)
+        .into_iter()
+        .filter_map(|candidate| {
+            let (patch, _) = candidate.patch();
+            super::cover::remote_cover(&patch)
+        })
+        .collect()
+}
+
+/// 导入框里的候选 JSON 草稿。跟当前路径走，详情到达不清空。
 pub(in crate::shell) fn import_draft(model: &ShellViewModel) -> String {
-    model.asmr.candidates.form_for(model.inspect.current_asset_id()).import_draft
+    model
+        .asmr
+        .candidates
+        .form_for(model.inspect.target_path.as_deref())
+        .import_draft
 }
 
 /// 一条候选：来源和置信度、「应用」，下面是要写入的字段和跳过的字段。
-pub(in crate::shell) fn candidate_card(candidate: CandidateCard, apply_disabled: impl Fn() -> bool + Send + 'static) -> AnyView {
+pub(in crate::shell) fn candidate_card(
+    candidate: CandidateCard,
+    apply_disabled: impl Fn() -> bool + Send + 'static,
+    cover_disabled: impl Fn() -> bool + Send + 'static,
+) -> AnyView {
     let index = candidate.index;
     let empty = candidate.fields.is_empty();
-    let mut rows = vec![text(candidate.title).key(format!("inspect-asmr-candidate-{index}")).into_any()];
+    let mut rows = vec![
+        text(candidate.title)
+            .key(format!("inspect-asmr-candidate-{index}"))
+            .into_any(),
+    ];
+    if let Some(url) = candidate.cover_url.clone() {
+        let locked = cover_disabled();
+        rows.push(
+            widget(Button::new("封面").kind(ButtonKind::Ghost).disabled(locked))
+                .prop::<bool, fields::button::disabled>(cover_disabled)
+                .key(format!("inspect-asmr-cover-{index}"))
+                .on_cx(move |_, _: &Activate, cx| {
+                    cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::SaveCover(url.clone())))
+                })
+                .into_any(),
+        );
+    }
     rows.push(
         widget(Button::new("应用").kind(ButtonKind::Ghost).disabled(true))
             .prop::<bool, fields::button::disabled>(move || empty || apply_disabled())
             .key(format!("inspect-asmr-apply-{index}"))
-            .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::Apply(index))))
+            .on_cx(move |_, _: &Activate, cx| {
+                cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::Apply(index)))
+            })
             .into_any(),
     );
     for (key, value) in &candidate.fields {
-        rows.push(text(format!("{key}={value}")).key(format!("inspect-asmr-field-{index}-{key}")).into_any());
+        rows.push(
+            text(format!("{key}={value}"))
+                .key(format!("inspect-asmr-field-{index}-{key}"))
+                .into_any(),
+        );
     }
     if !candidate.skipped.is_empty() {
-        rows.push(text(format!("跳过 {}", candidate.skipped.join("，"))).key(format!("inspect-asmr-skipped-{index}")).into_any());
+        rows.push(
+            text(format!("跳过 {}", candidate.skipped.join("，")))
+                .key(format!("inspect-asmr-skipped-{index}"))
+                .into_any(),
+        );
     }
-    widget(Stack::column(4.0)).key(format!("inspect-asmr-candidate-card-{index}")).children(rows).into_any()
+    widget(Stack::column(4.0))
+        .key(format!("inspect-asmr-candidate-card-{index}"))
+        .children(rows)
+        .into_any()
 }
 
 /// 候选区的消息：导入框、来源、作品 ID、导入、抓取和应用。播放列表的消息不归这里。
@@ -344,7 +522,11 @@ pub(super) fn reduce(model: &mut ShellViewModel, message: AsmrMessage) {
         AsmrMessage::SetImportDraft(value) => form_mut(model).import_draft = value,
         AsmrMessage::ImportCandidate => import_candidate(model),
         AsmrMessage::Lookup => lookup(model),
-        AsmrMessage::LookupFinished { repo_id, asset_id, result } => note_lookup(model, repo_id, asset_id, result),
+        AsmrMessage::LookupFinished {
+            repo_id,
+            asset_id,
+            result,
+        } => note_lookup(model, repo_id, asset_id, result),
         AsmrMessage::Apply(index) => apply_candidate(model, index),
         other => eprintln!("Nana ASMR 候选区收到别的消息：{other:?}"),
     }
@@ -357,7 +539,9 @@ fn import_candidate(model: &mut ShellViewModel) {
         return;
     };
     let draft = form_mut(model).import_draft.clone();
-    match Candidate::imported(&draft).and_then(|candidate| append_candidate(model, &asset_id, candidate)) {
+    match Candidate::imported(&draft)
+        .and_then(|candidate| append_candidate(model, &asset_id, candidate))
+    {
         Ok(()) => {
             let form = form_mut(model);
             form.import_draft.clear();
@@ -372,10 +556,17 @@ fn import_candidate(model: &mut ShellViewModel) {
 }
 
 /// 把一条候选追加到当前素材已有的候选后面，按原始类型写回 `providerCandidates`。
-fn append_candidate(model: &mut ShellViewModel, asset_id: &str, candidate: Candidate) -> Result<(), String> {
-    let mut list = stored_candidates(&super::current_metadata(model));
+fn append_candidate(
+    model: &mut ShellViewModel,
+    asset_id: &str,
+    candidate: Candidate,
+) -> Result<(), String> {
+    let mut list = stored_candidates(&card_metadata(model));
     list.push(candidate.to_value());
-    model.inspect.apply_metadata_patch(asset_id, BTreeMap::from([("providerCandidates".to_string(), Value::Array(list))]))
+    model.inspect.apply_metadata_patch(
+        asset_id,
+        BTreeMap::from([("providerCandidates".to_string(), Value::Array(list))]),
+    )
 }
 
 /// 「抓取候选」：调来源插件的 `provider.lookupMetadataCandidate`，载荷 `{ id }`，不带仓库（候选插件不是仓库的来源插件）。
@@ -386,7 +577,11 @@ fn lookup(model: &mut ShellViewModel) {
         return;
     };
     let typed = form_mut(model).lookup_id.trim().to_string();
-    let id = if typed.is_empty() { default_work_id(&super::display_custom(model)) } else { typed };
+    let id = if typed.is_empty() {
+        default_work_id(&card_text(model))
+    } else {
+        typed
+    };
     if id.is_empty() {
         form_mut(model).error = "缺少作品 ID".into();
         return;
@@ -410,9 +605,19 @@ fn lookup(model: &mut ShellViewModel) {
 
 /// 抓取结果回来：还是正在看的那个素材时把候选追加进它的 `providerCandidates` 并保存，失败把原因写在导入框里；
 /// 已经换了文件就丢掉，不写到别的文件上。
-fn note_lookup(model: &mut ShellViewModel, repo_id: String, asset_id: String, result: Result<Value, String>) {
-    model.asmr.candidates.lookups.remove(&(repo_id.clone(), asset_id.clone()));
-    let current = model.inspect.current_asset_id() == Some(asset_id.as_str()) && model.inspect.current_repo_id() == Some(repo_id.as_str());
+fn note_lookup(
+    model: &mut ShellViewModel,
+    repo_id: String,
+    asset_id: String,
+    result: Result<Value, String>,
+) {
+    model
+        .asmr
+        .candidates
+        .lookups
+        .remove(&(repo_id.clone(), asset_id.clone()));
+    let current = model.inspect.current_asset_id() == Some(asset_id.as_str())
+        && model.inspect.current_repo_id() == Some(repo_id.as_str());
     if !current {
         eprintln!("Nana ASMR 候选抓取结果回来时已经换了文件，不写入：{asset_id}");
         return;
@@ -436,7 +641,10 @@ fn apply_candidate(model: &mut ShellViewModel, index: usize) {
         eprintln!("Nana ASMR 当前文件不能应用候选");
         return;
     };
-    let Some(candidate) = listed_candidates(&super::current_metadata(model)).into_iter().nth(index) else {
+    let Some(candidate) = listed_candidates(&card_metadata(model))
+        .into_iter()
+        .nth(index)
+    else {
         eprintln!("Nana ASMR 候选下标不存在：{index}");
         return;
     };

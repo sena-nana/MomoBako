@@ -6,11 +6,12 @@
 use std::path::Path;
 
 use crate::backend::services::repository::{
-    preview_media_type_for_extension, AssetDetail, AssetSummary, FilePreviewSourceResponse, FileReadRequest,
+    AssetDetail, AssetSummary, FilePreviewSourceResponse, FileReadRequest,
+    preview_media_type_for_extension,
 };
 use crate::shell::{InspectEffect, ShellMessage, ShellViewModel, WorkspaceRepository};
 
-use super::{load_image_preview, ImagePreviewSource};
+use super::{ImagePreviewSource, load_image_preview};
 
 const REPO_ID: &str = "repo";
 const COVER_PNG: &[u8] = include_bytes!("shell/preview_fixtures/cover.png");
@@ -64,7 +65,10 @@ fn shell() -> ShellViewModel {
 
 fn detail(path: &str) -> AssetDetail {
     let filename = path.rsplit('/').next().unwrap_or(path).to_string();
-    let extension = filename.rsplit_once('.').map(|(_, extension)| extension.to_string()).unwrap_or_default();
+    let extension = filename
+        .rsplit_once('.')
+        .map(|(_, extension)| extension.to_string())
+        .unwrap_or_default();
     AssetDetail {
         summary: AssetSummary {
             asset_id: format!("asset:{path}"),
@@ -105,7 +109,13 @@ fn preview(model: &mut ShellViewModel, path: &str, bytes: &[u8]) {
             _ => None,
         });
     let (repo_id, path) = request.expect("图片预览排下读取");
-    let message = load_image_preview(&Backend { bytes: bytes.to_vec() }, repo_id, path);
+    let message = load_image_preview(
+        &Backend {
+            bytes: bytes.to_vec(),
+        },
+        repo_id,
+        path,
+    );
     model.reduce(message);
 }
 
@@ -134,5 +144,9 @@ fn an_svg_previews_through_the_real_dispatch_path() {
     let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><rect width="40" height="20" fill="#3fa796"/></svg>"##;
     preview(&mut model, "icons/badge.svg", svg);
     let pixels = model.preview_pixels.as_ref().expect("SVG 预览有像素");
-    assert_eq!((pixels.width, pixels.height), (2048, 1024), "按原比例画到最长边 2048");
+    assert_eq!(
+        (pixels.width, pixels.height),
+        (2048, 1024),
+        "按原比例画到最长边 2048"
+    );
 }

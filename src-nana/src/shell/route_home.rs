@@ -6,7 +6,7 @@
 //! 设置和启动页是整页滚动（[`scroll_route`]），内边距跟着内容一起滚。
 //! 外框和滚动容器都常驻，只建一次，滚动偏移自然留着。
 
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::view::{AnyView, IntoView, widget};
 use nana_ui::runtime::{LengthSpec, ScrollAxes, ScrollView, Stack};
 
 use super::render::{PRIMARY_INSET_X, PRIMARY_INSET_Y};
@@ -36,7 +36,10 @@ pub(super) fn scroll_route(content: AnyView, key: &'static str) -> AnyView {
     let padded = widget(Stack::column(0.0).padding_xy(PRIMARY_INSET_X, PRIMARY_INSET_Y))
         .children((content,))
         .into_any();
-    widget(scroll_view()).children((padded,)).key(key).into_any()
+    widget(scroll_view())
+        .children((padded,))
+        .key(key)
+        .into_any()
 }
 
 /// 占满剩余高度的纵向滚动。

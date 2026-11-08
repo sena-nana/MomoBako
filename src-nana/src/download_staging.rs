@@ -16,10 +16,21 @@ static NEXT_RUN: AtomicU64 = AtomicU64::new(1);
 
 /// 暂存根目录：来源资源库有本地缓存目录时放在它的 `.momo/cache/download-staging/{目标资源库}` 下（托管缓存布局，
 /// 见 `docs/api-design.md`），没有时放在服务目录的 `download-staging/{目标资源库}` 下。
-pub(crate) fn staging_root(managed_cache_root: Option<&str>, service_root: &Path, target_repo_id: &str) -> PathBuf {
+pub(crate) fn staging_root(
+    managed_cache_root: Option<&str>,
+    service_root: &Path,
+    target_repo_id: &str,
+) -> PathBuf {
     let key = safe_component(target_repo_id);
-    match managed_cache_root.map(str::trim).filter(|root| !root.is_empty()) {
-        Some(root) => Path::new(root).join(".momo").join("cache").join("download-staging").join(key),
+    match managed_cache_root
+        .map(str::trim)
+        .filter(|root| !root.is_empty())
+    {
+        Some(root) => Path::new(root)
+            .join(".momo")
+            .join("cache")
+            .join("download-staging")
+            .join(key),
         None => service_root.join("download-staging").join(key),
     }
 }
@@ -29,7 +40,14 @@ fn safe_component(value: &str) -> String {
     let name: String = value
         .trim()
         .chars()
-        .map(|ch| if matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') || ch.is_control() { '_' } else { ch })
+        .map(|ch| {
+            if matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*') || ch.is_control()
+            {
+                '_'
+            } else {
+                ch
+            }
+        })
         .collect();
     if name.trim_matches('.').is_empty() {
         "repository".into()
@@ -73,18 +91,31 @@ impl StagingDir {
     /// 在 `root` 下新建一个只属于这次下载的空目录，名字是时间、进程号和序号。同名目录已经在时换下一个序号，绝不沿用
     /// 已有的目录（`create_dir` 遇到已有的目录会失败，不会把它当成新建的）。
     pub(crate) fn create(root: &Path) -> Result<Self, String> {
-        fs::create_dir_all(root).map_err(|error| format!("建不了下载暂存目录 {}：{error}", root.display()))?;
-        let stamp = SystemTime::now().duration_since(UNIX_EPOCH).map(|elapsed| elapsed.as_millis()).unwrap_or_default();
+        fs::create_dir_all(root)
+            .map_err(|error| format!("建不了下载暂存目录 {}：{error}", root.display()))?;
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_millis())
+            .unwrap_or_default();
         for _ in 0..64 {
-            let name = format!("{stamp}-{}-{}", std::process::id(), NEXT_RUN.fetch_add(1, Ordering::Relaxed));
+            let name = format!(
+                "{stamp}-{}-{}",
+                std::process::id(),
+                NEXT_RUN.fetch_add(1, Ordering::Relaxed)
+            );
             let path = root.join(name);
             match fs::create_dir(&path) {
                 Ok(()) => return Ok(Self { path }),
                 Err(error) if error.kind() == ErrorKind::AlreadyExists => continue,
-                Err(error) => return Err(format!("建不了下载暂存目录 {}：{error}", path.display())),
+                Err(error) => {
+                    return Err(format!("建不了下载暂存目录 {}：{error}", path.display()));
+                }
             }
         }
-        Err(format!("建不了下载暂存目录：{} 下能用的名字都被占了", root.display()))
+        Err(format!(
+            "建不了下载暂存目录：{} 下能用的名字都被占了",
+            root.display()
+        ))
     }
 
     pub(crate) fn path(&self) -> &Path {

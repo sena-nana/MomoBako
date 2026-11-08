@@ -3,61 +3,120 @@
 
 use nana_ui::RuntimeProgramContext;
 
+use crate::MomoBakoApplication;
 use crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_ATTACH;
-use crate::backend::services::repository::{FileBrowserRequest, RecentAccessHistoryClearRequest, RepositoryFolderRequest};
+use crate::backend::services::repository::{
+    FileBrowserRequest, RecentAccessHistoryClearRequest, RepositoryFolderRequest,
+};
 use crate::shell::{
-    FileRow, ShellMessage, SidebarEffect, SidebarMessage, SidebarSmartFolder, SidebarTree, SmartFolderChange, SmartFolderOutcome,
-    SmartFolderResult, VirtualQuery,
+    FileRow, ShellMessage, SidebarEffect, SidebarMessage, SidebarSmartFolder, SidebarTree,
+    SmartFolderChange, SmartFolderOutcome, SmartFolderResult, VirtualQuery,
 };
 use crate::task_guard::spawn_service;
-use crate::MomoBakoApplication;
 
 /// 执行侧栏归约留下的请求。
-pub fn dispatch_sidebar_effects(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
+pub fn dispatch_sidebar_effects(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+) {
     for effect in app.shell.sidebar.take_effects() {
         match effect {
             SidebarEffect::LoadTree { repo_id } => dispatch_tree(app, context, repo_id),
-            SidebarEffect::LoadSmartFolders { repo_id } => dispatch_smart_folders(app, context, repo_id),
-            SidebarEffect::QuerySmartFolder { repo_id, smart_folder_id } => {
+            SidebarEffect::LoadSmartFolders { repo_id } => {
+                dispatch_smart_folders(app, context, repo_id)
+            }
+            SidebarEffect::QuerySmartFolder {
+                repo_id,
+                smart_folder_id,
+            } => {
                 dispatch_smart_query(app, context, repo_id, smart_folder_id);
             }
             SidebarEffect::CreateSmartFolder { repo_id } => {
                 let request = app.shell.sidebar.smart_create_request(&repo_id);
-                dispatch_save_smart(app, context, "新建智能文件夹", repo_id, move |interaction, executor| {
-                    let response = executor.block_on(interaction.create_smart_folder(request))?;
-                    let created = response.smart_folder.map(|folder| folder.smart_folder_id);
-                    Ok((response.smart_folders, SmartFolderChange::Created(created)))
-                });
+                dispatch_save_smart(
+                    app,
+                    context,
+                    "新建智能文件夹",
+                    repo_id,
+                    move |interaction, executor| {
+                        let response =
+                            executor.block_on(interaction.create_smart_folder(request))?;
+                        let created = response.smart_folder.map(|folder| folder.smart_folder_id);
+                        Ok((response.smart_folders, SmartFolderChange::Created(created)))
+                    },
+                );
             }
             SidebarEffect::UpdateSmartFolder { repo_id } => {
                 let request = app.shell.sidebar.smart_update_request(&repo_id);
                 let edited = request.smart_folder_id.clone();
-                dispatch_save_smart(app, context, "保存智能文件夹", repo_id, move |interaction, executor| {
-                    let response = executor.block_on(interaction.update_smart_folder(request))?;
-                    Ok((response.smart_folders, SmartFolderChange::Updated(edited)))
-                });
+                dispatch_save_smart(
+                    app,
+                    context,
+                    "保存智能文件夹",
+                    repo_id,
+                    move |interaction, executor| {
+                        let response =
+                            executor.block_on(interaction.update_smart_folder(request))?;
+                        Ok((response.smart_folders, SmartFolderChange::Updated(edited)))
+                    },
+                );
             }
-            SidebarEffect::DeleteSmartFolder { repo_id, smart_folder_id } => {
+            SidebarEffect::DeleteSmartFolder {
+                repo_id,
+                smart_folder_id,
+            } => {
                 let task_repo = repo_id.clone();
-                dispatch_save_smart(app, context, "删除智能文件夹", repo_id, move |interaction, executor| {
-                    let response = executor.block_on(interaction.delete_smart_folder(task_repo, smart_folder_id.clone()))?;
-                    Ok((response.smart_folders, SmartFolderChange::Deleted(smart_folder_id)))
-                });
+                dispatch_save_smart(
+                    app,
+                    context,
+                    "删除智能文件夹",
+                    repo_id,
+                    move |interaction, executor| {
+                        let response = executor.block_on(
+                            interaction.delete_smart_folder(task_repo, smart_folder_id.clone()),
+                        )?;
+                        Ok((
+                            response.smart_folders,
+                            SmartFolderChange::Deleted(smart_folder_id),
+                        ))
+                    },
+                );
             }
-            SidebarEffect::DeletePlaylist { repo_id, playlist_id } => dispatch_delete_playlist(app, context, repo_id, playlist_id),
-            SidebarEffect::CreatePlaylist { repo_id, name, player_type_id } => {
+            SidebarEffect::DeletePlaylist {
+                repo_id,
+                playlist_id,
+            } => dispatch_delete_playlist(app, context, repo_id, playlist_id),
+            SidebarEffect::CreatePlaylist {
+                repo_id,
+                name,
+                player_type_id,
+            } => {
                 dispatch_create_playlist(app, context, repo_id, name, player_type_id);
             }
-            SidebarEffect::CreateBackendRepository { name, path, plugin_id, config } => {
+            SidebarEffect::CreateBackendRepository {
+                name,
+                path,
+                plugin_id,
+                config,
+            } => {
                 dispatch_create_backend(app, context, name, path, plugin_id, config);
             }
             SidebarEffect::LoadPlaylists { repo_id } => dispatch_playlists(app, context, repo_id),
-            SidebarEffect::LoadPlaylistDetail { repo_id, playlist_id } => {
+            SidebarEffect::LoadPlaylistDetail {
+                repo_id,
+                playlist_id,
+            } => {
                 dispatch_playlist_detail(app, context, repo_id, playlist_id);
             }
-            SidebarEffect::Browse { repo_id, path, trash, progress } => {
+            SidebarEffect::Browse {
+                repo_id,
+                path,
+                trash,
+                progress,
+            } => {
+                let request = browse_request(&app.shell, &repo_id, &path, trash, progress);
                 app.shell.note_sidebar_browse(&path, trash, progress);
-                dispatch_browse_request(app, context, browse_request(repo_id, path, trash));
+                dispatch_browse_request(app, context, request);
             }
             SidebarEffect::AttachRepository { path } => dispatch_attach(app, context, path),
             SidebarEffect::ClearRecent { repo_id } => dispatch_clear_recent(app, context, repo_id),
@@ -66,49 +125,103 @@ pub fn dispatch_sidebar_effects(app: &mut MomoBakoApplication, context: &Runtime
 }
 
 /// 清空最近使用。失败时把错误写回侧栏，不假装已经清空。
-fn dispatch_clear_recent(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String) {
+fn dispatch_clear_recent(
+    app: &MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+) {
     let failed_repo = repo_id.clone();
-    let failed = move |error| sidebar_message(SidebarMessage::RecentCleared { repo_id: failed_repo.clone(), result: Err(error) });
-    spawn_service(app.services.as_ref(), context, "清空最近使用", failed, |services| {
-        let interaction = services.repository_interaction.clone();
-        let executor = services.executor.clone();
-        move || {
-            let result = executor
-                .block_on(interaction.clear_recent_access_history(RecentAccessHistoryClearRequest { repo_id: repo_id.clone() }))
-                .map(|response| response.cleared_count);
-            sidebar_message(SidebarMessage::RecentCleared { repo_id, result })
-        }
-    });
+    let failed = move |error| {
+        sidebar_message(SidebarMessage::RecentCleared {
+            repo_id: failed_repo.clone(),
+            result: Err(error),
+        })
+    };
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "清空最近使用",
+        failed,
+        |services| {
+            let interaction = services.repository_interaction.clone();
+            let executor = services.executor.clone();
+            move || {
+                let result = executor
+                    .block_on(interaction.clear_recent_access_history(
+                        RecentAccessHistoryClearRequest {
+                            repo_id: repo_id.clone(),
+                        },
+                    ))
+                    .map(|response| response.cleared_count);
+                sidebar_message(SidebarMessage::RecentCleared { repo_id, result })
+            }
+        },
+    );
 }
 
-fn dispatch_tree(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String) {
+fn dispatch_tree(
+    app: &MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+) {
     let failed_repo = repo_id.clone();
-    let failed = move |error| sidebar_message(SidebarMessage::SidebarTreeLoaded { repo_id: failed_repo.clone(), result: Err(error) });
-    spawn_service(app.services.as_ref(), context, "目录树", failed, |services| {
-        let browser = services.file_browser.clone();
-        let executor = services.executor.clone();
-        move || {
-            let result = executor
-                .block_on(browser.get_repository_tree(repo_id.clone()))
-                .map(|snapshot| SidebarTree::from_nodes(&snapshot.tree));
-            sidebar_message(SidebarMessage::SidebarTreeLoaded { repo_id, result })
-        }
-    });
+    let failed = move |error| {
+        sidebar_message(SidebarMessage::SidebarTreeLoaded {
+            repo_id: failed_repo.clone(),
+            result: Err(error),
+        })
+    };
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "目录树",
+        failed,
+        |services| {
+            let browser = services.file_browser.clone();
+            let executor = services.executor.clone();
+            move || {
+                let result = executor
+                    .block_on(browser.get_repository_tree(repo_id.clone()))
+                    .map(|snapshot| SidebarTree::from_nodes(&snapshot.tree));
+                sidebar_message(SidebarMessage::SidebarTreeLoaded { repo_id, result })
+            }
+        },
+    );
 }
 
-fn dispatch_smart_folders(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String) {
+fn dispatch_smart_folders(
+    app: &MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+) {
     let failed_repo = repo_id.clone();
-    let failed = move |error| sidebar_message(SidebarMessage::SidebarSmartFoldersLoaded { repo_id: failed_repo.clone(), result: Err(error) });
-    spawn_service(app.services.as_ref(), context, "智能文件夹", failed, |services| {
-        let interaction = services.repository_interaction.clone();
-        let executor = services.executor.clone();
-        move || {
-            let result = executor
-                .block_on(interaction.list_smart_folders(repo_id.clone()))
-                .map(|folders| folders.iter().map(SidebarSmartFolder::from_tree_node).collect());
-            sidebar_message(SidebarMessage::SidebarSmartFoldersLoaded { repo_id, result })
-        }
-    });
+    let failed = move |error| {
+        sidebar_message(SidebarMessage::SidebarSmartFoldersLoaded {
+            repo_id: failed_repo.clone(),
+            result: Err(error),
+        })
+    };
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "智能文件夹",
+        failed,
+        |services| {
+            let interaction = services.repository_interaction.clone();
+            let executor = services.executor.clone();
+            move || {
+                let result = executor
+                    .block_on(interaction.list_smart_folders(repo_id.clone()))
+                    .map(|folders| {
+                        folders
+                            .iter()
+                            .map(SidebarSmartFolder::from_tree_node)
+                            .collect()
+                    });
+                sidebar_message(SidebarMessage::SidebarSmartFoldersLoaded { repo_id, result })
+            }
+        },
+    );
 }
 
 /// 新建、编辑、删除智能文件夹：在任务里调 `save`，结果（整份智能文件夹树和这次改的是哪个）回
@@ -119,20 +232,33 @@ fn dispatch_save_smart(
     what: &str,
     repo_id: String,
     save: impl FnOnce(
-            crate::backend::viewmodels::RepositoryInteractionViewModel,
-            std::sync::Arc<tokio::runtime::Runtime>,
-        ) -> Result<(Vec<crate::backend::services::repository::SmartFolderTreeNode>, SmartFolderChange), String>
-        + Send
-        + 'static,
+        crate::backend::viewmodels::RepositoryInteractionViewModel,
+        std::sync::Arc<tokio::runtime::Runtime>,
+    ) -> Result<
+        (
+            Vec<crate::backend::services::repository::SmartFolderTreeNode>,
+            SmartFolderChange,
+        ),
+        String,
+    > + Send
+    + 'static,
 ) {
     let failed_repo = repo_id.clone();
-    let failed = move |error| sidebar_message(SidebarMessage::SmartFolderSaved { repo_id: failed_repo.clone(), result: Err(error) });
+    let failed = move |error| {
+        sidebar_message(SidebarMessage::SmartFolderSaved {
+            repo_id: failed_repo.clone(),
+            result: Err(error),
+        })
+    };
     spawn_service(app.services.as_ref(), context, what, failed, |services| {
         let interaction = services.repository_interaction.clone();
         let executor = services.executor.clone();
         move || {
             let result = save(interaction, executor).map(|(folders, change)| SmartFolderOutcome {
-                folders: folders.iter().map(SidebarSmartFolder::from_tree_node).collect(),
+                folders: folders
+                    .iter()
+                    .map(SidebarSmartFolder::from_tree_node)
+                    .collect(),
                 change,
             });
             sidebar_message(SidebarMessage::SmartFolderSaved { repo_id, result })
@@ -147,15 +273,26 @@ fn dispatch_delete_playlist(
     playlist_id: String,
 ) {
     let failed_repo = repo_id.clone();
-    let failed = move |error| ShellMessage::PlaylistsLoaded { repo_id: failed_repo.clone(), result: Err(error) };
-    spawn_service(app.services.as_ref(), context, "移除播放集", failed, |services| {
-        let interaction = services.repository_interaction.clone();
-        let executor = services.executor.clone();
-        move || {
-            let result = executor.block_on(interaction.delete_playlist(repo_id.clone(), playlist_id)).map(|response| response.playlists);
-            ShellMessage::PlaylistsLoaded { repo_id, result }
-        }
-    });
+    let failed = move |error| ShellMessage::PlaylistsLoaded {
+        repo_id: failed_repo.clone(),
+        result: Err(error),
+    };
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "移除播放集",
+        failed,
+        |services| {
+            let interaction = services.repository_interaction.clone();
+            let executor = services.executor.clone();
+            move || {
+                let result = executor
+                    .block_on(interaction.delete_playlist(repo_id.clone(), playlist_id))
+                    .map(|response| response.playlists);
+                ShellMessage::PlaylistsLoaded { repo_id, result }
+            }
+        },
+    );
 }
 
 /// 新建播放集。成功时带上整份列表和新播放集的编号，归约照 Vue `createPlaylistInWorkspace` 接着点开它；
@@ -174,18 +311,33 @@ fn dispatch_create_playlist(
         player_type_id,
     };
     let failed_repo = repo_id.clone();
-    let failed = move |error| ShellMessage::PlaylistCreated { repo_id: failed_repo.clone(), result: Err(error) };
-    spawn_service(app.services.as_ref(), context, "新建播放集", failed, |services| {
-        let interaction = services.repository_interaction.clone();
-        let executor = services.executor.clone();
-        move || {
-            let result = executor.block_on(interaction.create_playlist(request)).map(|response| {
-                let open = response.playlist.as_ref().map(|playlist| playlist.playlist_id.clone());
-                (response.playlists, open)
-            });
-            ShellMessage::PlaylistCreated { repo_id, result }
-        }
-    });
+    let failed = move |error| ShellMessage::PlaylistCreated {
+        repo_id: failed_repo.clone(),
+        result: Err(error),
+    };
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "新建播放集",
+        failed,
+        |services| {
+            let interaction = services.repository_interaction.clone();
+            let executor = services.executor.clone();
+            move || {
+                let result =
+                    executor
+                        .block_on(interaction.create_playlist(request))
+                        .map(|response| {
+                            let open = response
+                                .playlist
+                                .as_ref()
+                                .map(|playlist| playlist.playlist_id.clone());
+                            (response.playlists, open)
+                        });
+                ShellMessage::PlaylistCreated { repo_id, result }
+            }
+        },
+    );
 }
 
 fn dispatch_create_backend(
@@ -205,17 +357,28 @@ fn dispatch_create_backend(
         skip_initial_sync: false,
     };
     let failed = |error| sidebar_message(SidebarMessage::RepositoryAttachFinished(Err(error)));
-    spawn_service(app.services.as_ref(), context, "创建资源库", failed, |services| {
-        let tasks = services.tasks.clone();
-        let query = services.repository_query.clone();
-        let executor = services.executor.clone();
-        move || {
-            let result = executor
-                .block_on(tasks.execute(crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_CREATE, request))
-                .and_then(|(output, _)| crate::app_dispatch::mutated_repository(&executor, &query, &output));
-            sidebar_message(SidebarMessage::RepositoryAttachFinished(result))
-        }
-    });
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "创建资源库",
+        failed,
+        |services| {
+            let tasks = services.tasks.clone();
+            let query = services.repository_query.clone();
+            let executor = services.executor.clone();
+            move || {
+                let result = executor
+                    .block_on(tasks.execute(
+                        crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_CREATE,
+                        request,
+                    ))
+                    .and_then(|(output, _)| {
+                        crate::app_dispatch::mutated_repository(&executor, &query, &output)
+                    });
+                sidebar_message(SidebarMessage::RepositoryAttachFinished(result))
+            }
+        },
+    );
 }
 
 fn dispatch_smart_query(
@@ -226,39 +389,70 @@ fn dispatch_smart_query(
 ) {
     let (failed_repo, failed_id) = (repo_id.clone(), smart_folder_id.clone());
     let failed = move |error| {
-        sidebar_message(SidebarMessage::SidebarSmartFolderQueried { repo_id: failed_repo.clone(), smart_folder_id: failed_id.clone(), result: Err(error) })
+        sidebar_message(SidebarMessage::SidebarSmartFolderQueried {
+            repo_id: failed_repo.clone(),
+            smart_folder_id: failed_id.clone(),
+            result: Err(error),
+        })
     };
-    spawn_service(app.services.as_ref(), context, "智能文件夹查询", failed, |services| {
-        let interaction = services.repository_interaction.clone();
-        let executor = services.executor.clone();
-        move || {
-            // 文件夹名和与祖先合并以后的筛选也带回去，文件页头写标题和摘要行（Vue `smartFolderSummary`）。
-            let result = executor
-                .block_on(interaction.query_smart_folder(repo_id.clone(), smart_folder_id.clone()))
-                .map(|snapshot| SmartFolderResult {
-                    name: snapshot.smart_folder.name.clone(),
-                    filter: snapshot.inherited_filter.clone(),
-                    query: VirtualQuery {
-                        count: snapshot.results.len(),
-                        rows: snapshot.results.iter().map(FileRow::from_entry).collect(),
-                    },
-                });
-            sidebar_message(SidebarMessage::SidebarSmartFolderQueried { repo_id, smart_folder_id, result })
-        }
-    });
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "智能文件夹查询",
+        failed,
+        |services| {
+            let interaction = services.repository_interaction.clone();
+            let executor = services.executor.clone();
+            move || {
+                // 文件夹名和与祖先合并以后的筛选也带回去，文件页头写标题和摘要行（Vue `smartFolderSummary`）。
+                let result = executor
+                    .block_on(
+                        interaction.query_smart_folder(repo_id.clone(), smart_folder_id.clone()),
+                    )
+                    .map(|snapshot| SmartFolderResult {
+                        name: snapshot.smart_folder.name.clone(),
+                        filter: snapshot.inherited_filter.clone(),
+                        query: VirtualQuery {
+                            count: snapshot.results.len(),
+                            rows: snapshot.results.iter().map(FileRow::from_entry).collect(),
+                        },
+                    });
+                sidebar_message(SidebarMessage::SidebarSmartFolderQueried {
+                    repo_id,
+                    smart_folder_id,
+                    result,
+                })
+            }
+        },
+    );
 }
 
-fn dispatch_playlists(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String) {
+fn dispatch_playlists(
+    app: &MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+) {
     let failed_repo = repo_id.clone();
-    let failed = move |error| sidebar_message(SidebarMessage::SidebarPlaylistsLoaded { repo_id: failed_repo.clone(), result: Err(error) });
-    spawn_service(app.services.as_ref(), context, "播放集列表", failed, |services| {
-        let interaction = services.repository_interaction.clone();
-        let executor = services.executor.clone();
-        move || {
-            let result = executor.block_on(interaction.list_playlists(repo_id.clone()));
-            sidebar_message(SidebarMessage::SidebarPlaylistsLoaded { repo_id, result })
-        }
-    });
+    let failed = move |error| {
+        sidebar_message(SidebarMessage::SidebarPlaylistsLoaded {
+            repo_id: failed_repo.clone(),
+            result: Err(error),
+        })
+    };
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "播放集列表",
+        failed,
+        |services| {
+            let interaction = services.repository_interaction.clone();
+            let executor = services.executor.clone();
+            move || {
+                let result = executor.block_on(interaction.list_playlists(repo_id.clone()));
+                sidebar_message(SidebarMessage::SidebarPlaylistsLoaded { repo_id, result })
+            }
+        },
+    );
 }
 
 fn dispatch_playlist_detail(
@@ -268,33 +462,66 @@ fn dispatch_playlist_detail(
     playlist_id: String,
 ) {
     let failed = |error| ShellMessage::PlaylistDetailLoaded(Err(error));
-    spawn_service(app.services.as_ref(), context, "播放集详情", failed, |services| {
-        let interaction = services.repository_interaction.clone();
-        let executor = services.executor.clone();
-        move || ShellMessage::PlaylistDetailLoaded(executor.block_on(interaction.get_playlist_detail(repo_id, playlist_id)))
-    });
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "播放集详情",
+        failed,
+        |services| {
+            let interaction = services.repository_interaction.clone();
+            let executor = services.executor.clone();
+            move || {
+                ShellMessage::PlaylistDetailLoaded(
+                    executor.block_on(interaction.get_playlist_detail(repo_id, playlist_id)),
+                )
+            }
+        },
+    );
 }
 
 /// 交出 `prepare` 暂存的目录浏览，并写成和领域服务相同的请求。
-pub(crate) fn dispatch_prepared_browses(shell: &mut crate::shell::ShellViewModel) -> Vec<FileBrowserRequest> {
+pub(crate) fn dispatch_prepared_browses(
+    shell: &mut crate::shell::ShellViewModel,
+) -> Vec<FileBrowserRequest> {
     let staged = std::mem::take(&mut shell.staged_browses);
     staged
         .into_iter()
         .filter_map(|effect| match effect {
-            SidebarEffect::Browse { repo_id, path, trash, .. } => Some(browse_request(repo_id, path, trash)),
+            SidebarEffect::Browse {
+                repo_id,
+                path,
+                trash,
+                progress,
+            } => Some(browse_request(shell, &repo_id, &path, trash, progress)),
             _ => None,
         })
         .collect()
 }
 
-fn browse_request(repo_id: String, path: String, trash: bool) -> FileBrowserRequest {
+/// 侧栏打开目录。再点已经显示的这一层时，条数不少于列表里已经有的，避免静默重读把续读出来的条目读少。
+fn browse_request(
+    shell: &crate::shell::ShellViewModel,
+    repo_id: &str,
+    path: &str,
+    trash: bool,
+    progress: bool,
+) -> FileBrowserRequest {
+    let limit = if !progress && shell.files.shows_directory(path, trash) {
+        shell.files.listed_count().max(200)
+    } else {
+        200
+    };
     FileBrowserRequest {
-        repo_id,
-        directory_path: if trash || path.is_empty() { None } else { Some(path) },
+        repo_id: repo_id.to_string(),
+        directory_path: if trash || path.is_empty() {
+            None
+        } else {
+            Some(path.to_string())
+        },
         include_tree: Some(false),
         special_location: if trash { Some("trash".into()) } else { None },
         offset: Some(0),
-        limit: Some(200),
+        limit: Some(limit),
     }
 }
 
@@ -304,26 +531,50 @@ pub(crate) fn dispatch_browse_request(
     request: FileBrowserRequest,
 ) {
     let failed = |error| ShellMessage::FileBrowserLoaded(Err(error));
-    spawn_service(app.services.as_ref(), context, "目录浏览", failed, |services| {
-        let browser = services.file_browser.clone();
-        let executor = services.executor.clone();
-        move || ShellMessage::FileBrowserLoaded(executor.block_on(browser.get_file_browser(request)))
-    });
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "目录浏览",
+        failed,
+        |services| {
+            let browser = services.file_browser.clone();
+            let executor = services.executor.clone();
+            move || {
+                ShellMessage::FileBrowserLoaded(
+                    executor.block_on(browser.get_file_browser(request)),
+                )
+            }
+        },
+    );
 }
 
-fn dispatch_attach(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, path: String) {
+fn dispatch_attach(
+    app: &MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    path: String,
+) {
     let failed = |error| sidebar_message(SidebarMessage::RepositoryAttachFinished(Err(error)));
-    spawn_service(app.services.as_ref(), context, "附加资源库", failed, |services| {
-        let tasks = services.tasks.clone();
-        let query = services.repository_query.clone();
-        let executor = services.executor.clone();
-        move || {
-            let result = executor
-                .block_on(tasks.execute(PROTOCOL_REPOSITORY_ATTACH, RepositoryFolderRequest { path }))
-                .and_then(|(output, _)| crate::app_dispatch::mutated_repository(&executor, &query, &output));
-            sidebar_message(SidebarMessage::RepositoryAttachFinished(result))
-        }
-    });
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "附加资源库",
+        failed,
+        |services| {
+            let tasks = services.tasks.clone();
+            let query = services.repository_query.clone();
+            let executor = services.executor.clone();
+            move || {
+                let result = executor
+                    .block_on(
+                        tasks.execute(PROTOCOL_REPOSITORY_ATTACH, RepositoryFolderRequest { path }),
+                    )
+                    .and_then(|(output, _)| {
+                        crate::app_dispatch::mutated_repository(&executor, &query, &output)
+                    });
+                sidebar_message(SidebarMessage::RepositoryAttachFinished(result))
+            }
+        },
+    );
 }
 
 fn sidebar_message(message: SidebarMessage) -> ShellMessage {

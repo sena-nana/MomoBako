@@ -15,6 +15,11 @@ const ENTRY_DRAG_PX: f32 = 7.0;
 /// 同一文件里框选开始移动的阈值：任一轴超过 3px。
 const BOX_DRAG_PX: f32 = 3.0;
 
+#[path = "folder_drop.rs"]
+mod folder_drop;
+pub(crate) use folder_drop::{note_external_folder_drag, tick_external_folder_hover};
+
+#[derive(Clone)]
 struct RowMark {
     kind: String,
     path: String,
@@ -32,15 +37,24 @@ pub fn observe_live_pointer(model: &mut ShellViewModel, document: &RuntimeDocume
     let position = context.pointer_position(document_id, POINTER_ID);
     note_chrome_hover(model, world, document_id, position);
     if pressed.is_none() {
+        model.input.model_drag = None;
         release_gesture(model, world, document_id, position);
         return false;
     }
     let Some((x, y)) = position else {
         eprintln!("Nana 实况指针已按下，但没有坐标");
-        return model.input.live_gesture.is_some();
+        return model.input.live_gesture.is_some() || model.input.model_drag.is_some();
     };
-    let rows = collect_rows(world, document_id);
-    if rows.is_empty() && model.input.live_gesture.is_none() && file_rows_should_be_mounted(model) && !model.files.entry_names().is_empty() {
+    if track_model_drag(model, document, pressed, x, y) {
+        return true;
+    }
+    let marks = collect_rows(world, document_id);
+    let rows = folder_drop::file_rows(&marks);
+    if rows.is_empty()
+        && model.input.live_gesture.is_none()
+        && file_rows_should_be_mounted(model)
+        && !model.files.entry_names().is_empty()
+    {
         eprintln!("Nana 实况文件行没有路径标记，指针拖动无法开始");
     }
     let list = list_bounds(world, &rows);
@@ -64,6 +78,7 @@ pub fn observe_live_pointer(model: &mut ShellViewModel, document: &RuntimeDocume
             armed: false,
             append,
         });
+        super::files_selection_box::track(model, list);
         return true;
     }
 
@@ -74,7 +89,7 @@ pub fn observe_live_pointer(model: &mut ShellViewModel, document: &RuntimeDocume
     gesture.y = y;
     if let Some(path) = gesture.row.clone() {
         let distance = pointer_distance(gesture.origin_x, gesture.origin_y, x, y);
-        let hover_folder = directory_at(&rows, x, y, &path);
+        let hover_folder = directory_at(&marks, x, y, &path);
         if !gesture.armed && distance >= ENTRY_DRAG_PX {
             gesture.armed = true;
             begin_entry_drag(model, &path, x, y, over_browser, hover_folder.clone());
@@ -90,32 +105,58 @@ pub fn observe_live_pointer(model: &mut ShellViewModel, document: &RuntimeDocume
             }));
             note_folder_hover(model, hover_folder);
         }
-    } else if !gesture.armed && (dx(gesture.origin_x, x) > BOX_DRAG_PX || dx(gesture.origin_y, y) > BOX_DRAG_PX) {
+    } else if !gesture.armed
+        && (dx(gesture.origin_x, x) > BOX_DRAG_PX || dx(gesture.origin_y, y) > BOX_DRAG_PX)
+    {
         gesture.armed = true;
     }
     if gesture.row.is_none() && gesture.armed {
-        let paths = intersecting(&rows, gesture.origin_x, gesture.origin_y, x, y);
-        model.reduce(ShellMessage::Input(InputMessage::BoxSelect { paths, append: gesture.append }));
+        let scroll = list_scroll_y(world, &rows);
+        let mut paths = intersecting(&rows, gesture.origin_x, gesture.origin_y, x, y, scroll);
+        extend_virtual_rows(
+            model,
+            &rows,
+            &mut paths,
+            gesture.origin_x,
+            gesture.origin_y,
+            x,
+            y,
+            scroll,
+        );
+        model.reduce(ShellMessage::Input(InputMessage::BoxSelect {
+            paths,
+            append: gesture.append,
+        }));
     }
     model.input.live_gesture = Some(gesture);
+    super::files_selection_box::track(model, list);
     true
 }
 
 /// 松手。框选没拖动且不是追加时清空选择；条目拖动已经起步才结束会话。
-fn release_gesture(model: &mut ShellViewModel, world: &UiWorld, document_id: nana_ui::runtime::DocumentId, position: Option<(f32, f32)>) {
+fn release_gesture(
+    model: &mut ShellViewModel,
+    world: &UiWorld,
+    document_id: nana_ui::runtime::DocumentId,
+    position: Option<(f32, f32)>,
+) {
     let Some(gesture) = model.input.live_gesture.take() else {
         return;
     };
+    super::files_selection_box::clear(model);
     if let Some(previous) = model.sidebar.hover_folder.clone() {
-        model.reduce(ShellMessage::Sidebar(super::SidebarMessage::Gap(super::GapMessage::FolderLeave(previous))));
+        model.reduce(ShellMessage::Sidebar(super::SidebarMessage::Gap(
+            super::GapMessage::FolderLeave(previous),
+        )));
     }
-    let rows = collect_rows(world, document_id);
+    let marks = collect_rows(world, document_id);
+    let rows = folder_drop::file_rows(&marks);
     let list = list_bounds(world, &rows);
     let (x, y) = position.unwrap_or((gesture.x, gesture.y));
     let over_browser = list.is_some_and(|bounds| contains(bounds, x, y));
     if let Some(path) = gesture.row.clone() {
         if gesture.armed {
-            let hover_folder = directory_at(&rows, x, y, &path);
+            let hover_folder = directory_at(&marks, x, y, &path);
             model.reduce(ShellMessage::Input(InputMessage::EntryDragEnd {
                 hover_folder,
                 over_browser,
@@ -125,7 +166,10 @@ fn release_gesture(model: &mut ShellViewModel, world: &UiWorld, document_id: nan
         return;
     }
     if !gesture.armed && !gesture.append {
-        model.reduce(ShellMessage::Input(InputMessage::BoxSelect { paths: Vec::new(), append: false }));
+        model.reduce(ShellMessage::Input(InputMessage::BoxSelect {
+            paths: Vec::new(),
+            append: false,
+        }));
     }
 }
 
@@ -133,27 +177,41 @@ fn release_gesture(model: &mut ShellViewModel, world: &UiWorld, document_id: nan
 fn note_folder_hover(model: &mut ShellViewModel, hit: Option<String>) {
     if let Some(previous) = model.sidebar.hover_folder.clone() {
         if hit.as_deref() != Some(previous.as_str()) {
-            model.reduce(ShellMessage::Sidebar(super::SidebarMessage::Gap(super::GapMessage::FolderLeave(previous))));
+            model.reduce(ShellMessage::Sidebar(super::SidebarMessage::Gap(
+                super::GapMessage::FolderLeave(previous),
+            )));
         }
     }
     if let Some(folder) = hit {
-        model.reduce(ShellMessage::Sidebar(super::SidebarMessage::Gap(super::GapMessage::FolderHover {
-            path: folder,
-            now_ms: model.sidebar.hover_now(),
-            dragging: true,
-        })));
+        model.reduce(ShellMessage::Sidebar(super::SidebarMessage::Gap(
+            super::GapMessage::FolderHover {
+                path: folder,
+                now_ms: model.sidebar.hover_now(),
+                dragging: true,
+            },
+        )));
     }
 }
 
-fn begin_entry_drag(model: &mut ShellViewModel, path: &str, x: f32, y: f32, over_browser: bool, hover_folder: Option<String>) {
+fn begin_entry_drag(
+    model: &mut ShellViewModel,
+    path: &str,
+    x: f32,
+    y: f32,
+    over_browser: bool,
+    hover_folder: Option<String>,
+) {
     let repository = model.workspace.active_repository();
-    let writable = repository.is_some_and(|item| super::files::repository_is_writable(&item.status, &item.capabilities));
+    let writable = repository
+        .is_some_and(|item| super::files::repository_is_writable(&item.status, &item.capabilities));
     let trash = model.workspace.panel == WorkspacePanel::Trash;
     let smart_folder = model.workspace.panel == WorkspacePanel::SmartFolder;
     let backend_kind = repository.map(drag_backend_kind).unwrap_or_default();
     let repo_root = repository.map(|item| item.path.clone()).unwrap_or_default();
     if !writable || trash || smart_folder || backend_kind != "filesystem" {
-        eprintln!("Nana 实况拖动被拒绝：writable={writable} trash={trash} smart={smart_folder} kind={backend_kind}");
+        eprintln!(
+            "Nana 实况拖动被拒绝：writable={writable} trash={trash} smart={smart_folder} kind={backend_kind}"
+        );
     }
     let selected = model.files.selected_paths().to_vec();
     model.reduce(ShellMessage::Input(InputMessage::BeginEntryDrag {
@@ -172,9 +230,7 @@ fn begin_entry_drag(model: &mut ShellViewModel, path: &str, x: f32, y: f32, over
 }
 
 fn directory_at(rows: &[RowMark], x: f32, y: f32, exclude: &str) -> Option<String> {
-    rows.iter()
-        .find(|row| row.kind == "directory" && row.path != exclude && contains(row.bounds, x, y))
-        .map(|row| row.path.clone())
+    folder_drop::directory_at(rows, x, y, exclude).map(|hit| hit.path)
 }
 
 fn note_chrome_hover(
@@ -187,8 +243,15 @@ fn note_chrome_hover(
     let hover = world
         .pointer_hover(document_id, POINTER_ID)
         .or_else(|| position.and_then(|(x, y)| world.hit_test(document_id, x, y)));
-    let over_tools = hover.is_some_and(|id| label_in(world, id, &["快捷方式", "快捷访问", "文件夹", "智能文件夹", "播放集"]));
-    let over_footer = hover.is_some_and(|id| label_in(world, id, &["设置", "拓展", "日志"]) || footer_task(world, id));
+    let over_tools = hover.is_some_and(|id| {
+        label_in(
+            world,
+            id,
+            &["快捷方式", "快捷访问", "文件夹", "智能文件夹", "播放集"],
+        )
+    });
+    let over_footer = hover
+        .is_some_and(|id| label_in(world, id, &["设置", "拓展", "日志"]) || footer_task(world, id));
     model.motion.set_tools_hover(over_tools);
     model.motion.set_footer_hover(over_footer);
 }
@@ -217,25 +280,35 @@ fn footer_task(world: &UiWorld, id: StableNodeId) -> bool {
 
 /// 节点的文字和无障碍名称。图标按钮没有文字，名称只在无障碍状态里。
 fn node_names(world: &UiWorld, node: StableNodeId) -> impl Iterator<Item = &str> {
-    world
-        .text(node)
-        .into_iter()
-        .chain(world.accessibility(node).and_then(|state| state.label.as_deref()))
+    world.text(node).into_iter().chain(
+        world
+            .accessibility(node)
+            .and_then(|state| state.label.as_deref()),
+    )
 }
 
 /// 文件表面已经挂上时，行里应该有路径标记。
 fn file_rows_should_be_mounted(model: &ShellViewModel) -> bool {
     model.workspace.startup.status == super::StartupStatus::Ready
         && model.workspace.main_region() == super::MainRegion::HasRepository
-        && matches!(model.workspace.panel, WorkspacePanel::Files | WorkspacePanel::Trash | WorkspacePanel::SmartFolder)
-        && !matches!(model.page, super::ShellPage::Settings | super::ShellPage::SettingsError)
+        && matches!(
+            model.workspace.panel,
+            WorkspacePanel::Files | WorkspacePanel::Trash | WorkspacePanel::SmartFolder
+        )
+        && !matches!(
+            model.page,
+            super::ShellPage::Settings | super::ShellPage::SettingsError
+        )
 }
 
 /// 本地插件和 `localRootPath` 能力都按 Vue 的 filesystem 拖放处理。
 fn drag_backend_kind(repository: &WorkspaceRepository) -> String {
     if repository.backend_plugin_id == "filesystem"
         || repository.backend_plugin_id == "local"
-        || repository.capabilities.iter().any(|capability| capability == "localRootPath")
+        || repository
+            .capabilities
+            .iter()
+            .any(|capability| capability == "localRootPath")
     {
         "filesystem".into()
     } else {
@@ -273,7 +346,12 @@ fn collect_rows(world: &UiWorld, document_id: nana_ui::runtime::DocumentId) -> V
         if bounds.width <= 0.0 || bounds.height <= 0.0 {
             continue;
         }
-        rows.push(RowMark { kind: kind.to_string(), path: path.to_string(), node, bounds });
+        rows.push(RowMark {
+            kind: kind.to_string(),
+            path: path.to_string(),
+            node,
+            bounds,
+        });
     }
     rows
 }
@@ -283,11 +361,14 @@ fn collect_rows(world: &UiWorld, document_id: nana_ui::runtime::DocumentId) -> V
 fn list_bounds(world: &UiWorld, rows: &[RowMark]) -> Option<LayoutBox> {
     let mut cursor = world.parent_id(rows.first()?.node);
     while let Some(node) = cursor {
-        let scroll = world
-            .component_type(node)
-            .is_some_and(|kind| std::borrow::Borrow::<str>::borrow(kind) == nana_ui::runtime::component_descriptors::SCROLL_VIEW.type_id);
+        let scroll = world.component_type(node).is_some_and(|kind| {
+            std::borrow::Borrow::<str>::borrow(kind)
+                == nana_ui::runtime::component_descriptors::SCROLL_VIEW.type_id
+        });
         if scroll {
-            return world.layout_box(node).filter(|bounds| bounds.width > 0.0 && bounds.height > 0.0);
+            return world
+                .layout_box(node)
+                .filter(|bounds| bounds.width > 0.0 && bounds.height > 0.0);
         }
         cursor = world.parent_id(node);
     }
@@ -323,18 +404,176 @@ fn row_at(world: &UiWorld, hit: StableNodeId, rows: &[RowMark]) -> Option<String
     None
 }
 
-fn intersecting(rows: &[RowMark], x0: f32, y0: f32, x1: f32, y1: f32) -> Vec<String> {
+fn intersecting(
+    rows: &[RowMark],
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    scroll_y: f32,
+) -> Vec<String> {
     let left = x0.min(x1);
     let right = x0.max(x1);
-    let top = y0.min(y1);
-    let bottom = y0.max(y1);
+    let (top, bottom) = selection_y(rows, y0, y1, scroll_y);
     rows.iter()
         .filter(|row| {
             let bounds = row.bounds;
-            bounds.x + bounds.width >= left && bounds.x <= right && bounds.y + bounds.height >= top && bounds.y <= bottom
+            bounds.x + bounds.width >= left
+                && bounds.x <= right
+                && bounds.y + bounds.height >= top
+                && bounds.y <= bottom
         })
         .map(|row| row.path.clone())
         .collect()
+}
+
+/// 卡片框停在没滚动的内容坐标时，指针纵坐标加上滚动量才和它对齐。
+/// 框已经是视口坐标时不加。没滚动时两种算法相同。
+fn selection_y(rows: &[RowMark], y0: f32, y1: f32, scroll_y: f32) -> (f32, f32) {
+    let top = y0.min(y1);
+    let bottom = y0.max(y1);
+    if content_boxes(rows, scroll_y) {
+        (top + scroll_y, bottom + scroll_y)
+    } else {
+        (top, bottom)
+    }
+}
+
+/// 滚过以后，内容坐标的盒子减去滚动量会明显上移；视口坐标的盒子减了会跑到滚动区外面。
+fn content_boxes(rows: &[RowMark], scroll_y: f32) -> bool {
+    if scroll_y < 1.0 {
+        return false;
+    }
+    let Some(sample) = rows.iter().min_by(|left, right| {
+        left.bounds
+            .y
+            .partial_cmp(&right.bounds.y)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    }) else {
+        return false;
+    };
+    let shifted = sample.bounds.y - scroll_y;
+    shifted.abs() + 800.0 < sample.bounds.y.abs()
+}
+
+/// 按虚拟行的位置补上还没建出来的卡片。已经命中的路径保持在前面。
+fn extend_virtual_rows(
+    model: &ShellViewModel,
+    rows: &[RowMark],
+    paths: &mut Vec<String>,
+    x0: f32,
+    y0: f32,
+    x1: f32,
+    y1: f32,
+    scroll_y: f32,
+) {
+    let ctx = super::files::FileContext::from_model(model);
+    let listed = model.files.listed_rows(&ctx);
+    if listed.is_empty() {
+        return;
+    }
+    let width = model
+        .files
+        .list_width
+        .unwrap_or_else(|| super::files_view::estimated_list_width(model));
+    let slots =
+        super::files_view::row_slots(&listed, model.files.display_mode, width, !ctx.is_virtual());
+    let Some((dx, dy)) = slot_origin(rows, &slots) else {
+        eprintln!("Nana 框选没有挂上的卡片可对齐，未建行的位置对不上");
+        return;
+    };
+    let left = x0.min(x1);
+    let right = x0.max(x1);
+    let (top, bottom) = selection_y(rows, y0, y1, scroll_y);
+    for slot in slots {
+        let x = slot.x + dx;
+        let y = slot.y + dy;
+        let hits = x + slot.width >= left && x <= right && y + slot.height >= top && y <= bottom;
+        if hits && !paths.iter().any(|path| path == &slot.path) {
+            paths.push(slot.path);
+        }
+    }
+}
+
+/// 用一张已经挂上的卡片，把虚拟行的内容坐标平移到布局盒的坐标系。
+fn slot_origin(rows: &[RowMark], slots: &[super::files_view::RowSlot]) -> Option<(f32, f32)> {
+    let row = rows
+        .iter()
+        .find(|row| slots.iter().any(|slot| slot.path == row.path))?;
+    let slot = slots.iter().find(|slot| slot.path == row.path)?;
+    Some((row.bounds.x - slot.x, row.bounds.y - slot.y))
+}
+
+/// 列表滚动区的纵向滚动量。没有滚动区时是 0。
+fn list_scroll_y(world: &UiWorld, rows: &[RowMark]) -> f32 {
+    let Some(first) = rows.first() else {
+        return 0.0;
+    };
+    let mut cursor = world.parent_id(first.node);
+    while let Some(node) = cursor {
+        let scroll = world.component_type(node).is_some_and(|kind| {
+            std::borrow::Borrow::<str>::borrow(kind)
+                == nana_ui::runtime::component_descriptors::SCROLL_VIEW.type_id
+        });
+        if scroll {
+            return world
+                .scroll_offset(node)
+                .map(|offset| offset.y)
+                .unwrap_or(0.0);
+        }
+        cursor = world.parent_id(node);
+    }
+    0.0
+}
+
+/// 指针按在有网格的模型画面上时，拖拽旋转和缩放。按钮自己处理点击，这里不抢走。
+fn track_model_drag(
+    model: &mut ShellViewModel,
+    document: &RuntimeDocument,
+    pressed: Option<StableNodeId>,
+    x: f32,
+    y: f32,
+) -> bool {
+    let Some(hit) = pressed else {
+        return false;
+    };
+    if !model.inspect.has_mesh() || !model_surface(document, hit) {
+        model.input.model_drag = None;
+        return false;
+    }
+    let Some((last_x, last_y)) = model.input.model_drag else {
+        model.input.model_drag = Some((x, y));
+        return true;
+    };
+    let (yaw, zoom) = super::inspect::orbit_drag(x - last_x, y - last_y);
+    model.input.model_drag = Some((x, y));
+    if yaw.abs() > f32::EPSILON || (zoom - 1.0).abs() > 0.0001 {
+        model.reduce(ShellMessage::Inspect(super::InspectMessage::Orbit {
+            yaw,
+            zoom,
+        }));
+    }
+    true
+}
+
+/// 命中在模型画面上，且不在旋转按钮上。
+fn model_surface(document: &RuntimeDocument, hit: StableNodeId) -> bool {
+    let context = document.context();
+    let mut current = Some(hit);
+    let mut on_model = false;
+    let mut on_controls = false;
+    while let Some(node) = current {
+        if let Some(path) = context.assembly_path(node) {
+            if path.contains("inspect-orbit") {
+                on_controls = true;
+            }
+            if path.contains("inspect-model") {
+                on_model = true;
+            }
+        }
+        current = context.world().parent_id(node);
+    }
+    on_model && !on_controls
 }
 
 fn viewport_size(world: &UiWorld, document_id: nana_ui::runtime::DocumentId) -> (f32, f32) {
@@ -367,11 +606,13 @@ mod tests {
     use crate::backend::services::repository::{
         FileBrowserEntry, FileBrowserSnapshot, RepositoryStructureCacheState,
     };
-    use nana_ui::{ApplicationWindow, HeadlessInput, NanaTextShaper, PointerPhase};
     use nana_ui::runtime::LayoutViewport;
+    use nana_ui::{ApplicationWindow, HeadlessInput, NanaTextShaper, PointerPhase};
 
     use crate::acceptance_document_for_model;
     use crate::shell::view_host::prepare_registered as prepare_motion;
+
+    include!("sidebar_drop_tests.rs");
 
     #[test]
     fn live_folder_button_escape_and_prefetch_use_the_shell_path() {
@@ -385,8 +626,20 @@ mod tests {
         let mut window = mounted(&model);
         let mut input = bind(&mut window);
         let create = labeled_center(&window, "在当前目录新建文件夹");
-        pointer(&mut window, &mut input, PointerPhase::Down, create.0, create.1);
-        pointer(&mut window, &mut input, PointerPhase::Up, create.0, create.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Down,
+            create.0,
+            create.1,
+        );
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Up,
+            create.0,
+            create.1,
+        );
         reduce_queued(&mut model, &mut window);
         assert!(model.sidebar.folder_dialog.open);
         assert_eq!(model.sidebar.folder_dialog.title(), "新建文件夹");
@@ -394,22 +647,48 @@ mod tests {
         let mut window = mounted(&model);
         let mut input = bind(&mut window);
         prepare_motion(&mut model, &mut window);
-        window.document.flush(LayoutViewport::new(1200.0, 800.0), &mut NanaTextShaper::default()).expect("布局");
-        assert!(model.sidebar.folder_dialog.open, "对话框还在时不能把它当成已经关掉");
+        window
+            .document
+            .flush(
+                LayoutViewport::new(1200.0, 800.0),
+                &mut NanaTextShaper::default(),
+            )
+            .expect("布局");
+        assert!(
+            model.sidebar.folder_dialog.open,
+            "对话框还在时不能把它当成已经关掉"
+        );
         let field = labeled_input_id(&window, "文件夹名称");
         let document_id = window.document.document();
-        window.document.context_mut().focus_node(document_id, field).expect("焦点");
+        window
+            .document
+            .context_mut()
+            .focus_node(document_id, field)
+            .expect("焦点");
         press_escape(&mut model, &mut window, &mut input);
         prepare_motion(&mut model, &mut window);
-        assert!(!model.sidebar.folder_dialog.open, "焦点在对话框输入框时 Escape 应该关掉它");
+        assert!(
+            !model.sidebar.folder_dialog.open,
+            "焦点在对话框输入框时 Escape 应该关掉它"
+        );
 
         let mut model = files_model();
         model.reduce(ShellMessage::FileBrowserLoaded(Ok(thumbnail_snapshot())));
         assert!(model.files.prefetch_pending());
-        assert!(model.files.take_effects().iter().all(|effect| !matches!(effect, crate::shell::FilesEffect::DecodeThumbnails { .. })));
+        assert!(
+            model.files.take_effects().iter().all(|effect| !matches!(
+                effect,
+                crate::shell::FilesEffect::DecodeThumbnails { .. }
+            ))
+        );
         let mut window = mounted(&model);
         prepare_motion(&mut model, &mut window);
-        assert!(model.files.take_effects().iter().all(|effect| !matches!(effect, crate::shell::FilesEffect::DecodeThumbnails { .. })));
+        assert!(
+            model.files.take_effects().iter().all(|effect| !matches!(
+                effect,
+                crate::shell::FilesEffect::DecodeThumbnails { .. }
+            ))
+        );
         for _ in 0..30 {
             prepare_motion(&mut model, &mut window);
         }
@@ -425,20 +704,50 @@ mod tests {
         let mut window = mounted(&model);
         let mut input = bind(&mut window);
         let cover = row_center(&window, "cover.png");
-        pointer(&mut window, &mut input, PointerPhase::Down, cover.0, cover.1);
-        assert!(prepare_motion_tracks(&mut model, &mut window), "按下条目应该记住手势");
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Down,
+            cover.0,
+            cover.1,
+        );
+        assert!(
+            prepare_motion_tracks(&mut model, &mut window),
+            "按下条目应该记住手势"
+        );
         assert!(!model.input.internal_active);
-        pointer(&mut window, &mut input, PointerPhase::Move, cover.0 + 4.0, cover.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Move,
+            cover.0 + 4.0,
+            cover.1,
+        );
         assert!(prepare_motion_tracks(&mut model, &mut window));
-        assert!(!model.input.internal_active, "4px 还没到 Vue 的 7px 拖动阈值");
+        assert!(
+            !model.input.internal_active,
+            "4px 还没到 Vue 的 7px 拖动阈值"
+        );
 
         let mut model = files_model();
         let mut window = mounted(&model);
         let mut input = bind(&mut window);
         let cover = row_center(&window, "cover.png");
-        pointer(&mut window, &mut input, PointerPhase::Down, cover.0, cover.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Down,
+            cover.0,
+            cover.1,
+        );
         observe_live_pointer(&mut model, &window.document);
-        pointer(&mut window, &mut input, PointerPhase::Move, cover.0 + 20.0, cover.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Move,
+            cover.0 + 20.0,
+            cover.1,
+        );
         observe_live_pointer(&mut model, &window.document);
         assert!(model.input.internal_active);
         assert_eq!(model.files.selected_paths(), &["cover.png".to_string()]);
@@ -448,35 +757,80 @@ mod tests {
         let mut window = mounted(&model);
         let mut input = bind(&mut window);
         let empty = empty_list_point(&window);
-        pointer(&mut window, &mut input, PointerPhase::Down, empty.0, empty.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Down,
+            empty.0,
+            empty.1,
+        );
         observe_live_pointer(&mut model, &window.document);
         pointer(&mut window, &mut input, PointerPhase::Up, empty.0, empty.1);
         observe_live_pointer(&mut model, &window.document);
-        assert!(model.files.selected_paths().is_empty(), "没拖动的框选松手要清空选择");
+        assert!(
+            model.files.selected_paths().is_empty(),
+            "没拖动的框选松手要清空选择"
+        );
 
         let mut model = files_model();
         let mut window = mounted(&model);
         let mut input = bind(&mut window);
         let empty = empty_list_point(&window);
         let cover = row_center(&window, "cover.png");
-        pointer(&mut window, &mut input, PointerPhase::Down, empty.0, empty.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Down,
+            empty.0,
+            empty.1,
+        );
         observe_live_pointer(&mut model, &window.document);
-        pointer(&mut window, &mut input, PointerPhase::Move, cover.0, cover.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Move,
+            cover.0,
+            cover.1,
+        );
         observe_live_pointer(&mut model, &window.document);
         let selected = model.files.selected_paths();
-        assert!(selected.iter().any(|path| path == "cover.png"), "框选应该盖住 cover.png：{selected:?}");
-        assert!(selected.len() >= 2, "从列表空白拖到封面应该框住不止一行：{selected:?}");
+        assert!(
+            selected.iter().any(|path| path == "cover.png"),
+            "框选应该盖住 cover.png：{selected:?}"
+        );
+        assert!(
+            selected.len() >= 2,
+            "从列表空白拖到封面应该框住不止一行：{selected:?}"
+        );
 
         let mut model = files_model();
         let mut window = mounted(&model);
         let mut input = bind(&mut window);
         let cover = row_center(&window, "cover.png");
         let photos = row_center(&window, "photos");
-        pointer(&mut window, &mut input, PointerPhase::Down, cover.0, cover.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Down,
+            cover.0,
+            cover.1,
+        );
         observe_live_pointer(&mut model, &window.document);
-        pointer(&mut window, &mut input, PointerPhase::Move, photos.0, photos.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Move,
+            photos.0,
+            photos.1,
+        );
         observe_live_pointer(&mut model, &window.document);
-        pointer(&mut window, &mut input, PointerPhase::Up, photos.0, photos.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Up,
+            photos.0,
+            photos.1,
+        );
         observe_live_pointer(&mut model, &window.document);
         let effects = model.files.take_effects();
         assert!(
@@ -497,7 +851,13 @@ mod tests {
     fn mounted_at(model: &ShellViewModel, width: f32, height: f32) -> ApplicationWindow {
         let mut window = ApplicationWindow::new();
         window.document = acceptance_document_for_model(model.clone()).expect("生产文档");
-        window.document.flush(LayoutViewport::new(width, height), &mut NanaTextShaper::default()).expect("布局");
+        window
+            .document
+            .flush(
+                LayoutViewport::new(width, height),
+                &mut NanaTextShaper::default(),
+            )
+            .expect("布局");
         window
     }
 
@@ -506,14 +866,28 @@ mod tests {
         HeadlessInput::bind(window.document.context_mut(), document_id)
     }
 
-    fn pointer(window: &mut ApplicationWindow, input: &mut HeadlessInput, phase: PointerPhase, x: f32, y: f32) {
-        input.pointer(window.document.context_mut(), phase, x, y).expect("指针");
+    fn pointer(
+        window: &mut ApplicationWindow,
+        input: &mut HeadlessInput,
+        phase: PointerPhase,
+        x: f32,
+        y: f32,
+    ) {
+        input
+            .pointer(window.document.context_mut(), phase, x, y)
+            .expect("指针");
     }
 
     fn row_center(window: &ApplicationWindow, path: &str) -> (f32, f32) {
         let rows = marks(window);
-        let row = rows.iter().find(|row| row.path == path).unwrap_or_else(|| panic!("没有行 {path}"));
-        (row.bounds.x + row.bounds.width / 2.0, row.bounds.y + row.bounds.height / 2.0)
+        let row = rows
+            .iter()
+            .find(|row| row.path == path && row.kind != "sidebar")
+            .unwrap_or_else(|| panic!("没有行 {path}"));
+        (
+            row.bounds.x + row.bounds.width / 2.0,
+            row.bounds.y + row.bounds.height / 2.0,
+        )
     }
 
     /// 列表滚动区里不压在卡片上的一点。先试上方两角（内容上边距里），从那里拖到卡片会扫过第一行。
@@ -528,8 +902,15 @@ mod tests {
         ];
         candidates
             .into_iter()
-            .find(|(x, y)| contains(list, *x, *y) && rows.iter().all(|row| !contains(row.bounds, *x, *y)))
-            .unwrap_or_else(|| panic!("列表里没有空白点：{list:?} {:?}", rows.iter().map(|row| row.bounds).collect::<Vec<_>>()))
+            .find(|(x, y)| {
+                contains(list, *x, *y) && rows.iter().all(|row| !contains(row.bounds, *x, *y))
+            })
+            .unwrap_or_else(|| {
+                panic!(
+                    "列表里没有空白点：{list:?} {:?}",
+                    rows.iter().map(|row| row.bounds).collect::<Vec<_>>()
+                )
+            })
     }
 
     /// Vue `.workspace-sidebar__footer:hover`：悬停任一底部入口，整排从半透明变成不透明。
@@ -540,12 +921,28 @@ mod tests {
         let mut input = bind(&mut window);
         assert!(model.motion.footer_opacity() < 1.0, "底部入口平时半透明");
         let settings = labeled_center(&window, "设置");
-        pointer(&mut window, &mut input, PointerPhase::Move, settings.0, settings.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Move,
+            settings.0,
+            settings.1,
+        );
         for _ in 0..40 {
             prepare_motion(&mut model, &mut window);
-            window.document.flush(LayoutViewport::new(1200.0, 800.0), &mut NanaTextShaper::default()).expect("布局");
+            window
+                .document
+                .flush(
+                    LayoutViewport::new(1200.0, 800.0),
+                    &mut NanaTextShaper::default(),
+                )
+                .expect("布局");
         }
-        assert_eq!(model.motion.footer_opacity(), 1.0, "悬停底部入口时整排不透明");
+        assert_eq!(
+            model.motion.footer_opacity(),
+            1.0,
+            "悬停底部入口时整排不透明"
+        );
     }
 
     #[test]
@@ -554,18 +951,51 @@ mod tests {
         let mut window = mounted_at(&model, 420.0, 280.0);
         let mut input = bind(&mut window);
         let anchor = labeled_bounds(&window, "资源库 · 动画素材");
-        let center = (anchor.x + anchor.width / 2.0, anchor.y + anchor.height / 2.0);
-        pointer(&mut window, &mut input, PointerPhase::Down, center.0, center.1);
-        pointer(&mut window, &mut input, PointerPhase::Up, center.0, center.1);
+        let center = (
+            anchor.x + anchor.width / 2.0,
+            anchor.y + anchor.height / 2.0,
+        );
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Down,
+            center.0,
+            center.1,
+        );
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Up,
+            center.0,
+            center.1,
+        );
         reduce_queued(&mut model, &mut window);
         crate::shell::mount_shell(&mut window.document, &model).expect("挂上弹层");
-        window.document.flush(LayoutViewport::new(420.0, 280.0), &mut NanaTextShaper::default()).expect("布局");
+        window
+            .document
+            .flush(
+                LayoutViewport::new(420.0, 280.0),
+                &mut NanaTextShaper::default(),
+            )
+            .expect("布局");
         prepare_motion(&mut model, &mut window);
-        window.document.flush(LayoutViewport::new(420.0, 280.0), &mut NanaTextShaper::default()).expect("布局");
+        window
+            .document
+            .flush(
+                LayoutViewport::new(420.0, 280.0),
+                &mut NanaTextShaper::default(),
+            )
+            .expect("布局");
         // Vue `getPopoverPosition`：左边对齐仓库头按钮，顶边在按钮下方 6px，左右留 8px 视口边距。
         let row = labeled_bounds(&window, "切换资源库 动画素材");
-        assert!(row.x >= 8.0 && row.x + row.width <= 420.0 - 8.0, "弹层应留在视口里：{row:?}");
-        assert!(row.y >= anchor.y + anchor.height + 6.0, "弹层应在仓库头下方：{row:?} {anchor:?}");
+        assert!(
+            row.x >= 8.0 && row.x + row.width <= 420.0 - 8.0,
+            "弹层应留在视口里：{row:?}"
+        );
+        assert!(
+            row.y >= anchor.y + anchor.height + 6.0,
+            "弹层应在仓库头下方：{row:?} {anchor:?}"
+        );
     }
 
     #[test]
@@ -575,9 +1005,21 @@ mod tests {
         let mut input = bind(&mut window);
         let cover = row_center(&window, "cover.png");
         let photos = row_center(&window, "photos");
-        pointer(&mut window, &mut input, PointerPhase::Down, cover.0, cover.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Down,
+            cover.0,
+            cover.1,
+        );
         prepare_motion(&mut model, &mut window);
-        pointer(&mut window, &mut input, PointerPhase::Move, photos.0, photos.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Move,
+            photos.0,
+            photos.1,
+        );
         prepare_motion(&mut model, &mut window);
         assert_ne!(model.current_directory, "photos", "刚悬停还不到 450ms");
         for _ in 0..40 {
@@ -585,12 +1027,26 @@ mod tests {
         }
         assert_eq!(model.current_directory, "photos");
         assert!(!tree_selects_folder(&window, "照片"), "按着的时候不拆树");
-        pointer(&mut window, &mut input, PointerPhase::Up, photos.0, photos.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Up,
+            photos.0,
+            photos.1,
+        );
         prepare_motion(&mut model, &mut window);
         let requests = crate::sidebar_dispatch::dispatch_prepared_browses(&mut model);
-        window.document.flush(LayoutViewport::new(1200.0, 800.0), &mut NanaTextShaper::default()).expect("布局");
+        window
+            .document
+            .flush(
+                LayoutViewport::new(1200.0, 800.0),
+                &mut NanaTextShaper::default(),
+            )
+            .expect("布局");
         assert!(
-            requests.iter().any(|request| request.directory_path.as_deref() == Some("photos")),
+            requests
+                .iter()
+                .any(|request| request.directory_path.as_deref() == Some("photos")),
             "目录浏览已提交：{requests:?}"
         );
         assert!(
@@ -600,42 +1056,84 @@ mod tests {
         assert_eq!(model.files.current_path, "photos");
         assert!(model.files.loading, "目录读回来以前文件列表显示读取中");
         assert_eq!(model.current_directory, "photos");
-        assert!(tree_selects_folder(&window, "照片"), "松手后的树应选中 photos");
+        assert!(
+            tree_selects_folder(&window, "照片"),
+            "松手后的树应选中 photos"
+        );
 
         let mut model = hover_model();
         let mut window = mounted(&model);
         let mut input = bind(&mut window);
         let cover = row_center(&window, "cover.png");
         let photos = row_center(&window, "photos");
-        pointer(&mut window, &mut input, PointerPhase::Down, cover.0, cover.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Down,
+            cover.0,
+            cover.1,
+        );
         prepare_motion(&mut model, &mut window);
-        pointer(&mut window, &mut input, PointerPhase::Move, photos.0, photos.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Move,
+            photos.0,
+            photos.1,
+        );
         prepare_motion(&mut model, &mut window);
-        pointer(&mut window, &mut input, PointerPhase::Move, cover.0, cover.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Move,
+            cover.0,
+            cover.1,
+        );
         for _ in 0..32 {
             prepare_motion(&mut model, &mut window);
         }
-        pointer(&mut window, &mut input, PointerPhase::Move, photos.0, photos.1);
+        pointer(
+            &mut window,
+            &mut input,
+            PointerPhase::Move,
+            photos.0,
+            photos.1,
+        );
         prepare_motion(&mut model, &mut window);
         let requests = crate::sidebar_dispatch::dispatch_prepared_browses(&mut model);
-        assert!(requests.is_empty(), "离开后再进入不应立刻打开：{requests:?}");
+        assert!(
+            requests.is_empty(),
+            "离开后再进入不应立刻打开：{requests:?}"
+        );
         assert_ne!(model.files.current_path, "photos");
         assert_ne!(model.current_directory, "photos");
     }
 
     #[test]
     fn live_file_drop_imports_and_empty_drop_attaches() {
-        use std::path::PathBuf;
         use nana_ui::{FileDragInput, FileDragKind, InputModifiers, InputPayload};
+        use std::path::PathBuf;
 
         let mut model = files_model();
         let mut window = mounted(&model);
         let mut input = bind(&mut window);
         let point = drop_point(&window, "files");
-        drag_file(&mut window, &mut input, FileDragKind::Hover, "D:\\other\\c.png", point);
+        drag_file(
+            &mut window,
+            &mut input,
+            FileDragKind::Hover,
+            "D:\\other\\c.png",
+            point,
+        );
         reduce_queued(&mut model, &mut window);
         assert!(model.input.dragging_files, "悬停外部文件应标成正在拖入");
-        drag_file(&mut window, &mut input, FileDragKind::Drop, "D:\\other\\c.png", point);
+        drag_file(
+            &mut window,
+            &mut input,
+            FileDragKind::Drop,
+            "D:\\other\\c.png",
+            point,
+        );
         reduce_queued(&mut model, &mut window);
         let effects = model.files.take_effects();
         assert!(
@@ -647,7 +1145,13 @@ mod tests {
         let mut window = mounted(&model);
         let mut input = bind(&mut window);
         let point = drop_point(&window, "empty");
-        drag_file(&mut window, &mut input, FileDragKind::Drop, "C:\\library", point);
+        drag_file(
+            &mut window,
+            &mut input,
+            FileDragKind::Drop,
+            "C:\\library",
+            point,
+        );
         reduce_queued(&mut model, &mut window);
         let effects = model.sidebar.take_effects();
         assert!(
@@ -655,13 +1159,24 @@ mod tests {
             "空库放下应该附加文件夹：{effects:?}"
         );
 
-        fn drag_file(window: &mut ApplicationWindow, input: &mut HeadlessInput, kind: FileDragKind, path: &str, point: (f32, f32)) {
-            input.route(window.document.context_mut(), InputPayload::FileDrag(FileDragInput {
-                kind,
-                paths: vec![PathBuf::from(path)],
-                position: Some(point),
-                modifiers: InputModifiers::default(),
-            })).expect("文件拖放");
+        fn drag_file(
+            window: &mut ApplicationWindow,
+            input: &mut HeadlessInput,
+            kind: FileDragKind,
+            path: &str,
+            point: (f32, f32),
+        ) {
+            input
+                .route(
+                    window.document.context_mut(),
+                    InputPayload::FileDrag(FileDragInput {
+                        kind,
+                        paths: vec![PathBuf::from(path)],
+                        position: Some(point),
+                        modifiers: InputModifiers::default(),
+                    }),
+                )
+                .expect("文件拖放");
         }
     }
 
@@ -685,11 +1200,23 @@ mod tests {
         let host = world
             .document_order(document)
             .into_iter()
-            .find(|id| context.assembly_path(*id).is_some_and(|path| path.rsplit('/').next() == Some(key)))
+            .find(|id| {
+                context
+                    .assembly_path(*id)
+                    .is_some_and(|path| path.rsplit('/').next() == Some(key))
+            })
             .unwrap_or_else(|| panic!("没有拖放目标 {kind}"));
-        let bounds = world.layout_box(host).unwrap_or_else(|| panic!("拖放目标没有布局"));
-        assert!(bounds.width >= 40.0 && bounds.height >= 40.0, "拖放目标太小：{bounds:?}");
-        (bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0)
+        let bounds = world
+            .layout_box(host)
+            .unwrap_or_else(|| panic!("拖放目标没有布局"));
+        assert!(
+            bounds.width >= 40.0 && bounds.height >= 40.0,
+            "拖放目标太小：{bounds:?}"
+        );
+        (
+            bounds.x + bounds.width / 2.0,
+            bounds.y + bounds.height / 2.0,
+        )
     }
 
     fn hover_model() -> ShellViewModel {
@@ -710,7 +1237,11 @@ mod tests {
     }
 
     /// 按一下 Escape：先经运行时路由，再照生产 `input_event` 走全局 Escape，发出的消息直接归约。
-    fn press_escape(model: &mut ShellViewModel, window: &mut ApplicationWindow, input: &mut HeadlessInput) {
+    fn press_escape(
+        model: &mut ShellViewModel,
+        window: &mut ApplicationWindow,
+        input: &mut HeadlessInput,
+    ) {
         let escape = nana_ui::KeyInput {
             physical: nana_ui_platform::PhysicalKey("Escape".into()),
             logical: nana_ui_platform::LogicalKey("Escape".into()),
@@ -719,10 +1250,16 @@ mod tests {
             modifiers: nana_ui::InputModifiers::default(),
         };
         let payload = nana_ui::InputPayload::Key(escape.clone());
-        let outcome = input.press(window.document.context_mut(), escape, None, None).expect("Escape");
+        let outcome = input
+            .press(window.document.context_mut(), escape, None, None)
+            .expect("Escape");
         // 排着的消息（激活的对话框在路由时发的关闭请求）和生产一样先归约，再走全局 Escape。
         let routed = window.document.context_mut().take_program_messages();
-        let global = crate::window_host::escape_message(model, &payload, outcome.disposition().prevent_default);
+        let global = crate::window_host::escape_message(
+            model,
+            &payload,
+            outcome.disposition().prevent_default,
+        );
         for message in routed {
             model.reduce(*message.downcast::<ShellMessage>().expect("壳层消息"));
         }
@@ -732,26 +1269,43 @@ mod tests {
     }
 
     fn labeled_center(window: &ApplicationWindow, label: &str) -> (f32, f32) {
-        let node = accessibility(window).into_iter().find(|node| node.label.as_deref() == Some(label)).unwrap_or_else(|| panic!("没有 {label}"));
-        (node.bounds.x + node.bounds.width / 2.0, node.bounds.y + node.bounds.height / 2.0)
+        let node = accessibility(window)
+            .into_iter()
+            .find(|node| node.label.as_deref() == Some(label))
+            .unwrap_or_else(|| panic!("没有 {label}"));
+        (
+            node.bounds.x + node.bounds.width / 2.0,
+            node.bounds.y + node.bounds.height / 2.0,
+        )
     }
 
     /// 对话框字段上方有同名的可见标签，按输入框角色找。
     fn labeled_input_id(window: &ApplicationWindow, label: &str) -> nana_ui::runtime::StableNodeId {
         accessibility(window)
             .into_iter()
-            .find(|node| node.role == nana_ui::runtime::AccessibilityRole::TextInput && node.label.as_deref() == Some(label))
+            .find(|node| {
+                node.role == nana_ui::runtime::AccessibilityRole::TextInput
+                    && node.label.as_deref() == Some(label)
+            })
             .unwrap_or_else(|| panic!("没有输入框 {label}"))
             .id
     }
 
     fn labeled_bounds(window: &ApplicationWindow, label: &str) -> LayoutBox {
-        accessibility(window).into_iter().find(|node| node.label.as_deref() == Some(label)).unwrap_or_else(|| panic!("没有 {label}")).bounds
+        accessibility(window)
+            .into_iter()
+            .find(|node| node.label.as_deref() == Some(label))
+            .unwrap_or_else(|| panic!("没有 {label}"))
+            .bounds
     }
 
     fn accessibility(window: &ApplicationWindow) -> Vec<nana_ui::runtime::AccessibilityNode> {
         let document = window.document.document();
-        window.document.context().world().project_accessibility(document)
+        window
+            .document
+            .context()
+            .world()
+            .project_accessibility(document)
     }
 
     fn reduce_queued(model: &mut ShellViewModel, window: &mut ApplicationWindow) {
@@ -800,7 +1354,12 @@ mod tests {
             .map(|name| FileBrowserEntry {
                 path: name.into(),
                 name: name.into(),
-                kind: if name == "cover.png" { "file" } else { "directory" }.into(),
+                kind: if name == "cover.png" {
+                    "file"
+                } else {
+                    "directory"
+                }
+                .into(),
                 extension: None,
                 size_bytes: None,
                 size_label: None,

@@ -7,10 +7,11 @@
 //! 测试 `every_task_goes_through_the_guard` 扫描源码，保证没有派发点绕过这里直接排任务。
 
 use std::any::Any;
-use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::cell::RefCell;
+use std::panic::{AssertUnwindSafe, catch_unwind};
 
-use nana_ui::runtime::Task;
 use nana_ui::RuntimeProgramContext;
+use nana_ui::runtime::Task;
 
 use crate::shell::ShellMessage;
 
@@ -54,8 +55,13 @@ where
 
 /// 派发一个要用领域服务的任务：`prepare` 在当前线程里从服务取出要用的句柄、交回在任务线程里跑的 `work`。服务没
 /// 起来时不派发，当场把 `failed("领域服务未启动")` 送回归约。其余同 [`spawn`]。
-pub(crate) fn spawn_service<S, P, W, F>(services: Option<&S>, host: &impl TaskHost, what: &str, failed: F, prepare: P)
-where
+pub(crate) fn spawn_service<S, P, W, F>(
+    services: Option<&S>,
+    host: &impl TaskHost,
+    what: &str,
+    failed: F,
+    prepare: P,
+) where
     P: FnOnce(&S) -> W,
     W: FnOnce() -> ShellMessage + Send + 'static,
     F: Fn(String) -> ShellMessage + Clone + Send + 'static,
@@ -68,16 +74,65 @@ where
     spawn(host, what, failed, prepare(services));
 }
 
+/// 只为把失败原因从 [`spawn_service`] 带出来。消息种类不参与展示。
+struct ReasonHost {
+    reason: RefCell<Option<String>>,
+}
+
+impl TaskHost for ReasonHost {
+    fn submit(&self, _task: Task<ShellMessage>) -> Result<(), String> {
+        Err("服务未启动时不应排任务".into())
+    }
+
+    fn deliver(&self, message: ShellMessage) {
+        match message {
+            ShellMessage::FileBrowserLoaded(Err(error)) => *self.reason.borrow_mut() = Some(error),
+            _ => eprintln!("Nana 服务未启动的失败没有带原因"),
+        }
+    }
+}
+
+/// 领域服务没起来时，派发当场交给失败回调的原因。
+///
+/// 和 [`spawn_service`] 在没有服务时调用 `failed` 的那一句相同。调用方原样显示，不另写原因。
+pub(crate) fn failure_when_services_missing(what: &str) -> Option<String> {
+    let host = ReasonHost {
+        reason: RefCell::new(None),
+    };
+    spawn_service(
+        None::<&()>,
+        &host,
+        what,
+        |error| ShellMessage::FileBrowserLoaded(Err(error)),
+        |_: &()| || unreachable!("服务未启动时不应派发任务"),
+    );
+    let reason = host.reason.into_inner();
+    if reason.is_none() {
+        eprintln!("Nana {what}在服务未启动时没有交回失败原因");
+    }
+    reason
+}
+
 /// 在任务线程里跑 `work`。它 panic 时记下 `what` 和 panic 的原因（标准错误和系统日志），改为交回 `failed(原因)`。
 ///
 /// `work` 拿着的服务句柄 panic 以后不再使用，随闭包一起丢掉，所以按 `AssertUnwindSafe` 接住。
-pub(crate) fn settle<T>(what: &str, work: impl FnOnce() -> T, failed: impl FnOnce(String) -> T) -> T {
+pub(crate) fn settle<T>(
+    what: &str,
+    work: impl FnOnce() -> T,
+    failed: impl FnOnce(String) -> T,
+) -> T {
     match catch_unwind(AssertUnwindSafe(work)) {
         Ok(value) => value,
         Err(payload) => {
             let reason = format!("{what}任务异常退出：{}", panic_reason(payload.as_ref()));
             eprintln!("Nana {reason}");
-            momobako_backend::app_log!("error", "nana.task", "taskPanicked", reason, serde_json::json!({ "task": what }));
+            momobako_backend::app_log!(
+                "error",
+                "nana.task",
+                "taskPanicked",
+                reason,
+                serde_json::json!({ "task": what })
+            );
             failed(reason)
         }
     }

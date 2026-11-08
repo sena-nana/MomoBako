@@ -11,14 +11,14 @@
 
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{fields, widget, AnyView, El, FieldWrite, IntoProp, IntoView, Signal};
+use nana_ui::runtime::view::{AnyView, El, FieldWrite, IntoProp, IntoView, Signal, fields, widget};
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, IconButton, IconGlyph, InteractionStyle, LengthSpec, ListItem, NodeStyle, RadiusTier,
-    SemanticColorRole, SemanticPaint, Stack, Text, ViewContext,
+    Activate, AlignSpec, Button, IconButton, IconGlyph, InteractionStyle, LengthSpec, ListItem,
+    NodeStyle, RadiusTier, SemanticColorRole, SemanticPaint, Stack, Text, ViewContext,
 };
 use nana_ui::{ControlSize, Icon};
 
-use crate::theme_map::{disabled_paint, DISABLED_OPACITY};
+use crate::theme_map::{DISABLED_OPACITY, disabled_paint};
 
 /// 导航行高度：`.workspace-shortcuts__item` 的 `min-height: 28px`。
 const NAV_ROW_HEIGHT: f32 = 28.0;
@@ -38,7 +38,14 @@ pub(crate) enum ActiveTone {
 }
 
 /// 侧栏行的节点样式。`height` 和左右内边距按 Vue 的类给，悬停和当前态换底色和前景。
-pub(crate) fn row_style(height: f32, pad_left: f32, pad_right: f32, gap: f32, tone: ActiveTone, disabled: bool) -> NodeStyle {
+pub(crate) fn row_style(
+    height: f32,
+    pad_left: f32,
+    pad_right: f32,
+    gap: f32,
+    tone: ActiveTone,
+    disabled: bool,
+) -> NodeStyle {
     let mut style = NodeStyle::default();
     {
         let layout = Arc::make_mut(&mut style.layout);
@@ -110,7 +117,12 @@ pub(crate) fn inherit_icon(icon: Icon, size: f32) -> IconGlyph {
 }
 
 /// 一段文字。`color` 为 `None` 时继承父节点前景色。
-pub(crate) fn label_text(value: impl Into<String>, size: f32, weight: u16, color: Option<SemanticColorRole>) -> Text {
+pub(crate) fn label_text(
+    value: impl Into<String>,
+    size: f32,
+    weight: u16,
+    color: Option<SemanticColorRole>,
+) -> Text {
     let mut node = Text::new(value).font_size(size).font_weight(weight);
     if let Some(color) = color {
         node = node.color(color);
@@ -161,9 +173,16 @@ pub(crate) fn nav_row(
     parts.push(fill_label(label, 13.0, 500));
     if let Some(count) = initial.count {
         parts.push(
-            widget(label_text(count.to_string(), 12.0, 600, Some(SemanticColorRole::Muted)))
-                .prop::<String, fields::text::value>(move || look().count.unwrap_or_default().to_string())
-                .into_any(),
+            widget(label_text(
+                count.to_string(),
+                12.0,
+                600,
+                Some(SemanticColorRole::Muted),
+            ))
+            .prop::<String, fields::text::value>(move || {
+                look().count.unwrap_or_default().to_string()
+            })
+            .into_any(),
         );
     }
     let content = widget(Stack::fill_row(8.0).align(AlignSpec::Center)).children(parts);
@@ -171,7 +190,14 @@ pub(crate) fn nav_row(
         ListItem::new(label)
             .selected(initial.active)
             .disabled(initial.disabled)
-            .style(row_style(NAV_ROW_HEIGHT, 8.0, 8.0, 8.0, ActiveTone::Accent, initial.disabled)),
+            .style(row_style(
+                NAV_ROW_HEIGHT,
+                8.0,
+                8.0,
+                8.0,
+                ActiveTone::Accent,
+                initial.disabled,
+            )),
     )
     .prop::<bool, fields::list_item::selected>(move || look().active)
     .prop::<bool, DimmedRow>(move || look().disabled)
@@ -184,7 +210,11 @@ pub(crate) fn nav_row(
 /// 分组标题：11px 粗体弱色字，右侧工具。对应 `.workspace-group__header`。
 /// `title` 可以是一段文字，也可以是播放集那样可点的标题按钮。
 pub(crate) fn group_header(title: AnyView, tools: Vec<AnyView>, key: &'static str) -> AnyView {
-    let tools = (!tools.is_empty()).then(|| widget(Stack::row(2.0).align(AlignSpec::Center)).children(tools).into_any());
+    let tools = (!tools.is_empty()).then(|| {
+        widget(Stack::row(2.0).align(AlignSpec::Center))
+            .children(tools)
+            .into_any()
+    });
     widget(
         Stack::bar(0.0)
             .align(AlignSpec::Center)
@@ -211,8 +241,8 @@ pub(crate) fn group_title(value: &str) -> Text {
 /// 禁用按 `disabled` 绑定，常量也行。返回元素本身，调用方还能再绑图标。
 ///
 /// 停用时照 Vue `button:disabled` 的 0.45 把弱色和侧栏底色（`--bg-elev`）在 sRGB 里混成不透明色，
-/// 颜色照写的来（`colors_from_style`），NanaUI 不再整枚淡化。播放集行上的「播放」也用侧栏底色：行选中时
-/// 底下是一层 `--accent-soft`，Vue 的停用图标会透出一点强调色，这里的字形是不透明的灰。
+/// 颜色照写的来（`colors_from_style`），NanaUI 不再整枚淡化。播放集行上的「播放」不走这一个底色，
+/// 选中时改和 `--accent-soft` 混，见 [`PlayBase`]。
 pub(crate) fn tree_action(
     icon: Icon,
     label: &'static str,
@@ -220,18 +250,76 @@ pub(crate) fn tree_action(
     disabled: impl IntoProp<bool>,
     on_activate: impl Fn(&mut ViewContext<IconButton>) + Send + 'static,
 ) -> El<IconButton> {
-    let mut button = IconButton::new(icon, label).size(ControlSize::Medium).with_tooltip(label);
-    button.style = icon_button_style(TREE_ACTION_EDGE, RadiusTier::Xs, SemanticColorRole::Faint, None);
-    button.style.interaction.disabled = disabled_paint(SemanticColorRole::Faint, SemanticColorRole::Surface);
+    tree_action_titled(icon, label, label, key, disabled, on_activate)
+}
+
+/// 标题工具，悬停提示和读屏名可以不是同一句。
+///
+/// `label` 是无障碍名，`tip` 是悬停时浮出的提示。两边一样时用 [`tree_action`]。
+/// 播放集行的「播放」读屏名是「播放播放集」，提示是「播放」。
+pub(crate) fn tree_action_titled(
+    icon: Icon,
+    label: &'static str,
+    tip: &'static str,
+    key: &'static str,
+    disabled: impl IntoProp<bool>,
+    on_activate: impl Fn(&mut ViewContext<IconButton>) + Send + 'static,
+) -> El<IconButton> {
+    let mut button = IconButton::new(icon, label)
+        .size(ControlSize::Medium)
+        .with_tooltip(tip);
+    button.style = icon_button_style(
+        TREE_ACTION_EDGE,
+        RadiusTier::Xs,
+        SemanticColorRole::Faint,
+        None,
+    );
+    button.style.interaction.disabled =
+        disabled_paint(SemanticColorRole::Faint, SemanticColorRole::Surface);
     widget(button.colors_from_style())
         .prop::<bool, fields::icon_button::disabled>(disabled)
         .key(key)
         .on_cx(move |_, _: &Activate, cx| on_activate(cx))
 }
 
+/// 播放集行「播放」的停用底色：这一行选中时是 `--accent-soft`，否则仍是侧栏底。
+///
+/// Vue 里这个按钮底是透明的，字色 `--text-faint`，停用靠 `button:disabled { opacity: 0.45 }`。
+/// 选中行的底是 `--accent-soft`（深色主题约 0.14、浅色约 0.10 的强调色），半透明字形会透出那一点强调色；
+/// 没选中时行没有这层底，透出来的是侧栏 `--bg-elev`。这里不改 NanaUI 的混合，只按行换 `disabled_paint`
+/// 的底色。`--accent-soft` 自己带透明度，和它混出的字色也带着透明度，画上去会再叠一行底。
+pub(crate) struct PlayBase;
+
+impl FieldWrite<IconButton, bool> for PlayBase {
+    const FIELD: &'static str = "IconButton.style.interaction.disabled";
+
+    fn write(target: &mut IconButton, selected: bool) {
+        target.style.interaction.disabled = play_disabled_paint(selected);
+    }
+
+    fn differs(target: &IconButton, selected: &bool) -> bool {
+        target.style.interaction.disabled != play_disabled_paint(*selected)
+    }
+}
+
+/// 选中行和 `--accent-soft` 混，其余行和侧栏底混。
+fn play_disabled_paint(selected: bool) -> SemanticPaint {
+    let base = if selected {
+        SemanticColorRole::AccentSoft
+    } else {
+        SemanticColorRole::Surface
+    };
+    disabled_paint(SemanticColorRole::Faint, base)
+}
+
 /// 方形图标按钮的样式：常态透明，悬停换 `--bg-hover` 和正文色。会停用的按钮另写停用样子
 /// （`theme_map::disabled_paint`），要按它实际所在的底色混。
-pub(crate) fn icon_button_style(edge: f32, radius: RadiusTier, foreground: SemanticColorRole, background: Option<SemanticColorRole>) -> NodeStyle {
+pub(crate) fn icon_button_style(
+    edge: f32,
+    radius: RadiusTier,
+    foreground: SemanticColorRole,
+    background: Option<SemanticColorRole>,
+) -> NodeStyle {
     let mut style = NodeStyle::default();
     {
         let layout = Arc::make_mut(&mut style.layout);
@@ -280,7 +368,10 @@ pub(crate) fn empty_hint(copy: &str, key: impl Into<String>) -> AnyView {
 }
 
 /// 常驻分组的空状态说明：`copy` 现读信号，有说明时显示并改字，没有时藏起来、不占布局。
-pub(crate) fn bound_hint(copy: impl Fn() -> Option<&'static str> + Copy + Send + 'static, key: &'static str) -> AnyView {
+pub(crate) fn bound_hint(
+    copy: impl Fn() -> Option<&'static str> + Copy + Send + 'static,
+    key: &'static str,
+) -> AnyView {
     widget(Stack::column(0.0).padding_xy(8.0, 6.0))
         .visible(move || copy().is_some())
         .children((widget(hint_text(copy().unwrap_or_default()))
@@ -319,13 +410,24 @@ pub(crate) fn footer_button(
     rest: Signal<f32>,
     on_activate: impl Fn(&mut ViewContext<IconButton>) + Send + 'static,
 ) -> AnyView {
-    let mut button = IconButton::new(icon, label).size(ControlSize::Large).with_tooltip(label);
-    button.style = icon_button_style(FOOTER_BUTTON_EDGE, RadiusTier::Sm, SemanticColorRole::Muted, None);
+    let mut button = IconButton::new(icon, label)
+        .size(ControlSize::Large)
+        .with_tooltip(label);
+    button.style = icon_button_style(
+        FOOTER_BUTTON_EDGE,
+        RadiusTier::Sm,
+        SemanticColorRole::Muted,
+        None,
+    );
     widget(button.colors_from_style())
         .prop::<FooterLook, FooterPaint>(look)
         .prop::<f32, super::super::hot::OpacityField>(move || {
             let look = look();
-            if look.active || look.highlight { 1.0 } else { rest.get() }
+            if look.active || look.highlight {
+                1.0
+            } else {
+                rest.get()
+            }
         })
         .key(key)
         .on_cx(move |_, _: &Activate, cx| on_activate(cx))
@@ -335,7 +437,11 @@ pub(crate) fn footer_button(
 /// 底部入口的前景、底色和悬停按下的样子。当前入口悬停也保持强调色底，和 `.is-active` 压过
 /// `:hover` 一致。
 fn footer_paint(look: FooterLook) -> (SemanticColorRole, Option<SemanticColorRole>, SemanticPaint) {
-    let foreground = if look.active || look.highlight { SemanticColorRole::Accent } else { SemanticColorRole::Muted };
+    let foreground = if look.active || look.highlight {
+        SemanticColorRole::Accent
+    } else {
+        SemanticColorRole::Muted
+    };
     if look.active {
         let current = SemanticPaint {
             background: Some(SemanticColorRole::AccentSoft),
@@ -351,7 +457,8 @@ fn footer_paint(look: FooterLook) -> (SemanticColorRole, Option<SemanticColorRol
 pub(crate) struct FooterPaint;
 
 impl FieldWrite<IconButton, FooterLook> for FooterPaint {
-    const FIELD: &'static str = "IconButton.style.foreground+background+interaction.hovered+pressed";
+    const FIELD: &'static str =
+        "IconButton.style.foreground+background+interaction.hovered+pressed";
 
     fn write(target: &mut IconButton, look: FooterLook) {
         let (foreground, background, hover) = footer_paint(look);
@@ -383,7 +490,7 @@ impl FieldWrite<ListItem, bool> for DimmedRow {
     }
 
     fn differs(target: &ListItem, disabled: &bool) -> bool {
-        target.disabled != *disabled || target.style.layout.opacity != disabled.then_some(DISABLED_OPACITY)
+        target.disabled != *disabled
+            || target.style.layout.opacity != disabled.then_some(DISABLED_OPACITY)
     }
 }
-

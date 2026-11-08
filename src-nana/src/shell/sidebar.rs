@@ -92,21 +92,25 @@ pub enum PopoverMode {
     BackendForm,
 }
 
+#[path = "sidebar_bind.rs"]
+mod bind;
+#[path = "sidebar_gap.rs"]
+mod gap;
+#[path = "sidebar_popover.rs"]
+mod popover;
 #[path = "sidebar_smart.rs"]
 mod smart;
 #[path = "sidebar_smart_flow.rs"]
 mod smart_flow;
-#[path = "sidebar_gap.rs"]
-mod gap;
-#[path = "sidebar_bind.rs"]
-mod bind;
-#[path = "sidebar_popover.rs"]
-mod popover;
 
+pub use gap::{
+    FOLDER_DELETE_TITLE, FolderDeleteMode, FolderMenu, FolderMutation, GapMessage, escape_layer,
+};
+pub use popover::{BackendOption, BackendRoute, backend_options};
 pub use smart::{SmartFolderDraft, SmartFolderField};
-pub use smart_flow::{SmartFolderChange, SmartFolderOutcome, SmartFolderResult, SmartResultSummary};
-pub use gap::{escape_layer, FolderDeleteMode, FolderMenu, FolderMutation, GapMessage, FOLDER_DELETE_TITLE};
-pub use popover::{backend_options, BackendOption, BackendRoute};
+pub use smart_flow::{
+    SmartFolderChange, SmartFolderOutcome, SmartFolderResult, SmartResultSummary,
+};
 
 /// 一次目录树读取：树本身和每个目录的直属文件数（Vue `FileTreeNode.fileCount`）。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -117,14 +121,20 @@ pub struct SidebarTree {
 
 impl From<Vec<SidebarFolder>> for SidebarTree {
     fn from(folders: Vec<SidebarFolder>) -> Self {
-        Self { folders, counts: Default::default() }
+        Self {
+            folders,
+            counts: Default::default(),
+        }
     }
 }
 
 impl SidebarTree {
     /// 把服务返回的目录节点收成侧栏树，同时记下每个目录的文件数。
     pub fn from_nodes(nodes: &[crate::backend::services::repository::FileTreeNode]) -> Self {
-        fn walk(nodes: &[crate::backend::services::repository::FileTreeNode], counts: &mut std::collections::BTreeMap<String, usize>) {
+        fn walk(
+            nodes: &[crate::backend::services::repository::FileTreeNode],
+            counts: &mut std::collections::BTreeMap<String, usize>,
+        ) {
             for node in nodes {
                 counts.insert(node.path.clone(), node.file_count);
                 walk(&node.children, counts);
@@ -132,7 +142,10 @@ impl SidebarTree {
         }
         let mut counts = std::collections::BTreeMap::new();
         walk(nodes, &mut counts);
-        Self { folders: nodes.iter().map(SidebarFolder::from_file_node).collect(), counts }
+        Self {
+            folders: nodes.iter().map(SidebarFolder::from_file_node).collect(),
+            counts,
+        }
     }
 }
 
@@ -149,10 +162,16 @@ pub enum SidebarMessage {
     /// 智能文件夹行上的「新建子智能文件夹」，带父级 id。
     OpenSmartFolderChild(String),
     CloseSmartFolderDialog,
-    SetSmartFolderField { field: SmartFolderField, value: String },
+    SetSmartFolderField {
+        field: SmartFolderField,
+        value: String,
+    },
     SubmitSmartFolder,
     /// 新建、编辑或删除智能文件夹的结果：成功时是整棵树和这次改的是哪个。
-    SmartFolderSaved { repo_id: String, result: Result<SmartFolderOutcome, String> },
+    SmartFolderSaved {
+        repo_id: String,
+        result: Result<SmartFolderOutcome, String>,
+    },
     TogglePlaylists,
     OpenSidebarPlaylist(String),
     OpenRepositorySwitcher,
@@ -167,43 +186,103 @@ pub enum SidebarMessage {
     RepositoryAttachPathChanged(String),
     SubmitRepositoryAttach,
     /// 附加或新建资源库的结果：成功时是新仓库的摘要，照 Vue 放进列表并切过去。
-    RepositoryAttachFinished(Result<crate::backend::services::repository::RepositorySummary, String>),
-    SidebarTreeLoaded { repo_id: String, result: Result<SidebarTree, String> },
-    SidebarSmartFoldersLoaded { repo_id: String, result: Result<Vec<SidebarSmartFolder>, String> },
-    SidebarSmartFolderQueried { repo_id: String, smart_folder_id: String, result: Result<SmartFolderResult, String> },
-    SidebarPlaylistsLoaded { repo_id: String, result: Result<Vec<crate::backend::services::repository::PlaylistSummary>, String> },
+    RepositoryAttachFinished(
+        Result<crate::backend::services::repository::RepositorySummary, String>,
+    ),
+    SidebarTreeLoaded {
+        repo_id: String,
+        result: Result<SidebarTree, String>,
+    },
+    SidebarSmartFoldersLoaded {
+        repo_id: String,
+        result: Result<Vec<SidebarSmartFolder>, String>,
+    },
+    SidebarSmartFolderQueried {
+        repo_id: String,
+        smart_folder_id: String,
+        result: Result<SmartFolderResult, String>,
+    },
+    SidebarPlaylistsLoaded {
+        repo_id: String,
+        result: Result<Vec<crate::backend::services::repository::PlaylistSummary>, String>,
+    },
     /// 文件夹对话框、智能文件夹编辑、播放、弹层夹取和 Escape。
     Gap(gap::GapMessage),
     ClearRecent,
-    RecentCleared { repo_id: String, result: Result<usize, String> },
+    RecentCleared {
+        repo_id: String,
+        result: Result<usize, String>,
+    },
 }
 
 /// 侧栏归约后交给宿主的服务请求。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SidebarEffect {
-    LoadTree { repo_id: String },
-    LoadSmartFolders { repo_id: String },
-    QuerySmartFolder { repo_id: String, smart_folder_id: String },
-    CreateSmartFolder { repo_id: String },
-    LoadPlaylists { repo_id: String },
-    LoadPlaylistDetail { repo_id: String, playlist_id: String },
+    LoadTree {
+        repo_id: String,
+    },
+    LoadSmartFolders {
+        repo_id: String,
+    },
+    QuerySmartFolder {
+        repo_id: String,
+        smart_folder_id: String,
+    },
+    CreateSmartFolder {
+        repo_id: String,
+    },
+    LoadPlaylists {
+        repo_id: String,
+    },
+    LoadPlaylistDetail {
+        repo_id: String,
+        playlist_id: String,
+    },
     /// 读一个目录。`progress` 是 Vue 的非静默读取（回收站、快捷访问、从回收站回到全部），任务弹层出
     /// 「读取目录」（「读取回收站」）这一行；点文件夹是静默读取，不出。
-    Browse { repo_id: String, path: String, trash: bool, progress: bool },
-    AttachRepository { path: String },
-    UpdateSmartFolder { repo_id: String },
-    DeleteSmartFolder { repo_id: String, smart_folder_id: String },
-    DeletePlaylist { repo_id: String, playlist_id: String },
+    Browse {
+        repo_id: String,
+        path: String,
+        trash: bool,
+        progress: bool,
+    },
+    AttachRepository {
+        path: String,
+    },
+    UpdateSmartFolder {
+        repo_id: String,
+    },
+    DeleteSmartFolder {
+        repo_id: String,
+        smart_folder_id: String,
+    },
+    DeletePlaylist {
+        repo_id: String,
+        playlist_id: String,
+    },
     /// 新建播放集对话框的「创建」。结果回 `ShellMessage::PlaylistCreated`。
-    CreatePlaylist { repo_id: String, name: String, player_type_id: String },
+    CreatePlaylist {
+        repo_id: String,
+        name: String,
+        player_type_id: String,
+    },
     /// `config` 是后端表单的 `backendConfig`；Eagle 这类只给目录的来源为 `None`。
-    CreateBackendRepository { name: String, path: String, plugin_id: String, config: Option<serde_json::Value> },
-    ClearRecent { repo_id: String },
+    CreateBackendRepository {
+        name: String,
+        path: String,
+        plugin_id: String,
+        config: Option<serde_json::Value>,
+    },
+    ClearRecent {
+        repo_id: String,
+    },
 }
 
 #[derive(Clone, Debug)]
 pub struct SidebarState {
     pub counts: ShortcutCounts,
+    /// 「清空记录」已经发出、结果还没回来。这段时间按钮写成「清空中...」并禁用。
+    pub clearing_recent: bool,
     pub quick_access: Vec<SidebarShortcut>,
     pub folders: Vec<SidebarFolder>,
     /// 每个目录的直属文件数，树行右侧的计数。
@@ -231,6 +310,8 @@ pub struct SidebarState {
     pub attach_path: String,
     pub popover_error: String,
     pub selected_path: Option<String>,
+    /// 快捷访问点的文件。父目录快照回来以后才写进文件列表的选择；换目录或换仓库时丢掉。
+    pending_quick_file: Option<String>,
     pub folder_dialog: gap::FolderDialog,
     pub folder_delete_path: String,
     pub folder_delete_label: String,
@@ -270,6 +351,7 @@ impl Default for SidebarState {
     fn default() -> Self {
         Self {
             counts: ShortcutCounts::default(),
+            clearing_recent: false,
             quick_access: Vec::new(),
             folders: Vec::new(),
             folder_counts: std::collections::BTreeMap::new(),
@@ -294,6 +376,7 @@ impl Default for SidebarState {
             attach_path: String::new(),
             popover_error: String::new(),
             selected_path: None,
+            pending_quick_file: None,
             folder_dialog: gap::FolderDialog::default(),
             folder_delete_path: String::new(),
             folder_delete_label: String::new(),
@@ -362,14 +445,23 @@ impl SidebarState {
         }
         let repo_id = repo_id.expect("ready repository id").to_string();
         self.tree_loading = true;
-        self.effects.push(SidebarEffect::LoadTree { repo_id: repo_id.clone() });
-        self.effects.push(SidebarEffect::LoadSmartFolders { repo_id: repo_id.clone() });
+        self.effects.push(SidebarEffect::LoadTree {
+            repo_id: repo_id.clone(),
+        });
+        self.effects.push(SidebarEffect::LoadSmartFolders {
+            repo_id: repo_id.clone(),
+        });
         self.effects.push(SidebarEffect::LoadPlaylists { repo_id });
         true
     }
 
     /// 用摘要重算快捷方式。同一仓库的后续摘要不重新请求目录树。
-    pub fn apply_snapshot(&mut self, assets: &[ShortcutAsset], trash_count: i64, quick_access: Vec<SidebarShortcut>) {
+    pub fn apply_snapshot(
+        &mut self,
+        assets: &[ShortcutAsset],
+        trash_count: i64,
+        quick_access: Vec<SidebarShortcut>,
+    ) {
         self.counts = count_shortcuts(assets, trash_count);
         self.quick_access = quick_access;
     }
@@ -381,7 +473,12 @@ impl SidebarState {
     }
 
     /// 缺失仓库时快捷方式、快捷访问和目录打开都直接返回。
-    pub fn select_shortcut(&mut self, workspace: &mut WorkspaceState, id: ShortcutId, locked: bool) -> bool {
+    pub fn select_shortcut(
+        &mut self,
+        workspace: &mut WorkspaceState,
+        id: ShortcutId,
+        locked: bool,
+    ) -> bool {
         if locked {
             return false;
         }
@@ -391,7 +488,12 @@ impl SidebarState {
         if id == ShortcutId::Trash {
             workspace.panel = WorkspacePanel::Trash;
             self.browsing_trash = true;
-            self.effects.push(SidebarEffect::Browse { repo_id, path: String::new(), trash: true, progress: true });
+            self.effects.push(SidebarEffect::Browse {
+                repo_id,
+                path: String::new(),
+                trash: true,
+                progress: true,
+            });
             return true;
         }
         workspace.library_category = match id {
@@ -403,19 +505,35 @@ impl SidebarState {
         workspace.panel = WorkspacePanel::Files;
         if self.browsing_trash {
             self.browsing_trash = false;
-            self.effects.push(SidebarEffect::Browse { repo_id, path: String::new(), trash: false, progress: true });
+            self.effects.push(SidebarEffect::Browse {
+                repo_id,
+                path: String::new(),
+                trash: false,
+                progress: true,
+            });
         }
         true
     }
 
-    pub fn open_quick_access(&mut self, workspace: &mut WorkspaceState, shortcut_id: &str, locked: bool) -> bool {
+    pub fn open_quick_access(
+        &mut self,
+        workspace: &mut WorkspaceState,
+        shortcut_id: &str,
+        locked: bool,
+    ) -> bool {
         if locked {
             return false;
         }
-        let Some(shortcut) = self.quick_access.iter().find(|item| item.id == shortcut_id).cloned() else {
+        let Some(shortcut) = self
+            .quick_access
+            .iter()
+            .find(|item| item.id == shortcut_id)
+            .cloned()
+        else {
             return false;
         };
         if shortcut.target_kind == "smartFolder" {
+            self.pending_quick_file = None;
             return shortcut
                 .target_id
                 .as_deref()
@@ -430,7 +548,9 @@ impl SidebarState {
             if !self.browse_folder(workspace, &parent, locked, true) {
                 return false;
             }
-            self.selected_path = Some(path);
+            // Vue 等父目录读完才 `selectWorkspaceEntry`。这里先记下，快照回来再选。
+            self.selected_path = Some(path.clone());
+            self.pending_quick_file = Some(path);
             return true;
         }
         let Some(path) = shortcut.target_path else {
@@ -445,12 +565,23 @@ impl SidebarState {
     }
 
     /// 点文件夹（Vue `openFolder`，静默读取）：回到全部文件，展开到这一层并读它。
-    pub fn open_folder(&mut self, workspace: &mut WorkspaceState, path: &str, locked: bool) -> bool {
+    pub fn open_folder(
+        &mut self,
+        workspace: &mut WorkspaceState,
+        path: &str,
+        locked: bool,
+    ) -> bool {
         self.browse_folder(workspace, path, locked, false)
     }
 
     /// 打开一个文件夹；`progress` 时任务弹层出「读取目录」这一行。
-    fn browse_folder(&mut self, workspace: &mut WorkspaceState, path: &str, locked: bool, progress: bool) -> bool {
+    fn browse_folder(
+        &mut self,
+        workspace: &mut WorkspaceState,
+        path: &str,
+        locked: bool,
+        progress: bool,
+    ) -> bool {
         if locked || workspace.active_repo_id.is_none() {
             return false;
         }
@@ -458,9 +589,15 @@ impl SidebarState {
         workspace.panel = WorkspacePanel::Files;
         workspace.library_category = LibraryCategory::All;
         self.browsing_trash = false;
+        self.pending_quick_file = None;
         self.current_directory = path.to_string();
         self.expand_directory(path);
-        self.effects.push(SidebarEffect::Browse { repo_id, path: path.to_string(), trash: false, progress });
+        self.effects.push(SidebarEffect::Browse {
+            repo_id,
+            path: path.to_string(),
+            trash: false,
+            progress,
+        });
         true
     }
 
@@ -475,10 +612,16 @@ impl SidebarState {
         } else {
             self.tree_loading = true;
             self.tree_error.clear();
-            self.effects.push(SidebarEffect::LoadTree { repo_id: repo_id.to_string() });
+            self.effects.push(SidebarEffect::LoadTree {
+                repo_id: repo_id.to_string(),
+            });
         }
-        self.effects.push(SidebarEffect::LoadSmartFolders { repo_id: repo_id.to_string() });
-        self.effects.push(SidebarEffect::LoadPlaylists { repo_id: repo_id.to_string() });
+        self.effects.push(SidebarEffect::LoadSmartFolders {
+            repo_id: repo_id.to_string(),
+        });
+        self.effects.push(SidebarEffect::LoadPlaylists {
+            repo_id: repo_id.to_string(),
+        });
         if panel == WorkspacePanel::Playlist {
             if let Some(playlist_id) = self.active_playlist_id.clone() {
                 self.effects.push(SidebarEffect::LoadPlaylistDetail {
@@ -499,6 +642,22 @@ impl SidebarState {
         }
     }
 
+    /// 移走或删掉可见文件夹以后另读一次目录树（Vue `refreshRepositoryTree`）。
+    ///
+    /// 只发 `getRepositoryTree` 这一次。仓库对不上时记日志，已有文件夹不动。
+    /// 读失败交给 `apply_tree` 记日志，不另编一棵树。
+    pub(in crate::shell) fn reload_folder_tree(&mut self, repo_id: &str) {
+        if self.bound_missing || self.bound_repo_id.as_deref() != Some(repo_id) {
+            eprintln!("Nana 侧栏树另读与当前仓库不一致：{repo_id}");
+            return;
+        }
+        self.tree_loading = true;
+        self.tree_error.clear();
+        self.effects.push(SidebarEffect::LoadTree {
+            repo_id: repo_id.to_string(),
+        });
+    }
+
     pub fn apply_tree(&mut self, repo_id: &str, result: Result<SidebarTree, String>) {
         if self.bound_repo_id.as_deref() != Some(repo_id) {
             eprintln!("Nana 忽略过期的目录树：{repo_id}");
@@ -511,7 +670,8 @@ impl SidebarState {
                 self.folder_counts = tree.counts;
                 self.tree_error.clear();
                 let valid = folder_paths(&self.folders);
-                self.expanded_folders.retain(|path| path.is_empty() || valid.contains(path));
+                self.expanded_folders
+                    .retain(|path| path.is_empty() || valid.contains(path));
             }
             Err(error) => {
                 eprintln!("Nana 读取目录树失败：{error}");
@@ -533,7 +693,12 @@ impl SidebarState {
         toggle_id(&mut self.expanded_smart_folders, id);
     }
 
-    pub fn select_smart_folder(&mut self, workspace: &mut WorkspaceState, smart_folder_id: &str, locked: bool) -> bool {
+    pub fn select_smart_folder(
+        &mut self,
+        workspace: &mut WorkspaceState,
+        smart_folder_id: &str,
+        locked: bool,
+    ) -> bool {
         if locked || smart_folder_id.is_empty() || workspace.active_repo_id.is_none() {
             return false;
         }
@@ -550,7 +715,11 @@ impl SidebarState {
         true
     }
 
-    pub fn apply_smart_folders(&mut self, repo_id: &str, result: Result<Vec<SidebarSmartFolder>, String>) {
+    pub fn apply_smart_folders(
+        &mut self,
+        repo_id: &str,
+        result: Result<Vec<SidebarSmartFolder>, String>,
+    ) {
         if self.bound_repo_id.as_deref() != Some(repo_id) {
             eprintln!("Nana 忽略过期的智能文件夹：{repo_id}");
             return;
@@ -572,7 +741,12 @@ impl SidebarState {
     }
 
     /// 仓库或当前智能文件夹已经变化时，旧查询不能覆盖新的结果。
-    pub fn note_smart_query(&mut self, repo_id: &str, smart_folder_id: &str, result: Result<SmartResultSummary, String>) -> bool {
+    pub fn note_smart_query(
+        &mut self,
+        repo_id: &str,
+        smart_folder_id: &str,
+        result: Result<SmartResultSummary, String>,
+    ) -> bool {
         if self.bound_repo_id.as_deref() != Some(repo_id)
             || self.active_smart_folder_id.as_deref() != Some(smart_folder_id)
         {
@@ -618,13 +792,23 @@ impl SidebarState {
             eprintln!("Nana 侧栏没有可用的仓库，不重读播放集");
             return;
         };
-        self.effects.push(SidebarEffect::LoadPlaylists { repo_id: repo_id.clone() });
+        self.effects.push(SidebarEffect::LoadPlaylists {
+            repo_id: repo_id.clone(),
+        });
         if let Some(playlist_id) = detail {
-            self.effects.push(SidebarEffect::LoadPlaylistDetail { repo_id, playlist_id });
+            self.effects.push(SidebarEffect::LoadPlaylistDetail {
+                repo_id,
+                playlist_id,
+            });
         }
     }
 
-    pub fn apply_playlists(&mut self, workspace: &mut WorkspaceState, repo_id: &str, result: Result<Vec<SidebarPlaylist>, String>) {
+    pub fn apply_playlists(
+        &mut self,
+        workspace: &mut WorkspaceState,
+        repo_id: &str,
+        result: Result<Vec<SidebarPlaylist>, String>,
+    ) {
         if self.bound_repo_id.as_deref() != Some(repo_id) {
             eprintln!("Nana 忽略过期的播放集列表：{repo_id}");
             return;
@@ -656,6 +840,41 @@ impl SidebarState {
         self.hover_clock
     }
 
+    /// 快捷访问还在等父目录的文件路径。父目录还没读回来时留着。
+    pub(super) fn pending_quick_file(&self) -> Option<&str> {
+        self.pending_quick_file.as_deref()
+    }
+
+    /// 父目录已经对上，取走要选中的文件。对不上时原样留着。
+    pub(super) fn take_quick_file_for_directory(&mut self, directory: &str) -> Option<String> {
+        let path = self.pending_quick_file.as_deref()?;
+        if parent_path(path) != directory {
+            return None;
+        }
+        self.pending_quick_file.take()
+    }
+
+    /// 父目录没读回来，丢掉还在等的文件选择。
+    pub(super) fn drop_quick_file_for_directory(&mut self, directory: &str) {
+        if self
+            .pending_quick_file
+            .as_deref()
+            .is_some_and(|path| parent_path(path) == directory)
+        {
+            self.pending_quick_file = None;
+        }
+    }
+
+    /// 目录树上有没有这个路径。侧栏放下只认树上的文件夹，不把文件列表里的同名目录当成侧栏目标。
+    pub(crate) fn contains_folder(&self, path: &str) -> bool {
+        fn walk(folders: &[SidebarFolder], path: &str) -> bool {
+            folders
+                .iter()
+                .any(|folder| folder.path == path || walk(&folder.children, path))
+        }
+        !path.is_empty() && walk(&self.folders, path)
+    }
+
     fn clear_repository_content(&mut self) {
         self.counts = ShortcutCounts::default();
         self.quick_access.clear();
@@ -677,6 +896,7 @@ impl SidebarState {
         self.playlists.clear();
         self.active_playlist_id = None;
         self.selected_path = None;
+        self.pending_quick_file = None;
     }
 
     fn expand_directory(&mut self, path: &str) {
@@ -696,7 +916,11 @@ impl SidebarState {
     fn expand_smart_ancestors(&mut self, id: &str) {
         let parents = smart_ancestor_ids(&self.smart_folders, id);
         for parent in parents {
-            if !self.expanded_smart_folders.iter().any(|item| item == &parent) {
+            if !self
+                .expanded_smart_folders
+                .iter()
+                .any(|item| item == &parent)
+            {
                 self.expanded_smart_folders.push(parent);
             }
         }
@@ -716,7 +940,9 @@ impl SidebarFolder {
 
 impl SidebarSmartFolder {
     /// 把智能文件夹树收成侧栏节点，保留父子关系。
-    pub fn from_tree_node(node: &crate::backend::services::repository::SmartFolderTreeNode) -> Self {
+    pub fn from_tree_node(
+        node: &crate::backend::services::repository::SmartFolderTreeNode,
+    ) -> Self {
         Self {
             id: node.folder.smart_folder_id.clone(),
             parent_id: node.folder.parent_id.clone(),
@@ -830,7 +1056,10 @@ fn smart_ancestor_ids(nodes: &[SidebarSmartFolder], id: &str) -> Vec<String> {
 }
 
 /// 处理侧栏消息。其它消息原样返回，交给壳层的其余归约。
-pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::ShellMessage) -> Option<super::ShellMessage> {
+pub(super) fn reduce_message(
+    model: &mut super::ShellViewModel,
+    message: super::ShellMessage,
+) -> Option<super::ShellMessage> {
     let super::ShellMessage::Sidebar(message) = message else {
         return Some(message);
     };
@@ -857,18 +1086,26 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
             }
         }
         SidebarMessage::CloseSmartFolderDialog => model.sidebar.close_smart_dialog(),
-        SidebarMessage::SetSmartFolderField { field, value } => model.sidebar.set_smart_field(field, value),
-        SidebarMessage::SubmitSmartFolder => {
-            model.sidebar.submit_smart_folder(model.workspace.active_repo_id.as_deref());
+        SidebarMessage::SetSmartFolderField { field, value } => {
+            model.sidebar.set_smart_field(field, value)
         }
-        SidebarMessage::SmartFolderSaved { repo_id, result } => model.apply_smart_saved(&repo_id, result),
+        SidebarMessage::SubmitSmartFolder => {
+            model
+                .sidebar
+                .submit_smart_folder(model.workspace.active_repo_id.as_deref());
+        }
+        SidebarMessage::SmartFolderSaved { repo_id, result } => {
+            model.apply_smart_saved(&repo_id, result)
+        }
         SidebarMessage::TogglePlaylists => model.sidebar.toggle_playlists(),
         SidebarMessage::OpenSidebarPlaylist(id) => model.apply_playlist(id),
         SidebarMessage::OpenRepositorySwitcher => model.sidebar.open_switcher(),
         SidebarMessage::ShowRepositoryAddMenu => {
             model.sidebar.show_add_menu();
         }
-        SidebarMessage::SelectRepositoryBackend(plugin_id) => model.apply_repository_backend(&plugin_id),
+        SidebarMessage::SelectRepositoryBackend(plugin_id) => {
+            model.apply_repository_backend(&plugin_id)
+        }
         SidebarMessage::BackToAddMenu => model.sidebar.back_to_add_menu(),
         SidebarMessage::CloseRepositoryPopover => {
             model.sidebar.close_popover();
@@ -885,7 +1122,10 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
             }
         }
         SidebarMessage::DeleteRepositoryFromSwitcher => {
-            if model.sidebar.delete_from_switcher(model.workspace.active_repo_id.as_deref()) {
+            if model
+                .sidebar
+                .delete_from_switcher(model.workspace.active_repo_id.as_deref())
+            {
                 model.workspace.open_delete_dialog();
                 model.leave_settings_page();
             }
@@ -903,20 +1143,38 @@ pub(super) fn reduce_message(model: &mut super::ShellViewModel, message: super::
                 model.select_workspace_repository(&summary.repo_id);
             }
         }
-        SidebarMessage::SidebarTreeLoaded { repo_id, result } => model.sidebar.apply_tree(&repo_id, result),
-        SidebarMessage::SidebarSmartFoldersLoaded { repo_id, result } => model.sidebar.apply_smart_folders(&repo_id, result),
-        SidebarMessage::SidebarSmartFolderQueried { repo_id, smart_folder_id, result } => {
+        SidebarMessage::SidebarTreeLoaded { repo_id, result } => {
+            model.sidebar.apply_tree(&repo_id, result)
+        }
+        SidebarMessage::SidebarSmartFoldersLoaded { repo_id, result } => {
+            model.sidebar.apply_smart_folders(&repo_id, result)
+        }
+        SidebarMessage::SidebarSmartFolderQueried {
+            repo_id,
+            smart_folder_id,
+            result,
+        } => {
             model.apply_smart_query(&repo_id, &smart_folder_id, result);
         }
-        SidebarMessage::SidebarPlaylistsLoaded { repo_id, result: Ok(playlists) } => {
+        SidebarMessage::SidebarPlaylistsLoaded {
+            repo_id,
+            result: Ok(playlists),
+        } => {
             model.apply_playlist_list(&repo_id, &playlists, None);
         }
-        SidebarMessage::SidebarPlaylistsLoaded { repo_id, result: Err(error) } => {
-            model.sidebar.apply_playlists(&mut model.workspace, &repo_id, Err(error));
+        SidebarMessage::SidebarPlaylistsLoaded {
+            repo_id,
+            result: Err(error),
+        } => {
+            model
+                .sidebar
+                .apply_playlists(&mut model.workspace, &repo_id, Err(error));
         }
         SidebarMessage::Gap(message) => gap::reduce(model, message),
         SidebarMessage::ClearRecent => model.clear_recent_access(),
-        SidebarMessage::RecentCleared { repo_id, result } => model.note_recent_cleared(&repo_id, result),
+        SidebarMessage::RecentCleared { repo_id, result } => {
+            model.note_recent_cleared(&repo_id, result)
+        }
     }
     None
 }

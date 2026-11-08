@@ -3,8 +3,8 @@
 //! 最小化和最大化切换直接换成平台窗口命令。关闭不在这里直接关掉窗口，而是按关闭设置走
 //! （`input::decide_close`）：要确认时弹关闭确认，收进托盘时交给宿主，直接关闭时才排关窗命令。
 
-use nana_ui_platform::host::WindowCommand as PlatformWindowCommand;
 use nana_ui_platform::WindowId;
+use nana_ui_platform::host::WindowCommand as PlatformWindowCommand;
 
 use super::{ShellMessage, ShellViewModel, WindowAction};
 

@@ -78,7 +78,11 @@ fn existing_files_in_a_local_folder_are_kept_and_not_downloaded_again() {
     let folder = TempDir::new("keep");
     let data = TempDir::new("keep-data");
     fs::write(folder.path().join("周杰伦 - 晴天.mp3"), "用户自己的音频").expect("种下音频");
-    fs::write(folder.path().join("周杰伦 - 晴天.yrc"), "用户自己的逐字歌词").expect("种下逐字歌词");
+    fs::write(
+        folder.path().join("周杰伦 - 晴天.yrc"),
+        "用户自己的逐字歌词",
+    )
+    .expect("种下逐字歌词");
     let audio_fetched = Cell::new(false);
 
     let saved = save_track(
@@ -129,7 +133,10 @@ fn a_fresh_folder_gets_every_file() {
     .expect("写下");
     assert_eq!(
         contents(folder.path()),
-        [("A - B.lrc".to_string(), "lrc".to_string()), ("A - B.mp3".into(), "audio".into())]
+        [
+            ("A - B.lrc".to_string(), "lrc".to_string()),
+            ("A - B.mp3".into(), "audio".into())
+        ]
     );
     assert_eq!(saved.written.len(), 2);
     assert!(saved.kept.is_empty());
@@ -150,7 +157,10 @@ fn the_staging_folder_replaces_what_it_staged_before() {
         || Ok((None, None)),
     )
     .expect("替换");
-    assert_eq!(contents(folder.path()), [("A - B.mp3".to_string(), "new".to_string())]);
+    assert_eq!(
+        contents(folder.path()),
+        [("A - B.mp3".to_string(), "new".to_string())]
+    );
     assert_eq!(
         saved,
         SavedTrack {
@@ -176,7 +186,10 @@ fn nothing_is_written_when_a_part_cannot_be_fetched() {
     )
     .expect_err("歌词取不到");
     assert_eq!(error, "网络超时");
-    assert_eq!(contents(folder.path()), [("A - B.lrc".to_string(), "旧歌词".to_string())]);
+    assert_eq!(
+        contents(folder.path()),
+        [("A - B.lrc".to_string(), "旧歌词".to_string())]
+    );
 
     let error = save_track(
         &runtime(data.path()),
@@ -188,7 +201,10 @@ fn nothing_is_written_when_a_part_cannot_be_fetched() {
     )
     .expect_err("音频取不到");
     assert_eq!(error, "未获取到可下载音频地址");
-    assert_eq!(contents(folder.path()), [("A - B.lrc".to_string(), "旧歌词".to_string())]);
+    assert_eq!(
+        contents(folder.path()),
+        [("A - B.lrc".to_string(), "旧歌词".to_string())]
+    );
 }
 
 /// 写到一半失败时交回错误，删掉这一首这次写下的文件；别的文件和目录不碰。这里音频和普通歌词写下以后，逐字歌词的
@@ -208,10 +224,16 @@ fn a_failed_write_removes_only_what_this_track_wrote() {
         || lyrics("lrc", "yrc"),
     )
     .expect_err("逐字歌词写不进去");
-    assert!(error.contains("A - B.yrc.download"), "错误里写明是哪个文件：{error}");
+    assert!(
+        error.contains("A - B.yrc.download"),
+        "错误里写明是哪个文件：{error}"
+    );
     assert_eq!(
         contents(folder.path()),
-        [("A - B.yrc.download".to_string(), String::new()), ("别的文件.txt".into(), "不相干".into())],
+        [
+            ("A - B.yrc.download".to_string(), String::new()),
+            ("别的文件.txt".into(), "不相干".into())
+        ],
         "写下的音频和普通歌词删掉了，别的文件和占位的目录还在"
     );
     assert!(folder.path().join("A - B.yrc.download").is_dir());
@@ -243,8 +265,8 @@ fn file_names_within_one_download_do_not_collide() {
 /// 一首歌的结果：保留的同名文件写在 `skippedEntries`，没有保留的时不写这个键。
 #[test]
 fn a_track_result_lists_kept_files_only_when_there_are_some() {
-    let song: SongItem = serde_json::from_value(serde_json::json!({ "id": 186016, "name": "晴天" }))
-        .expect("歌曲");
+    let song: SongItem =
+        serde_json::from_value(serde_json::json!({ "id": 186016, "name": "晴天" })).expect("歌曲");
     let written = PathBuf::from("D:/Music/周杰伦 - 晴天.lrc");
     let kept = PathBuf::from("D:/Music/周杰伦 - 晴天.mp3");
     let result = track_result(
@@ -256,10 +278,22 @@ fn a_track_result_lists_kept_files_only_when_there_are_some() {
     );
     assert_eq!(result["songId"], 186016);
     assert_eq!(result["songName"], "晴天");
-    assert_eq!(result["paths"], serde_json::json!([written.to_string_lossy()]));
-    assert_eq!(result["skippedEntries"], serde_json::json!([kept.to_string_lossy()]));
+    assert_eq!(
+        result["paths"],
+        serde_json::json!([written.to_string_lossy()])
+    );
+    assert_eq!(
+        result["skippedEntries"],
+        serde_json::json!([kept.to_string_lossy()])
+    );
 
-    let clean = track_result(&song, &SavedTrack { written: vec![written], kept: Vec::new() });
+    let clean = track_result(
+        &song,
+        &SavedTrack {
+            written: vec![written],
+            kept: Vec::new(),
+        },
+    );
     assert!(clean.get("skippedEntries").is_none());
 }
 
@@ -277,16 +311,22 @@ fn downloads_land_where_the_destination_says() {
         staging_path: None,
     };
     let target = resolve_download_target(&runtime, &local, None).expect("本地目录");
-    assert_eq!((target.root, target.policy), (PathBuf::from("D:/Music"), WritePolicy::KeepExisting));
+    assert_eq!(
+        (target.root, target.policy),
+        (PathBuf::from("D:/Music"), WritePolicy::KeepExisting)
+    );
 
     let staged = DownloadDestination {
         kind: "repository".into(),
         path: Some("D:/third".into()),
         repo_id: Some("third-repo".into()),
         parent_path: None,
-        staging_path: Some("D:/MomoCache/netease/.momo/cache/download-staging/third-repo/run-1".into()),
+        staging_path: Some(
+            "D:/MomoCache/netease/.momo/cache/download-staging/third-repo/run-1".into(),
+        ),
     };
-    let target = resolve_download_target(&runtime, &staged, Some("D:/MomoCache/netease")).expect("宿主的暂存目录");
+    let target = resolve_download_target(&runtime, &staged, Some("D:/MomoCache/netease"))
+        .expect("宿主的暂存目录");
     assert_eq!(
         (target.root, target.policy),
         (
@@ -295,8 +335,12 @@ fn downloads_land_where_the_destination_says() {
         )
     );
 
-    let legacy = DownloadDestination { staging_path: Some("  ".into()), ..staged };
-    let target = resolve_download_target(&runtime, &legacy, Some("D:/MomoCache/netease")).expect("旧暂存目录");
+    let legacy = DownloadDestination {
+        staging_path: Some("  ".into()),
+        ..staged
+    };
+    let target = resolve_download_target(&runtime, &legacy, Some("D:/MomoCache/netease"))
+        .expect("旧暂存目录");
     assert_eq!(
         (target.root, target.policy),
         (
@@ -305,11 +349,20 @@ fn downloads_land_where_the_destination_says() {
         )
     );
 
-    let blank = DownloadDestination { path: Some("  ".into()), ..local };
-    assert!(resolve_download_target(&runtime, &blank, None).is_err(), "本地目录没有路径时不下载");
+    let blank = DownloadDestination {
+        path: Some("  ".into()),
+        ..local
+    };
+    assert!(
+        resolve_download_target(&runtime, &blank, None).is_err(),
+        "本地目录没有路径时不下载"
+    );
 }
 
-fn playlist_payload(tracks: serde_json::Value, name: Option<&str>) -> crate::models::DownloadPlaylistPackagePayload {
+fn playlist_payload(
+    tracks: serde_json::Value,
+    name: Option<&str>,
+) -> crate::models::DownloadPlaylistPackagePayload {
     serde_json::from_value(serde_json::json!({
         "playlistId": 9001,
         "playlistName": name,
@@ -320,7 +373,10 @@ fn playlist_payload(tracks: serde_json::Value, name: Option<&str>) -> crate::mod
 }
 
 fn detail(tracks: serde_json::Value, track_ids: &[i64]) -> crate::models::PlaylistDetailItem {
-    let ids: Vec<serde_json::Value> = track_ids.iter().map(|id| serde_json::json!({ "id": id })).collect();
+    let ids: Vec<serde_json::Value> = track_ids
+        .iter()
+        .map(|id| serde_json::json!({ "id": id }))
+        .collect();
     serde_json::from_value(serde_json::json!({
         "id": 9001, "name": "夜曲", "trackCount": track_ids.len(), "tracks": tracks, "trackIds": ids
     }))
@@ -337,11 +393,21 @@ fn a_playlist_without_tracks_fails_with_the_reason_its_detail_could_not_be_read(
         || Err("网易云上没有歌单 9001，可能已被删除或设为私密".to_string()),
         |_| warned.set(true),
     );
-    assert_eq!(result.expect_err("取不到曲目"), "网易云上没有歌单 9001，可能已被删除或设为私密");
+    assert_eq!(
+        result.expect_err("取不到曲目"),
+        "网易云上没有歌单 9001，可能已被删除或设为私密"
+    );
     assert!(!warned.get());
 
-    let read = super::playlist_detail(&payload, || Ok(detail(serde_json::json!([]), &[1, 2])), |_| {});
-    assert_eq!(read.expect("取到详情").map(|detail| detail.track_ids.len()), Some(2));
+    let read = super::playlist_detail(
+        &payload,
+        || Ok(detail(serde_json::json!([]), &[1, 2])),
+        |_| {},
+    );
+    assert_eq!(
+        read.expect("取到详情").map(|detail| detail.track_ids.len()),
+        Some(2)
+    );
 }
 
 /// 载荷带了曲目（Vue 列出来的）时详情只用来补歌单名：带了名字就不取；没名字又取不到时记一条警告、照常下载。
@@ -369,36 +435,62 @@ fn a_playlist_with_tracks_only_needs_its_detail_for_the_name() {
         |error| *warning.borrow_mut() = error.to_string(),
     );
     assert!(result.expect("照常下载").is_none());
-    assert_eq!(warning.into_inner(), "网易云接口请求超时（>30 秒），请检查网络后重试");
+    assert_eq!(
+        warning.into_inner(),
+        "网易云接口请求超时（>30 秒），请检查网络后重试"
+    );
 }
 
 /// 每首歌的详情先用歌单详情里带的，没带到的一次批量取；批量取不到时记一条警告，留给逐首下载时再取。
 #[test]
 fn song_details_come_from_the_playlist_first_then_one_batch() {
-    let tracks: Vec<crate::models::DownloadPlaylistTrackPayload> = serde_json::from_value(serde_json::json!([
-        { "songId": 1 }, { "songId": 2 }, { "songId": 3 }
-    ]))
-    .expect("曲目");
-    let detail = detail(serde_json::json!([{ "id": 1, "name": "晴天" }, { "id": 99, "name": "不在下载里" }]), &[1, 2, 3]);
+    let tracks: Vec<crate::models::DownloadPlaylistTrackPayload> =
+        serde_json::from_value(serde_json::json!([
+            { "songId": 1 }, { "songId": 2 }, { "songId": 3 }
+        ]))
+        .expect("曲目");
+    let detail = detail(
+        serde_json::json!([{ "id": 1, "name": "晴天" }, { "id": 99, "name": "不在下载里" }]),
+        &[1, 2, 3],
+    );
     let asked = std::cell::RefCell::new(Vec::new());
     let songs = super::known_songs(
         Some(&detail),
         &tracks,
         |ids| {
             asked.borrow_mut().push(ids.to_vec());
-            Ok(vec![serde_json::from_value(serde_json::json!({ "id": 2, "name": "七里香" })).expect("歌曲")])
+            Ok(vec![serde_json::from_value(
+                serde_json::json!({ "id": 2, "name": "七里香" }),
+            )
+            .expect("歌曲")])
         },
         |_| panic!("批量取到了"),
     );
-    assert_eq!(asked.into_inner(), [vec![2, 3]], "只批量取一次，只取歌单详情里没带的");
-    let mut names: Vec<(i64, String)> = songs.into_iter().map(|(id, song)| (id, song.name)).collect();
+    assert_eq!(
+        asked.into_inner(),
+        [vec![2, 3]],
+        "只批量取一次，只取歌单详情里没带的"
+    );
+    let mut names: Vec<(i64, String)> = songs
+        .into_iter()
+        .map(|(id, song)| (id, song.name))
+        .collect();
     names.sort();
     assert_eq!(names, [(1, "晴天".to_string()), (2, "七里香".into())]);
 
     let warned = Cell::new(false);
-    let songs = super::known_songs(Some(&detail), &tracks, |_| Err("限流".to_string()), |_| warned.set(true));
+    let songs = super::known_songs(
+        Some(&detail),
+        &tracks,
+        |_| Err("限流".to_string()),
+        |_| warned.set(true),
+    );
     assert!(warned.get());
-    assert_eq!(songs.keys().copied().collect::<Vec<_>>(), [1], "取不到的留给逐首下载");
+    assert_eq!(
+        songs.keys().copied().collect::<Vec<_>>(),
+        [1],
+        "取不到的留给逐首下载"
+    );
 }
 
 /// 失败的一首写上歌名：先用载荷带来的，再用取到的歌曲详情里的。
@@ -407,9 +499,16 @@ fn a_failed_track_names_the_song_when_it_can() {
     let bare: crate::models::DownloadPlaylistTrackPayload =
         serde_json::from_value(serde_json::json!({ "songId": 7 })).expect("曲目");
     let entry = super::failed_track(&bare, Some("七里香".into()), "未获取到可下载音频地址");
-    assert_eq!(entry, serde_json::json!({ "songId": 7, "songName": "七里香", "error": "未获取到可下载音频地址" }));
+    assert_eq!(
+        entry,
+        serde_json::json!({ "songId": 7, "songName": "七里香", "error": "未获取到可下载音频地址" })
+    );
     let named: crate::models::DownloadPlaylistTrackPayload =
-        serde_json::from_value(serde_json::json!({ "songId": 7, "songName": "载荷里的名字" })).expect("曲目");
-    assert_eq!(super::failed_track(&named, Some("七里香".into()), "x")["songName"], "载荷里的名字");
+        serde_json::from_value(serde_json::json!({ "songId": 7, "songName": "载荷里的名字" }))
+            .expect("曲目");
+    assert_eq!(
+        super::failed_track(&named, Some("七里香".into()), "x")["songName"],
+        "载荷里的名字"
+    );
     assert!(super::failed_track(&bare, None, "x")["songName"].is_null());
 }

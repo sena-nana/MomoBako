@@ -28,7 +28,11 @@ fn scene(name: &str) -> ShellViewModel {
 fn menu_open() -> ShellViewModel {
     let mut model = scene("source-download-target");
     model.reduce(ShellMessage::Admin(AdminMessage::CancelDownloadRepository));
-    model.reduce(ShellMessage::Files(FilesMessage::OpenEntryMenu { path: TRACK.into(), x: 400.0, y: 470.0 }));
+    model.reduce(ShellMessage::Files(FilesMessage::OpenEntryMenu {
+        path: TRACK.into(),
+        x: 400.0,
+        y: 470.0,
+    }));
     model.admin.take_effects();
     model
 }
@@ -67,7 +71,10 @@ fn note(text: &str) -> (String, bool, bool) {
 fn an_expired_login_disables_source_actions_and_says_why() {
     let model = scene("source-menu-unavailable");
     let items = menu(&model);
-    let start = items.iter().position(|item| item.0 == "下载单曲到本地").expect("有下载单曲");
+    let start = items
+        .iter()
+        .position(|item| item.0 == "下载单曲到本地")
+        .expect("有下载单曲");
     assert_eq!(
         items[start..start + 5],
         [
@@ -78,13 +85,27 @@ fn an_expired_login_disables_source_actions_and_says_why() {
             note(SOURCE_UNAVAILABLE),
         ]
     );
-    assert_eq!(items.iter().filter(|item| item.2).count(), 1, "原因只写一行");
-    assert!(items.iter().any(|item| item.0 == "预览" && !item.1), "别的菜单项照常");
+    assert_eq!(
+        items.iter().filter(|item| item.2).count(),
+        1,
+        "原因只写一行"
+    );
+    assert!(
+        items.iter().any(|item| item.0 == "预览" && !item.1),
+        "别的菜单项照常"
+    );
 
     let harness = ShellHarness::mount(model);
     assert!(harness.find(SOURCE_UNAVAILABLE).is_some(), "原因画在菜单里");
-    let clear = harness.keyed("file-menu-plugin-momobako.netease.source-clear-track-cache").expect("清理播放缓存这一项");
-    let disabled = harness.document().context().world().accessibility(clear).is_some_and(|state| state.disabled);
+    let clear = harness
+        .keyed("file-menu-plugin-momobako.netease.source-clear-track-cache")
+        .expect("清理播放缓存这一项");
+    let disabled = harness
+        .document()
+        .context()
+        .world()
+        .accessibility(clear)
+        .is_some_and(|state| state.disabled);
     assert!(disabled, "禁用的菜单项点不了");
 }
 
@@ -99,14 +120,26 @@ fn clearing_the_cache_passes_the_managed_cache_root() {
         let payload = effects
             .iter()
             .find_map(|effect| match effect {
-                AdminEffect::CallPlugin { payload, repository_id, origin: PluginCallOrigin::FileMenu, .. } => {
-                    assert_eq!(repository_id.as_deref(), Some("acceptance-repo"), "带上当前资源库");
+                AdminEffect::CallPlugin {
+                    payload,
+                    repository_id,
+                    origin: PluginCallOrigin::FileMenu,
+                    ..
+                } => {
+                    assert_eq!(
+                        repository_id.as_deref(),
+                        Some("acceptance-repo"),
+                        "带上当前资源库"
+                    );
                     Some(payload.clone())
                 }
                 _ => None,
             })
             .unwrap_or_else(|| panic!("「{label}」没有调用插件：{effects:?}"));
-        assert_eq!(payload["managedCacheRoot"], "D:/MomoCache/netease", "{label}");
+        assert_eq!(
+            payload["managedCacheRoot"], "D:/MomoCache/netease",
+            "{label}"
+        );
         assert_eq!(payload["songId"], 186016);
     }
 }
@@ -119,39 +152,89 @@ fn downloading_to_another_repository_asks_for_the_target_first() {
     let mut model = scene("source-download-target");
     assert_eq!(OverlayKey::of(&model), Some(OverlayKey::DownloadTarget));
     let pick = model.admin.download_target.as_ref().expect("等着选目标");
-    let names: Vec<&str> = pick.candidates.iter().map(|candidate| candidate.name.as_str()).collect();
-    assert_eq!(names, ["第二资源库", "第三资源库"], "只列就绪、可写、不是当前的资源库");
-    assert!(model.admin.take_effects().iter().all(|effect| !matches!(effect, AdminEffect::DownloadToRepository { .. })), "选好以前不下载");
+    let names: Vec<&str> = pick
+        .candidates
+        .iter()
+        .map(|candidate| candidate.name.as_str())
+        .collect();
+    assert_eq!(
+        names,
+        ["第二资源库", "第三资源库"],
+        "只列就绪、可写、不是当前的资源库"
+    );
+    assert!(
+        model
+            .admin
+            .take_effects()
+            .iter()
+            .all(|effect| !matches!(effect, AdminEffect::DownloadToRepository { .. })),
+        "选好以前不下载"
+    );
     assert!(model.operation.shown().is_none(), "选好以前不出进度行");
 
-    model.reduce(ShellMessage::Admin(AdminMessage::ChooseDownloadRepository("third-repo".into())));
+    model.reduce(ShellMessage::Admin(AdminMessage::ChooseDownloadRepository(
+        "third-repo".into(),
+    )));
     assert_eq!(OverlayKey::of(&model), None, "选好就关");
     let row = model.operation.shown().expect("进度行");
-    assert_eq!((row.label.as_str(), row.detail.as_str(), row.value, row.indeterminate), ("下载单曲", "正在下载 晴天.mp3", 36.0, true));
+    assert_eq!(
+        (
+            row.label.as_str(),
+            row.detail.as_str(),
+            row.value,
+            row.indeterminate
+        ),
+        ("下载单曲", "正在下载 晴天.mp3", 36.0, true)
+    );
     let effects = model.admin.take_effects();
     let (run, payload) = effects
         .iter()
         .find_map(|effect| match effect {
-            AdminEffect::DownloadToRepository { run, payload, parent_path } => {
-                assert_eq!(run.repository_id.as_deref(), Some("acceptance-repo"), "插件按当前资源库取来源凭据");
+            AdminEffect::DownloadToRepository {
+                run,
+                payload,
+                parent_path,
+            } => {
+                assert_eq!(
+                    run.repository_id.as_deref(),
+                    Some("acceptance-repo"),
+                    "插件按当前资源库取来源凭据"
+                );
                 let target = run.target().expect("目标资源库");
-                assert_eq!((target.repo_id.as_str(), target.path.as_str(), parent_path), ("third-repo", "D:/third", &None));
+                assert_eq!(
+                    (target.repo_id.as_str(), target.path.as_str(), parent_path),
+                    ("third-repo", "D:/third", &None)
+                );
                 Some((run.clone(), payload.clone()))
             }
             _ => None,
         })
         .unwrap_or_else(|| panic!("没有下载到其他资源库：{effects:?}"));
     assert_eq!(run.method, "media.downloadTrackPackage");
-    assert_eq!(payload["destination"], json!({ "kind": "repository", "repoId": "third-repo", "path": "D:/third" }));
+    assert_eq!(
+        payload["destination"],
+        json!({ "kind": "repository", "repoId": "third-repo", "path": "D:/third" })
+    );
     assert_eq!(payload["managedCacheRoot"], "D:/MomoCache/netease");
 
     model.workspace.take_effects();
     let result = json!({ "paths": ["D:/stage/晴天.mp3", "D:/stage/晴天.lrc"] });
-    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Ok(DownloadOutcome::plugin(result)) }));
+    model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished {
+        run,
+        result: Ok(DownloadOutcome::plugin(result)),
+    }));
     let row = model.operation.shown().expect("进度行");
-    assert_eq!((row.label.as_str(), row.detail.as_str()), ("加载资源库", "读取已注册资源库"), "刷新接手进度行");
+    assert_eq!(
+        (row.label.as_str(), row.detail.as_str()),
+        ("加载资源库", "读取已注册资源库"),
+        "刷新接手进度行"
+    );
     assert!(
-        model.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::RefreshRepositories { .. })),
+        model
+            .workspace
+            .take_effects()
+            .iter()
+            .any(|effect| matches!(effect, WorkspaceEffect::RefreshRepositories { .. })),
         "照 Vue context.refreshRepo() 刷新当前资源库"
     );
 }
@@ -161,7 +244,12 @@ fn downloading_to_another_repository_asks_for_the_target_first() {
 #[test]
 fn a_track_without_a_song_id_is_identified_by_its_provider_item_id() {
     let mut model = menu_open();
-    let row = model.files.rows.iter_mut().find(|row| row.path == TRACK).expect("晴天.mp3");
+    let row = model
+        .files
+        .rows
+        .iter_mut()
+        .find(|row| row.path == TRACK)
+        .expect("晴天.mp3");
     row.source_payload = Some(json!({ "entryKind": "track", "songName": "晴天" }));
     assert_eq!(row.provider_item_id.as_deref(), Some("186016"));
 
@@ -170,16 +258,29 @@ fn a_track_without_a_song_id_is_identified_by_its_provider_item_id() {
     let payload = effects
         .iter()
         .find_map(|effect| match effect {
-            AdminEffect::CallPlugin { payload, origin: PluginCallOrigin::FileMenu, .. } => Some(payload.clone()),
+            AdminEffect::CallPlugin {
+                payload,
+                origin: PluginCallOrigin::FileMenu,
+                ..
+            } => Some(payload.clone()),
             _ => None,
         })
         .unwrap_or_else(|| panic!("清理播放缓存没有调用插件：{effects:?}"));
     assert_eq!(payload["songId"], 186016);
-    assert!(payload.get("playlistId").is_none(), "单曲不拿自己的标识去填歌单标识");
+    assert!(
+        payload.get("playlistId").is_none(),
+        "单曲不拿自己的标识去填歌单标识"
+    );
 
-    model.reduce(ShellMessage::Files(FilesMessage::OpenEntryMenu { path: TRACK.into(), x: 400.0, y: 470.0 }));
+    model.reduce(ShellMessage::Files(FilesMessage::OpenEntryMenu {
+        path: TRACK.into(),
+        x: 400.0,
+        y: 470.0,
+    }));
     click(&mut model, "下载单曲到其他资源库");
-    model.reduce(ShellMessage::Admin(AdminMessage::ChooseDownloadRepository("third-repo".into())));
+    model.reduce(ShellMessage::Admin(AdminMessage::ChooseDownloadRepository(
+        "third-repo".into(),
+    )));
     let effects = model.admin.take_effects();
     let payload = effects
         .iter()
@@ -198,14 +299,24 @@ fn cancelling_or_failing_downloads_nothing_more() {
     let mut cancelled = scene("source-download-target");
     cancelled.reduce(ShellMessage::Admin(AdminMessage::CancelDownloadRepository));
     assert_eq!(OverlayKey::of(&cancelled), None);
-    assert!(cancelled.admin.take_effects().iter().all(|effect| !matches!(effect, AdminEffect::DownloadToRepository { .. })));
+    assert!(
+        cancelled
+            .admin
+            .take_effects()
+            .iter()
+            .all(|effect| !matches!(effect, AdminEffect::DownloadToRepository { .. }))
+    );
 
     let mut escaped = scene("source-download-target");
-    escaped.reduce(ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::Escape)));
+    escaped.reduce(ShellMessage::Sidebar(SidebarMessage::Gap(
+        GapMessage::Escape,
+    )));
     assert!(escaped.admin.download_target.is_none(), "Escape 关掉选择");
 
     let mut failed = scene("source-download-target");
-    failed.reduce(ShellMessage::Admin(AdminMessage::ChooseDownloadRepository("second-repo".into())));
+    failed.reduce(ShellMessage::Admin(AdminMessage::ChooseDownloadRepository(
+        "second-repo".into(),
+    )));
     let run = failed
         .admin
         .take_effects()
@@ -215,30 +326,47 @@ fn cancelling_or_failing_downloads_nothing_more() {
             _ => None,
         })
         .expect("开始下载到第二资源库");
-    failed.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished { run, result: Err("导入目标资源库失败：磁盘已满".into()) }));
+    failed.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished {
+        run,
+        result: Err("导入目标资源库失败：磁盘已满".into()),
+    }));
     assert!(failed.operation.shown().is_none(), "失败时进度行收起");
-    assert_eq!(failed.files.error, "下载单曲「晴天.mp3」失败：导入目标资源库失败：磁盘已满");
-    assert_eq!(crate::shell::status::StatusLine::project(&failed), crate::shell::status::StatusLine::Hidden, "文件列已经写着，状态区不重复");
+    assert_eq!(
+        failed.files.error,
+        "下载单曲「晴天.mp3」失败：导入目标资源库失败：磁盘已满"
+    );
+    assert_eq!(
+        crate::shell::status::StatusLine::project(&failed),
+        crate::shell::status::StatusLine::Hidden,
+        "文件列已经写着，状态区不重复"
+    );
 }
 
 /// 只有一个候选时照 Vue 直接用它，不弹选择；一个都没有时菜单里「下载单曲到其他资源库」禁用，写出原因，别的照常。
 #[test]
 fn the_number_of_targets_decides_whether_to_ask() {
     let mut single = menu_open();
-    single.workspace.repositories.retain(|repository| repository.repo_id != "third-repo");
+    single
+        .workspace
+        .repositories
+        .retain(|repository| repository.repo_id != "third-repo");
     click(&mut single, "下载单曲到其他资源库");
     assert_eq!(OverlayKey::of(&single), None, "一个候选不弹选择");
-    assert!(single
-        .admin
-        .take_effects()
-        .iter()
-        .any(|effect| matches!(effect, AdminEffect::DownloadToRepository { run, .. }
-            if run.target().is_some_and(|target| target.repo_id == "second-repo"))));
+    assert!(single.admin.take_effects().iter().any(
+        |effect| matches!(effect, AdminEffect::DownloadToRepository { run, .. }
+            if run.target().is_some_and(|target| target.repo_id == "second-repo"))
+    ));
 
     let mut alone = menu_open();
-    alone.workspace.repositories.retain(|repository| repository.repo_id == "acceptance-repo");
+    alone
+        .workspace
+        .repositories
+        .retain(|repository| repository.repo_id == "acceptance-repo");
     let items = menu(&alone);
-    let start = items.iter().position(|item| item.0 == "下载单曲到本地").expect("有下载单曲");
+    let start = items
+        .iter()
+        .position(|item| item.0 == "下载单曲到本地")
+        .expect("有下载单曲");
     assert_eq!(
         items[start..start + 5],
         [
@@ -257,7 +385,9 @@ fn the_target_dialog_lists_cards_that_choose_a_repository() {
     let mut harness = ShellHarness::mount(scene("source-download-target"));
     harness.flush();
     assert!(harness.find("选择目标资源库").is_some(), "对话框标题");
-    let card = harness.keyed("download-target-third-repo").expect("第三资源库的卡片");
+    let card = harness
+        .keyed("download-target-third-repo")
+        .expect("第三资源库的卡片");
     let (x, y) = harness.center(card);
     let messages = harness.click_messages(x, y);
     assert!(

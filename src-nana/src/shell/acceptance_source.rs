@@ -7,14 +7,16 @@
 //! 右键和菜单消息。在线单曲的场景照产品先排下 `momobako.playback.prepare` 的读取请求，再按夹具送回失败，
 //! 失败原因是网易云插件交回的原话（`External/Plugins/source-netease-cloud-music/src/client.rs`）。
 
-use crate::backend::services::repository::{FileBrowserEntry, PlaylistItem, PlaylistSummary, RepositorySummary};
+use crate::backend::services::repository::{
+    FileBrowserEntry, PlaylistItem, PlaylistSummary, RepositorySummary,
+};
 
 use super::super::files::FilesMessage;
 use super::super::files_view::EntryMenuView;
 use super::super::inspect::InspectMessage;
 use super::super::player::{PlayerEffect, PlayerMessage};
 use super::super::{InspectEffect, ShellMessage, ShellPage, ShellViewModel, SourcePrep};
-use super::base_scene::{file, playlist_players, settle, summary, Base, SourceState, NOW, REPO_ID};
+use super::base_scene::{Base, NOW, REPO_ID, SourceState, file, playlist_players, settle, summary};
 use super::files_scenes::asset_detail;
 use super::player_scenes::{open_playlist, play_first};
 
@@ -42,7 +44,8 @@ fn track() -> FileBrowserEntry {
     let mut entry = file(TRACK, 4_200_000);
     entry.provider_id = Some("netease-cloud-music".into());
     entry.provider_item_id = Some("186016".into());
-    entry.source_payload = Some(serde_json::json!({ "entryKind": "track", "songId": 186016, "songName": "晴天" }));
+    entry.source_payload =
+        Some(serde_json::json!({ "entryKind": "track", "songId": 186016, "songName": "晴天" }));
     entry
 }
 
@@ -57,7 +60,12 @@ fn online_track() -> FileBrowserEntry {
 
 /// 资源库列表里能当下载目标的另一个本地资源库。
 fn other(repo_id: &str, name: &'static str, path: &str) -> RepositorySummary {
-    RepositorySummary { repo_id: repo_id.into(), name: name.into(), path: path.into(), ..summary(name, "ready") }
+    RepositorySummary {
+        repo_id: repo_id.into(),
+        name: name.into(),
+        path: path.into(),
+        ..summary(name, "ready")
+    }
 }
 
 /// 网易云音乐资源库的底子，登录状态照 `logged_in` / `login_expired`。
@@ -79,13 +87,27 @@ fn netease_base(entries: Vec<FileBrowserEntry>, logged_in: bool, login_expired: 
 
 /// 网易云音乐资源库，登录状态照 `logged_in` / `login_expired`；`others` 是列表里别的资源库。
 fn netease(logged_in: bool, login_expired: bool, others: Vec<RepositorySummary>) -> ShellViewModel {
-    Base { others, ..netease_base(vec![track()], logged_in, login_expired) }.model()
+    Base {
+        others,
+        ..netease_base(vec![track()], logged_in, login_expired)
+    }
+    .model()
 }
 
 /// 右键单曲：选中它、打开菜单，再照 Vue 模拟 IPC 答上右键选中时读的素材详情。
 fn open_menu(model: &mut ShellViewModel) {
-    model.reduce(ShellMessage::Files(FilesMessage::OpenEntryMenu { path: TRACK.into(), x: MENU_POINT.0, y: MENU_POINT.1 }));
-    match model.files.rows.iter().find(|row| row.path == TRACK).cloned() {
+    model.reduce(ShellMessage::Files(FilesMessage::OpenEntryMenu {
+        path: TRACK.into(),
+        x: MENU_POINT.0,
+        y: MENU_POINT.1,
+    }));
+    match model
+        .files
+        .rows
+        .iter()
+        .find(|row| row.path == TRACK)
+        .cloned()
+    {
         Some(row) => model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset_detail(&row)))),
         None => eprintln!("Nana 来源场景里没有 {TRACK}"),
     }
@@ -94,7 +116,11 @@ fn open_menu(model: &mut ShellViewModel) {
 
 /// 登录过期：照 Vue `actionDisabled`，网易云的条目动作都禁用，后面一行写「来源认证或本地缓存不可用」。
 fn unavailable_menu() -> ShellViewModel {
-    let mut model = netease(true, true, vec![other("second-repo", "第二资源库", "C:/second")]);
+    let mut model = netease(
+        true,
+        true,
+        vec![other("second-repo", "第二资源库", "C:/second")],
+    );
     open_menu(&mut model);
     settle(&mut model);
     model
@@ -102,11 +128,18 @@ fn unavailable_menu() -> ShellViewModel {
 
 /// 登录正常、列表里还有两个本地资源库：右键单曲 →「下载单曲到其他资源库」，弹出「选择目标资源库」列出这两个。
 fn download_target() -> ShellViewModel {
-    let others = vec![other("second-repo", "第二资源库", "C:/second"), other("third-repo", "第三资源库", "D:/third")];
+    let others = vec![
+        other("second-repo", "第二资源库", "C:/second"),
+        other("third-repo", "第三资源库", "D:/third"),
+    ];
     let mut model = netease(true, false, others);
     open_menu(&mut model);
     let action = EntryMenuView::project(&model)
-        .and_then(|menu| menu.entries.into_iter().find(|entry| entry.label == "下载单曲到其他资源库"))
+        .and_then(|menu| {
+            menu.entries
+                .into_iter()
+                .find(|entry| entry.label == "下载单曲到其他资源库")
+        })
         .and_then(|entry| entry.action);
     match action {
         Some(action) => {
@@ -121,16 +154,34 @@ fn download_target() -> ShellViewModel {
 
 /// 双击在线单曲打开预览：素材详情到了，预览照产品排下准备播放源的读取请求。交回这个请求（文件和代次）。
 fn open_online_preview(model: &mut ShellViewModel) -> Option<(String, u64)> {
-    let Some(row) = model.files.rows.iter().find(|row| row.path == TRACK).cloned() else {
+    let Some(row) = model
+        .files
+        .rows
+        .iter()
+        .find(|row| row.path == TRACK)
+        .cloned()
+    else {
         eprintln!("Nana 在线单曲场景里没有 {TRACK}");
         return None;
     };
-    model.reduce(ShellMessage::SelectFile { path: TRACK.into(), asset_id: row.asset_id.clone() });
-    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset_detail(&row))));
-    let request = model.inspect.take_effects().into_iter().find_map(|effect| match effect {
-        InspectEffect::LoadMedia { path, generation, virtual_entry: true, .. } => Some((path, generation)),
-        _ => None,
+    model.reduce(ShellMessage::SelectFile {
+        path: TRACK.into(),
+        asset_id: row.asset_id.clone(),
     });
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset_detail(&row))));
+    let request = model
+        .inspect
+        .take_effects()
+        .into_iter()
+        .find_map(|effect| match effect {
+            InspectEffect::LoadMedia {
+                path,
+                generation,
+                virtual_entry: true,
+                ..
+            } => Some((path, generation)),
+            _ => None,
+        });
     if request.is_none() {
         eprintln!("Nana 在线单曲的预览没有排下准备播放源的请求");
     }
@@ -153,7 +204,14 @@ fn online_preview_failed() -> ShellViewModel {
     if let Some((path, generation)) = open_online_preview(&mut model) {
         let result = Err(LOGIN_EXPIRED.to_string());
         let prep = SourcePrep::failed();
-        model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result, pcm: None, frames: None, prep }));
+        model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded {
+            path,
+            generation,
+            result,
+            pcm: None,
+            frames: None,
+            prep,
+        }));
     }
     settle(&mut model);
     model
@@ -163,16 +221,33 @@ fn online_preview_failed() -> ShellViewModel {
 /// 「播放」留着可点（再点就是重试），上一首、下一首不可点。
 fn online_playback_failed() -> ShellViewModel {
     let playlist = online_playlist();
-    let mut model = Base { playlists: vec![playlist.clone()], players: playlist_players(), ..netease_base(vec![online_track()], true, false) }.model();
+    let mut model = Base {
+        playlists: vec![playlist.clone()],
+        players: playlist_players(),
+        ..netease_base(vec![online_track()], true, false)
+    }
+    .model();
     open_playlist(&mut model, &playlist, Some(vec![online_item(&playlist)]));
     play_first(&mut model);
     let mut kept = Vec::new();
     for effect in model.player.take_effects() {
         match effect {
-            PlayerEffect::LoadItem { item_id, still, generation, virtual_entry: true, .. } => {
+            PlayerEffect::LoadItem {
+                item_id,
+                still,
+                generation,
+                virtual_entry: true,
+                ..
+            } => {
                 let result = Err(TIMEOUT.to_string());
                 let prep = SourcePrep::failed();
-                model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded { item_id, generation, still, result, prep }));
+                model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded {
+                    item_id,
+                    generation,
+                    still,
+                    result,
+                    prep,
+                }));
             }
             effect => kept.push(effect),
         }

@@ -8,7 +8,9 @@ use super::super::inspect::{InspectState, PreviewBody};
 use super::wav_player::{self, Action, Output};
 use super::{PlayerEffect, PlayerState, QueueItem};
 
-const CLIP_EXTENSIONS: &[&str] = &["mp4", "mov", "mkv", "webm", "avi", "m4v", "m4a", "aac", "opus"];
+const CLIP_EXTENSIONS: &[&str] = &[
+    "mp4", "mov", "mkv", "webm", "avi", "m4v", "m4a", "aac", "opus",
+];
 const SESSION_EXTENSIONS: &[&str] = &[
     "mp3", "wav", "ogg", "flac", "m4a", "aac", "opus", "mp4", "mov", "mkv", "webm", "avi", "m4v",
 ];
@@ -32,7 +34,9 @@ pub enum LoadedItem {
 
 /// 这些扩展名已经能进预览用的音视频会话，不再要求把 Vue 播放器升级一遍。
 pub(super) fn uses_media_session(extension: &str) -> bool {
-    SESSION_EXTENSIONS.iter().any(|item| item.eq_ignore_ascii_case(extension.trim()))
+    SESSION_EXTENSIONS
+        .iter()
+        .any(|item| item.eq_ignore_ascii_case(extension.trim()))
 }
 
 /// 按条目和播放器决定怎么装：音视频、图片、外部条目或缺少插件。
@@ -51,7 +55,11 @@ pub(super) fn load_item(player: &mut PlayerState, item: &QueueItem) {
     if item.status != "ready" {
         player.drop_clip_frames();
         player.wav.clear();
-        player.fail_session(item.status_reason.clone().unwrap_or_else(|| "当前条目不可播放".into()));
+        player.fail_session(
+            item.status_reason
+                .clone()
+                .unwrap_or_else(|| "当前条目不可播放".into()),
+        );
         return;
     }
     if is_clip_extension(&item.extension) {
@@ -72,11 +80,17 @@ pub(super) fn load_item(player: &mut PlayerState, item: &QueueItem) {
         if item.file_class == "image" {
             player.apply_image_duration();
         }
-        eprintln!("Nana 播放器 {} 没有原生解码器：{}", candidate.plugin_id, item.path);
+        eprintln!(
+            "Nana 播放器 {} 没有原生解码器：{}",
+            candidate.plugin_id, item.path
+        );
         player.fail_session("没有原生解码器".into());
         return;
     }
-    let contributed = player.contributions.iter().any(|contribution| contribution.player_type_id == item.player_type_id);
+    let contributed = player
+        .contributions
+        .iter()
+        .any(|contribution| contribution.player_type_id == item.player_type_id);
     if contributed && uses_media_session(&item.extension) {
         eprintln!("Nana 播放贡献改走已有音视频会话：{}", item.path);
         player.notice.clear();
@@ -141,7 +155,12 @@ fn begin_load(player: &mut PlayerState, item: &QueueItem, still: bool) {
 }
 
 /// 读出的字节解成当前项。读文件由调用方经仓库服务完成，这里只解码。
-pub(crate) fn decode_loaded(repo_id: &str, still: bool, extension: &str, bytes: &[u8]) -> Result<LoadedItem, String> {
+pub(crate) fn decode_loaded(
+    repo_id: &str,
+    still: bool,
+    extension: &str,
+    bytes: &[u8],
+) -> Result<LoadedItem, String> {
     if still {
         return crate::shell::decode_preview_pixels(bytes).map(LoadedItem::Still);
     }
@@ -150,14 +169,26 @@ pub(crate) fn decode_loaded(repo_id: &str, still: bool, extension: &str, bytes: 
 
 /// 音视频字节解成会话、音轨和画面，播放条和预览页共用。wav、mp3、flac、ogg 解不开时报对应格式的原因
 /// （WAV 头不对、压缩音频解码失败），不拿视频容器的「没有原生解码器」顶替。
-pub(crate) fn decode_media(repo_id: &str, extension: &str, bytes: &[u8]) -> Result<crate::shell::MediaParts, String> {
-    crate::shell::preview_media_parts(repo_id, bytes).map_err(|error| wav_player::pcm_error_for_extension(extension, bytes).unwrap_or(error))
+pub(crate) fn decode_media(
+    repo_id: &str,
+    extension: &str,
+    bytes: &[u8],
+) -> Result<crate::shell::MediaParts, String> {
+    crate::shell::preview_media_parts(repo_id, bytes)
+        .map_err(|error| wav_player::pcm_error_for_extension(extension, bytes).unwrap_or(error))
 }
 
 /// 装进读取结果。过期的代次或已经换掉的条目不装（切曲、停止、换仓库和预览接管都换了代次，在线条目晚到的
 /// 播放源不会串到新曲目上）。`still` 是请求时的类别，失败时据此写说明；`retryable` 是失败出在准备在线条目的
 /// 播放源上：原因照写来源交回的原话，播放条的「播放」留着可点，点了重新准备。返回结果装上了没有。
-pub(super) fn finish_load(player: &mut PlayerState, item_id: &str, generation: u64, still: bool, result: Result<LoadedItem, String>, retryable: bool) -> bool {
+pub(super) fn finish_load(
+    player: &mut PlayerState,
+    item_id: &str,
+    generation: u64,
+    still: bool,
+    result: Result<LoadedItem, String>,
+    retryable: bool,
+) -> bool {
     if generation != player.load_generation || player.current_id.as_deref() != Some(item_id) {
         eprintln!("Nana 忽略过期的播放条目装载：{item_id}");
         return false;
@@ -176,7 +207,10 @@ pub(super) fn finish_load(player: &mut PlayerState, item_id: &str, generation: u
             player.clip_owned = true;
             player.wav.clear();
             if still {
-                player.still = Some(StillShow { path: item.path.clone(), frame: None });
+                player.still = Some(StillShow {
+                    path: item.path.clone(),
+                    frame: None,
+                });
             }
             player.fail_session(error);
             if retryable {
@@ -207,7 +241,8 @@ fn install_clip(player: &mut PlayerState, parts: crate::shell::MediaParts) {
         player.apply_cursor_volume();
         if let Some(position) = resume {
             let session = player.session.clone();
-            let (session, error) = wav_player::drive(Output::Cursor, &player.wav, session, Action::Seek(position));
+            let (session, error) =
+                wav_player::drive(Output::Cursor, &player.wav, session, Action::Seek(position));
             player.session = session;
             if let Some(error) = error {
                 eprintln!("Nana 恢复播放进度失败：{error}");
@@ -215,7 +250,8 @@ fn install_clip(player: &mut PlayerState, parts: crate::shell::MediaParts) {
         }
         if player.wants_playing {
             let session = player.session.clone();
-            let (session, error) = wav_player::drive(Output::Cursor, &player.wav, session, Action::Play);
+            let (session, error) =
+                wav_player::drive(Output::Cursor, &player.wav, session, Action::Play);
             player.session = session;
             if let Some(error) = error {
                 eprintln!("Nana 播放列表当前项出声失败：{error}");
@@ -241,29 +277,45 @@ fn take_resume(player: &mut PlayerState) -> Option<u64> {
     if player.current_id.as_deref() != Some(item_id.as_str()) || !player.session.can_seek {
         return None;
     }
-    let position = player.session.duration_ms.map_or(position, |duration| position.min(duration));
+    let position = player
+        .session
+        .duration_ms
+        .map_or(position, |duration| position.min(duration));
     (position > 0).then_some(position)
 }
 
 /// 解得出就留下真实宽高。图片幻灯片不能跳转，恢复会话时从头放，和 Vue 一样。
 fn install_still(player: &mut PlayerState, item: &QueueItem, pixels: super::super::PreviewPixels) {
     player.resume = None;
-    player.session.status = if player.wants_playing { "playing" } else { "paused" }.into();
+    player.session.status = if player.wants_playing {
+        "playing"
+    } else {
+        "paused"
+    }
+    .into();
     player.can_play = true;
     player.loaded_item = player.current_id.clone();
-    player.still = Some(StillShow { path: item.path.clone(), frame: Some(pixels) });
+    player.still = Some(StillShow {
+        path: item.path.clone(),
+        frame: Some(pixels),
+    });
 }
 
 /// 读不到或解不开：播放条和 Vue 一样只写「图片无法播放」，细节留在日志里。
 fn fail_still(player: &mut PlayerState, item: &QueueItem, error: &str) {
     eprintln!("Nana 图片幻灯片没有可绘制的画面：{}：{error}", item.path);
-    player.still = Some(StillShow { path: item.path.clone(), frame: None });
+    player.still = Some(StillShow {
+        path: item.path.clone(),
+        frame: None,
+    });
     player.fail_session("图片无法播放".into());
 }
 
 /// 预览页显示的正是当前项时，把会话和画面写回预览页；别的文件的预览不动。
 pub(super) fn publish_clip(player: &mut PlayerState, inspect: &mut InspectState) {
-    let shown = player.current_item().is_some_and(|item| inspect.target_path.as_deref() == Some(item.path.as_str()));
+    let shown = player
+        .current_item()
+        .is_some_and(|item| inspect.target_path.as_deref() == Some(item.path.as_str()));
     if !shown {
         return;
     }
@@ -294,19 +346,27 @@ impl PlayerState {
 /// 图片幻灯片扩展名。和 `media-preview` 的 `imagePreviewExtensions` 一致。
 pub(super) fn is_still_extension(extension: &str) -> bool {
     let extension = extension.trim();
-    STILL_EXTENSIONS.iter().any(|item| item.eq_ignore_ascii_case(extension))
+    STILL_EXTENSIONS
+        .iter()
+        .any(|item| item.eq_ignore_ascii_case(extension))
 }
 
 /// 不在音视频会话、也不是图片幻灯片时写进播放条的说明。和 Vue 插件报错一样只写一句事实。
 pub(super) fn outside_session_contract(extension: &str) -> String {
     let extension = extension.trim();
-    let shown = if extension.is_empty() { "（空）" } else { extension };
+    let shown = if extension.is_empty() {
+        "（空）"
+    } else {
+        extension
+    };
     format!("暂不支持播放 {shown} 文件")
 }
 
 fn is_clip_extension(extension: &str) -> bool {
     let extension = extension.trim();
-    CLIP_EXTENSIONS.iter().any(|item| item.eq_ignore_ascii_case(extension))
+    CLIP_EXTENSIONS
+        .iter()
+        .any(|item| item.eq_ignore_ascii_case(extension))
 }
 
 /// 测试里代替 `player_dispatch`：按请求里的路径直接读文件、解码并送回。其它副作用原样放回。
@@ -315,7 +375,16 @@ pub(crate) fn fulfill_loads(model: &mut super::super::ShellViewModel) {
     let effects = model.player.take_effects();
     let mut kept = Vec::new();
     for effect in effects {
-        let PlayerEffect::LoadItem { repo_id, item_id, path, extension, still, generation, .. } = effect else {
+        let PlayerEffect::LoadItem {
+            repo_id,
+            item_id,
+            path,
+            extension,
+            still,
+            generation,
+            ..
+        } = effect
+        else {
             kept.push(effect);
             continue;
         };
@@ -323,7 +392,15 @@ pub(crate) fn fulfill_loads(model: &mut super::super::ShellViewModel) {
             .map_err(|error| format!("无法读取当前项：{error}"))
             .and_then(|bytes| decode_loaded(&repo_id, still, &extension, &bytes));
         let prep = super::super::SourcePrep::default();
-        model.reduce(super::super::ShellMessage::Player(super::PlayerMessage::ItemLoaded { item_id, generation, still, result, prep }));
+        model.reduce(super::super::ShellMessage::Player(
+            super::PlayerMessage::ItemLoaded {
+                item_id,
+                generation,
+                still,
+                result,
+                prep,
+            },
+        ));
         kept.extend(model.player.take_effects());
     }
     model.player.requeue_effects(kept);

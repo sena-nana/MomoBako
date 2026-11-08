@@ -1,5 +1,6 @@
 //! 文件表面的缩略图状态：挂着的缩略图等空闲再解码，解码出的原始宽高写回列表行，宿主卸掉的纹理
 //! 写回成没有纹理，请后端刷新单条缩略图，以及自定义缩略图保存、清除和刷新以后的写回。
+//! 分类视图（未分类、未标签、最近使用）画的是 `category_rows`，和目录、智能文件夹是三份行，纹理和宽高都要写到。
 //!
 //! 解码在调度里做（`files_dispatch.rs`、`thumbs.rs`），纹理由宿主按 `thumb:{path}` 登记和回收
 //! （`thumbnail_host.rs`、`thumbnail_cache.rs`）；这里只排 `DecodeThumbnails` 请求，记下哪些行的纹理
@@ -37,17 +38,19 @@ impl FilesState {
         self.ensure.mark_rows_changed();
     }
 
-    /// 还要解码的缩略图文件：列表行和智能文件夹行里没有纹理、没请求过的，宿主报告过挂着的缩略图时
+    /// 还要解码的缩略图文件：目录、智能文件夹和分类视图里没有纹理、没请求过的，宿主报告过挂着的缩略图时
     /// 只取挂着的。同一个文件只出现一次。
     pub fn undecoded_thumbnail_paths(&self) -> Vec<String> {
         let mut seen = HashSet::new();
-        self.rows
-            .iter()
-            .chain(&self.virtual_rows)
+        self.each_listed_row()
             .filter(|row| !row.texture_ready)
             .filter_map(thumbnail_file)
             .filter(|path| !self.decode_requested.contains(*path))
-            .filter(|path| self.mounted_thumbnails.as_ref().is_none_or(|mounted| mounted.contains(*path)))
+            .filter(|path| {
+                self.mounted_thumbnails
+                    .as_ref()
+                    .is_none_or(|mounted| mounted.contains(*path))
+            })
             .filter(|path| seen.insert(*path))
             .map(str::to_string)
             .collect()
@@ -76,17 +79,21 @@ impl FilesState {
         self.mounted_version
     }
 
-    /// 当前列表行和智能文件夹行引用的缩略图文件。不在这里面、也不挂着的纹理可以立刻卸掉。
+    /// 目录、智能文件夹和分类视图引用的缩略图文件。不在这里面、也不挂着的纹理可以立刻卸掉。
     pub(crate) fn listed_thumbnails(&self) -> HashSet<String> {
-        self.rows.iter().chain(&self.virtual_rows).filter_map(thumbnail_file).map(str::to_string).collect()
+        self.each_listed_row()
+            .filter_map(thumbnail_file)
+            .map(str::to_string)
+            .collect()
     }
 
     /// 宿主卸掉了这些缩略图的纹理：对应的行回到类型图标，再挂出来时重新解码。返回有没有行变了。
     pub(crate) fn note_thumbnails_released(&mut self, paths: &[String]) -> bool {
         let released: HashSet<&str> = paths.iter().map(String::as_str).collect();
         let mut changed = false;
-        for row in self.rows.iter_mut().chain(self.virtual_rows.iter_mut()) {
-            if row.texture_ready && thumbnail_file(row).is_some_and(|path| released.contains(path)) {
+        for row in self.each_listed_row_mut() {
+            if row.texture_ready && thumbnail_file(row).is_some_and(|path| released.contains(path))
+            {
                 row.texture_ready = false;
                 changed = true;
             }
@@ -101,32 +108,64 @@ impl FilesState {
     }
 
     pub fn prefetch_pending(&self) -> bool {
-        self.prefetch_due_ms.is_some()
+        self.prefetch_due_ms.is_some() || self.virtual_page_pending()
     }
 
     /// 实况帧把空闲时钟向前拨。没有待预取时停在原地。
+    ///
+    /// 挂着的缩略图解码，和来源目录下一页的缩略图预取，共用这一只钟。
     pub fn tick_prefetch(&mut self, step_ms: u64) -> u64 {
-        if self.prefetch_due_ms.is_some() {
+        if self.prefetch_pending() {
             self.prefetch_clock = self.prefetch_clock.saturating_add(step_ms);
         }
         self.prefetch_clock
     }
 
-    /// 用解码出的原始宽高替换布局。同一路径的行一起更新。
+    /// 用解码出的原始宽高替换布局，并按像素取样色板。同一张缩略图在目录、智能文件夹和分类视图里各有一行时一起更新，
+    /// 分类视图的卡片才能从类型图标换成缩略图。色板按缩略图文件记下，元数据没有色板时详情和预览才用它。
     pub(in crate::shell) fn note_thumbnail_sizes(&mut self, frames: &[ThumbnailFrame]) {
         for frame in frames {
             self.decode_requested.remove(&frame.path);
             if frame.natural_width == 0 || frame.natural_height == 0 {
+                eprintln!(
+                    "Nana 缩略图没有可用尺寸，分类视图和目录都不换成纹理：{}",
+                    frame.path
+                );
                 continue;
             }
-            for row in self.rows.iter_mut().chain(self.virtual_rows.iter_mut()) {
+            for row in self.each_listed_row_mut() {
                 if row.thumbnail_path.as_deref() == Some(frame.path.as_str()) {
                     row.pixel_width = frame.natural_width;
                     row.pixel_height = frame.natural_height;
                     row.texture_ready = true;
                 }
             }
+            self.note_sampled_palette(frame);
         }
+    }
+
+    /// 把这一张缩略图的取样色板记在文件路径上。没有路径、像素对不上或取不出颜色时不覆盖上次的结果。
+    fn note_sampled_palette(&mut self, frame: &ThumbnailFrame) {
+        let path = frame.path.trim();
+        if path.is_empty() {
+            eprintln!("Nana 缩略图色板没有文件路径，不取样");
+            return;
+        }
+        let colors = super::super::palette::sample_rgba(frame.width, frame.height, &frame.rgba);
+        if !colors.is_empty() {
+            self.sampled_palettes.insert(path.to_string(), colors);
+        }
+    }
+
+    /// 元数据没有色板时，详情预览和预览页用的取样颜色。路径对不上时为空。
+    pub(in crate::shell) fn sampled_palette(&self, thumbnail_path: Option<&str>) -> Vec<String> {
+        let Some(path) = thumbnail_path
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+        else {
+            return Vec::new();
+        };
+        self.sampled_palettes.get(path).cloned().unwrap_or_default()
     }
 
     /// 自定义缩略图不锁整页变更。失败由调度器记错误。
@@ -134,17 +173,30 @@ impl FilesState {
         self.effects.push(effect);
     }
 
+    /// 把「保存封面」排进同一条缩略图通道。不把整页标成变更中。
+    pub(in crate::shell) fn queue_cover_save(
+        &mut self,
+        repo_id: String,
+        path: String,
+        source_url: String,
+    ) {
+        self.effects.push(FilesEffect::SaveCover {
+            repo_id,
+            path,
+            source_url,
+        });
+    }
+
     /// 把保存、清除或刷新的结果写回这一行，并重新解码缩略图文件：刷新以后缓存路径不变、内容换了，纹理也要换。
     /// 没有路径时不假装已经有图。
-    pub(in crate::shell) fn note_thumbnail_saved(&mut self, path: &str, thumbnail_path: Option<String>, custom: bool) {
+    pub(in crate::shell) fn note_thumbnail_saved(
+        &mut self,
+        path: &str,
+        thumbnail_path: Option<String>,
+        custom: bool,
+    ) {
         let mut found = false;
-        for row in &mut self.rows {
-            if row.path == path {
-                apply_thumbnail(row, thumbnail_path.clone(), custom);
-                found = true;
-            }
-        }
-        for row in &mut self.virtual_rows {
+        for row in self.each_listed_row_mut() {
             if row.path == path {
                 apply_thumbnail(row, thumbnail_path.clone(), custom);
                 found = true;
@@ -167,7 +219,11 @@ impl FilesState {
             self.note_error("刷新缩略图缺少仓库。".into());
             return;
         };
-        let Some(kind) = self.rows.iter().chain(&self.virtual_rows).find(|row| row.path == path).map(|row| row.kind.clone()) else {
+        let Some(kind) = self
+            .each_listed_row()
+            .find(|row| row.path == path)
+            .map(|row| row.kind.clone())
+        else {
             eprintln!("Nana 刷新缩略图的条目已经不在列表里：{path}");
             return;
         };
@@ -181,18 +237,20 @@ impl FilesState {
         });
     }
 
-    /// 换上新列表时，同一个缩略图文件已经有纹理的行接着用它：重读目录不让卡片闪回类型图标，也不重新解码
-    /// （Vue 的 `<img>` 地址不变时同样不重新加载）。新条目的元数据没给宽高时沿用解码出的原始宽高。
-    pub(super) fn carry_thumbnails(&self, incoming: &mut [FileRow]) {
+    /// 换上新列表时，同一个缩略图文件已经有纹理的行接着用它：重读目录、或分类视图按摘要重筛，都不让卡片闪回类型图标，
+    /// 也不重新解码（Vue 的 `<img>` 地址不变时同样不重新加载）。新条目的元数据没给宽高时沿用解码出的原始宽高。
+    /// 已经能画的图从目录、智能文件夹和分类视图三份里认。
+    pub(in crate::shell) fn carry_thumbnails(&self, incoming: &mut [FileRow]) {
         let ready: HashMap<&str, (u32, u32)> = self
-            .rows
-            .iter()
-            .chain(&self.virtual_rows)
+            .each_listed_row()
             .filter(|row| row.texture_ready)
-            .filter_map(|row| thumbnail_file(row).map(|path| (path, (row.pixel_width, row.pixel_height))))
+            .filter_map(|row| {
+                thumbnail_file(row).map(|path| (path, (row.pixel_width, row.pixel_height)))
+            })
             .collect();
         for row in incoming.iter_mut() {
-            let Some(&(width, height)) = thumbnail_file(row).and_then(|path| ready.get(path)) else {
+            let Some(&(width, height)) = thumbnail_file(row).and_then(|path| ready.get(path))
+            else {
                 continue;
             };
             row.texture_ready = true;
@@ -211,15 +269,34 @@ impl FilesState {
         self.ensure.mark_rows_changed();
     }
 
-    fn request_decode(&mut self, paths: Vec<String>) {
+    pub(super) fn request_decode(&mut self, paths: Vec<String>) {
         self.decode_requested.extend(paths.iter().cloned());
         self.effects.push(FilesEffect::DecodeThumbnails { paths });
+    }
+
+    /// 现在画得着的行：当前目录、智能文件夹查询结果、分类视图。分类视图不在前两份里。
+    fn each_listed_row(&self) -> impl Iterator<Item = &FileRow> {
+        self.rows
+            .iter()
+            .chain(self.virtual_rows.iter())
+            .chain(self.category_rows.iter())
+    }
+
+    /// [`Self::each_listed_row`] 的可变借用。纹理写回要三份一起改，卡片才跟着换。
+    fn each_listed_row_mut(&mut self) -> impl Iterator<Item = &mut FileRow> {
+        self.rows
+            .iter_mut()
+            .chain(self.virtual_rows.iter_mut())
+            .chain(self.category_rows.iter_mut())
     }
 }
 
 /// 行引用的缩略图文件（去掉首尾空白），没有时为 `None`。
 fn thumbnail_file(row: &FileRow) -> Option<&str> {
-    row.thumbnail_path.as_deref().map(str::trim).filter(|path| !path.is_empty())
+    row.thumbnail_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
 }
 
 fn apply_thumbnail(row: &mut FileRow, thumbnail_path: Option<String>, custom: bool) {

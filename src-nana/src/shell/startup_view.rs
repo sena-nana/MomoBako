@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
+use nana_ui::runtime::view::{AnyView, IntoView, widget};
 use nana_ui::runtime::{AlignSpec, JustifySpec, LengthSpec, SemanticColorRole, Stack, Text};
 
 use super::render::{PRIMARY_INSET_Y, TITLE_BAR_PX};
@@ -32,12 +32,24 @@ pub(crate) fn fill_section() -> Stack {
 }
 
 /// 一段文字，行高写成像素。
-pub(super) fn line(value: impl Into<String>, size: f32, weight: u16, color: SemanticColorRole, line_height: f32) -> Text {
+pub(super) fn line(
+    value: impl Into<String>,
+    size: f32,
+    weight: u16,
+    color: SemanticColorRole,
+    line_height: f32,
+) -> Text {
     label_text(value, size, weight, Some(color)).line_height(line_height)
 }
 
 /// 占满列宽、可在任意位置折行的一段字。
-pub(super) fn wrapping(value: impl Into<String>, size: f32, weight: u16, color: SemanticColorRole, line_height: f32) -> Text {
+pub(super) fn wrapping(
+    value: impl Into<String>,
+    size: f32,
+    weight: u16,
+    color: SemanticColorRole,
+    line_height: f32,
+) -> Text {
     let mut node = line(value, size, weight, color, line_height);
     let layout = Arc::make_mut(&mut node.style.layout);
     layout.width = Some(LengthSpec::Fill);
@@ -48,15 +60,23 @@ pub(super) fn wrapping(value: impl Into<String>, size: f32, weight: u16, color: 
 
 /// 眉题：11px、600、弱色、字距 0.4px。Vue 用 `text-transform: uppercase`，英文直接写大写。
 pub(super) fn eyebrow(value: &str, key: &'static str) -> AnyView {
-    let mut node = line(value, 11.0, 600, SemanticColorRole::Faint, 11.0 * ROOT_LINE_HEIGHT);
+    let mut node = line(
+        value,
+        11.0,
+        600,
+        SemanticColorRole::Faint,
+        11.0 * ROOT_LINE_HEIGHT,
+    );
     Arc::make_mut(&mut node.style.layout).letter_spacing = Some(0.4);
     widget(node).key(key).into_any()
 }
 
 /// 带外边距的一层。Vue 用 `margin` 微调的几处间距照搬。
 pub(super) fn margin(top: f32, bottom: f32) -> Stack {
-    Stack::column(0.0).width(LengthSpec::Fill).with_layout(move |layout| {
-        layout.margin_top = Some(LengthSpec::Px(top));
-        layout.margin_bottom = Some(LengthSpec::Px(bottom));
-    })
+    Stack::column(0.0)
+        .width(LengthSpec::Fill)
+        .with_layout(move |layout| {
+            layout.margin_top = Some(LengthSpec::Px(top));
+            layout.margin_bottom = Some(LengthSpec::Px(bottom));
+        })
 }

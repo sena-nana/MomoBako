@@ -2,9 +2,11 @@
 //! 已经表示的同一件事不再单列一行，侧栏「任务」的计数也只算去重以后的行。
 
 use crate::backend::services::mutsuki_runner::{
-    PROTOCOL_ENTRY_COPY, PROTOCOL_PLAYBACK_PREPARE, PROTOCOL_REPOSITORY_SYNC, PROTOCOL_THUMBNAIL_REQUEST,
+    PROTOCOL_ENTRY_COPY, PROTOCOL_PLAYBACK_PREPARE, PROTOCOL_REPOSITORY_SYNC,
+    PROTOCOL_THUMBNAIL_REQUEST,
 };
 use crate::backend::services::repository::TaskProgressSnapshot;
+use crate::shell::admin::{AdminEffect, AdminMessage};
 use crate::shell::files::{FileDialog, FilesMessage};
 use crate::shell::{ShellMessage, ShellViewModel, SidebarMessage};
 
@@ -34,7 +36,11 @@ fn task(task_id: &str, protocol_id: &str) -> TaskProgressSnapshot {
 
 /// 弹层各行的标题，按字排好。
 fn labels(model: &ShellViewModel) -> Vec<String> {
-    let mut labels = model.task_rows().into_iter().map(|row| row.label).collect::<Vec<_>>();
+    let mut labels = model
+        .task_rows()
+        .into_iter()
+        .map(|row| row.label)
+        .collect::<Vec<_>>();
     labels.sort();
     labels
 }
@@ -57,7 +63,10 @@ fn a_sync_shown_as_the_repository_operation_is_not_listed_again() {
     let mut model = scene("live-files-plain");
     model.reduce(ShellMessage::Sidebar(SidebarMessage::RefreshFolderTree));
     assert!(
-        model.task_rows().iter().any(|row| row.id == "workspace-operation" && row.label == "刷新文件树"),
+        model
+            .task_rows()
+            .iter()
+            .any(|row| row.id == "workspace-operation" && row.label == "刷新文件树"),
         "刷新文件夹树应该出仓库操作行"
     );
     model.reduce(ShellMessage::TaskProgressLoaded(vec![
@@ -71,12 +80,46 @@ fn a_sync_shown_as_the_repository_operation_is_not_listed_again() {
 #[test]
 fn a_copy_shown_as_the_repository_operation_is_counted_once() {
     let mut model = scene("files-list-mode");
-    let files = |model: &mut ShellViewModel, message: FilesMessage| model.reduce(ShellMessage::Files(message));
+    let files = |model: &mut ShellViewModel, message: FilesMessage| {
+        model.reduce(ShellMessage::Files(message))
+    };
     files(&mut model, FilesMessage::ActivateRow("cover.png".into()));
     files(&mut model, FilesMessage::OpenDialog(FileDialog::Copy));
     files(&mut model, FilesMessage::DraftChanged("assets".into()));
     files(&mut model, FilesMessage::SubmitDialog);
-    model.reduce(ShellMessage::TaskProgressLoaded(vec![task("momobako.task.9", PROTOCOL_ENTRY_COPY)]));
+    model.reduce(ShellMessage::TaskProgressLoaded(vec![task(
+        "momobako.task.9",
+        PROTOCOL_ENTRY_COPY,
+    )]));
     assert_eq!(labels(&model), ["复制文件"]);
     assert_eq!(model.task_rows().len(), 1, "「任务」的计数只算去重以后的行");
+}
+
+/// 只有排队或运行中的后台任务能取消。仓库操作行和找不到的编号不发请求。
+#[test]
+fn cancel_queues_only_a_running_background_task() {
+    let mut model = ShellViewModel::default();
+    model.reduce(ShellMessage::TaskProgressLoaded(vec![task(
+        "momobako.task.1",
+        PROTOCOL_REPOSITORY_SYNC,
+    )]));
+    assert!(
+        model
+            .task_rows()
+            .iter()
+            .any(|row| row.id == "momobako.task.1" && row.cancellable)
+    );
+    model.reduce(ShellMessage::Admin(AdminMessage::CancelTask(
+        "workspace-operation".into(),
+    )));
+    assert!(
+        model.admin.take_effects().is_empty(),
+        "仓库操作行不能当成后台任务取消"
+    );
+    model.reduce(ShellMessage::Admin(AdminMessage::CancelTask(
+        "momobako.task.1".into(),
+    )));
+    assert!(
+        matches!(model.admin.take_effects().as_slice(), [AdminEffect::CancelTask(id)] if id == "momobako.task.1")
+    );
 }

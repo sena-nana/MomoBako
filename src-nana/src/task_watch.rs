@@ -6,8 +6,8 @@
 //! 没有时连快照都不读。弹层里每一行按任务协议写标题，仓库操作那一行已经表示的任务不再单列
 //! （`admin_support::popover_rows`）。
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crate::backend::services::repository::TaskProgressSnapshot;
@@ -46,7 +46,10 @@ impl TaskWatch {
 }
 
 /// 只留登记中、状态还在进行的任务，按任务编号排好，两次读的顺序一致。
-pub(crate) fn active_snapshots(active_ids: &[String], snapshots: Vec<TaskProgressSnapshot>) -> Vec<TaskProgressSnapshot> {
+pub(crate) fn active_snapshots(
+    active_ids: &[String],
+    snapshots: Vec<TaskProgressSnapshot>,
+) -> Vec<TaskProgressSnapshot> {
     let mut active = snapshots
         .into_iter()
         .filter(|snapshot| active_ids.iter().any(|id| id == &snapshot.task_id))
@@ -77,15 +80,19 @@ pub(crate) fn spawn<F>(tasks: MutsukiTaskViewModel, stop: Arc<AtomicBool>, dispa
 where
     F: Fn(Vec<TaskProgressSnapshot>) + Send + 'static,
 {
-    let started = std::thread::Builder::new().name("nana-task-watch".into()).spawn(move || {
-        let mut watch = TaskWatch::default();
-        while !stop.load(Ordering::Acquire) {
-            if let Some(active) = watch.poll(&tasks.active_task_ids(), || tasks.progress_snapshots()) {
-                dispatch(active);
+    let started = std::thread::Builder::new()
+        .name("nana-task-watch".into())
+        .spawn(move || {
+            let mut watch = TaskWatch::default();
+            while !stop.load(Ordering::Acquire) {
+                if let Some(active) =
+                    watch.poll(&tasks.active_task_ids(), || tasks.progress_snapshots())
+                {
+                    dispatch(active);
+                }
+                std::thread::sleep(POLL_INTERVAL);
             }
-            std::thread::sleep(POLL_INTERVAL);
-        }
-    });
+        });
     if let Err(error) = started {
         eprintln!("Nana 任务观察线程启动失败，任务弹层不会更新：{error}");
     }
@@ -117,13 +124,33 @@ mod tests {
         assert!(watch.poll(&[], || panic!("空闲时不该读快照")).is_none());
 
         let ids = vec!["task-1".to_string()];
-        let first = watch.poll(&ids, || vec![snapshot("task-1", "queued", None), snapshot("old", "completed", Some(100.0))]);
-        assert_eq!(first.as_ref().map(|tasks| tasks.iter().map(|task| task.task_id.as_str()).collect::<Vec<_>>()), Some(vec!["task-1"]));
-        assert!(watch.poll(&ids, || vec![snapshot("task-1", "queued", None)]).is_none(), "没变不交");
-        let running = watch.poll(&ids, || vec![snapshot("task-1", "running", Some(40.0))]).expect("状态变了要交");
+        let first = watch.poll(&ids, || {
+            vec![
+                snapshot("task-1", "queued", None),
+                snapshot("old", "completed", Some(100.0)),
+            ]
+        });
+        assert_eq!(
+            first.as_ref().map(|tasks| tasks
+                .iter()
+                .map(|task| task.task_id.as_str())
+                .collect::<Vec<_>>()),
+            Some(vec!["task-1"])
+        );
+        assert!(
+            watch
+                .poll(&ids, || vec![snapshot("task-1", "queued", None)])
+                .is_none(),
+            "没变不交"
+        );
+        let running = watch
+            .poll(&ids, || vec![snapshot("task-1", "running", Some(40.0))])
+            .expect("状态变了要交");
         assert_eq!(running[0].status, "running");
 
-        let finished = watch.poll(&ids, || vec![snapshot("task-1", "completed", Some(100.0))]).expect("结束了要交一次空列表");
+        let finished = watch
+            .poll(&ids, || vec![snapshot("task-1", "completed", Some(100.0))])
+            .expect("结束了要交一次空列表");
         assert!(finished.is_empty(), "结束的任务不进弹层");
         assert!(watch.poll(&[], || panic!("都空了不再读")).is_none());
     }
@@ -132,7 +159,20 @@ mod tests {
     #[test]
     fn active_snapshots_keep_registered_running_tasks_in_order() {
         let ids = vec!["b".to_string(), "a".to_string()];
-        let active = active_snapshots(&ids, vec![snapshot("b", "running", None), snapshot("gone", "running", None), snapshot("a", "cancelling", None)]);
-        assert_eq!(active.iter().map(|task| task.task_id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+        let active = active_snapshots(
+            &ids,
+            vec![
+                snapshot("b", "running", None),
+                snapshot("gone", "running", None),
+                snapshot("a", "cancelling", None),
+            ],
+        );
+        assert_eq!(
+            active
+                .iter()
+                .map(|task| task.task_id.as_str())
+                .collect::<Vec<_>>(),
+            ["a", "b"]
+        );
     }
 }

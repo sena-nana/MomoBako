@@ -22,21 +22,23 @@ use std::cell::RefCell;
 use std::collections::HashSet;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use nana_ui::RegionId;
 use nana_ui::runtime::view::{detached, entity_ref, node_ref, widget, with_refs};
 use nana_ui::runtime::{
-    component_descriptors, AppContext, AppShell, Entity, FrameworkError, LanguageTag, LengthSpec, RuntimeDocument,
-    StableNodeId, Text, Thumbnail, Workspace, WorkspaceRegionSlot,
+    AppContext, AppShell, Entity, FrameworkError, LanguageTag, LengthSpec, RuntimeDocument,
+    StableNodeId, Text, Thumbnail, Workspace, WorkspaceRegionSlot, component_descriptors,
 };
-use nana_ui::RegionId;
 
+use super::ShellViewModel;
 use super::focus_return::{Before, FocusReturn, Regions};
-use super::hot::{self, HotSignals, ModelField, MotionFrame, PlaybackView, TaskFills, TitleBarView, TitleSignals};
+use super::hot::{
+    self, HotSignals, ModelField, MotionFrame, PlaybackView, TaskFills, TitleBarView, TitleSignals,
+};
 use super::menu_focus_view::MenuFocusView;
-use super::view_part::{body_mode, BodyMode, PartCx, PartId, ShellPart, Swap};
+use super::view_part::{BodyMode, PartCx, PartId, ShellPart, Swap, body_mode};
 use super::view_part_overlay::OverlayPart;
 use super::view_part_primary::PrimaryPart;
 use super::view_part_sidebar::SidebarPart;
-use super::ShellViewModel;
 
 /// 同步计数，测试用来确认动效帧不重挂、组合输入会延后。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -79,6 +81,8 @@ pub(crate) struct ShellView {
     revision: u64,
     /// 上次收集挂着的缩略图时文档的变更代次。
     thumbnails_scanned: Option<u64>,
+    /// 歌词当前行上次滚到中间时的视口。同一行不再拉回去。
+    lyric_follow: Option<super::inspect_view::LyricFollow>,
     stats: ViewStats,
 }
 
@@ -88,34 +92,55 @@ impl ShellView {
     /// 挂之前先给这份文档声明应用语言（[`APP_LANGUAGE`]）：中文标点挤压、避头尾按中文排，拉丁文字和数字
     /// 也按简体中文挑字形，和 Chrome 用同一份字体画 `lang="zh-CN"` 一致。真实窗口、测试 harness 和截图场景
     /// 都从这里挂，排出来的字一样。
-    pub(crate) fn mount(document: &mut RuntimeDocument, model: &ShellViewModel) -> Result<Self, FrameworkError> {
+    pub(crate) fn mount(
+        document: &mut RuntimeDocument,
+        model: &ShellViewModel,
+    ) -> Result<Self, FrameworkError> {
         let document_id = document.document();
-        document.context_mut().set_default_language(LanguageTag::new(APP_LANGUAGE));
-        let marker_text = format!("{MARKER_PREFIX}{}", NEXT_MARKER.fetch_add(1, Ordering::Relaxed));
+        document
+            .context_mut()
+            .set_default_language(LanguageTag::new(APP_LANGUAGE));
+        let marker_text = format!(
+            "{MARKER_PREFIX}{}",
+            NEXT_MARKER.fetch_add(1, Ordering::Relaxed)
+        );
         let motion = MotionFrame::project(model);
         let fills = TaskFills::project(model);
         let playback = PlaybackView::project(model);
+        let selection_box = model.input.selection_box;
         let title_view = TitleBarView::project(model);
         let mut made = None;
-        let (_skeleton, (shell, workspace, marker)) = document.context_mut().mount_view_root(document_id, || {
-            let hot = HotSignals::new(motion, fills.clone(), &playback);
-            let title = TitleSignals::new(&title_view);
-            let query = ModelField::new(&title_view.query);
-            let parts = (SidebarPart::signals(model), PrimaryPart::signals(model), OverlayPart::signals(model));
-            let shell = entity_ref::<AppShell>();
-            let workspace = entity_ref::<Workspace>();
-            let marker = node_ref();
-            let view = (
-                detached(widget(hidden_marker(&marker_text)).node_ref(marker)),
-                detached(widget(super::render::workbench_workspace(motion.sidebar_width)).entity_ref(workspace)),
-                widget(AppShell::new())
-                    .title_bar(super::title_bar::title_bar(title, query.signal(), &title_view.query))
-                    .overlay(super::view_part_overlay::layer(parts.2))
-                    .entity_ref(shell),
-            );
-            made = Some((hot, title, query, parts));
-            with_refs(view, (shell, workspace, marker))
-        })?;
+        let (_skeleton, (shell, workspace, marker)) =
+            document.context_mut().mount_view_root(document_id, || {
+                let hot = HotSignals::new(motion, fills.clone(), &playback, selection_box);
+                let title = TitleSignals::new(&title_view);
+                let query = ModelField::new(&title_view.query);
+                let parts = (
+                    SidebarPart::signals(model),
+                    PrimaryPart::signals(model),
+                    OverlayPart::signals(model),
+                );
+                let shell = entity_ref::<AppShell>();
+                let workspace = entity_ref::<Workspace>();
+                let marker = node_ref();
+                let view = (
+                    detached(widget(hidden_marker(&marker_text)).node_ref(marker)),
+                    detached(
+                        widget(super::render::workbench_workspace(motion.sidebar_width))
+                            .entity_ref(workspace),
+                    ),
+                    widget(AppShell::new())
+                        .title_bar(super::title_bar::title_bar(
+                            title,
+                            query.signal(),
+                            &title_view.query,
+                        ))
+                        .overlay(super::view_part_overlay::layer(parts.2))
+                        .entity_ref(shell),
+                );
+                made = Some((hot, title, query, parts));
+                with_refs(view, (shell, workspace, marker))
+            })?;
         let (hot, title, query, (sidebar, primary, overlay)) = made.expect("骨架挂载闭包已经运行");
         super::title_bar::bind_window_controls(document)?;
         let mode = body_mode(model);
@@ -137,15 +162,35 @@ impl ShellView {
             focus_return: FocusReturn::default(),
             revision: model.revision,
             thumbnails_scanned: None,
+            lyric_follow: None,
             stats: ViewStats::default(),
         };
         let mut swap = Swap::default();
         let mut error = None;
         {
-            let mut cx = PartCx { document: &mut *document, hot, stats: &mut view.stats };
-            absorb(&mut swap, &mut error, PartId::Sidebar, view.sidebar.mount(&mut cx, model, mode));
-            absorb(&mut swap, &mut error, PartId::Primary, view.primary.mount(&mut cx, model, mode));
-            absorb(&mut swap, &mut error, PartId::Overlay, view.overlay.mount(&mut cx, model, mode));
+            let mut cx = PartCx {
+                document: &mut *document,
+                hot,
+                stats: &mut view.stats,
+            };
+            absorb(
+                &mut swap,
+                &mut error,
+                PartId::Sidebar,
+                view.sidebar.mount(&mut cx, model, mode),
+            );
+            absorb(
+                &mut swap,
+                &mut error,
+                PartId::Primary,
+                view.primary.mount(&mut cx, model, mode),
+            );
+            absorb(
+                &mut swap,
+                &mut error,
+                PartId::Overlay,
+                view.overlay.mount(&mut cx, model, mode),
+            );
         }
         view.place(document.context_mut(), mode)?;
         swap.finish(document);
@@ -189,7 +234,11 @@ impl ShellView {
     /// 整体同步：写热信号和标题栏；排法变了时侧栏和主区挪到新槽位（第一次排成工作台时才建侧栏）；
     /// 再让每一块写信号、按需重挂。正在组合输入的块延后重挂。最后按浮层的开合交还焦点，再照键盘
     /// 打开的菜单放焦点。
-    pub(crate) fn sync(&mut self, document: &mut RuntimeDocument, model: &ShellViewModel) -> Result<(), FrameworkError> {
+    pub(crate) fn sync(
+        &mut self,
+        document: &mut RuntimeDocument,
+        model: &ShellViewModel,
+    ) -> Result<(), FrameworkError> {
         if !self.alive() {
             eprintln!("Nana 壳层骨架已随文档回收，跳过同步");
             return Err(FrameworkError::MissingView(self.shell.stable_id()));
@@ -201,19 +250,49 @@ impl ShellView {
         let mut swap = Swap::default();
         let mut error = None;
         {
-            let mut cx = PartCx { document: &mut *document, hot: self.hot, stats: &mut self.stats };
+            let mut cx = PartCx {
+                document: &mut *document,
+                hot: self.hot,
+                stats: &mut self.stats,
+            };
             if mode != self.mode {
-                absorb(&mut swap, &mut error, PartId::Sidebar, self.sidebar.mount(&mut cx, model, mode));
-                absorb(&mut swap, &mut error, PartId::Primary, self.primary.mount(&mut cx, model, mode));
+                absorb(
+                    &mut swap,
+                    &mut error,
+                    PartId::Sidebar,
+                    self.sidebar.mount(&mut cx, model, mode),
+                );
+                absorb(
+                    &mut swap,
+                    &mut error,
+                    PartId::Primary,
+                    self.primary.mount(&mut cx, model, mode),
+                );
             }
-            absorb(&mut swap, &mut error, PartId::Sidebar, step(&mut self.sidebar, &mut cx, model, &mut self.deferred));
-            absorb(&mut swap, &mut error, PartId::Primary, step(&mut self.primary, &mut cx, model, &mut self.deferred));
-            absorb(&mut swap, &mut error, PartId::Overlay, step(&mut self.overlay, &mut cx, model, &mut self.deferred));
+            absorb(
+                &mut swap,
+                &mut error,
+                PartId::Sidebar,
+                step(&mut self.sidebar, &mut cx, model, &mut self.deferred),
+            );
+            absorb(
+                &mut swap,
+                &mut error,
+                PartId::Primary,
+                step(&mut self.primary, &mut cx, model, &mut self.deferred),
+            );
+            absorb(
+                &mut swap,
+                &mut error,
+                PartId::Overlay,
+                step(&mut self.overlay, &mut cx, model, &mut self.deferred),
+            );
         }
         self.settle(document, mode, swap, error)?;
         self.overlay.sweep(document.context_mut());
         self.return_focus(document, model, before);
-        self.menu_focus.sync(document.context_mut(), document_id, model);
+        self.menu_focus
+            .sync(document.context_mut(), document_id, model);
         self.revision = model.revision;
         Ok(())
     }
@@ -227,27 +306,55 @@ impl ShellView {
 
     /// 一帧刷新以后：对话框在刷新时才真正关上，控件也可能在刷新时才卸掉。这时照焦点归还的规则补还
     /// 焦点（`focus_return.rs`），焦点动了返回真，调用方再画一帧。
-    pub(crate) fn settle_focus(&mut self, document: &mut RuntimeDocument, model: &ShellViewModel) -> bool {
+    pub(crate) fn settle_focus(
+        &mut self,
+        document: &mut RuntimeDocument,
+        model: &ShellViewModel,
+    ) -> bool {
         if !self.alive() {
             return false;
         }
         let regions = self.regions();
         let document_id = document.document();
         let before = document.context().world().focused(document_id);
-        self.focus_return.settle(document.context_mut(), document_id, model, regions);
-        document.context().world().focused(document_id) != before
+        self.focus_return
+            .settle(document.context_mut(), document_id, model, regions);
+        let lyric = if super::files_view::previewing(model) && !model.inspect.lyrics.is_empty() {
+            super::inspect_view::follow_active_lyric(document, &mut self.lyric_follow)
+        } else {
+            self.lyric_follow = None;
+            false
+        };
+        document.context().world().focused(document_id) != before || lyric
     }
 
     /// 页面的几块：侧栏和主区的根、浮层层和它现在显示的那一块。
     fn regions(&self) -> Regions {
-        Regions { sidebar: self.sidebar.root(), primary: self.primary.root(), layer: self.overlay.layer_id(), overlay: self.overlay.root() }
+        Regions {
+            sidebar: self.sidebar.root(),
+            primary: self.primary.root(),
+            layer: self.overlay.layer_id(),
+            overlay: self.overlay.root(),
+        }
     }
 
     /// 按浮层现在显示的那一层交还焦点（`focus_return.rs`）。`before` 是这次同步开始前焦点在哪。
-    fn return_focus(&mut self, document: &mut RuntimeDocument, model: &ShellViewModel, before: Before) {
+    fn return_focus(
+        &mut self,
+        document: &mut RuntimeDocument,
+        model: &ShellViewModel,
+        before: Before,
+    ) {
         let regions = self.regions();
         let document_id = document.document();
-        self.focus_return.sync(document.context_mut(), document_id, model, self.overlay.identity(), before, regions);
+        self.focus_return.sync(
+            document.context_mut(),
+            document_id,
+            model,
+            self.overlay.identity(),
+            before,
+            regions,
+        );
     }
 
     /// 还有对话框在放退场：准备帧要一直要帧，放完以后才卸得掉。
@@ -261,7 +368,10 @@ impl ShellView {
     /// 缩略图节点的资源是 `thumb:{文件}`：文件卡片有缩略图时一直引用它，还没有纹理时只是藏着。视口和前后
     /// 预留的行、详情卡片、播放条和预览里的缩略图都算；滚走的行连节点一起卸掉，就不算了。宿主按这份决定
     /// 解码哪些缩略图、哪些纹理不能卸。
-    pub(crate) fn mounted_thumbnails(&mut self, document: &RuntimeDocument) -> Option<HashSet<String>> {
+    pub(crate) fn mounted_thumbnails(
+        &mut self,
+        document: &RuntimeDocument,
+    ) -> Option<HashSet<String>> {
         let context = document.context();
         let generation = context.world().generation();
         if self.thumbnails_scanned == Some(generation) {
@@ -269,8 +379,13 @@ impl ShellView {
         }
         self.thumbnails_scanned = Some(generation);
         let mut mounted = HashSet::new();
-        for node in context.world().nodes_of_component(document.document(), component_descriptors::THUMBNAIL.type_id) {
-            match context.read(Entity::<Thumbnail>::from_stable_id(node), |thumb| thumb.resource.clone()) {
+        for node in context.world().nodes_of_component(
+            document.document(),
+            component_descriptors::THUMBNAIL.type_id,
+        ) {
+            match context.read(Entity::<Thumbnail>::from_stable_id(node), |thumb| {
+                thumb.resource.clone()
+            }) {
                 Ok(resource) => {
                     if let Some(path) = super::thumbs::slot_file(&resource) {
                         mounted.insert(path.to_string());
@@ -283,7 +398,11 @@ impl ShellView {
     }
 
     /// 只同步热信号和侧栏宽度：动效帧和播放推进走这里，不重挂内容。排法要换时由调用方整体同步。
-    pub(crate) fn sync_hot(&mut self, document: &mut RuntimeDocument, model: &ShellViewModel) -> Result<(), FrameworkError> {
+    pub(crate) fn sync_hot(
+        &mut self,
+        document: &mut RuntimeDocument,
+        model: &ShellViewModel,
+    ) -> Result<(), FrameworkError> {
         if !self.alive() {
             eprintln!("Nana 壳层骨架已随文档回收，跳过热同步");
             return Err(FrameworkError::MissingView(self.shell.stable_id()));
@@ -292,20 +411,38 @@ impl ShellView {
     }
 
     /// 因输入法组合延后的块，组合已经结束的按当前 ViewModel 补挂。
-    pub(crate) fn retry_deferred(&mut self, document: &mut RuntimeDocument, model: &ShellViewModel) -> Result<(), FrameworkError> {
+    pub(crate) fn retry_deferred(
+        &mut self,
+        document: &mut RuntimeDocument,
+        model: &ShellViewModel,
+    ) -> Result<(), FrameworkError> {
         if self.deferred.is_empty() || !self.alive() {
             return Ok(());
         }
-        let before = Before::capture(document.context(), document.document(), self.overlay.layer_id());
+        let before = Before::capture(
+            document.context(),
+            document.document(),
+            self.overlay.layer_id(),
+        );
         let mut swap = Swap::default();
         let mut error = None;
         {
-            let mut cx = PartCx { document: &mut *document, hot: self.hot, stats: &mut self.stats };
+            let mut cx = PartCx {
+                document: &mut *document,
+                hot: self.hot,
+                stats: &mut self.stats,
+            };
             for id in self.deferred.clone() {
                 let result = match id {
-                    PartId::Sidebar if !self.sidebar.composing(cx.document) => step(&mut self.sidebar, &mut cx, model, &mut self.deferred),
-                    PartId::Primary if !self.primary.composing(cx.document) => step(&mut self.primary, &mut cx, model, &mut self.deferred),
-                    PartId::Overlay if !self.overlay.composing(cx.document) => step(&mut self.overlay, &mut cx, model, &mut self.deferred),
+                    PartId::Sidebar if !self.sidebar.composing(cx.document) => {
+                        step(&mut self.sidebar, &mut cx, model, &mut self.deferred)
+                    }
+                    PartId::Primary if !self.primary.composing(cx.document) => {
+                        step(&mut self.primary, &mut cx, model, &mut self.deferred)
+                    }
+                    PartId::Overlay if !self.overlay.composing(cx.document) => {
+                        step(&mut self.overlay, &mut cx, model, &mut self.deferred)
+                    }
                     _ => continue,
                 };
                 absorb(&mut swap, &mut error, id, result);
@@ -317,10 +454,19 @@ impl ShellView {
     }
 
     /// 写热投影和标题栏投影；搜索框草稿只在 ViewModel 的值变了时写。侧栏呈现宽度变了时写进工作区。
-    fn write_signals(&mut self, document: &mut RuntimeDocument, model: &ShellViewModel) -> Result<(), FrameworkError> {
+    fn write_signals(
+        &mut self,
+        document: &mut RuntimeDocument,
+        model: &ShellViewModel,
+    ) -> Result<(), FrameworkError> {
         let motion = MotionFrame::project(model);
         let title = TitleBarView::project(model);
-        self.hot.write(motion, TaskFills::project(model), &PlaybackView::project(model));
+        self.hot.write(
+            motion,
+            TaskFills::project(model),
+            &PlaybackView::project(model),
+            model.input.selection_box,
+        );
         self.title.write(&title);
         self.query.sync(&title.query);
         self.sync_sidebar_width(document.context_mut(), motion.sidebar_width)
@@ -330,12 +476,18 @@ impl ShellView {
     ///
     /// 工作区每次 `update_component` 都会重投影（哪怕夹到上下限以后区域尺寸没变），冲掉 AppShell 给 body
     /// 打的布局补丁，所以工作区是 body 时写完总让 AppShell 重新投影补回。
-    fn sync_sidebar_width(&mut self, context: &mut AppContext, width: f32) -> Result<(), FrameworkError> {
+    fn sync_sidebar_width(
+        &mut self,
+        context: &mut AppContext,
+        width: f32,
+    ) -> Result<(), FrameworkError> {
         if self.sidebar_width == width {
             return Ok(());
         }
         self.sidebar_width = width;
-        context.update_component(self.workspace, |workspace, _| hot::set_resources_width(workspace, width))?;
+        context.update_component(self.workspace, |workspace, _| {
+            hot::set_resources_width(workspace, width)
+        })?;
         if self.mode == BodyMode::Workbench {
             context.reproject_component(self.shell)?;
         }
@@ -412,7 +564,12 @@ fn step<P: ShellPart>(
 }
 
 /// 收下一块的结果：成功的并进收尾，失败的记日志，留下第一个错误。失败的块保留旧内容。
-fn absorb(swap: &mut Swap, error: &mut Option<FrameworkError>, part: PartId, result: Result<Swap, FrameworkError>) {
+fn absorb(
+    swap: &mut Swap,
+    error: &mut Option<FrameworkError>,
+    part: PartId,
+    result: Result<Swap, FrameworkError>,
+) {
     match result {
         Ok(done) => swap.merge(done),
         Err(failed) => {
@@ -443,7 +600,11 @@ fn place_regions(
 
 /// AppShell 的 body。没变时不动，返回 `false`；变了以后重新装配（装配最后会重新投影），换下来的
 /// 节点由装配停放。overlay 槽位是骨架挂载时交给它的浮层层，一直不换。
-fn place_shell(context: &mut AppContext, shell: Entity<AppShell>, body: Option<StableNodeId>) -> Result<bool, FrameworkError> {
+fn place_shell(
+    context: &mut AppContext,
+    shell: Entity<AppShell>,
+    body: Option<StableNodeId>,
+) -> Result<bool, FrameworkError> {
     if context.read(shell, |current| current.body == body)? {
         return Ok(false);
     }
@@ -471,7 +632,10 @@ thread_local! {
 ///
 /// 文档里已经有这里挂过的壳层就整体同步，否则新挂一棵。生产窗口自己持有 `ShellView`；
 /// 这个入口给验收文档和测试用，文档丢掉后对应的视图在下次调用时清掉。
-pub fn mount_shell(document: &mut RuntimeDocument, model: &ShellViewModel) -> Result<(), FrameworkError> {
+pub fn mount_shell(
+    document: &mut RuntimeDocument,
+    model: &ShellViewModel,
+) -> Result<(), FrameworkError> {
     REGISTERED.with(|views| {
         let mut views = views.borrow_mut();
         views.retain(ShellView::alive);
@@ -486,11 +650,21 @@ pub fn mount_shell(document: &mut RuntimeDocument, model: &ShellViewModel) -> Re
 
 /// 测试用：照生产 `prepare` 跑一帧准备，一帧按 16ms 算，视图用 `mount_shell` 挂在这份文档里的那个。
 #[cfg(test)]
-pub(crate) fn prepare_registered(model: &mut ShellViewModel, window: &mut nana_ui::ApplicationWindow) {
+pub(crate) fn prepare_registered(
+    model: &mut ShellViewModel,
+    window: &mut nana_ui::ApplicationWindow,
+) {
     REGISTERED.with(|views| {
         let mut views = views.borrow_mut();
-        let view = views.iter_mut().find(|view| view.alive() && view.owns(&window.document));
-        crate::window_host::prepare_motion(model, view, window, crate::frame_clock::FrameStep::millis(16));
+        let view = views
+            .iter_mut()
+            .find(|view| view.alive() && view.owns(&window.document));
+        crate::window_host::prepare_motion(
+            model,
+            view,
+            window,
+            crate::frame_clock::FrameStep::millis(16),
+        );
     })
 }
 

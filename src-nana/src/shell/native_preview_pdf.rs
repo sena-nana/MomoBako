@@ -9,7 +9,7 @@ mod objects;
 #[path = "native_preview_pdf_paint.rs"]
 mod paint;
 
-use super::super::bridge::{page_caption, NativeLoad, PageFrame};
+use super::super::bridge::{NativeLoad, PageFrame, page_caption};
 use objects::{Document, Page, Value};
 
 /// 画出位图的页数上限：每页 480×640 的位图约 1.2 MB。后面的页记成失败、写明原因，页数仍是真实的。
@@ -54,7 +54,13 @@ pub(super) fn load(bytes: &[u8]) -> Result<NativeLoad, String> {
         })
         .collect();
     let text = super::limit_text(&page_caption(0, frames.len(), &frames[0]));
-    Ok(NativeLoad { text, frames, mesh: None, paged: true })
+    Ok(NativeLoad {
+        text,
+        frames,
+        mesh: None,
+        paged: true,
+        archive: None,
+    })
 }
 
 /// 画一页：内容流和它调用的表单里的文字按点阵画；没有文字时画它调用的第一张 JPEG；都没有时这一页失败。
@@ -68,7 +74,14 @@ fn render_page(document: &Document, page: &Page) -> PageFrame {
     };
     let mut text = show_text(&content);
     let mut images = Vec::new();
-    follow_xobjects(document, &content, page.resources.as_ref(), 0, &mut text, &mut images);
+    follow_xobjects(
+        document,
+        &content,
+        page.resources.as_ref(),
+        0,
+        &mut text,
+        &mut images,
+    );
     if !text.trim().is_empty() {
         return paint::paint_text(&text);
     }
@@ -103,11 +116,21 @@ fn stream_text(document: &Document, streams: &[Value]) -> Result<Vec<u8>, String
 }
 
 /// 内容里 `Do` 调用的 XObject：表单把它的文字接到 `text` 后面（再看它自己调用的），DCTDecode 的图片收进 `images`。
-fn follow_xobjects(document: &Document, content: &[u8], resources: Option<&Value>, depth: usize, text: &mut String, images: &mut Vec<Vec<u8>>) {
+fn follow_xobjects(
+    document: &Document,
+    content: &[u8],
+    resources: Option<&Value>,
+    depth: usize,
+    text: &mut String,
+    images: &mut Vec<Vec<u8>>,
+) {
     if depth >= FORM_DEPTH {
         return;
     }
-    let Some(xobjects) = resources.map(|resources| document.resolve(resources)).and_then(|resources| resources.get("XObject")) else {
+    let Some(xobjects) = resources
+        .map(|resources| document.resolve(resources))
+        .and_then(|resources| resources.get("XObject"))
+    else {
         return;
     };
     let xobjects = document.resolve(xobjects).clone();
@@ -115,7 +138,9 @@ fn follow_xobjects(document: &Document, content: &[u8], resources: Option<&Value
         let Some(Value::Ref(number)) = xobjects.get(&name) else {
             continue;
         };
-        let (Some(object), Some((dict, data))) = (document.object(*number), document.stream(*number)) else {
+        let (Some(object), Some((dict, data))) =
+            (document.object(*number), document.stream(*number))
+        else {
             continue;
         };
         let subtype = match object.value.get("Subtype") {
@@ -155,7 +180,9 @@ fn invoked_xobjects(content: &[u8]) -> Vec<String> {
                 if token == b"Do" {
                     names.extend(last_name.take());
                 } else if token == b"ID" {
-                    index = find_keyword(content, b"EI", index).map(|end| end + 2).unwrap_or(content.len());
+                    index = find_keyword(content, b"EI", index)
+                        .map(|end| end + 2)
+                        .unwrap_or(content.len());
                     last_name = None;
                 } else {
                     last_name = None;
@@ -255,7 +282,11 @@ fn find_keyword(bytes: &[u8], keyword: &[u8], from: usize) -> Option<usize> {
 }
 
 fn is_pdf_delim(byte: u8) -> bool {
-    byte.is_ascii_whitespace() || matches!(byte, b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%')
+    byte.is_ascii_whitespace()
+        || matches!(
+            byte,
+            b'(' | b')' | b'<' | b'>' | b'[' | b']' | b'{' | b'}' | b'/' | b'%'
+        )
 }
 
 enum Operand {
@@ -276,7 +307,9 @@ fn show_text(stream: &[u8]) -> String {
         }
         let byte = stream[index];
         if byte == b'(' {
-            let Some(text) = parse_literal(stream, &mut index) else { break };
+            let Some(text) = parse_literal(stream, &mut index) else {
+                break;
+            };
             stack.push(Operand::Str(text));
             continue;
         }
@@ -287,12 +320,16 @@ fn show_text(stream: &[u8]) -> String {
                 }
                 continue;
             }
-            let Some(text) = parse_hex(stream, &mut index) else { break };
+            let Some(text) = parse_hex(stream, &mut index) else {
+                break;
+            };
             stack.push(Operand::Str(text));
             continue;
         }
         if byte == b'[' {
-            let Some(items) = parse_array(stream, &mut index) else { break };
+            let Some(items) = parse_array(stream, &mut index) else {
+                break;
+            };
             stack.push(Operand::Arr(items));
             continue;
         }
@@ -304,7 +341,10 @@ fn show_text(stream: &[u8]) -> String {
             continue;
         }
         if byte == b'+' || byte == b'-' || byte == b'.' || byte.is_ascii_digit() {
-            if parse_number(stream, &mut index).map(|number| stack.push(Operand::Num(number))).is_none() {
+            if parse_number(stream, &mut index)
+                .map(|number| stack.push(Operand::Num(number)))
+                .is_none()
+            {
                 index += 1;
             }
             continue;
@@ -329,7 +369,11 @@ fn apply_operator(operator: &[u8], stack: &[Operand], out: &mut String) {
             if matches!(operator, b"'" | b"\"") && !out.is_empty() && !out.ends_with('\n') {
                 out.push('\n');
             }
-            if let Some(item) = stack.iter().rev().find(|item| matches!(item, Operand::Str(_) | Operand::Arr(_))) {
+            if let Some(item) = stack
+                .iter()
+                .rev()
+                .find(|item| matches!(item, Operand::Str(_) | Operand::Arr(_)))
+            {
                 append_operand(item, out);
             }
         }
@@ -584,21 +628,42 @@ fn pdf_text(bytes: &[u8]) -> String {
             .collect::<Vec<_>>();
         return String::from_utf16_lossy(&units);
     }
-    String::from_utf8(bytes.to_vec()).unwrap_or_else(|_| bytes.iter().map(|byte| char::from(*byte)).collect())
+    String::from_utf8(bytes.to_vec())
+        .unwrap_or_else(|_| bytes.iter().map(|byte| char::from(*byte)).collect())
 }
 
 /// 测试用的最小 PDF：目录（1 号）、页树（2 号），每页一个页对象和一个内容流，内容流字典里另加 `extra`
 /// （比如滤镜），对象按页的顺序编号。
 #[cfg(test)]
 pub(super) fn sample(pages: &[(&str, &[u8])]) -> Vec<u8> {
-    let kids: Vec<String> = (0..pages.len()).map(|index| format!("{} 0 R", 3 + index * 2)).collect();
+    let kids: Vec<String> = (0..pages.len())
+        .map(|index| format!("{} 0 R", 3 + index * 2))
+        .collect();
     let mut pdf = b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n".to_vec();
-    pdf.extend_from_slice(format!("2 0 obj\n<< /Type /Pages /Kids [{}] /Count {} >>\nendobj\n", kids.join(" "), pages.len()).as_bytes());
+    pdf.extend_from_slice(
+        format!(
+            "2 0 obj\n<< /Type /Pages /Kids [{}] /Count {} >>\nendobj\n",
+            kids.join(" "),
+            pages.len()
+        )
+        .as_bytes(),
+    );
     for (index, (extra, data)) in pages.iter().enumerate() {
         let page = 3 + index * 2;
         let contents = page + 1;
-        pdf.extend_from_slice(format!("{page} 0 obj\n<< /Type /Page /Parent 2 0 R /Contents {contents} 0 R >>\nendobj\n").as_bytes());
-        pdf.extend_from_slice(format!("{contents} 0 obj\n<< /Length {} {extra} >>\nstream\n", data.len()).as_bytes());
+        pdf.extend_from_slice(
+            format!(
+                "{page} 0 obj\n<< /Type /Page /Parent 2 0 R /Contents {contents} 0 R >>\nendobj\n"
+            )
+            .as_bytes(),
+        );
+        pdf.extend_from_slice(
+            format!(
+                "{contents} 0 obj\n<< /Length {} {extra} >>\nstream\n",
+                data.len()
+            )
+            .as_bytes(),
+        );
         pdf.extend_from_slice(data);
         pdf.extend_from_slice(b"\nendstream\nendobj\n");
     }

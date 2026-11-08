@@ -10,26 +10,35 @@
 //! `route_files.rs`）；文件对话框和右键菜单在浮层里。外部文件拖放的处理器只发意图消息，当时能不能放、
 //! 放到哪由归约按当时的 ViewModel 决定。
 
-use nana_ui::runtime::view::{node_ref, signal, widget, AnyView, IntoView, NodeRef, Signal};
-use nana_ui::runtime::{AlignSpec, FileDropEvent, LengthSpec, NodeStyle, PositionSpec, RadiusTier, SemanticColorRole, Stack};
+use nana_ui::runtime::view::{AnyView, IntoView, NodeRef, Signal, node_ref, signal, widget};
+use nana_ui::runtime::{
+    AlignSpec, FileDropEvent, LengthSpec, NodeStyle, PositionSpec, RadiusTier, SemanticColorRole,
+    Stack,
+};
 
 use super::hot::HotSignals;
 use super::inspect_metadata_view::MetadataSignals;
 use super::inspect_view::PreviewSignals;
 use super::{ShellMessage, ShellPage, ShellViewModel};
 
-#[path = "files_style.rs"]
-pub(super) mod style;
 #[path = "files_bind.rs"]
 pub(super) mod bind;
-#[path = "files_header.rs"]
-mod header;
 #[path = "files_grid.rs"]
 mod grid;
+#[path = "files_header.rs"]
+mod header;
+#[path = "files_style.rs"]
+pub(super) mod style;
+pub(crate) use grid::load_more_if_sentinel_near;
+pub(crate) use grid::suppress_row_click;
+#[cfg(test)]
+pub(crate) use grid::reset_row_click_state;
 #[path = "files_cards.rs"]
 mod cards;
 #[path = "files_virtual.rs"]
 mod virtual_rows;
+pub(crate) use board::estimated_list_width;
+pub(crate) use virtual_rows::{RowSlot, row_slots};
 #[path = "files_board.rs"]
 mod board;
 #[path = "files_detail.rs"]
@@ -37,6 +46,8 @@ mod detail;
 #[path = "files_menu.rs"]
 mod menu;
 pub(crate) use menu::EntryMenuView;
+#[cfg(test)]
+pub(crate) use menu::open_and_reveal_targets;
 
 use bind::StyleField;
 
@@ -56,7 +67,11 @@ pub(super) fn entry_menu(model: &ShellViewModel) -> Option<AnyView> {
 pub(super) fn entry_menu_card_key(model: &ShellViewModel) -> Option<String> {
     let path = &model.files.entry_menu.as_ref()?.path;
     let ctx = super::files::FileContext::from_model(model);
-    let row = model.files.visible_rows(&ctx).into_iter().find(|row| &row.path == path)?;
+    let row = model
+        .files
+        .visible_rows(&ctx)
+        .into_iter()
+        .find(|row| &row.path == path)?;
     Some(cards::view_key("file-row", &row.key()))
 }
 
@@ -79,8 +94,11 @@ impl ColumnLook {
 }
 
 /// 预览页替换文件列表：已选文件、而且是双击或「预览」打开的（单击只在右侧详情里看）。
-pub(super) fn previewing(model: &ShellViewModel) -> bool {
-    model.page == ShellPage::SelectedFile && model.files.preview_open(model.inspect.target_path.as_deref())
+pub(crate) fn previewing(model: &ShellViewModel) -> bool {
+    model.page == ShellPage::SelectedFile
+        && model
+            .files
+            .preview_open(model.inspect.target_path.as_deref())
 }
 
 /// 文件列里旧视图岛的占位节点，由文件路由登记。
@@ -94,7 +112,10 @@ pub(super) struct ColumnSlots {
 
 impl ColumnSlots {
     pub(super) fn new() -> Self {
-        Self { player: node_ref(), preview_bar: node_ref() }
+        Self {
+            player: node_ref(),
+            preview_bar: node_ref(),
+        }
     }
 }
 
@@ -124,7 +145,8 @@ impl ColumnSignals {
     /// 写入投影，只写变了的。
     pub(super) fn write(&self, model: &ShellViewModel) {
         self.look.try_set_if_changed(ColumnLook::of(model));
-        self.player.try_set_if_changed(model.player_surface_visible());
+        self.player
+            .try_set_if_changed(model.player_surface_visible());
         self.header.write(model);
         self.list.write(model);
         self.detail.write(model);
@@ -148,11 +170,20 @@ pub(super) fn file_column(
         .key("file-workbench");
     let preview_page = widget(fill())
         .visible(move || look.with(|look| look.previewing))
-        .children((super::inspect_view::preview_page(preview, metadata, slots.preview_bar),))
+        .children((super::inspect_view::preview_page(
+            preview,
+            metadata,
+            slots.preview_bar,
+            hot.sweep,
+        ),))
         .key("file-preview-page");
     widget(fill())
         .node_ref(drop)
-        .on_cx(|_, event: &FileDropEvent, cx| cx.dispatch_program_all(file_message(super::files::FilesMessage::HostDrop(event.clone()))))
+        .on_cx(|_, event: &FileDropEvent, cx| {
+            cx.dispatch_program_all(file_message(super::files::FilesMessage::HostDrop(
+                event.clone(),
+            )))
+        })
         .children((workbench, preview_page))
         .key("file-column")
         .into_any()
@@ -160,11 +191,18 @@ pub(super) fn file_column(
 
 /// 铺满父级、可以收窄的一列。
 fn fill() -> Stack {
-    Stack::fill_column(0.0).min_width(LengthSpec::Px(0.0)).min_height(LengthSpec::Px(0.0))
+    Stack::fill_column(0.0)
+        .min_width(LengthSpec::Px(0.0))
+        .min_height(LengthSpec::Px(0.0))
 }
 
 /// `.files-workbench`：文件卡片列和详情卡片列。窄窗口里详情排到下面。
-fn workbench(signals: ColumnSignals, player: NodeRef, metadata: MetadataSignals, hot: HotSignals) -> AnyView {
+fn workbench(
+    signals: ColumnSignals,
+    player: NodeRef,
+    metadata: MetadataSignals,
+    hot: HotSignals,
+) -> AnyView {
     let look = signals.look;
     let shown = signals.player;
     let main = widget(
@@ -176,10 +214,16 @@ fn workbench(signals: ColumnSignals, player: NodeRef, metadata: MetadataSignals,
     .children((
         browser_card(signals, hot),
         // 播放条不随内容伸缩，宽度跟着左列。内容是播放条的旧视图岛。
-        widget(Stack::column(0.0).grow(0.0).shrink(0.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
-            .visible(shown)
-            .node_ref(player)
-            .key("file-player-slot"),
+        widget(
+            Stack::column(0.0)
+                .grow(0.0)
+                .shrink(0.0)
+                .width(LengthSpec::Fill)
+                .min_width(LengthSpec::Px(0.0)),
+        )
+        .visible(shown)
+        .node_ref(player)
+        .key("file-player-slot"),
     ))
     .key("file-workbench-main")
     .into_any();
@@ -197,7 +241,10 @@ fn workbench_style(stacked: bool) -> NodeStyle {
     } else {
         Stack::fill_row(DETAIL_GAP).align(AlignSpec::Stretch)
     };
-    frame.min_width(LengthSpec::Px(0.0)).min_height(LengthSpec::Px(0.0)).node_style()
+    frame
+        .min_width(LengthSpec::Px(0.0))
+        .min_height(LengthSpec::Px(0.0))
+        .node_style()
 }
 
 /// `.files-browser`：抬升底色、`--radius-2xl` 的大卡片。外部文件拖进来时描强调色边。
@@ -209,7 +256,11 @@ fn browser_card(signals: ColumnSignals, hot: HotSignals) -> AnyView {
     let initial = look.get_untracked();
     widget(Stack::column(0.0).style(card_style(initial)))
         .prop::<NodeStyle, StyleField>(move || card_style(look.get()))
-        .children((header::header(signals.header), grid::body(signals.list, hot), drop_hint(look)))
+        .children((
+            header::header(signals.header),
+            grid::body(signals.list, hot),
+            drop_hint(look),
+        ))
         .key("file-browser-card")
         .into_any()
 }
@@ -246,10 +297,20 @@ fn drop_hint(look: Signal<ColumnLook>) -> AnyView {
             layout.pointer_events = Some(nana_ui_core::PointerEventsSpec::None);
         });
     let mut style = frame.node_style();
-    style.interaction.base.background_mix = Some(nana_ui_core::SemanticColorMix::alpha(SemanticColorRole::Surface, 0.78));
+    style.interaction.base.background_mix = Some(nana_ui_core::SemanticColorMix::alpha(
+        SemanticColorRole::Surface,
+        0.78,
+    ));
     widget(frame.style(style))
         .visible(move || look.with(|look| look.dragging))
-        .children((widget(style::text("拖放到此处添加", 14.0, 700, SemanticColorRole::Accent, 21.7)).key("file-drop-hint"),))
+        .children((widget(style::text(
+            "拖放到此处添加",
+            14.0,
+            700,
+            SemanticColorRole::Accent,
+            21.7,
+        ))
+        .key("file-drop-hint"),))
         .key("file-drop-overlay")
         .into_any()
 }

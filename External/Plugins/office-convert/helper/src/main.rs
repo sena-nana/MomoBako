@@ -71,7 +71,9 @@ impl HelperState {
                     Ok(Some(_)) => true,
                     Ok(None) => false,
                     Err(error) => {
-                        return Err(format!("failed to query LibreOffice process state: {error}"));
+                        return Err(format!(
+                            "failed to query LibreOffice process state: {error}"
+                        ));
                     }
                 },
                 None => true,
@@ -83,10 +85,12 @@ impl HelperState {
                 }
                 *guard = Some(spawn_soffice_server(&self.args)?);
             }
-            let pid = soffice_pid(&guard).ok_or_else(|| "LibreOffice process is missing".to_string())?;
+            let pid =
+                soffice_pid(&guard).ok_or_else(|| "LibreOffice process is missing".to_string())?;
             drop(guard);
-            wait_for_soffice_ready()
-                .map_err(|error| format!("LibreOffice helper failed to prepare soffice pid {pid}: {error}"))
+            wait_for_soffice_ready().map_err(|error| {
+                format!("LibreOffice helper failed to prepare soffice pid {pid}: {error}")
+            })
         }
 
         #[cfg(not(target_os = "windows"))]
@@ -313,7 +317,10 @@ fn wait_for_soffice_ready() -> Result<(), String> {
 }
 
 #[cfg(target_os = "windows")]
-fn convert_with_managed_runtime(args: &Args, payload: &ConvertRequest) -> Result<std::process::ExitStatus, String> {
+fn convert_with_managed_runtime(
+    args: &Args,
+    payload: &ConvertRequest,
+) -> Result<std::process::ExitStatus, String> {
     let python_path = libreoffice_python_path(&args.soffice_path)
         .ok_or_else(|| "LibreOffice Python runtime is unavailable".to_string())?;
     let script_path = write_uno_bridge_script()?;
@@ -337,7 +344,10 @@ fn convert_with_managed_runtime(args: &Args, payload: &ConvertRequest) -> Result
 }
 
 #[cfg(target_os = "windows")]
-fn convert_with_cli_fallback(args: &Args, payload: &ConvertRequest) -> Result<std::process::ExitStatus, String> {
+fn convert_with_cli_fallback(
+    args: &Args,
+    payload: &ConvertRequest,
+) -> Result<std::process::ExitStatus, String> {
     Command::new(&args.soffice_path)
         .arg("--headless")
         .arg("--nologo")
@@ -359,7 +369,10 @@ fn libreoffice_python_path(soffice_path: &PathBuf) -> Option<PathBuf> {
     let program_dir = soffice_path.parent()?;
     for candidate in [
         program_dir.join("python.exe"),
-        program_dir.join("python-core-3.11.11").join("bin").join("python.exe"),
+        program_dir
+            .join("python-core-3.11.11")
+            .join("bin")
+            .join("python.exe"),
     ] {
         if candidate.is_file() {
             return Some(candidate);
@@ -558,7 +571,10 @@ mod tests {
     #[test]
     fn windows_named_pipe_name_uses_fixed_helper_channel() {
         #[cfg(target_os = "windows")]
-        assert_eq!(windows_named_pipe_name(), r"\\.\pipe\momobako-office-convert");
+        assert_eq!(
+            windows_named_pipe_name(),
+            r"\\.\pipe\momobako-office-convert"
+        );
 
         #[cfg(not(target_os = "windows"))]
         {
@@ -590,16 +606,31 @@ mod tests {
 
     #[test]
     fn office_family_from_path_supports_word_excel_powerpoint() {
-        assert_eq!(office_family_from_path("C:/repo/demo.docx"), Some(OfficeFamily::Word));
-        assert_eq!(office_family_from_path("C:/repo/demo.xlsx"), Some(OfficeFamily::Spreadsheet));
-        assert_eq!(office_family_from_path("C:/repo/demo.pptx"), Some(OfficeFamily::Presentation));
+        assert_eq!(
+            office_family_from_path("C:/repo/demo.docx"),
+            Some(OfficeFamily::Word)
+        );
+        assert_eq!(
+            office_family_from_path("C:/repo/demo.xlsx"),
+            Some(OfficeFamily::Spreadsheet)
+        );
+        assert_eq!(
+            office_family_from_path("C:/repo/demo.pptx"),
+            Some(OfficeFamily::Presentation)
+        );
         assert_eq!(office_family_from_path("C:/repo/demo.txt"), None);
     }
 
     #[test]
     fn uno_pdf_filter_name_matches_office_family() {
         assert_eq!(uno_pdf_filter_name(OfficeFamily::Word), "writer_pdf_Export");
-        assert_eq!(uno_pdf_filter_name(OfficeFamily::Spreadsheet), "calc_pdf_Export");
-        assert_eq!(uno_pdf_filter_name(OfficeFamily::Presentation), "impress_pdf_Export");
+        assert_eq!(
+            uno_pdf_filter_name(OfficeFamily::Spreadsheet),
+            "calc_pdf_Export"
+        );
+        assert_eq!(
+            uno_pdf_filter_name(OfficeFamily::Presentation),
+            "impress_pdf_Export"
+        );
     }
 }

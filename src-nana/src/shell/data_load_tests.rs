@@ -2,21 +2,24 @@
 //! 再把读取结果送回，看界面要读的状态有没有接上。时机照 Vue 各 composable 读数据的时候。
 
 use crate::backend::services::repository::{
-    ApiDesignSnapshot, CacheConfig, CacheSnapshot, FileBrowserSnapshot, PlaylistPlayerContribution, PlaylistSummary, PluginManifest,
-    RepositoryBackendSummary, RepositoryLocalCacheStatus, RepositoryOverview, RepositorySnapshot, RepositoryStructureCacheState,
-    RepositoryAction, RepositorySummary, SystemLogLocation, SystemLogPage, SystemLogRecord, SystemLogSource,
+    ApiDesignSnapshot, CacheConfig, CacheSnapshot, FileBrowserSnapshot, PlaylistPlayerContribution,
+    PlaylistSummary, PluginManifest, RepositoryAction, RepositoryBackendSummary,
+    RepositoryLocalCacheStatus, RepositoryOverview, RepositorySnapshot,
+    RepositoryStructureCacheState, RepositorySummary, SystemLogLocation, SystemLogPage,
+    SystemLogRecord, SystemLogSource,
 };
-use crate::shell::files::FileDialog;
-use crate::shell::{FilesEffect, FilesMessage, HardlinkPrompt};
 use crate::backend::services::runtime::ExternalApiConnectionStatus;
 use crate::shell::admin::{AdminEffect, AdminMessage, LogsView};
+use crate::shell::files::FileDialog;
 use crate::shell::player::PlayerEffect;
 use crate::shell::route_startup::StartupView;
 use crate::shell::view_part_primary::RouteKey;
 use crate::shell::view_part_sidebar::project::SidebarView;
 use crate::shell::workspace::SettingsWait;
+use crate::shell::{FilesEffect, FilesMessage, HardlinkPrompt};
 use crate::shell::{
-    ShellMessage, ShellPage, ShellViewModel, SidebarEffect, SidebarMessage, StartupStatus, WorkspaceEffect, WorkspacePanel,
+    ShellMessage, ShellPage, ShellViewModel, SidebarEffect, SidebarMessage, StartupStatus,
+    WorkspaceEffect, WorkspacePanel,
 };
 
 const REPO: &str = "repo-a";
@@ -100,21 +103,39 @@ pub(super) fn start(model: &mut ShellViewModel, repo_id: &str) {
 pub(super) fn launch(model: &mut ShellViewModel, repo_id: &str) {
     let generation = model.workspace.prepare_initial_list();
     let steps = [
-        ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(repo_id, "ready")]) },
-        ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) },
-        ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(repo_id)) },
+        ShellMessage::WorkspaceListLoaded {
+            generation,
+            result: Ok(vec![summary(repo_id, "ready")]),
+        },
+        ShellMessage::RepositorySynced {
+            generation,
+            result: Ok(crate::shell::SyncCounts::default()),
+        },
+        ShellMessage::RepositorySnapshotLoaded {
+            generation,
+            result: Ok(snapshot(repo_id)),
+        },
     ];
     let mut early = Vec::new();
     for message in steps {
         model.reduce(message);
         early.extend(model.admin.take_effects());
     }
-    assert!(!early.iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)), "读完首屏目录以前就读了设置包");
+    assert!(
+        !early
+            .iter()
+            .any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)),
+        "读完首屏目录以前就读了设置包"
+    );
     for effect in early {
         model.admin.push_effect(effect);
     }
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser(repo_id))));
-    assert_eq!(model.workspace.startup.status, StartupStatus::Loading, "首屏启动还在等设置包");
+    assert_eq!(
+        model.workspace.startup.status,
+        StartupStatus::Loading,
+        "首屏启动还在等设置包"
+    );
     assert_eq!(model.workspace.startup.settings, SettingsWait::Bundle);
 }
 
@@ -177,8 +198,18 @@ pub(super) fn bundle(plugins: Vec<PluginManifest>) -> ShellMessage {
     ShellMessage::Admin(AdminMessage::SettingsBundleLoaded {
         plugins: Ok(plugins),
         hooks: Ok(Vec::new()),
-        cache: Ok(CacheSnapshot { config: CacheConfig { metadata_capacity: 1, thumbnail_capacity: 1, query_capacity: 1 }, entries: Vec::new() }),
-        api: Ok(ApiDesignSnapshot { transport: "native".into(), endpoints: Vec::new() }),
+        cache: Ok(CacheSnapshot {
+            config: CacheConfig {
+                metadata_capacity: 1,
+                thumbnail_capacity: 1,
+                query_capacity: 1,
+            },
+            entries: Vec::new(),
+        }),
+        api: Ok(ApiDesignSnapshot {
+            transport: "native".into(),
+            endpoints: Vec::new(),
+        }),
         external: Ok(ExternalApiConnectionStatus {
             base_url: "http://127.0.0.1:1".into(),
             token: "token".into(),
@@ -201,18 +232,43 @@ fn startup_waits_for_the_settings_bundle_and_player_types() {
     let mut model = ShellViewModel::default();
     launch(&mut model, REPO);
     let effects = admin_effects(&mut model);
-    assert!(effects.iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)), "读完首屏目录读设置包：{effects:?}");
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)),
+        "读完首屏目录读设置包：{effects:?}"
+    );
     assert!(model.admin.loading_settings);
-    assert_eq!(RouteKey::of(&model), RouteKey::Startup, "设置包回来以前留在启动页");
+    assert_eq!(
+        RouteKey::of(&model),
+        RouteKey::Startup,
+        "设置包回来以前留在启动页"
+    );
     let text = StartupView::project(&model).text;
-    assert_eq!((text.title.as_str(), text.meta.as_str()), ("读取首屏目录", "第 4 / 4 步"));
+    assert_eq!(
+        (text.title.as_str(), text.meta.as_str()),
+        ("读取首屏目录", "第 4 / 4 步")
+    );
     assert_eq!(text.detail, "加载应用配置、插件设置和首屏辅助数据。");
 
-    model.reduce(bundle(vec![plugin("momobako.player.audio", serde_json::json!({}))]));
-    assert!(admin_effects(&mut model).iter().any(|effect| matches!(effect, AdminEffect::LoadPlaylistPlayers)));
-    assert_eq!(RouteKey::of(&model), RouteKey::Startup, "插件列表到了，还等播放器类型");
+    model.reduce(bundle(vec![plugin(
+        "momobako.player.audio",
+        serde_json::json!({}),
+    )]));
+    assert!(
+        admin_effects(&mut model)
+            .iter()
+            .any(|effect| matches!(effect, AdminEffect::LoadPlaylistPlayers))
+    );
+    assert_eq!(
+        RouteKey::of(&model),
+        RouteKey::Startup,
+        "插件列表到了，还等播放器类型"
+    );
 
-    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![audio_player()])));
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(
+        vec![audio_player()],
+    )));
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
     assert_eq!(RouteKey::of(&model), RouteKey::Files);
     let playlists = SidebarView::project(&model).playlists;
@@ -233,7 +289,11 @@ fn a_failed_settings_bundle_still_finishes_the_startup() {
         api: Err("读取插件目录失败".into()),
         external: Err("读取插件目录失败".into()),
     }));
-    assert!(!admin_effects(&mut model).iter().any(|effect| matches!(effect, AdminEffect::LoadPlaylistPlayers)));
+    assert!(
+        !admin_effects(&mut model)
+            .iter()
+            .any(|effect| matches!(effect, AdminEffect::LoadPlaylistPlayers))
+    );
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
     assert_eq!(RouteKey::of(&model), RouteKey::Files);
 }
@@ -247,12 +307,29 @@ fn a_panicking_settings_bundle_task_still_finishes_the_startup() {
     launch(&mut model, REPO);
     admin_effects(&mut model);
     let failed = crate::admin_dispatch::failed_bundle_message;
-    model.reduce(crate::task_guard::tests::run_guarded("设置页数据", failed, || panic!("插件宿主没有响应")));
-    assert!(!admin_effects(&mut model).iter().any(|effect| matches!(effect, AdminEffect::LoadPlaylistPlayers)), "插件列表没换，不读播放器类型");
+    model.reduce(crate::task_guard::tests::run_guarded(
+        "设置页数据",
+        failed,
+        || panic!("插件宿主没有响应"),
+    ));
+    assert!(
+        !admin_effects(&mut model)
+            .iter()
+            .any(|effect| matches!(effect, AdminEffect::LoadPlaylistPlayers)),
+        "插件列表没换，不读播放器类型"
+    );
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
     assert_eq!(RouteKey::of(&model), RouteKey::Files);
-    assert_eq!(model.admin.load_error, "设置页数据任务异常退出：插件宿主没有响应");
-    let last = model.workspace.startup.logs.last().map(|log| log.message.as_str());
+    assert_eq!(
+        model.admin.load_error,
+        "设置页数据任务异常退出：插件宿主没有响应"
+    );
+    let last = model
+        .workspace
+        .startup
+        .logs
+        .last()
+        .map(|log| log.message.as_str());
     assert_eq!(last, Some("首屏启动流程完成。"));
 }
 
@@ -264,10 +341,17 @@ fn a_panicking_player_type_task_still_finishes_the_startup() {
     admin_effects(&mut model);
     model.reduce(bundle(Vec::new()));
     let failed = crate::admin_dispatch::players_failed;
-    model.reduce(crate::task_guard::tests::run_guarded("播放器类型", failed, || panic!("播放器清单解析出错")));
+    model.reduce(crate::task_guard::tests::run_guarded(
+        "播放器类型",
+        failed,
+        || panic!("播放器清单解析出错"),
+    ));
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
     assert_eq!(
-        model.status.failure().map(|failure| failure.message.as_str()),
+        model
+            .status
+            .failure()
+            .map(|failure| failure.message.as_str()),
         Some("无法读取播放器类型：播放器类型任务异常退出：播放器清单解析出错")
     );
 }
@@ -279,9 +363,17 @@ fn a_failed_player_type_read_still_finishes_the_startup() {
     launch(&mut model, REPO);
     admin_effects(&mut model);
     model.reduce(bundle(Vec::new()));
-    model.reduce(ShellMessage::PlaylistPlayersLoaded(Err("插件宿主没有响应".into())));
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Err(
+        "插件宿主没有响应".into()
+    )));
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
-    assert_eq!(model.status.failure().map(|failure| failure.message.as_str()), Some("无法读取播放器类型：插件宿主没有响应"));
+    assert_eq!(
+        model
+            .status
+            .failure()
+            .map(|failure| failure.message.as_str()),
+        Some("无法读取播放器类型：插件宿主没有响应")
+    );
 }
 
 /// 没有资源库的启动也读设置包（添加资源库的来源列表要用插件清单），等它回来才落到空库页。
@@ -289,10 +381,17 @@ fn a_failed_player_type_read_still_finishes_the_startup() {
 fn an_empty_library_still_reads_the_settings_bundle() {
     let mut model = ShellViewModel::default();
     let generation = model.workspace.prepare_initial_list();
-    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(Vec::new()) });
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(Vec::new()),
+    });
     assert_eq!(model.workspace.startup.status, StartupStatus::Loading);
     assert_eq!(RouteKey::of(&model), RouteKey::Startup);
-    assert!(admin_effects(&mut model).iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)));
+    assert!(
+        admin_effects(&mut model)
+            .iter()
+            .any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle))
+    );
     model.reduce(bundle(Vec::new()));
     model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(Vec::new())));
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
@@ -305,15 +404,24 @@ fn an_empty_library_still_reads_the_settings_bundle() {
 fn a_missing_repository_lands_after_the_settings_bundle() {
     let mut model = ShellViewModel::default();
     let generation = model.workspace.prepare_initial_list();
-    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary("gone", "missing")]) });
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(vec![summary("gone", "missing")]),
+    });
     assert_eq!(RouteKey::of(&model), RouteKey::Startup);
     admin_effects(&mut model);
     model.reduce(bundle(Vec::new()));
     model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(Vec::new())));
-    assert_eq!(model.workspace.main_region(), crate::shell::MainRegion::MissingRepository);
+    assert_eq!(
+        model.workspace.main_region(),
+        crate::shell::MainRegion::MissingRepository
+    );
     assert_eq!(RouteKey::of(&model), RouteKey::Missing);
     assert_eq!(model.sidebar.bound_repo_id(), Some("gone"));
-    assert!(SidebarView::project(&model).nav.locked, "缺失仓库锁住侧栏导航");
+    assert!(
+        SidebarView::project(&model).nav.locked,
+        "缺失仓库锁住侧栏导航"
+    );
 }
 
 /// 首屏启动读完首屏目录、只在等设置包的这段，外面来的结构更新照常静默刷新（Vue 读完摘要以后就处理结构更新），
@@ -321,14 +429,20 @@ fn a_missing_repository_lands_after_the_settings_bundle() {
 #[test]
 fn structure_updates_while_waiting_for_settings_refresh_silently() {
     let structure = || {
-        ShellMessage::Host(crate::shell::host_events::HostMessage::StructureUpdated { repo_id: REPO.into(), reason: "watch".into() })
+        ShellMessage::Host(crate::shell::host_events::HostMessage::StructureUpdated {
+            repo_id: REPO.into(),
+            reason: "watch".into(),
+        })
     };
     let silent = |model: &mut ShellViewModel| {
         model.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::LoadSnapshotSilent { repo_id } if repo_id == REPO))
     };
     let mut model = ShellViewModel::default();
     let generation = model.workspace.prepare_initial_list();
-    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(REPO, "ready")]) });
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(vec![summary(REPO, "ready")]),
+    });
     model.reduce(structure());
     assert!(!silent(&mut model), "同步以前的结构更新不管");
 
@@ -337,7 +451,11 @@ fn structure_updates_while_waiting_for_settings_refresh_silently() {
     waiting.workspace.take_effects();
     waiting.reduce(structure());
     assert!(silent(&mut waiting), "等设置包时照常静默刷新");
-    assert_eq!(waiting.workspace.startup.status, StartupStatus::Loading, "还在等设置包");
+    assert_eq!(
+        waiting.workspace.startup.status,
+        StartupStatus::Loading,
+        "还在等设置包"
+    );
 }
 
 /// 插件列表到了（启动、刷新、启停、安装、删除）就重读播放器类型；读回以后侧栏能新建播放集，
@@ -346,20 +464,53 @@ fn structure_updates_while_waiting_for_settings_refresh_silently() {
 fn plugin_lists_lead_to_player_types() {
     let mut model = started(REPO);
     admin_effects(&mut model);
-    model.reduce(bundle(vec![plugin("momobako.player.audio", serde_json::json!({}))]));
+    model.reduce(bundle(vec![plugin(
+        "momobako.player.audio",
+        serde_json::json!({}),
+    )]));
     let effects = admin_effects(&mut model);
-    assert!(matches!(effects.as_slice(), [AdminEffect::LoadPlaylistPlayers]), "插件列表到了应读播放器类型：{effects:?}");
-    assert!(SidebarView::project(&model).playlists.create_locked, "播放器类型读回之前不能新建播放集");
+    assert!(
+        matches!(effects.as_slice(), [AdminEffect::LoadPlaylistPlayers]),
+        "插件列表到了应读播放器类型：{effects:?}"
+    );
+    assert!(
+        SidebarView::project(&model).playlists.create_locked,
+        "播放器类型读回之前不能新建播放集"
+    );
 
-    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![audio_player()])));
-    assert_eq!(model.player.contributions.len(), 1, "播放器认得插件登记的类型");
-    assert_eq!(model.selected_new_playlist_player_type_id.as_deref(), Some("momobako.playlist.audio-sequence"));
-    assert!(!SidebarView::project(&model).playlists.create_locked, "读回播放器类型以后可以新建播放集");
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(
+        vec![audio_player()],
+    )));
+    assert_eq!(
+        model.player.contributions.len(),
+        1,
+        "播放器认得插件登记的类型"
+    );
+    assert_eq!(
+        model.selected_new_playlist_player_type_id.as_deref(),
+        Some("momobako.playlist.audio-sequence")
+    );
+    assert!(
+        !SidebarView::project(&model).playlists.create_locked,
+        "读回播放器类型以后可以新建播放集"
+    );
 
-    model.reduce(ShellMessage::Admin(AdminMessage::PluginsReplaced(Ok(Vec::new()))));
-    assert!(admin_effects(&mut model).iter().any(|effect| matches!(effect, AdminEffect::LoadPlaylistPlayers)), "启停、安装、删除以后也重读");
-    model.reduce(ShellMessage::Admin(AdminMessage::PluginsReplaced(Err("失败".into()))));
-    assert!(admin_effects(&mut model).is_empty(), "插件操作失败时列表没换，不重读");
+    model.reduce(ShellMessage::Admin(AdminMessage::PluginsReplaced(Ok(
+        Vec::new(),
+    ))));
+    assert!(
+        admin_effects(&mut model)
+            .iter()
+            .any(|effect| matches!(effect, AdminEffect::LoadPlaylistPlayers)),
+        "启停、安装、删除以后也重读"
+    );
+    model.reduce(ShellMessage::Admin(AdminMessage::PluginsReplaced(Err(
+        "失败".into(),
+    ))));
+    assert!(
+        admin_effects(&mut model).is_empty(),
+        "插件操作失败时列表没换，不重读"
+    );
 }
 
 /// 侧栏底部的「设置」：进设置页，读设置包和应用设置，和 Vue 设置页挂载时一样。
@@ -370,8 +521,16 @@ fn opening_settings_reads_the_bundle_and_app_settings() {
     model.reduce(ShellMessage::OpenSettings);
     assert_eq!(model.page, ShellPage::Settings);
     let effects = admin_effects(&mut model);
-    assert!(effects.iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)));
-    assert!(effects.iter().any(|effect| matches!(effect, AdminEffect::LoadAppSettings)));
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle))
+    );
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, AdminEffect::LoadAppSettings))
+    );
 }
 
 /// 缺失仓库的「打开来源设置」：照 Vue `/settings?plugin=` 进设置页并展开来源插件的设置，
@@ -382,19 +541,47 @@ fn source_cache_issue_opens_the_source_plugin_settings() {
     let generation = model.workspace.prepare_initial_list();
     let mut remote = summary("remote", "missing");
     remote.backend.plugin_id = "momobako.netease.source".into();
-    remote.local_cache = Some(RepositoryLocalCacheStatus { required: true, path: None, status: "unconfigured".into() });
-    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![remote]) });
-    model.reduce(bundle(vec![plugin("momobako.netease.source", serde_json::json!({}))]));
+    remote.local_cache = Some(RepositoryLocalCacheStatus {
+        required: true,
+        path: None,
+        status: "unconfigured".into(),
+    });
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(vec![remote]),
+    });
+    model.reduce(bundle(vec![plugin(
+        "momobako.netease.source",
+        serde_json::json!({}),
+    )]));
     model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(Vec::new())));
-    assert_eq!(model.workspace.main_region(), crate::shell::MainRegion::MissingRepository);
+    assert_eq!(
+        model.workspace.main_region(),
+        crate::shell::MainRegion::MissingRepository
+    );
     admin_effects(&mut model);
     model.reduce(ShellMessage::MissingOpenSourceSettings);
     assert_eq!(model.page, ShellPage::Settings);
-    assert_eq!(model.admin.active_settings_plugin_id.as_deref(), Some("momobako.netease.source"));
+    assert_eq!(
+        model.admin.active_settings_plugin_id.as_deref(),
+        Some("momobako.netease.source")
+    );
     let effects = admin_effects(&mut model);
-    assert!(effects.iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)));
-    assert!(effects.iter().any(|effect| matches!(effect, AdminEffect::LoadConfig(id) if id == "momobako.netease.source")));
-    assert!(!model.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::RefreshRepositories { .. })));
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle))
+    );
+    assert!(effects.iter().any(
+        |effect| matches!(effect, AdminEffect::LoadConfig(id) if id == "momobako.netease.source")
+    ));
+    assert!(
+        !model
+            .workspace
+            .take_effects()
+            .iter()
+            .any(|effect| matches!(effect, WorkspaceEffect::RefreshRepositories { .. }))
+    );
 }
 
 fn playlist(playlist_id: &str) -> PlaylistSummary {
@@ -414,7 +601,10 @@ fn playlist(playlist_id: &str) -> PlaylistSummary {
 }
 
 fn sidebar_playlists(repo_id: &str, playlists: Vec<PlaylistSummary>) -> ShellMessage {
-    ShellMessage::Sidebar(SidebarMessage::SidebarPlaylistsLoaded { repo_id: repo_id.into(), result: Ok(playlists) })
+    ShellMessage::Sidebar(SidebarMessage::SidebarPlaylistsLoaded {
+        repo_id: repo_id.into(),
+        result: Ok(playlists),
+    })
 }
 
 /// 启动绑定侧栏时读播放集列表；读回的列表同时交给播放器：读成员索引，文件右键有「加入播放列表」。
@@ -424,16 +614,35 @@ fn the_sidebar_playlist_list_reaches_the_player() {
     let mut model = started(REPO);
     let effects = model.sidebar.take_effects();
     assert!(
-        effects.iter().any(|effect| matches!(effect, SidebarEffect::LoadPlaylists { repo_id } if repo_id == REPO)),
+        effects.iter().any(
+            |effect| matches!(effect, SidebarEffect::LoadPlaylists { repo_id } if repo_id == REPO)
+        ),
         "启动后侧栏要读播放集：{effects:?}"
     );
-    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![audio_player()])));
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(
+        vec![audio_player()],
+    )));
     model.reduce(sidebar_playlists(REPO, vec![playlist("pl-1")]));
     assert_eq!(model.sidebar.playlists.len(), 1);
-    assert_eq!(model.player.playlists.len(), 1, "播放器拿到同一份播放集列表");
-    assert!(model.player.take_effects().iter().any(|effect| matches!(effect, PlayerEffect::LoadMemberships { repo_id } if repo_id == REPO)));
-    let actions = model.player.membership_actions("file", "mp3", "asset-1", false);
-    assert_eq!(actions.iter().map(|action| action.label.as_str()).collect::<Vec<_>>(), ["加入 早晨"], "文件右键有加入播放列表");
+    assert_eq!(
+        model.player.playlists.len(),
+        1,
+        "播放器拿到同一份播放集列表"
+    );
+    assert!(model.player.take_effects().iter().any(
+        |effect| matches!(effect, PlayerEffect::LoadMemberships { repo_id } if repo_id == REPO)
+    ));
+    let actions = model
+        .player
+        .membership_actions("file", "mp3", "asset-1", false);
+    assert_eq!(
+        actions
+            .iter()
+            .map(|action| action.label.as_str())
+            .collect::<Vec<_>>(),
+        ["加入 早晨"],
+        "文件右键有加入播放列表"
+    );
 
     model.reduce(sidebar_playlists("repo-old", Vec::new()));
     assert_eq!(model.player.playlists.len(), 1, "别的仓库的旧结果不写");
@@ -445,12 +654,17 @@ fn the_sidebar_playlist_list_reaches_the_player() {
 fn a_created_playlist_is_listed_and_opened() {
     let mut model = started(REPO);
     model.sidebar.take_effects();
-    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![audio_player()])));
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(
+        vec![audio_player()],
+    )));
     model.reduce(ShellMessage::NewPlaylistNameChanged("上次没建完".into()));
     model.reduce(ShellMessage::OpenPlaylistDialog);
     assert!(model.playlist_dialog_open);
     assert!(model.new_playlist_name.is_empty(), "每次打开都清空名称");
-    assert_eq!(model.selected_new_playlist_player_type_id.as_deref(), Some("momobako.playlist.audio-sequence"));
+    assert_eq!(
+        model.selected_new_playlist_player_type_id.as_deref(),
+        Some("momobako.playlist.audio-sequence")
+    );
 
     model.reduce(ShellMessage::NewPlaylistNameChanged("早晨".into()));
     model.reduce(ShellMessage::CreatePlaylist);
@@ -460,24 +674,58 @@ fn a_created_playlist_is_listed_and_opened() {
         .iter()
         .any(|effect| matches!(effect, SidebarEffect::CreatePlaylist { repo_id, name, .. } if repo_id == REPO && name == "早晨")));
     assert!(model.playlist_dialog_open, "创建结果回来以前对话框留着");
-    model.reduce(ShellMessage::PlaylistCreated { repo_id: REPO.into(), result: Ok((vec![playlist("pl-new")], Some("pl-new".into()))) });
-    assert!(!model.playlist_dialog_open && !model.playlist_creating, "创建成功才关");
-    assert_eq!(model.sidebar.playlists.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(), ["pl-new"]);
+    model.reduce(ShellMessage::PlaylistCreated {
+        repo_id: REPO.into(),
+        result: Ok((vec![playlist("pl-new")], Some("pl-new".into()))),
+    });
+    assert!(
+        !model.playlist_dialog_open && !model.playlist_creating,
+        "创建成功才关"
+    );
+    assert_eq!(
+        model
+            .sidebar
+            .playlists
+            .iter()
+            .map(|item| item.id.as_str())
+            .collect::<Vec<_>>(),
+        ["pl-new"]
+    );
     assert_eq!(model.player.playlists.len(), 1);
-    assert_eq!(model.workspace.panel, WorkspacePanel::Playlist, "新建以后点开它");
+    assert_eq!(
+        model.workspace.panel,
+        WorkspacePanel::Playlist,
+        "新建以后点开它"
+    );
     assert!(model
         .sidebar
         .take_effects()
         .iter()
         .any(|effect| matches!(effect, SidebarEffect::LoadPlaylistDetail { playlist_id, .. } if playlist_id == "pl-new")));
 
-    model.reduce(ShellMessage::PlaylistsLoaded { repo_id: REPO.into(), result: Ok(Vec::new()) });
+    model.reduce(ShellMessage::PlaylistsLoaded {
+        repo_id: REPO.into(),
+        result: Ok(Vec::new()),
+    });
     assert!(model.sidebar.playlists.is_empty());
     assert!(model.sidebar.active_playlist_id.is_none());
-    assert_eq!(model.workspace.panel, WorkspacePanel::Files, "点开的播放集删掉以后回到文件面板");
+    assert_eq!(
+        model.workspace.panel,
+        WorkspacePanel::Files,
+        "点开的播放集删掉以后回到文件面板"
+    );
 
-    model.reduce(ShellMessage::PlaylistsLoaded { repo_id: REPO.into(), result: Err("磁盘已满".into()) });
-    assert_eq!(model.status.failure().map(|failure| failure.message.as_str()), Some("播放集操作失败：磁盘已满"));
+    model.reduce(ShellMessage::PlaylistsLoaded {
+        repo_id: REPO.into(),
+        result: Err("磁盘已满".into()),
+    });
+    assert_eq!(
+        model
+            .status
+            .failure()
+            .map(|failure| failure.message.as_str()),
+        Some("播放集操作失败：磁盘已满")
+    );
 }
 
 /// 新建播放集失败：对话框留着，原因写在对话框里，不进状态区；处理中点取消、遮罩或 Escape 都不关，
@@ -486,38 +734,61 @@ fn a_created_playlist_is_listed_and_opened() {
 fn a_failed_playlist_creation_keeps_the_dialog_with_the_error() {
     use crate::shell::view_part_overlay::OverlayKey;
     let mut model = started(REPO);
-    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![audio_player()])));
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(
+        vec![audio_player()],
+    )));
     model.reduce(ShellMessage::OpenPlaylistDialog);
     model.reduce(ShellMessage::NewPlaylistNameChanged("早晨".into()));
     model.reduce(ShellMessage::CreatePlaylist);
     model.sidebar.take_effects();
 
     model.reduce(ShellMessage::ClosePlaylistDialog);
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::Gap(crate::shell::GapMessage::Escape)));
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::Gap(
+        crate::shell::GapMessage::Escape,
+    )));
     assert!(model.playlist_dialog_open, "处理中不能关");
     model.reduce(ShellMessage::CreatePlaylist);
     assert!(model.sidebar.take_effects().is_empty(), "处理中不重复提交");
 
-    model.reduce(ShellMessage::PlaylistCreated { repo_id: REPO.into(), result: Err("磁盘已满".into()) });
-    assert!(model.playlist_dialog_open && !model.playlist_creating, "失败时对话框留着");
+    model.reduce(ShellMessage::PlaylistCreated {
+        repo_id: REPO.into(),
+        result: Err("磁盘已满".into()),
+    });
+    assert!(
+        model.playlist_dialog_open && !model.playlist_creating,
+        "失败时对话框留着"
+    );
     assert_eq!(model.playlist_dialog_error, "磁盘已满");
-    assert!(model.status.failure().is_none(), "失败写在对话框里，不进状态区");
+    assert!(
+        model.status.failure().is_none(),
+        "失败写在对话框里，不进状态区"
+    );
     assert_eq!(OverlayKey::of(&model), Some(OverlayKey::PlaylistCreate));
 
     model.reduce(ShellMessage::CreatePlaylist);
-    assert!(model.playlist_dialog_error.is_empty(), "再次提交时清掉上一次的原因");
-    model.reduce(ShellMessage::PlaylistCreated { repo_id: REPO.into(), result: Err("磁盘已满".into()) });
+    assert!(
+        model.playlist_dialog_error.is_empty(),
+        "再次提交时清掉上一次的原因"
+    );
+    model.reduce(ShellMessage::PlaylistCreated {
+        repo_id: REPO.into(),
+        result: Err("磁盘已满".into()),
+    });
     model.reduce(ShellMessage::ClosePlaylistDialog);
     assert!(!model.playlist_dialog_open, "失败以后可以取消");
     model.reduce(ShellMessage::OpenPlaylistDialog);
-    assert!(model.playlist_dialog_error.is_empty(), "重新打开时不带上一次的原因");
+    assert!(
+        model.playlist_dialog_error.is_empty(),
+        "重新打开时不带上一次的原因"
+    );
 }
 
 /// 启动时恢复存下的播放会话：播放集列表和播放器类型都读回以后才读它的详情。首屏启动在等播放器类型，
 /// 侧栏的播放集列表先到也不读详情；播放器类型回来时启动结束、读存下的播放集详情。
 #[test]
 fn startup_restores_the_stored_session_after_players_arrive() {
-    let dir = std::env::temp_dir().join(format!("momobako-data-load-restore-{}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("momobako-data-load-restore-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("临时目录");
     let sessions = dir.join("sessions.json");
     let stored = serde_json::json!({
@@ -535,17 +806,39 @@ fn startup_restores_the_stored_session_after_players_arrive() {
     });
     std::fs::write(&sessions, stored.to_string()).expect("写会话");
     let mut model = ShellViewModel::default();
-    model.player.load_files(&dir.join("missing-settings.json"), &sessions, &dir.join("missing-prefs.json"));
+    model.player.load_files(
+        &dir.join("missing-settings.json"),
+        &sessions,
+        &dir.join("missing-prefs.json"),
+    );
     launch(&mut model, REPO);
-    model.reduce(bundle(vec![plugin("momobako.player.audio", serde_json::json!({}))]));
+    model.reduce(bundle(vec![plugin(
+        "momobako.player.audio",
+        serde_json::json!({}),
+    )]));
     model.reduce(sidebar_playlists(REPO, vec![playlist("pl-1")]));
     let restores = |model: &mut ShellViewModel| {
-        model.player.take_effects().into_iter().filter(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. })).count()
+        model
+            .player
+            .take_effects()
+            .into_iter()
+            .filter(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. }))
+            .count()
     };
     assert_eq!(restores(&mut model), 0, "插件类型的播放器还没读回");
-    assert_eq!(model.workspace.startup.status, StartupStatus::Loading, "首屏启动在等播放器类型");
-    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(vec![audio_player()])));
-    assert_eq!(restores(&mut model), 1, "播放器类型读回以后读存下的播放集详情");
+    assert_eq!(
+        model.workspace.startup.status,
+        StartupStatus::Loading,
+        "首屏启动在等播放器类型"
+    );
+    model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(
+        vec![audio_player()],
+    )));
+    assert_eq!(
+        restores(&mut model),
+        1,
+        "播放器类型读回以后读存下的播放集详情"
+    );
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -558,7 +851,12 @@ fn log_record(id: &str, timestamp: &str) -> SystemLogRecord {
         category: "repository".into(),
         action: "sync".into(),
         message: format!("日志 {id}"),
-        source: SystemLogSource { kind: "host".into(), label: None, plugin_id: None, repo_id: None },
+        source: SystemLogSource {
+            kind: "host".into(),
+            label: None,
+            plugin_id: None,
+            repo_id: None,
+        },
         location: SystemLogLocation::default(),
         context: serde_json::json!({}),
     }
@@ -571,7 +869,13 @@ fn opening_the_logs_panel_reads_history() {
     let mut model = started(REPO);
     admin_effects(&mut model);
     model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs));
-    assert!(matches!(admin_effects(&mut model).as_slice(), [AdminEffect::LoadLogs]), "切到日志面板应读历史日志");
+    assert!(
+        matches!(
+            admin_effects(&mut model).as_slice(),
+            [AdminEffect::LoadLogs]
+        ),
+        "切到日志面板应读历史日志"
+    );
     let view = LogsView::project(&model);
     assert!(view.loading, "读的时候写正在加载");
     assert!(view.empty.is_none(), "读的时候不写空状态");
@@ -581,16 +885,36 @@ fn opening_the_logs_panel_reads_history() {
         log_record("log-3", "2026-10-08T07:53:00Z"),
         log_record("log-2", "2026-10-08T07:53:00Z"),
     ];
-    model.reduce(ShellMessage::LogsLoaded(Ok(SystemLogPage { records, next_cursor: None })));
-    assert_eq!(model.admin.logs.iter().map(|record| record.id.as_str()).collect::<Vec<_>>(), ["log-3", "log-2", "log-1"]);
+    model.reduce(ShellMessage::LogsLoaded(Ok(SystemLogPage {
+        records,
+        next_cursor: None,
+    })));
+    assert_eq!(
+        model
+            .admin
+            .logs
+            .iter()
+            .map(|record| record.id.as_str())
+            .collect::<Vec<_>>(),
+        ["log-3", "log-2", "log-1"]
+    );
     let view = LogsView::project(&model);
     assert!(!view.loading);
     assert_eq!(view.rows.len(), 3);
 
     model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Files));
     model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs));
-    assert!(matches!(admin_effects(&mut model).as_slice(), [AdminEffect::LoadLogs]), "再切回来再读一次");
-    assert!(!LogsView::project(&model).loading, "手上已经有日志时不挡住列表");
+    assert!(
+        matches!(
+            admin_effects(&mut model).as_slice(),
+            [AdminEffect::LoadLogs]
+        ),
+        "再切回来再读一次"
+    );
+    assert!(
+        !LogsView::project(&model).loading,
+        "手上已经有日志时不挡住列表"
+    );
     model.reduce(ShellMessage::LogsLoaded(Err("拒绝访问".into())));
     assert!(!model.admin.logs_loading);
     assert_eq!(model.admin.logs.len(), 3, "读失败保留手上的日志");
@@ -603,27 +927,56 @@ fn clearing_logs_empties_the_list_without_reading_again() {
     let mut model = started(REPO);
     model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs));
     admin_effects(&mut model);
-    let records = vec![log_record("log-1", "2026-10-08T07:51:00Z"), log_record("log-2", "2026-10-08T07:52:00Z")];
-    model.reduce(ShellMessage::LogsLoaded(Ok(SystemLogPage { records, next_cursor: None })));
-    assert!(!LogsView::project(&model).toolbar.clear_disabled, "有日志时可以清空");
+    let records = vec![
+        log_record("log-1", "2026-10-08T07:51:00Z"),
+        log_record("log-2", "2026-10-08T07:52:00Z"),
+    ];
+    model.reduce(ShellMessage::LogsLoaded(Ok(SystemLogPage {
+        records,
+        next_cursor: None,
+    })));
+    assert!(
+        !LogsView::project(&model).toolbar.clear_disabled,
+        "有日志时可以清空"
+    );
 
     model.reduce(ShellMessage::ClearLogs);
-    assert!(matches!(admin_effects(&mut model).as_slice(), [AdminEffect::ClearLogs]), "只排下清空，不排读取");
+    assert!(
+        matches!(
+            admin_effects(&mut model).as_slice(),
+            [AdminEffect::ClearLogs]
+        ),
+        "只排下清空，不排读取"
+    );
     let toolbar = LogsView::project(&model).toolbar;
-    assert!(toolbar.clear_disabled && toolbar.clearing, "清空中按钮禁用、换成加载图标");
+    assert!(
+        toolbar.clear_disabled && toolbar.clearing,
+        "清空中按钮禁用、换成加载图标"
+    );
     model.reduce(ShellMessage::ClearLogs);
     assert!(admin_effects(&mut model).is_empty(), "清空中再点不重复清空");
 
-    model.reduce(ShellMessage::Admin(AdminMessage::LogsCleared(Err("拒绝访问".into()))));
+    model.reduce(ShellMessage::Admin(AdminMessage::LogsCleared(Err(
+        "拒绝访问".into(),
+    ))));
     assert_eq!(model.admin.logs.len(), 2, "清空失败保留手上的日志");
-    assert_eq!(model.status.failure().map(|failure| failure.message.as_str()), Some("清空系统日志失败：拒绝访问"));
+    assert_eq!(
+        model
+            .status
+            .failure()
+            .map(|failure| failure.message.as_str()),
+        Some("清空系统日志失败：拒绝访问")
+    );
     assert!(!LogsView::project(&model).toolbar.clearing);
 
     model.reduce(ShellMessage::ClearLogs);
     admin_effects(&mut model);
     model.reduce(ShellMessage::Admin(AdminMessage::LogsCleared(Ok(()))));
     assert!(model.admin.logs.is_empty(), "清空成功直接清掉列表");
-    assert!(admin_effects(&mut model).is_empty(), "清空成功不再读历史日志");
+    assert!(
+        admin_effects(&mut model).is_empty(),
+        "清空成功不再读历史日志"
+    );
     let view = LogsView::project(&model);
     assert!(view.toolbar.clear_disabled, "没有日志时不能再清空");
     assert_eq!(view.empty.map(|(title, _)| title), Some("还没有系统日志"));
@@ -650,8 +1003,15 @@ fn running_tasks_feed_the_popover_and_the_footer_count() {
     model.reduce(ShellMessage::TaskProgressLoaded(vec![task.clone()]));
     let rows = model.task_rows();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0].label, "复制文件", "没有标题时按协议写，不写泛泛的「进度」，也不露协议 id");
-    assert_eq!(SidebarView::project(&model).footer.tasks, 1, "计数是弹层的行数");
+    assert_eq!(
+        rows[0].label, "复制文件",
+        "没有标题时按协议写，不写泛泛的「进度」，也不露协议 id"
+    );
+    assert_eq!(
+        SidebarView::project(&model).footer.tasks,
+        1,
+        "计数是弹层的行数"
+    );
 
     // 后更新的任务排在前面：快照的更新时间是 RFC 3339，按毫秒比。
     let later = crate::backend::services::repository::TaskProgressSnapshot {
@@ -661,17 +1021,37 @@ fn running_tasks_feed_the_popover_and_the_footer_count() {
         ..task.clone()
     };
     model.reduce(ShellMessage::TaskProgressLoaded(vec![task, later]));
-    let labels = model.task_rows().into_iter().map(|row| row.label).collect::<Vec<_>>();
+    let labels = model
+        .task_rows()
+        .into_iter()
+        .map(|row| row.label)
+        .collect::<Vec<_>>();
     assert_eq!(labels, ["同步资源库", "复制文件"], "任务自己报了标题就用它");
-    model.reduce(ShellMessage::TaskProgressLoaded(model.task_progress[..1].to_vec()));
+    model.reduce(ShellMessage::TaskProgressLoaded(
+        model.task_progress[..1].to_vec(),
+    ));
 
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::SidebarTreeLoaded { repo_id: REPO.into(), result: Ok(Default::default()) }));
+    model.reduce(ShellMessage::Sidebar(SidebarMessage::SidebarTreeLoaded {
+        repo_id: REPO.into(),
+        result: Ok(Default::default()),
+    }));
     model.reduce(ShellMessage::Sidebar(SidebarMessage::RefreshFolderTree));
-    assert!(model.operation.shown().is_some(), "刷新文件夹树是一行仓库操作");
-    assert_eq!(SidebarView::project(&model).footer.tasks, 2, "仓库操作也算一行");
+    assert!(
+        model.operation.shown().is_some(),
+        "刷新文件夹树是一行仓库操作"
+    );
+    assert_eq!(
+        SidebarView::project(&model).footer.tasks,
+        2,
+        "仓库操作也算一行"
+    );
 
     model.reduce(ShellMessage::TaskProgressLoaded(Vec::new()));
-    assert_eq!(SidebarView::project(&model).footer.tasks, 1, "任务结束后只剩仓库操作");
+    assert_eq!(
+        SidebarView::project(&model).footer.tasks,
+        1,
+        "任务结束后只剩仓库操作"
+    );
 }
 
 fn repository_action(action_id: &str) -> RepositoryAction {
@@ -700,7 +1080,12 @@ fn repository_action(action_id: &str) -> RepositoryAction {
 fn binding_a_repository_reads_actions_and_hardlinks() {
     let mut model = started(REPO);
     let admin = admin_effects(&mut model);
-    assert!(admin.iter().any(|effect| matches!(effect, AdminEffect::LoadActions { repo_id } if repo_id == REPO)), "绑定仓库要读动作：{admin:?}");
+    assert!(
+        admin.iter().any(
+            |effect| matches!(effect, AdminEffect::LoadActions { repo_id } if repo_id == REPO)
+        ),
+        "绑定仓库要读动作：{admin:?}"
+    );
     let files = model.files.take_effects();
     let epoch = files
         .iter()
@@ -711,16 +1096,42 @@ fn binding_a_repository_reads_actions_and_hardlinks() {
         .expect("绑定仓库要查硬链接候选");
 
     assert_eq!(SidebarView::project(&model).nav.actions, 0);
-    model.reduce(ShellMessage::Admin(AdminMessage::ActionsLoaded { repo_id: REPO.into(), result: Ok(vec![repository_action("act-1")]) }));
-    assert_eq!(SidebarView::project(&model).nav.actions, 1, "读回动作后侧栏有「动作」入口");
+    model.reduce(ShellMessage::Admin(AdminMessage::ActionsLoaded {
+        repo_id: REPO.into(),
+        result: Ok(vec![repository_action("act-1")]),
+    }));
+    assert_eq!(
+        SidebarView::project(&model).nav.actions,
+        1,
+        "读回动作后侧栏有「动作」入口"
+    );
 
-    model.reduce(ShellMessage::Files(FilesMessage::HardlinksChecked { epoch, result: Err("索引被占用".into()) }));
+    model.reduce(ShellMessage::Files(FilesMessage::HardlinksChecked {
+        epoch,
+        result: Err("索引被占用".into()),
+    }));
     assert!(model.files.error.is_empty(), "后台读取失败不写进文件列表");
-    let prompt = HardlinkPrompt { id: "c-1".into(), new_path: "b.png".into(), existing_path: "a.png".into(), size_label: "1 KB".into() };
-    model.reduce(ShellMessage::Files(FilesMessage::HardlinksChecked { epoch, result: Ok(vec![prompt]) }));
+    let prompt = HardlinkPrompt {
+        id: "c-1".into(),
+        new_path: "b.png".into(),
+        existing_path: "a.png".into(),
+        size_label: "1 KB".into(),
+    };
+    model.reduce(ShellMessage::Files(FilesMessage::HardlinksChecked {
+        epoch,
+        result: Ok(vec![prompt]),
+    }));
     assert_eq!(model.files.dialog, FileDialog::Hardlink, "有候选就弹出确认");
 
     let generation = model.workspace.list_generation;
-    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(REPO)) });
-    assert!(!admin_effects(&mut model).iter().any(|effect| matches!(effect, AdminEffect::LoadActions { .. })), "同一个仓库的摘要不重读动作");
+    model.reduce(ShellMessage::RepositorySnapshotLoaded {
+        generation,
+        result: Ok(snapshot(REPO)),
+    });
+    assert!(
+        !admin_effects(&mut model)
+            .iter()
+            .any(|effect| matches!(effect, AdminEffect::LoadActions { .. })),
+        "同一个仓库的摘要不重读动作"
+    );
 }

@@ -5,11 +5,14 @@
 //! 页面上点开的那张受影响时跟着刷新。
 
 use super::super::files::repository_is_writable;
-use super::super::{ShellMessage, ShellViewModel};
+use super::super::{ShellMessage, ShellPage, ShellViewModel};
 use super::{PlayerEffect, PlayerMessage};
 
 /// 处理播放条消息，并记下随后到达的播放列表结果。
-pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) -> Option<ShellMessage> {
+pub(crate) fn reduce_message(
+    model: &mut ShellViewModel,
+    message: ShellMessage,
+) -> Option<ShellMessage> {
     match message {
         ShellMessage::Player(message) => {
             let next = reduce_player(model, message);
@@ -21,12 +24,25 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
             Some(ShellMessage::PlaylistPlayersLoaded(Ok(players)))
         }
         ShellMessage::PlaylistDetailLoaded(Ok(detail)) => {
-            let stale = model.sidebar.bound_repo_id().is_some_and(|repo_id| repo_id != detail.playlist.repo_id);
-            if !stale {
-                model.player.note_detail(&detail);
-                if model.sidebar.take_pending_play(&detail.playlist.playlist_id) {
-                    model.player.play_listed(None, &mut model.inspect);
+            let stale = model
+                .sidebar
+                .bound_repo_id()
+                .is_some_and(|repo_id| repo_id != detail.playlist.repo_id);
+            if stale {
+                return Some(ShellMessage::PlaylistDetailLoaded(Ok(detail)));
+            }
+            if model
+                .sidebar
+                .take_pending_play(&detail.playlist.playlist_id)
+            {
+                // 侧栏「播放」只改播放条。不是正在看的那张时，不把选中的播放集和条目编号换成这一张。
+                let same_page = model.player.play_sidebar(&detail, &mut model.inspect);
+                model.player.publish(&mut model.inspect);
+                if !same_page {
+                    return None;
                 }
+            } else {
+                model.player.note_detail(&detail);
                 model.player.publish(&mut model.inspect);
             }
             Some(ShellMessage::PlaylistDetailLoaded(Ok(detail)))
@@ -38,7 +54,37 @@ pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) 
 /// 按路径加入（目录、虚拟条目）的结果。成功以后重读播放集列表和成员索引；页面上点开的正是加入的那张时，和读回
 /// 详情一样换上它（条目、项数、排序用的编号），返回读回详情的消息交给壳层接着归约；不是它时不动页面上点开的那张
 /// （Vue 会把页面换成加入的那张，不照抄）。
-fn paths_added(model: &mut ShellViewModel, result: Result<crate::backend::services::repository::PlaylistDetail, String>) -> Option<ShellMessage> {
+/// 播放集页移除或排序的结果。
+///
+/// 照 Vue `removePlaylistItemInWorkspace` / `reorderPlaylistItemsInWorkspace`：先换上交回的详情，
+/// 再 `refreshPlaylists` 重读播放集列表（侧栏项数）和成员索引。不另读这一张的详情，条目用这次交回的。
+/// 别的仓库的结果不写、不重读。失败和点开详情失败一样写进状态区。
+fn items_changed(
+    model: &mut ShellViewModel,
+    result: Result<crate::backend::services::repository::PlaylistDetail, String>,
+) -> Option<ShellMessage> {
+    let detail = match result {
+        Ok(detail) => detail,
+        Err(error) => return Some(ShellMessage::PlaylistDetailLoaded(Err(error))),
+    };
+    if model
+        .sidebar
+        .bound_repo_id()
+        .is_some_and(|repo_id| repo_id != detail.playlist.repo_id)
+    {
+        eprintln!("Nana 忽略过期的播放集修改：{}", detail.playlist.playlist_id);
+        return None;
+    }
+    model.player.note_detail(&detail);
+    model.player.publish(&mut model.inspect);
+    model.sidebar.reload_playlists(None);
+    Some(ShellMessage::PlaylistDetailLoaded(Ok(detail)))
+}
+
+fn paths_added(
+    model: &mut ShellViewModel,
+    result: Result<crate::backend::services::repository::PlaylistDetail, String>,
+) -> Option<ShellMessage> {
     let detail = model.player.note_paths_added(result)?;
     model.sidebar.reload_playlists(None);
     if model.player.lists(&detail.playlist.playlist_id) {
@@ -49,22 +95,41 @@ fn paths_added(model: &mut ShellViewModel, result: Result<crate::backend::servic
 
 /// 归约一条播放消息。返回值是还要交给壳层接着归约的消息，只有按路径加入了点开的那张时才有。
 fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) -> Option<ShellMessage> {
-    let writable = model.workspace.active_repository().is_some_and(|repository| repository_is_writable(&repository.status, &repository.capabilities));
+    let writable = model
+        .workspace
+        .active_repository()
+        .is_some_and(|repository| {
+            repository_is_writable(&repository.status, &repository.capabilities)
+        });
     let repo_id = model.workspace.active_repo_id.clone();
     let playlist_id = model.selected_playlist_id.clone();
     let item_ids = model.playlist_item_ids.clone();
     match message {
         PlayerMessage::SetCandidates(candidates) => model.player.candidates = candidates,
-        PlayerMessage::SetPreference { capability_id, plugin_id } => model.player.set_preference(capability_id, plugin_id),
-        PlayerMessage::PlayListed { item_id } => model.player.play_listed(item_id, &mut model.inspect),
+        PlayerMessage::SetPreference {
+            capability_id,
+            plugin_id,
+        } => model.player.set_preference(capability_id, plugin_id),
+        PlayerMessage::PlayListed { item_id } => {
+            model.player.play_listed(item_id, &mut model.inspect)
+        }
         PlayerMessage::PlayItem { item_id } => {
             model.player.play_item(&item_id, true);
             model.player.publish(&mut model.inspect);
         }
-        PlayerMessage::PlayNext { natural_end } => model.player.play_next(natural_end, &mut model.inspect),
+        PlayerMessage::PlayNext { natural_end } => {
+            model.player.play_next(natural_end, &mut model.inspect)
+        }
         PlayerMessage::PlayPrevious => model.player.play_previous(&mut model.inspect),
         PlayerMessage::CycleMode => model.player.cycle_mode(),
-        PlayerMessage::SetPlaying(playing) => model.player.set_playing(playing, &mut model.inspect),
+        PlayerMessage::SetPlaying(playing) => {
+            let was_playing = model.player.session.status == "playing";
+            let clip = super::super::listening_progress::playing_clip(&model.player);
+            model.player.set_playing(playing, &mut model.inspect);
+            if was_playing && !playing {
+                super::super::listening_progress::on_pause(model, clip);
+            }
+        }
         PlayerMessage::Seek(position) => model.player.seek(position, &mut model.inspect),
         PlayerMessage::SetVolume(volume) => model.player.set_volume(volume, &mut model.inspect),
         PlayerMessage::SetImageDuration(value) => model.player.set_image_duration(value),
@@ -79,39 +144,104 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) -> Option<S
                 model.player.bar_width = width;
             }
         }
-        PlayerMessage::Stop { repo_id, clear_stored } => model.player.stop_for(repo_id, clear_stored, &mut model.inspect),
-        PlayerMessage::ToggleMembership { playlist_id, kind, extension, asset_id, is_virtual, path } => {
-            model.player.toggle_membership(&playlist_id, &kind, &extension, &asset_id, is_virtual, &path, writable, repo_id.as_deref());
+        PlayerMessage::Stop {
+            repo_id,
+            clear_stored,
+        } => model
+            .player
+            .stop_for(repo_id, clear_stored, &mut model.inspect),
+        PlayerMessage::ToggleMembership {
+            playlist_id,
+            kind,
+            extension,
+            asset_id,
+            is_virtual,
+            path,
+        } => {
+            model.player.toggle_membership(
+                &playlist_id,
+                &kind,
+                &extension,
+                &asset_id,
+                is_virtual,
+                &path,
+                writable,
+                repo_id.as_deref(),
+            );
         }
         PlayerMessage::MembershipsLoaded { repo_id, result } => {
-            model.player.note_memberships(&repo_id, result, model.workspace.active_repo_id.as_deref());
+            model.player.note_memberships(
+                &repo_id,
+                result,
+                model.workspace.active_repo_id.as_deref(),
+            );
         }
         PlayerMessage::MembershipSaved(result) => {
             let saved = result.is_ok();
             let changed = model.player.note_membership_saved(result);
             if saved {
                 // 点开的那张加入或移出了条目时连它的详情一起重读，页面条目和项数跟着变；Vue 只换页眉的摘要，条目不变。
-                let listed = model.player.listed.as_ref().map(|detail| detail.playlist.playlist_id.clone());
-                model.sidebar.reload_playlists(listed.filter(|id| changed.contains(id)));
+                let listed = model
+                    .player
+                    .listed
+                    .as_ref()
+                    .map(|detail| detail.playlist.playlist_id.clone());
+                model
+                    .sidebar
+                    .reload_playlists(listed.filter(|id| changed.contains(id)));
             }
         }
         PlayerMessage::PathsAdded(result) => return paths_added(model, result),
+        PlayerMessage::ItemsChanged(result) => return items_changed(model, result),
         PlayerMessage::Reorder { source, before } => {
-            model.player.reorder(&source, before.as_deref(), playlist_id.as_deref(), &item_ids, writable, repo_id.as_deref());
+            model.player.reorder(
+                &source,
+                before.as_deref(),
+                playlist_id.as_deref(),
+                &item_ids,
+                writable,
+                repo_id.as_deref(),
+            );
         }
         PlayerMessage::OpenPreview { item_id } => {
-            model.player.open_preview(
+            // Vue `openPlaylistItemPreview` / `openCurrentPlayerPreview`：`setPreviewFilePath` 立刻换上预览页，
+            // 不等 `selectAsset` 回来。单击选中的同一条也要打开，不能把随后的详情当成「只在右侧看」。
+            if model.player.open_preview(
                 item_id.as_deref(),
                 &mut model.workspace.panel,
                 &mut model.workspace.library_category,
                 &mut model.selected_path,
                 &mut model.inspect,
-            );
+            ) {
+                let path = model.inspect.target_path.clone().unwrap_or_default();
+                model.files.reveal_explicit_preview(&path);
+                model.page = ShellPage::SelectedFile;
+                // 播放集打开预览不等详情。列表里有这条用列表，否则只用播放集上的扩展名。
+                super::super::inspect_view::seed_preview_facts(model, &path);
+            }
         }
-        PlayerMessage::ItemLoaded { item_id, generation, still, result, prep } => {
+        PlayerMessage::ItemLoaded {
+            item_id,
+            generation,
+            still,
+            result,
+            prep,
+        } => {
             let loaded = result.is_ok();
-            let local = model.player.queue.iter().find(|item| item.id == item_id && !item.is_virtual).map(|item| item.path.clone());
-            let applied = super::clip::finish_load(&mut model.player, &item_id, generation, still, result, prep.retryable);
+            let local = model
+                .player
+                .queue
+                .iter()
+                .find(|item| item.id == item_id && !item.is_virtual)
+                .map(|item| item.path.clone());
+            let applied = super::clip::finish_load(
+                &mut model.player,
+                &item_id,
+                generation,
+                still,
+                result,
+                prep.retryable,
+            );
             // 访问记录照 Vue：在线条目的播放源准备好时后端已经写下，当场改「最近使用」；本地文件直接读的字节，
             // 装上了才补一次访问记录。
             if let Some(access) = &prep.accessed {
@@ -121,6 +251,7 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) -> Option<S
                 model.request_entry_access(&repo_id, &path);
             }
             model.player.publish(&mut model.inspect);
+            super::super::listening_progress::on_duration(model);
         }
         PlayerMessage::RestoreDetail(Ok(detail)) => {
             model.player.note_detail(&detail);
@@ -128,7 +259,12 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) -> Option<S
         }
         PlayerMessage::RestoreDetail(Err(error)) => {
             eprintln!("Nana 恢复播放会话时读取播放列表失败：{error}");
-            if let Some(repo_id) = model.player.repo_id.clone().or(model.workspace.active_repo_id.clone()) {
+            if let Some(repo_id) = model
+                .player
+                .repo_id
+                .clone()
+                .or(model.workspace.active_repo_id.clone())
+            {
                 model.player.clear_stored(&repo_id);
             }
             model.player.restore_playlist_id = None;

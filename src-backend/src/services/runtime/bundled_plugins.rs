@@ -136,9 +136,8 @@ fn replace_file(source: &Path, target: &Path) -> Result<(), String> {
     let mut temporary = target.as_os_str().to_owned();
     temporary.push(".new");
     let temporary = PathBuf::from(temporary);
-    fs::copy(source, &temporary).map_err(|error| {
-        format!("复制随附插件 {} 失败：{error}", source.display())
-    })?;
+    fs::copy(source, &temporary)
+        .map_err(|error| format!("复制随附插件 {} 失败：{error}", source.display()))?;
     if target.exists() {
         if let Err(error) = fs::remove_file(target) {
             let _ = fs::remove_file(&temporary);

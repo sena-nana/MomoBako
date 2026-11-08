@@ -17,20 +17,24 @@
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{LOADER_2, X};
-use nana_ui::runtime::view::{entity_ref, fields, signal, widget, AnyView, El, EntityRef, FieldWrite, IntoProp, IntoView, Signal};
+use nana_ui::runtime::view::{
+    AnyView, El, EntityRef, FieldWrite, IntoProp, IntoView, Signal, entity_ref, fields, signal,
+    widget,
+};
 use nana_ui::runtime::{
-    Activate, AlignSpec, AppContext, Button, ConfirmDialog, ConfirmIntent, Dialog, DialogCloseRequested, IconButton,
-    IconGlyph, LengthSpec, ListItem, NodeStyle, OverlayHost, PositionSpec, RadiusTier, SemanticColorRole, Stack, Text,
+    Activate, AlignSpec, AppContext, Button, ConfirmDialog, ConfirmIntent, Dialog,
+    DialogCloseRequested, IconButton, IconGlyph, LengthSpec, ListItem, NodeStyle, OverlayHost,
+    PositionSpec, RadiusTier, SemanticColorRole, Stack, Text,
 };
 use nana_ui::{ButtonKind, ControlSize, Icon};
 use nana_ui_core::{DialogClosePolicy, DialogSize};
 
-use super::session::{register, OverlaySession};
+use super::session::{OverlaySession, register};
 use crate::shell::ShellMessage;
 
 #[path = "overlay_dialog_fields.rs"]
 mod form;
-pub(crate) use form::{select_field, text_area_field, text_field, two_columns, Choices};
+pub(crate) use form::{Choices, select_field, text_area_field, text_field, two_columns};
 
 /// 处理中的判断，事件处理器和绑定都要读，所以共享一份。
 pub(crate) type BusyFn = Arc<dyn Fn() -> bool + Send + Sync>;
@@ -107,10 +111,22 @@ impl DialogFrame {
 
     /// 普通对话框：标题下面是 `body`，底栏是 `footer`（一般是 [`footer`] 建的按钮行）。
     pub(crate) fn dialog(self, body: impl IntoView, footer_view: impl IntoView) -> AnyView {
-        let Self { key, title, danger, size, icon, busy, close, close_button } = self;
+        let Self {
+            key,
+            title,
+            danger,
+            size,
+            icon,
+            busy,
+            close,
+            close_button,
+        } = self;
         let host = entity_ref::<OverlayHost>();
         let open = Presence::register(host);
-        let dialog = Dialog::new(title()).size(size).danger(danger).close_policy(DialogClosePolicy::requests_only());
+        let dialog = Dialog::new(title())
+            .size(size)
+            .danger(danger)
+            .close_policy(DialogClosePolicy::requests_only());
         let mut element = widget(dialog)
             .key("dialog-surface")
             .model(open)
@@ -145,10 +161,22 @@ impl DialogFrame {
         confirm: impl IntoView,
         on_confirm: impl Fn() -> ShellMessage + Send + Sync + 'static,
     ) -> AnyView {
-        let Self { key, title, danger, size, icon, busy, close, close_button: _ } = self;
+        let Self {
+            key,
+            title,
+            danger,
+            size,
+            icon,
+            busy,
+            close,
+            close_button: _,
+        } = self;
         let host = entity_ref::<OverlayHost>();
         let open = Presence::register(host);
-        let dialog = ConfirmDialog::new(title(), message()).size(size).danger(danger).close_policy(DialogClosePolicy::requests_only());
+        let dialog = ConfirmDialog::new(title(), message())
+            .size(size)
+            .danger(danger)
+            .close_policy(DialogClosePolicy::requests_only());
         let gesture_close = close.clone();
         let gesture_busy = busy.clone();
         let mut element = widget(dialog)
@@ -189,8 +217,14 @@ impl DialogFrame {
 
 /// 标题前的图标：14px，颜色跟着标题走（Vue 的图标继承头部的文字色，危险口气时是 `--err`）。
 fn title_icon(icon: Icon, danger: bool) -> AnyView {
-    let role = if danger { SemanticColorRole::Danger } else { SemanticColorRole::Text };
-    widget(IconGlyph::new(icon).size(TITLE_ICON_SIZE).role(role)).key("dialog-icon").into_any()
+    let role = if danger {
+        SemanticColorRole::Danger
+    } else {
+        SemanticColorRole::Text
+    };
+    widget(IconGlyph::new(icon).size(TITLE_ICON_SIZE).role(role))
+        .key("dialog-icon")
+        .into_any()
 }
 
 /// 浮层层里的一块：铺满浮层层（换下的对话框放退场时和新的一块叠在一起），里面是对话框的宿主。
@@ -211,7 +245,10 @@ fn frame(key: &'static str, host: EntityRef<OverlayHost>, surface: AnyView) -> A
     });
     widget(block)
         .key(key)
-        .children((widget(OverlayHost::new().style(fill)).entity_ref(host).key("dialog-host").children((surface,)),))
+        .children((widget(OverlayHost::new().style(fill))
+            .entity_ref(host)
+            .key("dialog-host")
+            .children((surface,)),))
         .into_any()
 }
 
@@ -247,7 +284,10 @@ impl OverlaySession for Presence {
         let Some(host) = self.host.get() else {
             return true;
         };
-        context.world().overlay_host(host.stable_id()).is_none_or(|state| state.active.is_none())
+        context
+            .world()
+            .overlay_host(host.stable_id())
+            .is_none_or(|state| state.active.is_none())
     }
 }
 
@@ -258,11 +298,17 @@ impl OverlaySession for Presence {
 /// 淡到 50%。悬停、按下和焦点沿用 `IconButton` 自带的样子；停用照 Vue `button:disabled` 的 0.45 和卡片底色
 /// （`--bg-elev`）在 sRGB 里混。
 fn close_affordance(busy: BusyFn) -> AnyView {
-    let mut button = IconButton::new(X, "关闭").size(ControlSize::Small).colors_from_style();
+    let mut button = IconButton::new(X, "关闭")
+        .size(ControlSize::Small)
+        .colors_from_style();
     button.style.radius = Some(RadiusTier::Sm);
     button.style.foreground = Some(SemanticColorRole::Faint);
-    button.style.interaction.disabled = crate::theme_map::disabled_paint(SemanticColorRole::Faint, SemanticColorRole::Surface);
-    widget(button).key("dialog-close").prop::<bool, fields::icon_button::disabled>(move || busy()).into_any()
+    button.style.interaction.disabled =
+        crate::theme_map::disabled_paint(SemanticColorRole::Faint, SemanticColorRole::Surface);
+    widget(button)
+        .key("dialog-close")
+        .prop::<bool, fields::icon_button::disabled>(move || busy())
+        .into_any()
 }
 
 /// 底栏：左边可放一段说明（处理中），按钮靠右、间距 8。对应 `.dialog-card__actions`。
@@ -271,7 +317,10 @@ pub(crate) fn footer(leading: Option<AnyView>, buttons: Vec<AnyView>) -> AnyView
     children.extend(leading);
     children.push(widget(Stack::spacer()).into_any());
     children.extend(buttons);
-    widget(Stack::bar(8.0).align(AlignSpec::Center)).children(children).key("dialog-actions").into_any()
+    widget(Stack::bar(8.0).align(AlignSpec::Center))
+        .children(children)
+        .key("dialog-actions")
+        .into_any()
 }
 
 /// 底栏按钮：高 32、左右 10、14px；主操作低饱和蓝 600 字重，危险操作低饱和红，普通操作透明
@@ -294,15 +343,26 @@ pub(crate) fn action_button(
     key: &'static str,
     message: impl Fn() -> ShellMessage + Send + Sync + 'static,
 ) -> El<Button> {
-    button_view(label, kind, disabled, key).on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(message()))
+    button_view(label, kind, disabled, key)
+        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(message()))
 }
 
 /// 确认框里的按钮：样式和 [`action`] 一样，点击由框架变成 `ConfirmIntent`，按钮自己不发消息。
-pub(crate) fn intent_button(label: impl IntoProp<String>, kind: ButtonKind, disabled: impl IntoProp<bool>, key: &'static str) -> AnyView {
+pub(crate) fn intent_button(
+    label: impl IntoProp<String>,
+    kind: ButtonKind,
+    disabled: impl IntoProp<bool>,
+    key: &'static str,
+) -> AnyView {
     button_view(label, kind, disabled, key).into_any()
 }
 
-fn button_view(label: impl IntoProp<String>, kind: ButtonKind, disabled: impl IntoProp<bool>, key: &'static str) -> El<Button> {
+fn button_view(
+    label: impl IntoProp<String>,
+    kind: ButtonKind,
+    disabled: impl IntoProp<bool>,
+    key: &'static str,
+) -> El<Button> {
     let mut button = Button::new("").kind(kind);
     button.style.control_height = None;
     button.style.control_padding_x = None;
@@ -313,18 +373,32 @@ fn button_view(label: impl IntoProp<String>, kind: ButtonKind, disabled: impl In
         layout.padding_left = Some(LengthSpec::Px(10.0));
         layout.padding_right = Some(LengthSpec::Px(10.0));
         layout.font_size = Some(14.0);
-        layout.font_weight = Some(if kind == ButtonKind::Primary { 600 } else { 500 });
+        layout.font_weight = Some(if kind == ButtonKind::Primary {
+            600
+        } else {
+            500
+        });
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(0.0);
     }
-    widget(button).key(key).prop::<String, fields::button::label>(label).prop::<bool, fields::button::disabled>(disabled)
+    widget(button)
+        .key(key)
+        .prop::<String, fields::button::label>(label)
+        .prop::<bool, fields::button::disabled>(disabled)
 }
 
 /// 正文里的一段说明：13px、行高 1.5、占满宽度、任意处折行（`.dialog-card__body p`）。
 /// `muted` 时用次要文字色（`.folder-dialog__summary`）。
 pub(crate) fn paragraph(copy: impl IntoProp<String>, muted: bool, key: &'static str) -> AnyView {
-    let color = if muted { SemanticColorRole::Muted } else { SemanticColorRole::Text };
-    widget(wrapping_text(13.0, 19.5, color)).key(key).prop::<String, fields::text::value>(copy).into_any()
+    let color = if muted {
+        SemanticColorRole::Muted
+    } else {
+        SemanticColorRole::Text
+    };
+    widget(wrapping_text(13.0, 19.5, color))
+        .key(key)
+        .prop::<String, fields::text::value>(copy)
+        .into_any()
 }
 
 /// 正文里的错误：`--err` 12px，没有错误时不占位。
@@ -341,15 +415,27 @@ pub(crate) fn busy_note(visible: impl IntoProp<bool>, key: &'static str) -> AnyV
         .visible(visible)
         .key(key)
         .children((
-            widget(IconGlyph::new(LOADER_2).size(13.0).role(SemanticColorRole::Muted)),
-            widget(Text::new("处理中...").font_size(12.0).color(SemanticColorRole::Muted)),
+            widget(
+                IconGlyph::new(LOADER_2)
+                    .size(13.0)
+                    .role(SemanticColorRole::Muted),
+            ),
+            widget(
+                Text::new("处理中...")
+                    .font_size(12.0)
+                    .color(SemanticColorRole::Muted),
+            ),
         ))
         .into_any()
 }
 
 /// 占满宽度、任意处折行的一段字。
 pub(crate) fn wrapping_text(size: f32, line_height: f32, color: SemanticColorRole) -> Text {
-    let mut node = Text::new(String::new()).font_size(size).font_weight(400).color(color).line_height(line_height);
+    let mut node = Text::new(String::new())
+        .font_size(size)
+        .font_weight(400)
+        .color(color)
+        .line_height(line_height);
     let layout = Arc::make_mut(&mut node.style.layout);
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
@@ -366,7 +452,8 @@ impl FieldWrite<ListItem, bool> for DimmedDisabled {
 
     fn write(target: &mut ListItem, disabled: bool) {
         target.disabled = disabled;
-        Arc::make_mut(&mut target.style.layout).opacity = disabled.then_some(crate::theme_map::DISABLED_OPACITY);
+        Arc::make_mut(&mut target.style.layout).opacity =
+            disabled.then_some(crate::theme_map::DISABLED_OPACITY);
     }
 
     fn differs(target: &ListItem, disabled: &bool) -> bool {

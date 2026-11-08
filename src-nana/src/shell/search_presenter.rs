@@ -8,10 +8,10 @@ use std::collections::{BTreeMap, HashMap};
 
 use serde_json::Value;
 
+use super::super::ShellViewModel;
 use super::super::files::FileContext;
 use super::super::inspect::SearchRow;
-use super::super::inspect_shortcuts::{matches_entry, SearchShortcut};
-use super::super::ShellViewModel;
+use super::super::inspect_shortcuts::{SearchShortcut, matches_entry};
 
 use super::super::search_collate as collate;
 
@@ -95,7 +95,9 @@ pub(crate) fn swatch_color(name: &str) -> SwatchColor {
     if let Some(rgb) = parse_hex(trimmed) {
         return SwatchColor::Rgb(rgb);
     }
-    named_color(&name.to_lowercase()).or_else(|| named_color(name)).map_or(SwatchColor::Accent, SwatchColor::Rgb)
+    named_color(&name.to_lowercase())
+        .or_else(|| named_color(name))
+        .map_or(SwatchColor::Accent, SwatchColor::Rgb)
 }
 
 fn parse_hex(value: &str) -> Option<[u8; 3]> {
@@ -127,18 +129,34 @@ fn named_color(name: &str) -> Option<[u8; 3]> {
 
 /// 结果的格式：文件名最后一个点之后的部分，小写。没有点时是空串。
 pub(crate) fn result_format(row: &SearchRow) -> String {
-    let filename = if row.filename.is_empty() { row.path.as_str() } else { row.filename.as_str() };
-    filename.rfind('.').map(|index| filename[index + 1..].to_lowercase()).unwrap_or_default()
+    let filename = if row.filename.is_empty() {
+        row.path.as_str()
+    } else {
+        row.filename.as_str()
+    };
+    filename
+        .rfind('.')
+        .map(|index| filename[index + 1..].to_lowercase())
+        .unwrap_or_default()
 }
 
 /// Vue `searchResultContext`：格式（没有时写「文件」）、前三个标签、颜色、形状和评分。
 pub(crate) fn result_context(row: &SearchRow) -> Vec<String> {
     let format = result_format(row);
-    let mut items = vec![if format.is_empty() { "文件".to_string() } else { format }];
+    let mut items = vec![if format.is_empty() {
+        "文件".to_string()
+    } else {
+        format
+    }];
     items.extend(row.tags.iter().take(3).cloned());
     items.push(metadata_text(&row.metadata, "color"));
     items.push(metadata_text(&row.metadata, "shape"));
-    if let Some(rating) = row.metadata.get("rating").and_then(Value::as_f64).filter(|value| *value > 0.0) {
+    if let Some(rating) = row
+        .metadata
+        .get("rating")
+        .and_then(Value::as_f64)
+        .filter(|value| *value > 0.0)
+    {
         items.push(format!("{} 星", js_number_text(rating)));
     }
     items.into_iter().filter(|item| !item.is_empty()).collect()
@@ -165,7 +183,11 @@ fn js_number_text(value: f64) -> String {
 
 /// 当前资源库名。没有活动仓库时用「当前资源库」。
 fn repository_name(model: &ShellViewModel) -> String {
-    model.workspace.active_repository().map(|item| item.name.clone()).unwrap_or_else(|| "当前资源库".into())
+    model
+        .workspace
+        .active_repository()
+        .map(|item| item.name.clone())
+        .unwrap_or_else(|| "当前资源库".into())
 }
 
 /// Vue `searchResultScopeLabel`。
@@ -201,10 +223,20 @@ pub(crate) fn empty_result(model: &ShellViewModel) -> Option<(&'static str, Stri
         return None;
     }
     if !inspect.searched {
-        return Some(("等待搜索条件", "输入关键词、标签或评分条件后，这里会展示结果。".into()));
+        return Some((
+            "等待搜索条件",
+            "输入关键词、标签或评分条件后，这里会展示结果。".into(),
+        ));
     }
-    let scope = if inspect.filters.has_active_filters() { repository_name(model) } else { "全部资源库".into() };
-    Some(("没有匹配的文件", format!("{scope}里没有符合当前条件的文件。调整关键词、标签或评分条件后再试。")))
+    let scope = if inspect.filters.has_active_filters() {
+        repository_name(model)
+    } else {
+        "全部资源库".into()
+    };
+    Some((
+        "没有匹配的文件",
+        format!("{scope}里没有符合当前条件的文件。调整关键词、标签或评分条件后再试。"),
+    ))
 }
 
 /// Vue `activeLibrarySearchShortcuts`：当前视图的文件或搜索结果里有该库类型的条目时，
@@ -220,11 +252,20 @@ pub(crate) fn active_shortcuts(model: &ShellViewModel) -> Vec<SearchShortcut> {
     shortcuts
         .iter()
         .filter(|shortcut| {
-            *matched.entry(shortcut.library_kind.as_str()).or_insert_with(|| {
-                let kind = shortcut.library_kind.as_str();
-                entries.iter().filter(|row| row.kind != "directory").any(|row| matches_entry(kind, &row.metadata))
-                    || model.inspect.results.iter().any(|row| matches_entry(kind, &row.metadata))
-            })
+            *matched
+                .entry(shortcut.library_kind.as_str())
+                .or_insert_with(|| {
+                    let kind = shortcut.library_kind.as_str();
+                    entries
+                        .iter()
+                        .filter(|row| row.kind != "directory")
+                        .any(|row| matches_entry(kind, &row.metadata))
+                        || model
+                            .inspect
+                            .results
+                            .iter()
+                            .any(|row| matches_entry(kind, &row.metadata))
+                })
         })
         .cloned()
         .collect()

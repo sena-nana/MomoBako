@@ -6,7 +6,7 @@
 //! 绑定。同步时只写变了的信号；列表经 `row_sync::sync_rows` 只删掉没了的行、插入新行、整行改写内容变了
 //! 的行，顺序变了再排。
 
-use nana_ui::runtime::view::{signal, store, Signal, Store};
+use nana_ui::runtime::view::{Signal, Store, signal, store};
 
 use super::super::row_sync::sync_rows;
 use super::super::sidebar::{SidebarFolder, SidebarSmartFolder};
@@ -118,6 +118,8 @@ pub(crate) struct FolderRow {
     pub branch: bool,
     /// 直属文件数。
     pub count: usize,
+    /// 拖放悬停正落在这个路径上：放置态高亮。
+    pub drop_target: bool,
 }
 
 /// 智能文件夹分组的头部和正文。
@@ -168,22 +170,36 @@ impl SidebarView {
         let category = workspace.library_category;
         let counts = sidebar.counts;
         let no_players = model.playlist_players.is_empty();
-        let trash = panel == WorkspacePanel::Trash || sidebar.browsing_trash;
+        // Vue `isTrashPanel` 只看当前面板。文件快照还可以停在回收站（Eagle 导入靠它写「当前目标不可导入。」），
+        // 面板已经离开时侧栏回到默认资源库，不留下「回收站条目在主视图中管理。」。
+        let trash = panel == WorkspacePanel::Trash;
         // 刷新按钮转圈：目录树在读，或者照 Vue `isLoadingFileBrowser` 在读目录、在刷新文件夹树。
         let loading = sidebar.tree_loading || super::super::tree_sync::loading_file_browser(model);
         Self {
             status: StatusLine::project(model),
             head: HeadView {
-                name: repository.map(|item| item.name.clone()).unwrap_or_else(|| "无资源库".into()),
-                folders_visible: repository
-                    .is_none_or(|item| !item.capabilities.iter().any(|capability| capability == "virtual-entries")),
+                name: repository
+                    .map(|item| item.name.clone())
+                    .unwrap_or_else(|| "无资源库".into()),
+                folders_visible: repository.is_none_or(|item| {
+                    !item
+                        .capabilities
+                        .iter()
+                        .any(|capability| capability == "virtual-entries")
+                }),
             },
             nav: NavView {
                 locked,
                 shortcuts: [
                     (counts.all, files && category == LibraryCategory::All),
-                    (counts.uncategorized, files && category == LibraryCategory::Uncategorized),
-                    (counts.untagged, files && category == LibraryCategory::Untagged),
+                    (
+                        counts.uncategorized,
+                        files && category == LibraryCategory::Uncategorized,
+                    ),
+                    (
+                        counts.untagged,
+                        files && category == LibraryCategory::Untagged,
+                    ),
                     (counts.recent, files && category == LibraryCategory::Recent),
                     (counts.trash, panel == WorkspacePanel::Trash),
                 ],
@@ -230,7 +246,11 @@ impl SidebarView {
                 } else if locked {
                     Some("资源库文件夹丢失，请先在主视图修复。")
                 } else if (trash || sidebar.folders.is_empty()) && !loading {
-                    Some(if trash { "回收站条目在主视图中管理。" } else { "当前仓库还没有子文件夹。" })
+                    Some(if trash {
+                        "回收站条目在主视图中管理。"
+                    } else {
+                        "当前仓库还没有子文件夹。"
+                    })
                 } else {
                     None
                 },
@@ -264,7 +284,11 @@ impl SidebarView {
 
 /// 播放集各行。当前点开、详情已读回的播放集按详情里的条目数显示项数。
 fn playlist_rows(model: &ShellViewModel) -> Vec<PlaylistRow> {
-    let listed = model.player.listed.as_ref().map(|detail| (detail.playlist.playlist_id.as_str(), detail.items.len()));
+    let listed = model
+        .player
+        .listed
+        .as_ref()
+        .map(|detail| (detail.playlist.playlist_id.as_str(), detail.items.len()));
     let playlist_panel = model.workspace.panel == WorkspacePanel::Playlist;
     model
         .sidebar
@@ -279,8 +303,12 @@ fn playlist_rows(model: &ShellViewModel) -> Vec<PlaylistRow> {
                 playlist_id: playlist.id.clone(),
                 name: playlist.name.clone(),
                 meta: format!("{} · {} 项", playlist.player_label, count),
-                active: playlist_panel && model.sidebar.active_playlist_id.as_deref() == Some(playlist.id.as_str()),
-                playable: !super::super::player_view::playlist_plugin_missing(model, &playlist.player_type_id),
+                active: playlist_panel
+                    && model.sidebar.active_playlist_id.as_deref() == Some(playlist.id.as_str()),
+                playable: !super::super::player_view::playlist_plugin_missing(
+                    model,
+                    &playlist.player_type_id,
+                ),
             }
         })
         .collect()
@@ -289,9 +317,16 @@ fn playlist_rows(model: &ShellViewModel) -> Vec<PlaylistRow> {
 /// 文件夹树按显示顺序展开：每个目录一行，展开了的目录后面跟着它的子级。
 fn folder_rows(model: &ShellViewModel) -> Vec<FolderRow> {
     fn walk(model: &ShellViewModel, folder: &SidebarFolder, depth: u16, rows: &mut Vec<FolderRow>) {
+        let dragging = model.input.internal_active
+            || model.input.dragging_files
+            || model.input.external_active;
+        let hover = model.input.hover_folder.clone();
         let sidebar = &model.sidebar;
         let current = sidebar.current_directory.as_str();
-        let expanded = sidebar.expanded_folders.iter().any(|path| path == &folder.path);
+        let expanded = sidebar
+            .expanded_folders
+            .iter()
+            .any(|path| path == &folder.path);
         let active = current == folder.path;
         let has_children = !folder.children.is_empty();
         rows.push(FolderRow {
@@ -302,7 +337,12 @@ fn folder_rows(model: &ShellViewModel) -> Vec<FolderRow> {
             expanded,
             active,
             branch: active || current.starts_with(&format!("{}/", folder.path)),
-            count: sidebar.folder_counts.get(&folder.path).copied().unwrap_or(0),
+            count: sidebar
+                .folder_counts
+                .get(&folder.path)
+                .copied()
+                .unwrap_or(0),
+            drop_target: dragging && hover.as_deref() == Some(folder.path.as_str()),
         });
         if has_children && expanded {
             for child in &folder.children {
@@ -320,13 +360,23 @@ fn folder_rows(model: &ShellViewModel) -> Vec<FolderRow> {
 /// 智能文件夹树按显示顺序展开。包含当前智能文件夹的一支用打开的图标。
 fn smart_rows(model: &ShellViewModel) -> Vec<SmartRow> {
     fn contains(folders: &[SidebarSmartFolder], id: &str) -> bool {
-        folders.iter().any(|folder| folder.id == id || contains(&folder.children, id))
+        folders
+            .iter()
+            .any(|folder| folder.id == id || contains(&folder.children, id))
     }
-    fn walk(model: &ShellViewModel, folder: &SidebarSmartFolder, depth: u16, rows: &mut Vec<SmartRow>) {
+    fn walk(
+        model: &ShellViewModel,
+        folder: &SidebarSmartFolder,
+        depth: u16,
+        rows: &mut Vec<SmartRow>,
+    ) {
         let sidebar = &model.sidebar;
         let active_id = sidebar.active_smart_folder_id.as_deref();
         let active = active_id == Some(folder.id.as_str());
-        let expanded = sidebar.expanded_smart_folders.iter().any(|id| id == &folder.id);
+        let expanded = sidebar
+            .expanded_smart_folders
+            .iter()
+            .any(|id| id == &folder.id);
         let has_children = !folder.children.is_empty();
         rows.push(SmartRow {
             smart_id: folder.id.clone(),

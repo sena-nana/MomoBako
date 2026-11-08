@@ -86,10 +86,13 @@ impl SyncCounts {
     /// 从同步协议的输出（后端 `SyncResult` 的 JSON）里取计数。缺的或不是整数的按 0，并记日志。
     pub fn from_output(output: &serde_json::Value) -> Self {
         let read = |key: &str| {
-            output.get(key).and_then(serde_json::Value::as_i64).unwrap_or_else(|| {
-                eprintln!("Nana 同步结果里没有 {key}，按 0 记");
-                0
-            })
+            output
+                .get(key)
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or_else(|| {
+                    eprintln!("Nana 同步结果里没有 {key}，按 0 记");
+                    0
+                })
         };
         Self {
             scanned_files: read("scannedFiles"),
@@ -183,7 +186,11 @@ impl StartupState {
         self.log(
             "info",
             "首屏启动流程开始。",
-            &[("totalSteps", Some(total.as_str())), ("activeRepoId", active_repo_id), ("rememberedRepoId", remembered_repo_id)],
+            &[
+                ("totalSteps", Some(total.as_str())),
+                ("activeRepoId", active_repo_id),
+                ("rememberedRepoId", remembered_repo_id),
+            ],
         );
     }
 
@@ -193,7 +200,11 @@ impl StartupState {
         self.mode = StartupMode::Switch;
         self.settings = SettingsWait::None;
         self.active_applied = true;
-        self.set_progress(1, "切换资源库", "准备目标资源库，清理上一个资源库的首屏状态。");
+        self.set_progress(
+            1,
+            "切换资源库",
+            "准备目标资源库，清理上一个资源库的首屏状态。",
+        );
     }
 
     /// 第 4 步「读取首屏目录」的说明：启动和换仓库各照 Vue 的原文。
@@ -212,7 +223,8 @@ impl StartupState {
         self.step_detail = detail.into();
         self.current_step = step;
         self.total_steps = STARTUP_TOTAL_STEPS;
-        self.percent = u8::try_from((u16::from(step) * 100) / u16::from(STARTUP_TOTAL_STEPS)).unwrap_or(100);
+        self.percent =
+            u8::try_from((u16::from(step) * 100) / u16::from(STARTUP_TOTAL_STEPS)).unwrap_or(100);
         self.error = None;
     }
 
@@ -222,7 +234,12 @@ impl StartupState {
     }
 
     /// 停在当前步骤，并记下「首屏启动流程失败。」，明细带步骤、错误和相关资源库。
-    pub fn fail_with(&mut self, message: impl Into<String>, active_repo_id: Option<&str>, target_repo_id: Option<&str>) {
+    pub fn fail_with(
+        &mut self,
+        message: impl Into<String>,
+        active_repo_id: Option<&str>,
+        target_repo_id: Option<&str>,
+    ) {
         let message = message.into();
         self.status = StartupStatus::Error;
         self.step_label = "加载失败".into();
@@ -287,21 +304,36 @@ impl StartupState {
     pub fn await_settings(&mut self, repo_id: Option<&str>) {
         self.set_progress(4, "读取首屏目录", "加载应用配置、插件设置和首屏辅助数据。");
         self.settings = SettingsWait::Bundle;
-        self.log("info", "首屏启动开始加载应用配置与插件设置。", &[("step", Some("4")), ("repoId", repo_id)]);
+        self.log(
+            "info",
+            "首屏启动开始加载应用配置与插件设置。",
+            &[("step", Some("4")), ("repoId", repo_id)],
+        );
     }
 
     /// 设置数据都回来了（失败也算，和 Vue `loadSettingsData` 吃掉错误一样）：首屏启动结束，记「首屏启动应用配置与
     /// 插件设置加载完成。」和「首屏启动流程完成。」，后者明细带活动仓库、素材数和播放集数（没读到摘要时都是 0）。
     pub fn finish_launch(&mut self, repo_id: Option<&str>) {
         self.settings = SettingsWait::None;
-        self.log("info", "首屏启动应用配置与插件设置加载完成。", &[("step", Some("4")), ("repoId", repo_id)]);
+        self.log(
+            "info",
+            "首屏启动应用配置与插件设置加载完成。",
+            &[("step", Some("4")), ("repoId", repo_id)],
+        );
         self.finish();
         let index = self.index.clone().unwrap_or_default();
-        let (assets, playlists) = (index.asset_count.to_string(), index.playlist_count.to_string());
+        let (assets, playlists) = (
+            index.asset_count.to_string(),
+            index.playlist_count.to_string(),
+        );
         self.log(
             "info",
             "首屏启动流程完成。",
-            &[("activeRepoId", repo_id), ("assetCount", Some(assets.as_str())), ("playlistCount", Some(playlists.as_str()))],
+            &[
+                ("activeRepoId", repo_id),
+                ("assetCount", Some(assets.as_str())),
+                ("playlistCount", Some(playlists.as_str())),
+            ],
         );
     }
 
@@ -311,7 +343,12 @@ impl StartupState {
     }
 
     /// 启动仍在加载时追加一条同步日志，明细照 Vue `appendStartupSyncLog` 取记录的 `context`。其它状态忽略。
-    pub(crate) fn append_sync_log(&mut self, level: &str, message: impl Into<String>, context: &serde_json::Value) {
+    pub(crate) fn append_sync_log(
+        &mut self,
+        level: &str,
+        message: impl Into<String>,
+        context: &serde_json::Value,
+    ) {
         if self.status != StartupStatus::Loading {
             return;
         }
@@ -326,20 +363,38 @@ impl StartupState {
 
     /// 记一条日志。明细按 Vue `appendStartupLog` 去掉空值，用「 · 」连接。换仓库不写首屏启动日志
     /// （Vue `selectRepository` 不调 `emitStartupLog`）。
-    pub(crate) fn log(&mut self, level: &'static str, message: &str, context: &[(&str, Option<&str>)]) {
+    pub(crate) fn log(
+        &mut self,
+        level: &'static str,
+        message: &str,
+        context: &[(&str, Option<&str>)],
+    ) {
         if self.mode == StartupMode::Switch {
             return;
         }
         let detail = context
             .iter()
-            .filter_map(|(key, value)| value.filter(|value| !value.is_empty()).map(|value| format!("{key}: {value}")))
+            .filter_map(|(key, value)| {
+                value
+                    .filter(|value| !value.is_empty())
+                    .map(|value| format!("{key}: {value}"))
+            })
             .collect::<Vec<_>>()
             .join(" · ");
-        self.push(level, message.to_string(), (!detail.is_empty()).then_some(detail));
+        self.push(
+            level,
+            message.to_string(),
+            (!detail.is_empty()).then_some(detail),
+        );
     }
 
     fn push(&mut self, level: &'static str, message: String, detail: Option<String>) {
-        self.logs.push(StartupLog { level, time: local_clock(), message, detail });
+        self.logs.push(StartupLog {
+            level,
+            time: local_clock(),
+            message,
+            detail,
+        });
         if self.logs.len() > STARTUP_LOG_LIMIT {
             let extra = self.logs.len() - STARTUP_LOG_LIMIT;
             self.logs.drain(0..extra);
@@ -387,7 +442,16 @@ pub fn local_clock() -> String {
         unsafe extern "system" {
             fn GetLocalTime(time: *mut SystemTime);
         }
-        let mut now = SystemTime { year: 0, month: 0, day_of_week: 0, day: 0, hour: 0, minute: 0, second: 0, milliseconds: 0 };
+        let mut now = SystemTime {
+            year: 0,
+            month: 0,
+            day_of_week: 0,
+            day: 0,
+            hour: 0,
+            minute: 0,
+            second: 0,
+            milliseconds: 0,
+        };
         // SAFETY: GetLocalTime 只写入调用方传入的结构体，结构体布局与 Win32 SYSTEMTIME 一致。
         unsafe { GetLocalTime(&mut now) };
         format!("{:02}:{:02}:{:02}", now.hour, now.minute, now.second)

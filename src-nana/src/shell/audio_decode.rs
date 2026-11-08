@@ -46,7 +46,12 @@ fn decode_packets(bytes: &[u8]) -> Result<DecodedPcm, String> {
     }
     let stream = MediaSourceStream::new(Box::new(Cursor::new(bytes)), Default::default());
     let mut reader = symphonia::default::get_probe()
-        .probe(&hint_for(bytes), stream, FormatOptions::default(), MetadataOptions::default())
+        .probe(
+            &hint_for(bytes),
+            stream,
+            FormatOptions::default(),
+            MetadataOptions::default(),
+        )
         .map_err(|error| format!("无法识别压缩音频：{error}"))?;
     let (track_id, params) = {
         let track = reader.default_track(TrackType::Audio).ok_or("没有音频轨")?;
@@ -87,7 +92,8 @@ fn decode_packets(bytes: &[u8]) -> Result<DecodedPcm, String> {
         }
         let spec = decoded.spec();
         let rate = spec.rate();
-        let plane_count = u16::try_from(spec.channels().count()).map_err(|_| "声道数无效".to_string())?;
+        let plane_count =
+            u16::try_from(spec.channels().count()).map_err(|_| "声道数无效".to_string())?;
         if rate == 0 || plane_count == 0 {
             return Err("压缩音频采样率或声道无效".into());
         }
@@ -97,9 +103,15 @@ fn decode_packets(bytes: &[u8]) -> Result<DecodedPcm, String> {
         } else if sample_rate != rate {
             return Err("压缩音频中途改变了采样率".into());
         }
-        if layout.as_ref().is_none_or(|(known, _)| known != spec.channels()) {
+        if layout
+            .as_ref()
+            .is_none_or(|(known, _)| known != spec.channels())
+        {
             let positions = pcm::positions(plane_count, positioned_mask(spec.channels()));
-            layout = Some((spec.channels().clone(), pcm::Mixer::new(&positions, channels)));
+            layout = Some((
+                spec.channels().clone(),
+                pcm::Mixer::new(&positions, channels),
+            ));
         }
         let mut samples = vec![0i16; decoded.samples_interleaved()];
         decoded.copy_to_slice_interleaved(&mut samples);
@@ -117,7 +129,12 @@ fn decode_packets(bytes: &[u8]) -> Result<DecodedPcm, String> {
         return Err("没有解出样本".into());
     }
     let duration_ms = frames.saturating_mul(1000) / u64::from(sample_rate);
-    Ok(DecodedPcm { sample_rate, channels, pcm, duration_ms })
+    Ok(DecodedPcm {
+        sample_rate,
+        channels,
+        pcm,
+        duration_ms,
+    })
 }
 
 /// 按扬声器位置排的声道给出位置掩码（symphonia 的 `Position` 前 18 位和 WAVE 声道掩码一致，缓冲里的声道
@@ -167,8 +184,17 @@ mod tests {
         assert_eq!(flac.sample_rate, 8_000);
         assert_eq!(flac.channels, 1);
         assert_eq!(flac.duration_ms, 2);
-        let samples: Vec<i16> = flac.pcm.chunks_exact(2).map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]])).collect();
-        assert_eq!(samples, vec![0, 1000, -1000, 500, 0, 1000, -1000, 500, 0, 1000, -1000, 500, 0, 1000, -1000, 500]);
+        let samples: Vec<i16> = flac
+            .pcm
+            .chunks_exact(2)
+            .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
+        assert_eq!(
+            samples,
+            vec![
+                0, 1000, -1000, 500, 0, 1000, -1000, 500, 0, 1000, -1000, 500, 0, 1000, -1000, 500
+            ]
+        );
 
         let mp3 = decode_compressed(fixture_mp3()).expect("mp3");
         assert!(mp3.sample_rate > 0);
@@ -190,8 +216,15 @@ mod tests {
         let frame = [1_000i16, -1_000, 0, 20_000, 0, 0];
         let flac = verbatim_flac(8_000, &vec![frame; 16]);
         let decoded = decode_compressed(&flac).expect("5.1 FLAC");
-        assert_eq!((decoded.sample_rate, decoded.channels, decoded.duration_ms), (8_000, 2, 2));
-        let samples: Vec<i16> = decoded.pcm.chunks_exact(2).map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]])).collect();
+        assert_eq!(
+            (decoded.sample_rate, decoded.channels, decoded.duration_ms),
+            (8_000, 2, 2)
+        );
+        let samples: Vec<i16> = decoded
+            .pcm
+            .chunks_exact(2)
+            .map(|chunk| i16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
         let side = (1_000.0 / (1.0 + std::f32::consts::SQRT_2)).round() as i16;
         assert_eq!(samples, [side, -side].repeat(16));
     }
@@ -206,12 +239,20 @@ mod tests {
         bytes.extend_from_slice(&(block as u16).to_be_bytes());
         bytes.extend_from_slice(&(block as u16).to_be_bytes());
         bytes.extend_from_slice(&[0; 6]);
-        let packed = (u64::from(sample_rate) << 44) | ((channels - 1) << 41) | (15 << 36) | block as u64;
+        let packed =
+            (u64::from(sample_rate) << 44) | ((channels - 1) << 41) | (15 << 36) | block as u64;
         bytes.extend_from_slice(&packed.to_be_bytes());
         bytes.extend_from_slice(&[0; 16]);
         // 帧头：同步码、定长块；块长在帧头末尾给 8 位，采样率取 STREAMINFO；6 个独立声道、16 位；帧号 0。
         let start = bytes.len();
-        bytes.extend_from_slice(&[0xFF, 0xF8, 0x60, (((channels - 1) as u8) << 4) | (0b100 << 1), 0x00, (block - 1) as u8]);
+        bytes.extend_from_slice(&[
+            0xFF,
+            0xF8,
+            0x60,
+            (((channels - 1) as u8) << 4) | (0b100 << 1),
+            0x00,
+            (block - 1) as u8,
+        ]);
         let header_crc = crc8(&bytes[start..]);
         bytes.push(header_crc);
         for channel in 0..channels as usize {
@@ -230,7 +271,11 @@ mod tests {
         bytes.iter().fold(0u8, |mut crc, byte| {
             crc ^= byte;
             for _ in 0..8 {
-                crc = if crc & 0x80 != 0 { (crc << 1) ^ 0x07 } else { crc << 1 };
+                crc = if crc & 0x80 != 0 {
+                    (crc << 1) ^ 0x07
+                } else {
+                    crc << 1
+                };
             }
             crc
         })
@@ -241,7 +286,11 @@ mod tests {
         bytes.iter().fold(0u16, |mut crc, byte| {
             crc ^= u16::from(*byte) << 8;
             for _ in 0..8 {
-                crc = if crc & 0x8000 != 0 { (crc << 1) ^ 0x8005 } else { crc << 1 };
+                crc = if crc & 0x8000 != 0 {
+                    (crc << 1) ^ 0x8005
+                } else {
+                    crc << 1
+                };
             }
             crc
         })
@@ -270,7 +319,9 @@ mod tests {
     }
 
     fn tone_wav() -> Vec<u8> {
-        let data = [0u8, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255];
+        let data = [
+            0u8, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255,
+        ];
         let mut body = Vec::new();
         body.extend_from_slice(b"fmt ");
         body.extend_from_slice(&16u32.to_le_bytes());

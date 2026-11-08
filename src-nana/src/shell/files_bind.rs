@@ -5,8 +5,10 @@
 //! 现算整份样式绑各页共用的 [`StyleField`]（`field_bind.rs`），和旧视图用同一个构造函数，保证画面和整块
 //! 重挂时一样。
 
-use nana_ui::runtime::view::{css, fields, signal, untrack, widget, AnyView, FieldWrite, InlineStyle, IntoView, Signal};
 use nana_ui::runtime::ValidationMessage;
+use nana_ui::runtime::view::{
+    AnyView, FieldWrite, InlineStyle, IntoView, Signal, css, fields, signal, untrack, widget,
+};
 
 pub(crate) use super::super::field_bind::StyleField;
 use super::super::hot::ModelField;
@@ -77,7 +79,9 @@ pub(crate) fn fact_row(
         .visible(shown)
         .children((
             widget(style::row_label(label)).key(format!("{key}-label")),
-            widget(style::value(untrack(&value))).prop::<String, fields::text::value>(value).key(format!("{key}-value")),
+            widget(style::value(untrack(&value)))
+                .prop::<String, fields::text::value>(value)
+                .key(format!("{key}-value")),
         ))
         .key(key.to_string())
         .into_any()

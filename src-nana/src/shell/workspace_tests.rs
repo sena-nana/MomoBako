@@ -30,7 +30,11 @@ fn failed_middle_step_keeps_earlier_steps_done() {
     startup.set_progress(3, "读取仓库摘要", "索引");
     let percent = startup.percent;
     startup.fail("索引损坏");
-    let states: Vec<_> = startup.step_items().into_iter().map(|item| item.state).collect();
+    let states: Vec<_> = startup
+        .step_items()
+        .into_iter()
+        .map(|item| item.state)
+        .collect();
     assert_eq!(
         states,
         vec![
@@ -77,7 +81,10 @@ fn repository_regions_are_mutually_exclusive() {
 
     let mut missing = WorkspaceState::default();
     missing.prepare_initial_list();
-    missing.apply_repository_list(Some(missing.list_generation), Ok(vec![repo("gone", "missing")]));
+    missing.apply_repository_list(
+        Some(missing.list_generation),
+        Ok(vec![repo("gone", "missing")]),
+    );
     missing.note_settings_loaded(false);
     assert_eq!(missing.main_region(), MainRegion::MissingRepository);
 
@@ -89,11 +96,22 @@ fn repository_regions_are_mutually_exclusive() {
     ready.note_sync_finished(generation, Ok(SyncCounts::default()));
     assert!(ready.awaits_snapshot(generation));
     ready.note_index_finished(Ok(IndexCounts::default()));
-    assert!(ready.take_effects().contains(&WorkspaceEffect::LoadFirstScreen { repo_id: "live".into() }), "读完摘要接着读首屏目录");
+    assert!(
+        ready
+            .take_effects()
+            .contains(&WorkspaceEffect::LoadFirstScreen {
+                repo_id: "live".into()
+            }),
+        "读完摘要接着读首屏目录"
+    );
     ready.note_first_screen_finished(Ok(()));
     assert_eq!(ready.main_region(), MainRegion::Startup, "首屏启动等设置包");
     ready.note_settings_loaded(true);
-    assert_eq!(ready.main_region(), MainRegion::Startup, "插件列表到了，等播放器类型");
+    assert_eq!(
+        ready.main_region(),
+        MainRegion::Startup,
+        "插件列表到了，等播放器类型"
+    );
     ready.note_players_loaded();
     assert_eq!(ready.main_region(), MainRegion::HasRepository);
 
@@ -112,7 +130,11 @@ fn selection_prefers_active_then_remembered_then_first() {
     state.last_active_repo_id = Some("remembered".into());
     state.apply_repository_list(
         Some(state.list_generation),
-        Ok(vec![repo("first", "ready"), repo("remembered", "ready"), repo("active", "ready")]),
+        Ok(vec![
+            repo("first", "ready"),
+            repo("remembered", "ready"),
+            repo("active", "ready"),
+        ]),
     );
     assert_eq!(state.active_repo_id.as_deref(), Some("active"));
     assert!(state.effects.iter().any(|effect| matches!(
@@ -130,14 +152,22 @@ fn selection_prefers_active_then_remembered_then_first() {
     assert_eq!(remembered.active_repo_id.as_deref(), Some("remembered"));
     remembered.note_settings_loaded(false);
     assert_eq!(remembered.main_region(), MainRegion::MissingRepository);
-    assert!(remembered.effects.iter().all(|effect| !matches!(effect, WorkspaceEffect::SyncRepository { .. })));
+    assert!(
+        remembered
+            .effects
+            .iter()
+            .all(|effect| !matches!(effect, WorkspaceEffect::SyncRepository { .. }))
+    );
 }
 
 #[test]
 fn switching_repository_stops_playback_once_previous_id_exists() {
     let mut state = WorkspaceState::default();
     state.prepare_initial_list();
-    state.apply_repository_list(Some(state.list_generation), Ok(vec![repo("a", "ready"), repo("b", "ready")]));
+    state.apply_repository_list(
+        Some(state.list_generation),
+        Ok(vec![repo("a", "ready"), repo("b", "ready")]),
+    );
     assert!(!state.stop_playback);
     state.effects.clear();
     state.select_repository("a");
@@ -164,7 +194,14 @@ fn sidebar_storage_matches_vue_ranges_and_keys() {
     state.toggle_sidebar();
     assert!(state.sidebar_collapsed);
     assert_eq!(state.sidebar_collapsed_storage(), "1");
-    assert!(state.effects.iter().filter(|effect| matches!(effect, WorkspaceEffect::PersistSidebar)).count() >= 2);
+    assert!(
+        state
+            .effects
+            .iter()
+            .filter(|effect| matches!(effect, WorkspaceEffect::PersistSidebar))
+            .count()
+            >= 2
+    );
 
     let path = std::env::temp_dir().join(format!("momobako-sidebar-{}", std::process::id()));
     let file = path.join("sidebar.json");
@@ -206,7 +243,12 @@ fn missing_actions_reject_duplicates_and_blank_paths() {
     state.path_draft = "   ".into();
     state.submit_missing_path();
     assert!(!state.relocating);
-    assert!(state.effects.iter().all(|effect| !matches!(effect, WorkspaceEffect::RelocateRepository { .. })));
+    assert!(
+        state
+            .effects
+            .iter()
+            .all(|effect| !matches!(effect, WorkspaceEffect::RelocateRepository { .. }))
+    );
 
     state.path_draft = "D:/library".into();
     state.submit_missing_path();
@@ -267,7 +309,10 @@ fn source_cache_issue_requests_settings_instead_of_a_path() {
     state.active_repo_id = Some("remote".into());
     assert_eq!(state.missing_primary_label(), "打开来源设置");
     assert_eq!(state.open_source_settings().as_deref(), Some("filesystem"));
-    assert!(state.effects.is_empty(), "打开设置页由壳层归约完成，不再经宿主副作用");
+    assert!(
+        state.effects.is_empty(),
+        "打开设置页由壳层归约完成，不再经宿主副作用"
+    );
     assert!(!state.path_prompt);
 }
 
@@ -282,6 +327,43 @@ fn stale_list_generation_does_not_reset_completed_steps() {
     assert_eq!(state.active_repo_id.as_deref(), Some("live"));
     assert_eq!(state.startup.current_step, 2);
     assert_eq!(state.main_region(), MainRegion::LoadError);
+}
+
+/// 同步结果代次不对，或启动已经不在加载中时丢掉，不改已完成步骤和活动仓库。
+#[test]
+fn stale_or_idle_sync_result_keeps_steps_and_the_active_repository() {
+    let mut state = WorkspaceState::default();
+    let generation = state.prepare_initial_list();
+    state.apply_repository_list(Some(generation), Ok(vec![repo("live", "ready")]));
+    let _ = state.take_effects();
+    assert_eq!(state.startup.step_state(1), StartupStepState::Done);
+    assert_eq!(state.startup.current_step, 2);
+    assert_eq!(state.startup.step_state(2), StartupStepState::Current);
+
+    assert!(
+        state
+            .note_sync_finished(generation.wrapping_add(1), Ok(SyncCounts::default()))
+            .is_none()
+    );
+    assert_eq!(state.startup.step_state(1), StartupStepState::Done);
+    assert_eq!(state.startup.current_step, 2);
+    assert_eq!(state.startup.step_state(2), StartupStepState::Current);
+    assert_eq!(state.active_repo_id.as_deref(), Some("live"));
+    assert!(state.effects.is_empty(), "过期同步不读摘要");
+
+    state.startup.finish();
+    assert!(
+        state
+            .note_sync_finished(generation, Ok(SyncCounts::default()))
+            .is_none()
+    );
+    assert_eq!(state.startup.status, StartupStatus::Ready);
+    assert_eq!(state.startup.current_step, 4);
+    assert_eq!(state.active_repo_id.as_deref(), Some("live"));
+    assert!(
+        state.effects.is_empty(),
+        "启动结束后没有进行中的刷新时同步结果丢掉"
+    );
 }
 
 #[test]

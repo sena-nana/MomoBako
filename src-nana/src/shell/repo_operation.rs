@@ -54,7 +54,13 @@ pub struct OperationStart {
 
 impl OperationStart {
     pub fn new(label: impl Into<String>, detail: impl Into<String>, initial: f64) -> Self {
-        Self { label: label.into(), detail: detail.into(), initial, indeterminate: false, protocols: &[] }
+        Self {
+            label: label.into(),
+            detail: detail.into(),
+            initial,
+            indeterminate: false,
+            protocols: &[],
+        }
     }
 
     /// 标成不确定进度（Vue `{ indeterminate: true }`）。
@@ -81,7 +87,11 @@ pub struct OperationPatch {
 impl OperationPatch {
     /// 走到下一个阶段：阶段说明和百分比一起换。
     pub fn step(detail: impl Into<String>, value: f64) -> Self {
-        Self { detail: Some(detail.into()), value: Some(value), indeterminate: None }
+        Self {
+            detail: Some(detail.into()),
+            value: Some(value),
+            indeterminate: None,
+        }
     }
 
     /// 同时改不确定标记。
@@ -239,7 +249,8 @@ impl RepositoryOperation {
     /// 还要准备帧接着拨：在爬，或者等着收起。到了上限、只剩爬升的操作也算，收起靠完成或取消。
     pub fn pending(&self) -> bool {
         self.current.as_ref().is_some_and(|running| {
-            running.hide_at_ms.is_some() || running.next_climb_ms.is_some() && running.progress.value < CLIMB_CEILING
+            running.hide_at_ms.is_some()
+                || running.next_climb_ms.is_some() && running.progress.value < CLIMB_CEILING
         })
     }
 
@@ -250,7 +261,9 @@ impl RepositoryOperation {
 
     /// `id` 还占着槽位。
     pub fn is_current(&self, id: OperationId) -> bool {
-        self.current.as_ref().is_some_and(|running| running.id == id.0)
+        self.current
+            .as_ref()
+            .is_some_and(|running| running.id == id.0)
     }
 
     fn running_mut(&mut self, id: OperationId) -> Option<&mut Running> {
@@ -307,7 +320,11 @@ impl OperationRequests {
 }
 
 fn clamp_percent(value: f64) -> f64 {
-    if value.is_finite() { value.clamp(0.0, 100.0) } else { 0.0 }
+    if value.is_finite() {
+        value.clamp(0.0, 100.0)
+    } else {
+        0.0
+    }
 }
 
 #[cfg(test)]

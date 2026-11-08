@@ -2,12 +2,17 @@
 //!
 //! 计时器和动效每帧按 [`FrameStep`] 推进，步长是两帧之间真实流逝的时间，见 `frame_clock.rs`。
 
-use nana_ui::runtime::{component_descriptors, Entity, Workspace};
-use nana_ui::{ApplicationWindow, InputPayload, KeyState, RegionId, RuntimeProgramContext, RuntimeProgramUpdate};
+use nana_ui::runtime::{Entity, Workspace, component_descriptors};
+use nana_ui::{
+    ApplicationWindow, InputPayload, KeyState, RegionId, RuntimeProgramContext,
+    RuntimeProgramUpdate,
+};
 
 use crate::frame_clock::{FrameClock, FrameStep};
-use crate::shell::{GapMessage, ShellMessage, ShellView, ShellViewModel, SidebarMessage, WindowAction};
-use crate::{host_api, MomoBakoApplication};
+use crate::shell::{
+    GapMessage, ShellMessage, ShellView, ShellViewModel, SidebarMessage, WindowAction,
+};
+use crate::{MomoBakoApplication, host_api};
 
 /// 托盘和图标失败原因。窗口几何会话和帧时钟跟这一扇主窗口走。
 pub(crate) struct HostSession {
@@ -30,7 +35,10 @@ impl Default for HostSession {
 }
 
 /// 进程启动后建一次托盘。建失败就记下原因，之后不能把隐藏窗口说成已经进了托盘。
-pub(crate) fn install_tray(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
+pub(crate) fn install_tray(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+) {
     if app.host.tray.is_some() || app.host.tray_error.is_some() {
         return;
     }
@@ -44,7 +52,10 @@ pub(crate) fn install_tray(app: &mut MomoBakoApplication, context: &RuntimeProgr
 }
 
 /// 打开、拖出和托盘请求在这一帧执行。拖出结果如果已经回来，也在这里写回壳层。
-pub(crate) fn after_update(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
+pub(crate) fn after_update(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+) {
     let window = context.window();
     let tray_ready = app.host.tray.is_some();
     let tray_error = app.host.tray_error.clone();
@@ -58,8 +69,16 @@ pub(crate) fn after_update(app: &mut MomoBakoApplication, context: &RuntimeProgr
 /// 或者工作台排法要换时才整体同步，手势进行中不重挂，否则按下目标会随节点一起消失。
 /// 悬停、预取、仓库操作行和动效的时钟都按 `step.ui_ms` 往前拨。文档变了以后先把挂着的缩略图报给文件表面，
 /// 预取只解码挂着的，纹理回收也按它（`thumbnail_host.rs`）。
-pub(crate) fn prepare_motion(shell: &mut ShellViewModel, mut view: Option<&mut ShellView>, window: &mut ApplicationWindow, step: FrameStep) {
-    if let Some(mounted) = view.as_deref_mut().and_then(|view| view.mounted_thumbnails(&window.document)) {
+pub(crate) fn prepare_motion(
+    shell: &mut ShellViewModel,
+    mut view: Option<&mut ShellView>,
+    window: &mut ApplicationWindow,
+    step: FrameStep,
+) {
+    if let Some(mounted) = view
+        .as_deref_mut()
+        .and_then(|view| view.mounted_thumbnails(&window.document))
+    {
         shell.files.note_mounted_thumbnails(mounted);
     }
     crate::shell::poll_media_keys(shell);
@@ -68,6 +87,7 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, mut view: Option<&mut S
     if shell.input.live_gesture.is_some() || shell.sidebar.hover_since_ms.is_some() {
         shell.sidebar.tick_hover(step.ui_ms);
     }
+    crate::shell::tick_external_folder_hover(shell);
     let tracking = crate::shell::observe_live_pointer(shell, &window.document);
     shell.stage_browses();
     // 拖出结果这类归约以外写下的失败收进状态区，状态区变了要整体同步。
@@ -80,7 +100,9 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, mut view: Option<&mut S
         shell.follow_task_fills();
     }
     if shell.motion.active() {
-        shell.motion.advance(shell.motion.now_ms().saturating_add(step.ui_ms));
+        shell
+            .motion
+            .advance(shell.motion.now_ms().saturating_add(step.ui_ms));
     }
     let mut overlay_leaving = false;
     if let Some(view) = view {
@@ -91,7 +113,8 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, mut view: Option<&mut S
             shell.surface_dirty = false;
             view.sync(&mut window.document, shell)
         } else {
-            view.sync_hot(&mut window.document, shell).and_then(|()| view.retry_deferred(&mut window.document, shell))
+            view.sync_hot(&mut window.document, shell)
+                .and_then(|()| view.retry_deferred(&mut window.document, shell))
         };
         if let Err(error) = synced {
             eprintln!("Nana 准备帧同步壳层失败：{error}");
@@ -101,7 +124,11 @@ pub(crate) fn prepare_motion(shell: &mut ShellViewModel, mut view: Option<&mut S
         overlay_leaving = view.overlay_leaving();
     }
     let busy = shell.motion.active() || tracking || overlay_leaving || shell.player.clock_running();
-    window.demand = if busy || shell.files.prefetch_pending() || shell.inspect.timers_pending() || shell.operation.pending() {
+    window.demand = if busy
+        || shell.files.prefetch_pending()
+        || shell.inspect.timers_pending()
+        || shell.operation.pending()
+    {
         nana_ui::FrameDemand::Continuous(std::num::NonZeroU32::new(30).expect("30"))
     } else {
         nana_ui::FrameDemand::OnDemand
@@ -116,6 +143,8 @@ fn drive_prefetch(shell: &mut ShellViewModel, step_ms: u64) {
     let now = shell.files.tick_prefetch(step_ms);
     let paths = shell.files.undecoded_thumbnail_paths();
     shell.files.poll_thumbnail_prefetch(now, &paths);
+    // 来源目录的下一页：到点就读，只生成缩略图，不画进列表。
+    shell.files.poll_virtual_page_prefetch(now);
 }
 
 /// 记下这次输入按着的修饰键。运行时路由以后文档不保留修饰键，点选条目（切换、范围）和
@@ -126,7 +155,10 @@ pub(crate) fn note_modifiers(shell: &mut ShellViewModel, payload: &InputPayload)
         InputPayload::Key(key) => key.modifiers,
         _ => return,
     };
-    shell.input.modifiers = crate::shell::input::HeldModifiers { shift: modifiers.shift, command: modifiers.control || modifiers.meta };
+    shell.input.modifiers = crate::shell::input::HeldModifiers {
+        shift: modifiers.shift,
+        command: modifiers.control || modifiers.meta,
+    };
 }
 
 /// 运行时路由完一个输入事件以后的全局 Escape：按下、不是连发、控件没有自己处理掉（`consumed`
@@ -135,7 +167,11 @@ pub(crate) fn note_modifiers(shell: &mut ShellViewModel, payload: &InputPayload)
 /// 焦点在哪都一样：对话框、弹层和右键菜单的开合都记在 ViewModel 里，关哪一层由
 /// [`crate::shell::escape_layer`] 按先后决定，归约时 `dismiss_top` 照同一个顺序关。下拉框的选项、
 /// 数字框这类控件自己处理 Escape 时运行时会标 `prevent_default`，这里不再重复处理。
-pub(crate) fn escape_message(shell: &ShellViewModel, payload: &InputPayload, consumed: bool) -> Option<ShellMessage> {
+pub(crate) fn escape_message(
+    shell: &ShellViewModel,
+    payload: &InputPayload,
+    consumed: bool,
+) -> Option<ShellMessage> {
     let InputPayload::Key(key) = payload else {
         return None;
     };
@@ -143,7 +179,9 @@ pub(crate) fn escape_message(shell: &ShellViewModel, payload: &InputPayload, con
         return None;
     }
     crate::shell::escape_layer(shell)?;
-    Some(ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::Escape)))
+    Some(ShellMessage::Sidebar(SidebarMessage::Gap(
+        GapMessage::Escape,
+    )))
 }
 
 /// 分隔条的松手被 Nana 工作区吃掉。指针捕获结束时才写入宽度。
@@ -163,11 +201,18 @@ fn sync_sidebar_resize(shell: &mut ShellViewModel, document: &nana_ui::runtime::
     }) else {
         return;
     };
-    let dragging = context.world().pointer_captures(document_id).iter().any(|(_, node)| {
-        context
-            .read(Entity::<nana_ui::runtime::WorkspaceResizeHandle>::from_stable_id(*node), |_| ())
-            .is_ok()
-    });
+    let dragging = context
+        .world()
+        .pointer_captures(document_id)
+        .iter()
+        .any(|(_, node)| {
+            context
+                .read(
+                    Entity::<nana_ui::runtime::WorkspaceResizeHandle>::from_stable_id(*node),
+                    |_| (),
+                )
+                .is_ok()
+        });
     let frame = crate::shell::note_sidebar_resize(
         shell.input.sidebar_dragging,
         dragging,
@@ -185,7 +230,21 @@ fn sync_sidebar_resize(shell: &mut ShellViewModel, document: &nana_ui::runtime::
     }
 }
 
+/// 记下窗口逻辑尺寸。相对上次变了至少 1px 时，收起文件菜单和文件夹菜单。
+/// 发出的消息和失焦一样经 `update` 归约。尺寸没变或无效时不发。
+fn note_window_resize(
+    app: &mut MomoBakoApplication,
+    geometry: &nana_ui_platform::WindowGeometry,
+    context: &RuntimeProgramContext<ShellMessage>,
+) {
+    let (width, height) = geometry.logical_size;
+    for message in crate::shell::window_resize_messages(&mut app.shell, width, height) {
+        context.dispatch(message);
+    }
+}
+
 /// 几何变化、外观和文件对话框从这里进壳层。关窗请求由 `close_requested` 回答。
+/// 窗口逻辑尺寸相对上次记下的像素变了时，收起文件菜单和文件夹菜单。
 pub(crate) fn on_window_event(
     app: &mut MomoBakoApplication,
     event: &nana_ui_platform::WindowEvent,
@@ -193,17 +252,24 @@ pub(crate) fn on_window_event(
 ) -> RuntimeProgramUpdate {
     match event {
         nana_ui_platform::WindowEvent::Ready { id, geometry } => {
+            // 打开时记下尺寸。随后的缩放才和它对，尺寸没变不关菜单。
+            note_window_resize(app, geometry, context);
             app.shell.set_viewport_width(geometry.logical_size.0);
             let window_commands = app.host.windows.on_ready(*id);
-            RuntimeProgramUpdate { window_commands, ..RuntimeProgramUpdate::redraw(*id) }
+            RuntimeProgramUpdate {
+                window_commands,
+                ..RuntimeProgramUpdate::redraw(*id)
+            }
         }
         nana_ui_platform::WindowEvent::Resized { id, geometry } => {
             app.host.windows.on_geometry(geometry);
+            note_window_resize(app, geometry, context);
             if app.shell.set_viewport_width(geometry.logical_size.0) {
                 return RuntimeProgramUpdate::redraw(*id);
             }
             RuntimeProgramUpdate::default()
         }
+        // 只移动窗口不改变尺寸，右键菜单留着。
         nana_ui_platform::WindowEvent::Moved { geometry, .. } => {
             app.host.windows.on_geometry(geometry);
             RuntimeProgramUpdate::default()
@@ -224,21 +290,33 @@ pub(crate) fn on_window_event(
         }
         nana_ui_platform::WindowEvent::FileDialogCompleted { id, result } => {
             let failed = result.error.as_ref().map(|error| format!("{error:?}"));
-            let paths = result.paths.iter().map(|path| path.display().to_string()).collect();
-            context.dispatch(ShellMessage::Input(crate::shell::input::InputMessage::FileDialogCompleted {
-                request_id: result.id,
-                paths,
-                failed,
-            }));
+            let paths = result
+                .paths
+                .iter()
+                .map(|path| path.display().to_string())
+                .collect();
+            context.dispatch(ShellMessage::Input(
+                crate::shell::input::InputMessage::FileDialogCompleted {
+                    request_id: result.id,
+                    paths,
+                    failed,
+                },
+            ));
             RuntimeProgramUpdate::redraw(*id)
         }
-        nana_ui_platform::WindowEvent::FileDialogRejected { id, request_id, error } => {
+        nana_ui_platform::WindowEvent::FileDialogRejected {
+            id,
+            request_id,
+            error,
+        } => {
             eprintln!("Nana 文件对话框被拒绝：{error:?}");
-            context.dispatch(ShellMessage::Input(crate::shell::input::InputMessage::FileDialogCompleted {
-                request_id: *request_id,
-                paths: Vec::new(),
-                failed: Some(format!("{error:?}")),
-            }));
+            context.dispatch(ShellMessage::Input(
+                crate::shell::input::InputMessage::FileDialogCompleted {
+                    request_id: *request_id,
+                    paths: Vec::new(),
+                    failed: Some(format!("{error:?}")),
+                },
+            ));
             RuntimeProgramUpdate::redraw(*id)
         }
         _ => RuntimeProgramUpdate::default(),
@@ -251,13 +329,20 @@ pub(crate) fn answer_close(
     id: nana_ui_platform::WindowId,
     context: &RuntimeProgramContext<ShellMessage>,
 ) -> RuntimeProgramUpdate {
-    let decision = crate::shell::input::decide_close(app.shell.settings.close_behavior.as_str(), app.shell.close_is_dirty());
+    let decision = crate::shell::input::decide_close(
+        app.shell.settings.close_behavior.as_str(),
+        app.shell.close_is_dirty(),
+    );
     match decision {
         crate::shell::input::CloseDecision::CloseNow => RuntimeProgramUpdate {
-            window_commands: vec![host_api::WindowCommand::Close.to_platform_command(id, context.geometry().maximized)],
+            window_commands: vec![
+                host_api::WindowCommand::Close
+                    .to_platform_command(id, context.geometry().maximized),
+            ],
             ..RuntimeProgramUpdate::redraw(id)
         },
-        crate::shell::input::CloseDecision::Ask { .. } | crate::shell::input::CloseDecision::HoldForTray => {
+        crate::shell::input::CloseDecision::Ask { .. }
+        | crate::shell::input::CloseDecision::HoldForTray => {
             context.dispatch(ShellMessage::WindowAction(WindowAction::Close));
             RuntimeProgramUpdate::redraw(id)
         }

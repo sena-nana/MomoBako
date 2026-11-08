@@ -3,10 +3,10 @@
 
 use serde_json::json;
 
-use crate::shell::admin::style::key_part;
-use crate::shell::admin::AdminEffect;
-use crate::shell::view_harness::ShellHarness;
 use crate::shell::ShellViewModel;
+use crate::shell::admin::AdminEffect;
+use crate::shell::admin::style::key_part;
+use crate::shell::view_harness::ShellHarness;
 
 /// 网易云来源插件：设置里有「API Base URL」这些文本字段。
 const NETEASE: &str = "momobako.netease.source";
@@ -60,24 +60,39 @@ fn a_text_field_saves_its_draft_when_focus_leaves() {
     settle(&mut harness);
     assert!(saved(&mut harness).is_empty(), "打字时不保存");
     leave_field(&mut harness);
-    assert_eq!(saved(&mut harness), [("apiBaseUrl".to_string(), json!("https://ncm.example"))], "失焦应该保存草稿");
+    assert_eq!(
+        saved(&mut harness),
+        [("apiBaseUrl".to_string(), json!("https://ncm.example"))],
+        "失焦应该保存草稿"
+    );
 }
 
 /// JSON 字段：多行框里改完点到别处保存，按 JSON 解析以后写进配置。
 #[test]
 fn a_json_field_saves_when_focus_leaves() {
     let mut model = scene("source-auth-gap");
-    let plugin = model.admin.plugins.iter_mut().find(|plugin| plugin.plugin_id == NETEASE).expect("网易云插件");
+    let plugin = model
+        .admin
+        .plugins
+        .iter_mut()
+        .find(|plugin| plugin.plugin_id == NETEASE)
+        .expect("网易云插件");
     plugin.contributes["settings"]["fields"]
         .as_array_mut()
         .expect("设置字段")
         .push(json!({ "key": "headers", "label": "请求头", "type": "json" }));
     let mut harness = ShellHarness::mount(model);
-    let area = harness.keyed(&format!("admin-field-json-{}-headers", key_part(NETEASE))).expect("JSON 文本域");
+    let area = harness
+        .keyed(&format!("admin-field-json-{}-headers", key_part(NETEASE)))
+        .expect("JSON 文本域");
     harness.focus(area);
     harness.type_text("{\"x\": 1}");
     settle(&mut harness);
     assert!(saved(&mut harness).is_empty(), "打字时不保存");
     leave_field(&mut harness);
-    assert_eq!(saved(&mut harness), [("headers".to_string(), json!({ "x": 1 }))], "失焦应该保存 JSON");
+    assert_eq!(
+        saved(&mut harness),
+        [("headers".to_string(), json!({ "x": 1 }))],
+        "失焦应该保存 JSON"
+    );
 }

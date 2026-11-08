@@ -18,24 +18,59 @@ fn scene(name: &str) -> ShellViewModel {
 /// 侧栏五个快捷方式的计数：全部、未分类、未标签、最近使用、回收站。
 fn counts(model: &ShellViewModel) -> [usize; 5] {
     let counts = model.sidebar.counts;
-    [counts.all, counts.uncategorized, counts.untagged, counts.recent, counts.trash]
+    [
+        counts.all,
+        counts.uncategorized,
+        counts.untagged,
+        counts.recent,
+        counts.trash,
+    ]
 }
 
 /// 底子本身：启动走完、活动仓库是夹具仓库、目录树 assets → covers、根目录三条，启动结束时读到的插件清单在
 /// （设置读取失败的场景除外）。
 fn assert_base(name: &str, model: &mut ShellViewModel) {
-    assert_eq!(model.workspace.startup.status, StartupStatus::Ready, "{name} 的启动没走完");
-    assert_eq!(model.workspace.active_repo_id.as_deref(), Some(REPO_ID), "{name} 的活动仓库不对");
+    assert_eq!(
+        model.workspace.startup.status,
+        StartupStatus::Ready,
+        "{name} 的启动没走完"
+    );
+    assert_eq!(
+        model.workspace.active_repo_id.as_deref(),
+        Some(REPO_ID),
+        "{name} 的活动仓库不对"
+    );
     assert_eq!(model.repository_name, REPO_NAME, "{name} 的资源库名不对");
-    let tree = model.sidebar.folders.iter().map(|folder| (folder.path.as_str(), folder.children.len())).collect::<Vec<_>>();
+    let tree = model
+        .sidebar
+        .folders
+        .iter()
+        .map(|folder| (folder.path.as_str(), folder.children.len()))
+        .collect::<Vec<_>>();
     assert_eq!(tree, [("assets", 1)], "{name} 的目录树应是 assets → covers");
-    let rows = model.files.rows.iter().map(|row| row.path.as_str()).collect::<Vec<_>>();
-    assert_eq!(rows, ["assets", "cover.png", "notes/page.pdf"], "{name} 的根目录条目不对");
+    let rows = model
+        .files
+        .rows
+        .iter()
+        .map(|row| row.path.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        rows,
+        ["assets", "cover.png", "notes/page.pdf"],
+        "{name} 的根目录条目不对"
+    );
     // Vue `settings-error` 场景的 `list_plugins` 一直失败，启动结束时也读不到插件。
     let plugins_expected = name != "SettingsError";
-    assert_eq!(!model.admin.plugins.is_empty(), plugins_expected, "{name} 启动结束时读到的插件清单不对");
+    assert_eq!(
+        !model.admin.plugins.is_empty(),
+        plugins_expected,
+        "{name} 启动结束时读到的插件清单不对"
+    );
     assert!(!model.admin.loading_settings, "{name} 的设置包读取应已答完");
-    assert!(model.workspace.take_effects().is_empty(), "{name} 的启动请求应已按夹具答完");
+    assert!(
+        model.workspace.take_effects().is_empty(),
+        "{name} 的启动请求应已按夹具答完"
+    );
 }
 
 /// 管理、搜索、播放集和任务类场景都从 `base()` 起步：全部 2、未分类 1、未标签 2，有 assets 目录，网格展示。
@@ -56,12 +91,16 @@ fn listed_scenes_start_from_the_vue_base() {
     for name in [
         "logs-paused",
         "extensions",
+        "file-import",
+        "eagle-import",
+        "eagle-import-busy",
         "downloader-settings",
         "office-convert",
         "source-auth-gap",
         "source-auth-methods",
         "filter-bar",
         "search-empty",
+        "search-failed",
         "playlist-open",
         "playback-queue",
         "outside-playback",
@@ -70,8 +109,16 @@ fn listed_scenes_start_from_the_vue_base() {
         models.push((name.to_string(), scene(name)));
     }
     for (name, mut model) in models {
-        assert_eq!(counts(&model), [2, 1, 2, 0, 0], "{name} 的侧栏计数和 Vue 不一致");
-        assert_eq!(model.files.display_mode, DisplayMode::Grid, "{name} 应是网格展示");
+        assert_eq!(
+            counts(&model),
+            [2, 1, 2, 0, 0],
+            "{name} 的侧栏计数和 Vue 不一致"
+        );
+        assert_eq!(
+            model.files.display_mode,
+            DisplayMode::Grid,
+            "{name} 应是网格展示"
+        );
         assert_base(&name, &mut model);
     }
 }
@@ -79,7 +126,12 @@ fn listed_scenes_start_from_the_vue_base() {
 /// 页面身份留着：设置、日志和播放中这些页起步以后还停在自己的页面上。
 #[test]
 fn seeding_keeps_the_page_identity() {
-    for page in [ShellPage::Settings, ShellPage::Logs, ShellPage::TaskRunning, ShellPage::PlaybackRunning] {
+    for page in [
+        ShellPage::Settings,
+        ShellPage::Logs,
+        ShellPage::TaskRunning,
+        ShellPage::PlaybackRunning,
+    ] {
         assert_eq!(ShellViewModel::for_page(page.clone()).page, page);
     }
 }
@@ -88,28 +140,50 @@ fn seeding_keeps_the_page_identity() {
 /// 两个文件都有标签，未标签是 0。
 #[test]
 fn tagged_fixtures_change_the_untagged_count() {
-    for (name, untagged) in [("files-selected-metadata", 1), ("filter-bar-active", 0), ("search-results", 0)] {
+    for (name, untagged) in [
+        ("files-selected-metadata", 1),
+        ("filter-bar-active", 0),
+        ("search-results", 0),
+    ] {
         let model = scene(name);
-        assert_eq!(counts(&model), [2, 1, untagged, 0, 0], "{name} 的侧栏计数和 Vue 不一致");
+        assert_eq!(
+            counts(&model),
+            [2, 1, untagged, 0, 0],
+            "{name} 的侧栏计数和 Vue 不一致"
+        );
     }
 }
 
 /// 截图拿到的是静止画面：任务弹层开着的场景，各行进度条停在自己的目标宽度上，不停在过渡的起点或半路。
 #[test]
 fn task_fills_rest_on_their_targets() {
-    let pages = [ShellPage::TaskRunning, ShellPage::TaskCancelling].map(|page| (format!("{page:?}"), ShellViewModel::for_page(page)));
-    let scenes = crate::shell::acceptance_gap_models().into_iter().map(|(name, model)| (name.to_string(), model));
+    let pages = [ShellPage::TaskRunning, ShellPage::TaskCancelling]
+        .map(|page| (format!("{page:?}"), ShellViewModel::for_page(page)));
+    let scenes = crate::shell::acceptance_gap_models()
+        .into_iter()
+        .map(|(name, model)| (name.to_string(), model));
     let mut checked = Vec::new();
     for (name, model) in pages.into_iter().chain(scenes) {
         let targets = crate::shell::admin::task_fill_targets(&model);
         if targets.is_empty() {
             continue;
         }
-        assert_eq!(model.motion.task_fills(), targets, "{name} 的任务进度条没有停在目标宽度");
+        assert_eq!(
+            model.motion.task_fills(),
+            targets,
+            "{name} 的任务进度条没有停在目标宽度"
+        );
         checked.push(name);
     }
-    for name in ["TaskRunning", "file-operation-progress", "repo-refresh-sync"] {
-        assert!(checked.iter().any(|checked| checked == name), "{name} 应开着任务弹层：{checked:?}");
+    for name in [
+        "TaskRunning",
+        "file-operation-progress",
+        "repo-refresh-sync",
+    ] {
+        assert!(
+            checked.iter().any(|checked| checked == name),
+            "{name} 应开着任务弹层：{checked:?}"
+        );
     }
 }
 
@@ -118,13 +192,39 @@ fn task_fills_rest_on_their_targets() {
 fn scene_specific_data_arrives_through_the_same_messages() {
     for name in ["playlist-open", "outside-playback", "still-playback"] {
         let model = scene(name);
-        assert_eq!(model.sidebar.playlists.len(), 1, "{name} 侧栏应有一个播放集");
-        assert_eq!(model.sidebar.active_playlist_id.as_deref(), Some("playlist-demo"), "{name} 应点开了它");
+        assert_eq!(
+            model.sidebar.playlists.len(),
+            1,
+            "{name} 侧栏应有一个播放集"
+        );
+        assert_eq!(
+            model.sidebar.active_playlist_id.as_deref(),
+            Some("playlist-demo"),
+            "{name} 应点开了它"
+        );
     }
     let outside = scene("outside-playback");
-    assert!(outside.playlist_players.iter().any(|player| player.player_type_id == "momobako.playlist.foreign"), "外部播放器要经播放器类型的读取进来");
-    assert!(outside.player.contributions.iter().any(|player| player.player_type_id == "momobako.playlist.foreign"), "播放器也要认得外部播放器");
+    assert!(
+        outside
+            .playlist_players
+            .iter()
+            .any(|player| player.player_type_id == "momobako.playlist.foreign"),
+        "外部播放器要经播放器类型的读取进来"
+    );
+    assert!(
+        outside
+            .player
+            .contributions
+            .iter()
+            .any(|player| player.player_type_id == "momobako.playlist.foreign"),
+        "播放器也要认得外部播放器"
+    );
     let methods = scene("source-auth-methods");
-    let repositories = methods.workspace.repositories.iter().map(|item| item.repo_id.as_str()).collect::<Vec<_>>();
+    let repositories = methods
+        .workspace
+        .repositories
+        .iter()
+        .map(|item| item.repo_id.as_str())
+        .collect::<Vec<_>>();
     assert_eq!(repositories, [REPO_ID, "netease-cloud-music-10086"]);
 }

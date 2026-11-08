@@ -4,77 +4,97 @@
 //! `ShellViewModel` 注入文本状态，避免把领域服务直接耦合到 Nana 控件树。
 
 use crate::backend::services::repository::{
-    AssetDetail, FileBrowserEntry, FileBrowserSnapshot, FilePreviewSourceResponse, RepositorySnapshot,
-    PlaylistSummary, RepositorySummary, SystemLogPage,
-    PluginConfigSnapshot, PlaylistDetail, PlaylistPlayerContribution, TaskProgressSnapshot,
+    AssetDetail, FileBrowserEntry, FileBrowserSnapshot, FilePreviewSourceResponse, PlaylistDetail,
+    PlaylistPlayerContribution, PlaylistSummary, PluginConfigSnapshot, RepositorySnapshot,
+    RepositorySummary, SystemLogPage, TaskProgressSnapshot,
 };
 use crate::settings::ApplicationSettings;
 
 mod acceptance;
-mod workspace_dialogs;
 mod files;
 mod system_media;
+mod workspace_dialogs;
 pub(crate) use system_media::{poll as poll_media_keys, sync as sync_media_session};
-mod inspect_shortcuts;
-mod entry_actions;
-mod palette;
 mod admin_fields;
+mod entry_actions;
+mod inspect_shortcuts;
 mod motion;
+mod palette;
 mod pointer_gesture;
-pub use pointer_gesture::observe_live_pointer;
 pub use motion::note_sidebar_resize;
-mod thumbs;
+pub use pointer_gesture::observe_live_pointer;
+pub(crate) use pointer_gesture::{note_external_folder_drag, tick_external_folder_hover};
+mod files_selection_box;
 mod files_view;
+mod thumbs;
+pub(crate) use context_menu::{
+    dismiss_context_menus_on_scroll, focus_loss_messages, window_resize_messages,
+};
+pub(crate) use files_view::load_more_if_sentinel_near;
+pub(crate) use input::pointer_leave_message;
 mod inspect;
-mod inspect_library;
 mod inspect_asmr;
-pub(crate) use inspect_asmr::{asmr_playlist_path, AsmrMessage};
-mod inspect_view;
+mod inspect_library;
+pub(crate) use inspect_asmr::{AsmrMessage, asmr_playlist_path};
+pub(crate) mod admin;
+pub(crate) mod audio_decode;
 mod inspect_metadata_view;
 mod inspect_search_view;
-pub(crate) mod search_collate;
-pub(crate) mod audio_decode;
+mod inspect_view;
 pub(crate) mod player;
-pub(crate) mod admin;
-pub use admin::{AdminMessage, SourceStep, ToolPageEntry};
+pub(crate) mod search_collate;
 pub use acceptance::gap_models as acceptance_gap_models;
-pub(crate) mod input;
+pub use admin::{AdminMessage, SourceStep, ToolPageEntry};
 pub mod host_events;
+pub(crate) mod input;
+pub(crate) mod library;
+mod playback_prep;
 mod player_view;
 mod sidebar;
 mod sidebar_view;
-pub(crate) mod library;
-mod playback_prep;
 pub use playback_prep::SourcePrep;
-mod workspace;
-pub(crate) mod workspace_refresh;
-pub(crate) mod tree_sync;
-pub(crate) mod repo_operation;
+pub(crate) mod inspect_lyrics;
+mod listening_progress;
+pub(crate) use inspect::support::is_video_extension;
+mod context_menu;
+mod focus_return;
 mod menu_focus;
 mod menu_focus_view;
-mod focus_return;
-mod context_menu;
-pub use files::{display_mode_path, EnsuredThumbnail, FileRow, FilesEffect, FilesMessage, HardlinkPrompt, VirtualQuery};
-pub(crate) use thumbs::{decode_preview_pixels, decode_thumbnail_file, thumbnail_slot, ThumbnailFrame};
-pub(crate) use inspect::poll_timers;
-pub use inspect::{
-    DateBound, InspectEffect, InspectMessage, NumberBound, SearchRequestDraft, SearchRow, prepare_text,
+pub(crate) mod repo_operation;
+pub(crate) mod tree_sync;
+mod workspace;
+pub(crate) mod workspace_refresh;
+pub(crate) use files::ProtocolFolderTree;
+pub use files::{
+    EnsuredThumbnail, FileRow, FilesEffect, FilesMessage, HardlinkPrompt, VirtualQuery,
+    display_mode_path,
 };
+pub(crate) use inspect::NativeLoad;
+pub(crate) use inspect::archive_entry_loaded;
 pub(crate) use inspect::native_preview::load as load_native_preview;
-pub(crate) use inspect::support::{preview_media_parts, MediaParts};
+pub(crate) use inspect::native_preview::preview_archive_entry;
+pub(crate) use inspect::poll_timers;
 #[cfg(test)]
 pub(crate) use inspect::support::preview_media_session;
-pub use player::PreviewPcm;
-pub(crate) use inspect::NativeLoad;
-pub(crate) use inspect_view::wants_preview_texture;
-pub use sidebar::{
-    FolderMutation, GapMessage, SidebarEffect, SidebarFolder, SidebarMessage, SidebarPlaylist, SidebarSmartFolder,
-    SidebarTree, ShortcutId, SmartFolderChange, SmartFolderOutcome, SmartFolderResult,
+pub(crate) use inspect::support::{MediaParts, preview_media_parts};
+pub use inspect::{
+    DateBound, InspectEffect, InspectMessage, NumberBound, SearchRequestDraft, SearchRow,
+    prepare_text,
 };
+pub(crate) use inspect_view::wants_preview_texture;
+pub use player::PreviewPcm;
 pub(crate) use sidebar::escape_layer;
+pub use sidebar::{
+    FolderMutation, GapMessage, ShortcutId, SidebarEffect, SidebarFolder, SidebarMessage,
+    SidebarPlaylist, SidebarSmartFolder, SidebarTree, SmartFolderChange, SmartFolderOutcome,
+    SmartFolderResult,
+};
+pub(crate) use thumbs::{
+    ThumbnailFrame, decode_preview_pixels, decode_thumbnail_file, thumbnail_slot,
+};
 pub use workspace::{
-    last_repository_path, sidebar_prefs_path, DeleteMode, LibraryCategory, MainRegion, StartupStatus, SyncCounts, WorkspaceEffect,
-    WorkspacePanel, WorkspaceRepository, WorkspaceState,
+    DeleteMode, LibraryCategory, MainRegion, StartupStatus, SyncCounts, WorkspaceEffect,
+    WorkspacePanel, WorkspaceRepository, WorkspaceState, last_repository_path, sidebar_prefs_path,
 };
 
 /// Nana Runtime 传递给应用状态的壳层交互消息。
@@ -82,13 +102,29 @@ pub enum ShellMessage {
     /// 打开设置页：读设置包和应用设置，和 Vue `Settings.vue` 挂载时的 `loadSettingsData` 一致。
     OpenSettings,
     /// 带代次的仓库摘要结果：启动和换仓库的第 3 步，或者同一个仓库刷新时的读摘要。代次不对的丢掉。
-    RepositorySnapshotLoaded { generation: u64, result: Result<RepositorySnapshot, String> },
+    RepositorySnapshotLoaded {
+        generation: u64,
+        result: Result<RepositorySnapshot, String>,
+    },
     FileBrowserLoaded(Result<FileBrowserSnapshot, String>),
+    /// 来源目录下一页读回来了，只用来生成缩略图，不替换文件列表。
+    VirtualThumbnailPage {
+        repo_id: String,
+        path: String,
+        trash: bool,
+        offset: usize,
+        result: Result<FileBrowserSnapshot, String>,
+    },
     /// 缩略图解码结果。像素由宿主上传，归约只留下原始宽高。
     ThumbnailPixels(Vec<ThumbnailFrame>),
-    SelectFile { path: String, asset_id: Option<String> },
+    SelectFile {
+        path: String,
+        asset_id: Option<String>,
+    },
     OpenDirectory(String),
     AssetDetailLoaded(Result<AssetDetail, String>),
+    /// 同一个仓库刷新以后重读的素材详情。失败只记日志，不改页面。
+    RefreshAssetLoaded(Result<AssetDetail, String>),
     PreviewPixelsLoaded {
         source: FilePreviewSourceResponse,
         pixels: Result<PreviewPixels, String>,
@@ -97,9 +133,15 @@ pub enum ShellMessage {
     LogsLoaded(Result<SystemLogPage, String>),
     ClearLogs,
     /// 删除播放集以后这个仓库的整份播放集列表。
-    PlaylistsLoaded { repo_id: String, result: Result<Vec<PlaylistSummary>, String> },
+    PlaylistsLoaded {
+        repo_id: String,
+        result: Result<Vec<PlaylistSummary>, String>,
+    },
     /// 新建播放集的结果：成功时是整份列表和新建出来、要接着点开的播放集。
-    PlaylistCreated { repo_id: String, result: Result<(Vec<PlaylistSummary>, Option<String>), String> },
+    PlaylistCreated {
+        repo_id: String,
+        result: Result<(Vec<PlaylistSummary>, Option<String>), String>,
+    },
     PlaylistPlayersLoaded(Result<Vec<PlaylistPlayerContribution>, String>),
     NewPlaylistNameChanged(String),
     SelectPlaylistPlayer(String),
@@ -107,7 +149,10 @@ pub enum ShellMessage {
     ClosePlaylistDialog,
     CreatePlaylist,
     PlaylistDetailLoaded(Result<PlaylistDetail, String>),
-    RemovePlaylistItem { playlist_id: String, item_id: String },
+    RemovePlaylistItem {
+        playlist_id: String,
+        item_id: String,
+    },
     SettingsLoaded(Result<(ApplicationSettings, Option<String>), String>),
     SettingsThemeChanged(String),
     SettingsSaved(Result<ApplicationSettings, String>),
@@ -120,7 +165,10 @@ pub enum ShellMessage {
         result: Result<Vec<RepositorySummary>, String>,
     },
     /// 带代次的同步结果：启动、换仓库和同一个仓库的刷新都先同步资源库。成功时带同步写回的计数，首屏启动日志用。
-    RepositorySynced { generation: u64, result: Result<workspace::SyncCounts, String> },
+    RepositorySynced {
+        generation: u64,
+        result: Result<workspace::SyncCounts, String>,
+    },
     ToggleSidebar,
     StartupRetry,
     MissingRefresh,
@@ -159,7 +207,11 @@ pub enum ShellMessage {
     /// 键盘打开的菜单：焦点放进菜单的首项或末项，见 `menu_focus.rs`。
     FocusMenu(menu_focus::MenuFocusRequest),
     /// 一次访问记录（`record_entry_access`）的结果：成功时是后端写下的访问时间，见 `library.rs`。
-    EntryAccessRecorded { repo_id: String, path: String, result: Result<String, String> },
+    EntryAccessRecorded {
+        repo_id: String,
+        path: String,
+        result: Result<String, String>,
+    },
 }
 
 /// 已解码的 RGBA 预览帧；解码在服务任务中完成，窗口线程只负责上传 GPU 纹理。
@@ -261,6 +313,10 @@ pub struct ShellViewModel {
     pub operation: repo_operation::RepositoryOperation,
     /// 键盘打开菜单时要把焦点放进哪个菜单，见 `menu_focus.rs`。
     pub(crate) menu_focus: menu_focus::MenuFocus,
+    /// 右键菜单打开时记下的滚动偏移。同一份菜单下偏移变了就关掉，见 `context_menu.rs`。
+    pub(crate) context_menu_scroll: Option<context_menu::MenuScrollSnapshot>,
+    /// 上次见到的窗口逻辑像素尺寸。变了才关右键菜单，见 `context_menu.rs`。
+    pub(crate) context_menu_window: Option<(i32, i32)>,
     /// 窗口逻辑宽。Vue 唯一按窗口宽度切换的断点在播放条，见 [`NARROW_VIEWPORT_PX`]。
     pub viewport_width: f32,
     /// 对话框、弹层或打开文件夹之后，手势松开时要重建树。
@@ -270,6 +326,8 @@ pub struct ShellViewModel {
     pub(crate) revision: u64,
     /// `prepare` 里产生的目录浏览。这一帧就要提交，不能等下一次 `update`。
     pub(crate) staged_browses: Vec<sidebar::SidebarEffect>,
+    /// ASMR 收听进度的节流记号，见 `listening_progress.rs`。
+    pub(crate) listening: listening_progress::Gate,
 }
 
 impl Default for ShellViewModel {
@@ -310,10 +368,13 @@ impl Default for ShellViewModel {
             tree_sync: tree_sync::TreeSyncState::default(),
             operation: repo_operation::RepositoryOperation::default(),
             menu_focus: menu_focus::MenuFocus::default(),
+            context_menu_scroll: None,
+            context_menu_window: None,
             viewport_width: DEFAULT_VIEWPORT_PX,
             surface_dirty: false,
             revision: 0,
             staged_browses: Vec::new(),
+            listening: listening_progress::Gate::default(),
         }
     }
 }
@@ -360,30 +421,65 @@ impl ShellViewModel {
         self.viewport_width <= NARROW_VIEWPORT_PX
     }
 
+    /// 把一份播放集详情写到页面字段上：选中的编号、排序用的条目编号、未就绪说明。不改播放队列。
+    fn write_open_playlist_fields(&mut self, detail: &PlaylistDetail) {
+        self.selected_playlist_id = Some(detail.playlist.playlist_id.clone());
+        self.playlist_item_ids = detail
+            .items
+            .iter()
+            .map(|item| item.playlist_item_id.clone())
+            .collect();
+        self.playlist_item_status = detail
+            .items
+            .iter()
+            .filter(|item| item.status != "ready")
+            .map(|item| {
+                format!(
+                    "{}: {}",
+                    item.filename,
+                    item.status_reason
+                        .clone()
+                        .unwrap_or_else(|| item.status.clone())
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" · ");
+    }
+
     /// 在 ViewModel 边界集中处理导航和页面动作，避免控件闭包直接修改领域状态。
     pub fn reduce(&mut self, message: ShellMessage) {
         self.revision = self.revision.wrapping_add(1);
-        let (before, seq, started) = (status::Activity::of(self), self.status.seq(), status::starts_operation(&message));
+        let (before, seq, started) = (
+            status::Activity::of(self),
+            self.status.seq(),
+            status::starts_operation(&message),
+        );
         let startup_before = self.workspace.startup.status;
         let settings_before = self.workspace.startup.settings;
         let active_before = self.workspace.active_repo_id.clone();
         self.reduce_inner(message);
-        if settings_before != workspace::SettingsWait::Bundle && self.workspace.startup.settings == workspace::SettingsWait::Bundle {
+        if settings_before != workspace::SettingsWait::Bundle
+            && self.workspace.startup.settings == workspace::SettingsWait::Bundle
+        {
             // Vue 首屏启动在离开启动页之前 `await loadSettingsData()`：插件、钩子记录、缓存、API 设计和外部连接。
             // 没有仓库、仓库丢失的启动也读，添加资源库的来源列表要用插件清单。换仓库不读（Vue `selectRepository`）。
             // 设置包和随后的播放器类型都回来才结束启动（`admin_reduce::apply_bundle`、`PlaylistPlayersLoaded`）。
             self.admin.begin_settings_load();
         }
         let launch = self.workspace.startup.mode == workspace::StartupMode::Launch;
-        if startup_before != StartupStatus::Ready && self.workspace.startup.status == StartupStatus::Ready && launch {
+        if startup_before != StartupStatus::Ready
+            && self.workspace.startup.status == StartupStatus::Ready
+            && launch
+        {
             self.settle_launch();
         }
         self.settle_workspace(&active_before, startup_before);
         self.flush_folder_mutations();
         self.settle_sidebar_dialogs();
         tree_sync::settle(self);
-        // 列表换过或者上一条生成结果回来了：给下一条还没有缩略图的文件排生成（`files_thumbnail_ensure.rs`）。
-        self.files.settle_thumbnail_ensure(self.workspace.active_repo_id.as_deref());
+        // 列表换过或者上一条生成结果回来了：给下一条还没有缩略图的条目排生成或来源封面（`files_thumbnail_ensure.rs`）。
+        self.files
+            .settle_thumbnail_ensure(self.workspace.active_repo_id.as_deref());
         // 同一次归约里先后开始的操作，照开始的先后交给槽位：文件和侧栏的在前，换仓库的在后。
         self.operation.apply(&mut self.files.operation);
         self.operation.apply(&mut self.sidebar.operation);
@@ -397,15 +493,29 @@ impl ShellViewModel {
             return;
         };
         let effect = match mutation {
-            sidebar::FolderMutation::Create { repo_id, parent, name } => files::FilesEffect::CreateDirectory {
+            sidebar::FolderMutation::Create {
+                repo_id,
+                parent,
+                name,
+            } => files::FilesEffect::CreateDirectory {
                 repo_id,
                 parent: (!parent.is_empty()).then_some(parent),
                 name,
             },
-            sidebar::FolderMutation::Rename { repo_id, path, name } => {
-                files::FilesEffect::Rename { repo_id, path, new_name: name }
-            }
-            sidebar::FolderMutation::Delete { repo_id, path, mode } => files::FilesEffect::Delete {
+            sidebar::FolderMutation::Rename {
+                repo_id,
+                path,
+                name,
+            } => files::FilesEffect::Rename {
+                repo_id,
+                path,
+                new_name: name,
+            },
+            sidebar::FolderMutation::Delete {
+                repo_id,
+                path,
+                mode,
+            } => files::FilesEffect::Delete {
                 repo_id,
                 paths: vec![path],
                 mode: Some(mode.as_str().into()),
@@ -415,7 +525,8 @@ impl ShellViewModel {
     }
 
     fn follow_motion(&mut self) {
-        let panel_open = self.sidebar.popover != sidebar::PopoverMode::Closed || self.admin.popover_open;
+        let panel_open =
+            self.sidebar.popover != sidebar::PopoverMode::Closed || self.admin.popover_open;
         let startup = f32::from(self.workspace.startup.percent);
         let spinner = self.sidebar.tree_loading
             || self.sidebar.submitting
@@ -432,7 +543,13 @@ impl ShellViewModel {
         // 任务弹层开着、里面有不确定进度的行时，进度条按 `progress-pulse` 呼吸；弹层关着不画，也不要帧。
         let pulse = self.admin.popover_open && self.task_rows().iter().any(|row| row.indeterminate);
         self.motion.set_pulse(pulse);
-        self.motion.set_sidebar_collapsed(self.workspace.sidebar_collapsed, self.workspace.sidebar_width);
+        // 准备卡和图片读取胶囊的色条按 `media-preview-progress-sweep` 来回扫。不在预览框里时不要帧。
+        self.motion
+            .set_preview_sweep(inspect_view::shows_preview_sweep(self));
+        self.motion.set_sidebar_collapsed(
+            self.workspace.sidebar_collapsed,
+            self.workspace.sidebar_width,
+        );
     }
 
     /// 任务弹层各行进度条的目标宽度交给动效时钟（`.progress-bar__fill` 的宽度过渡）。归约以后、准备帧里仓库操作行
@@ -477,16 +594,32 @@ impl ShellViewModel {
             ShellMessage::WorkspaceListLoaded { generation, result } => {
                 self.apply_loaded_repositories(Some(generation), result);
             }
-            ShellMessage::RepositorySnapshotLoaded { generation, result } => self.apply_repository_snapshot(generation, result),
+            ShellMessage::RepositorySnapshotLoaded { generation, result } => {
+                self.apply_repository_snapshot(generation, result)
+            }
             ShellMessage::FileBrowserLoaded(Ok(browser)) => self.apply_file_browser(browser),
             ShellMessage::ThumbnailPixels(frames) => {
                 self.files.note_thumbnail_sizes(&frames);
             }
             ShellMessage::FileBrowserLoaded(Err(error)) => self.note_file_browser_failed(error),
+            ShellMessage::VirtualThumbnailPage {
+                repo_id,
+                path,
+                trash,
+                offset,
+                result,
+            } => {
+                self.files
+                    .note_virtual_thumbnail_page(&repo_id, &path, trash, offset, result);
+            }
             ShellMessage::SelectFile { path, .. } => {
                 self.page = ShellPage::SelectedFile;
                 self.player.disarm_preview_audio();
                 self.inspect.begin_selection(&path);
+                inspect_view::seed_preview_facts(self, &path);
+                if !files_view::previewing(self) {
+                    inspect_view::seed_detail_card_editor(self, &path);
+                }
                 self.selected_path = Some(path);
                 self.preview_token = None;
                 self.preview_pixels = None;
@@ -505,41 +638,69 @@ impl ShellViewModel {
                 // 单击只在右侧详情里看（Vue 不挂预览插件）：不读预览内容，不准备播放源，也不记访问。
                 let preview = self.files.preview_open(Some(detail.summary.path.as_str()));
                 self.inspect.note_selected_detail(&detail, preview);
+                // Vue `FilePreviewPane` 的四行读 `previewFileEntry`，不读 `activeAssetDetail`。
+                // 详情可以写下缩略图和元数据，类型、大小、硬链接和修改时间仍按列表或播放集条目填回去。
+                let path = detail.summary.path.clone();
+                inspect_view::seed_preview_facts(self, &path);
+                if !preview {
+                    inspect_view::seed_detail_card_editor(self, &path);
+                }
                 if let Some(session) = self.inspect.media_session().cloned() {
                     self.player.adopt_session(session);
                 }
             }
             ShellMessage::AssetDetailLoaded(Err(error)) => {
-                self.status.fail(status::FailureSource::Asset, format!("无法读取文件元数据：{error}"));
+                self.status.fail(
+                    status::FailureSource::Asset,
+                    format!("无法读取文件元数据：{error}"),
+                );
                 self.page = ShellPage::Error;
                 self.inspect.note_detail_error(&error);
             }
             ShellMessage::PreviewPixelsLoaded { source, pixels } => {
                 // 预览源准备好时后端已经写下访问时间（`prepare_preview_file_source`），照 Vue 当场改「最近使用」。
                 if !source.token.is_empty() {
-                    self.note_entry_access(&source.repo_id, &source.path, &admin::support::now_iso8601());
+                    self.note_entry_access(
+                        &source.repo_id,
+                        &source.path,
+                        &admin::support::now_iso8601(),
+                    );
                 }
                 let pixels_ok = pixels.is_ok();
                 let error_text = pixels.as_ref().err().cloned();
-                if !self.inspect.note_pixels(&source.path, pixels_ok, error_text.as_deref()) {
+                if !self
+                    .inspect
+                    .note_pixels(&source.path, pixels_ok, error_text.as_deref())
+                {
                     return;
                 }
                 self.page = ShellPage::SelectedFile;
                 self.preview_token = Some(source.token);
                 self.preview_pixels = pixels.ok();
             }
-            ShellMessage::PlaylistsLoaded { repo_id, result: Ok(playlists) } => {
+            ShellMessage::PlaylistsLoaded {
+                repo_id,
+                result: Ok(playlists),
+            } => {
                 self.apply_playlist_list(&repo_id, &playlists, None);
             }
-            ShellMessage::PlaylistsLoaded { result: Err(error), .. } => {
+            ShellMessage::PlaylistsLoaded {
+                result: Err(error), ..
+            } => {
                 eprintln!("Nana 播放集删除失败：{error}");
-                self.status.fail(status::FailureSource::Playlist, format!("播放集操作失败：{error}"));
+                self.status.fail(
+                    status::FailureSource::Playlist,
+                    format!("播放集操作失败：{error}"),
+                );
             }
-            ShellMessage::PlaylistCreated { repo_id, result } => self.note_playlist_created(&repo_id, result),
+            ShellMessage::PlaylistCreated { repo_id, result } => {
+                self.note_playlist_created(&repo_id, result)
+            }
             ShellMessage::PlaylistPlayersLoaded(Ok(mut players)) => {
                 // 照 Vue `listRegisteredPlaylistPlayers` 按名称的 zh-CN 顺序排，新建播放集默认选第一项。
                 players.sort_by(|left, right| {
-                    search_collate::compare_zh(&left.label, &right.label).then_with(|| left.player_type_id.cmp(&right.player_type_id))
+                    search_collate::compare_zh(&left.label, &right.label)
+                        .then_with(|| left.player_type_id.cmp(&right.player_type_id))
                 });
                 self.playlist_players = players;
                 if self.selected_new_playlist_player_type_id.is_none() {
@@ -551,7 +712,10 @@ impl ShellViewModel {
                 self.workspace.note_players_loaded();
             }
             ShellMessage::PlaylistPlayersLoaded(Err(error)) => {
-                self.status.fail(status::FailureSource::Playlist, format!("无法读取播放器类型：{error}"));
+                self.status.fail(
+                    status::FailureSource::Playlist,
+                    format!("无法读取播放器类型：{error}"),
+                );
                 self.workspace.note_players_loaded();
             }
             ShellMessage::NewPlaylistNameChanged(value) => {
@@ -564,27 +728,22 @@ impl ShellViewModel {
             ShellMessage::ClosePlaylistDialog => self.close_playlist_dialog(),
             ShellMessage::CreatePlaylist => self.submit_playlist_dialog(),
             ShellMessage::PlaylistDetailLoaded(Ok(detail)) => {
-                if self.sidebar.bound_repo_id().is_some_and(|repo_id| repo_id != detail.playlist.repo_id.as_str()) {
+                if self
+                    .sidebar
+                    .bound_repo_id()
+                    .is_some_and(|repo_id| repo_id != detail.playlist.repo_id.as_str())
+                {
                     eprintln!("Nana 忽略过期的播放集详情：{}", detail.playlist.playlist_id);
                     return;
                 }
-                self.selected_playlist_id = Some(detail.playlist.playlist_id.clone());
-                self.playlist_item_ids = detail
-                    .items
-                    .iter()
-                    .map(|item| item.playlist_item_id.clone())
-                    .collect();
-                self.playlist_item_status = detail
-                    .items
-                    .iter()
-                    .filter(|item| item.status != "ready")
-                    .map(|item| format!("{}: {}", item.filename, item.status_reason.clone().unwrap_or_else(|| item.status.clone())))
-                    .collect::<Vec<_>>()
-                    .join(" · ");
+                self.write_open_playlist_fields(&detail);
             }
             ShellMessage::PlaylistDetailLoaded(Err(error)) => {
                 eprintln!("Nana 播放集详情读取或条目修改失败：{error}");
-                self.status.fail(status::FailureSource::Playlist, format!("播放集操作失败：{error}"));
+                self.status.fail(
+                    status::FailureSource::Playlist,
+                    format!("播放集操作失败：{error}"),
+                );
             }
             ShellMessage::OpenSettings
             | ShellMessage::RemovePlaylistItem { .. }
@@ -597,7 +756,9 @@ impl ShellViewModel {
             | ShellMessage::TaskProgressLoaded(_)
             | ShellMessage::Admin(_) => {}
             ShellMessage::WindowAction(_) => {}
-            ShellMessage::RepositorySynced { generation, result } => self.note_repository_synced(generation, result),
+            ShellMessage::RepositorySynced { generation, result } => {
+                self.note_repository_synced(generation, result)
+            }
             ShellMessage::ToggleSidebar => self.workspace.toggle_sidebar(),
             ShellMessage::StartupRetry => {
                 self.workspace.retry_startup();
@@ -606,20 +767,26 @@ impl ShellViewModel {
             ShellMessage::MissingChoosePath => input::begin_relocate_dialog(self),
             ShellMessage::MissingPathChanged(value) => self.workspace.set_path_draft(value),
             ShellMessage::MissingSubmitPath => self.workspace.submit_missing_path(),
-            ShellMessage::MissingRelocateFinished(result) => self.workspace.note_relocate_finished(result),
+            ShellMessage::MissingRelocateFinished(result) => {
+                self.workspace.note_relocate_finished(result)
+            }
             ShellMessage::MissingOpenDelete => self.workspace.open_delete_dialog(),
             ShellMessage::MissingCloseDelete => self.workspace.close_delete_dialog(),
             ShellMessage::MissingConfirmDelete(mode) => {
                 self.workspace.confirm_delete(mode);
             }
             // 删掉当前仓库以后换到下一个（或回到空库），壳层上的内容在归约结束时随活动仓库一起清掉。
-            ShellMessage::MissingDeleteFinished(result) => self.workspace.note_delete_finished(result),
+            ShellMessage::MissingDeleteFinished(result) => {
+                self.workspace.note_delete_finished(result)
+            }
             ShellMessage::MissingOpenSourceSettings => {
                 if let Some(plugin_id) = self.workspace.open_source_settings() {
                     admin::open_settings_page(self, Some(&plugin_id));
                 }
             }
-            ShellMessage::SelectWorkspaceRepository(repo_id) => self.select_workspace_repository(&repo_id),
+            ShellMessage::SelectWorkspaceRepository(repo_id) => {
+                self.select_workspace_repository(&repo_id)
+            }
             // 选面板就是去首页的这个面板：设置页上点「拓展」「日志」「动作」或在标题栏搜索都离开设置页
             // （Vue `selectPanel`、`showSearchWorkspace` 在 `/settings` 时 `router.push("/")`）。
             ShellMessage::SetWorkspacePanel(panel) => {
@@ -636,60 +803,64 @@ impl ShellViewModel {
             ShellMessage::TreeSync(_) => {}
             ShellMessage::Asmr(_) => {}
             ShellMessage::FocusMenu(request) => menu_focus::request(self, request),
-            ShellMessage::EntryAccessRecorded { repo_id, path, result } => self.note_access_recorded(&repo_id, &path, result),
+            ShellMessage::EntryAccessRecorded {
+                repo_id,
+                path,
+                result,
+            } => self.note_access_recorded(&repo_id, &path, result),
+            ShellMessage::RefreshAssetLoaded(result) => self.note_refresh_asset(result),
         }
     }
-
 }
 
-mod workspace_flow;
+mod field_bind;
+mod hot;
 mod interaction;
-mod render;
 mod remount_state;
+mod render;
+mod route_admin;
+mod route_empty;
+mod route_files;
+mod route_home;
+mod route_missing;
+mod route_playlists;
+mod route_search;
+mod route_settings;
+mod route_startup;
 mod row_sync;
-pub(crate) mod status;
 mod shell_tint;
 mod startup_view;
-mod workbench;
+pub(crate) mod status;
 mod title_bar;
-mod hot;
-mod field_bind;
 mod view_host;
 mod view_part;
-mod view_part_sidebar;
-mod view_part_primary;
 mod view_part_overlay;
-mod route_home;
-mod route_startup;
-mod route_settings;
-mod route_files;
-mod route_search;
-mod route_playlists;
-mod route_admin;
-mod route_missing;
-mod route_empty;
+mod view_part_primary;
+mod view_part_sidebar;
+mod workbench;
+mod workspace_flow;
 pub use interaction::commit_interaction;
 pub(crate) use interaction::window_action_commands;
-pub use view_host::mount_shell;
 pub(crate) use view_host::ShellView;
+pub use view_host::mount_shell;
 
-#[cfg(test)]
-mod tests;
-#[cfg(test)]
-mod escape_tests;
-#[cfg(test)]
-mod disabled_fade_tests;
 #[cfg(test)]
 mod data_load_tests;
 #[cfg(test)]
-mod operation_row_tests;
+mod disabled_fade_tests;
+#[cfg(test)]
+mod escape_tests;
 #[cfg(test)]
 mod frame_timing_tests;
 #[cfg(test)]
-mod thumbnail_host_tests;
+mod operation_row_tests;
 #[cfg(test)]
 mod startup_log_tests;
 #[cfg(test)]
-mod workspace_switch_tests;
+mod tests;
+#[cfg(test)]
+mod thumbnail_host_tests;
 #[cfg(test)]
 pub(crate) mod view_harness;
+#[cfg(test)]
+mod workspace_switch_tests;

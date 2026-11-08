@@ -6,36 +6,40 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::backend::services::repository::{
-    PlaybackSessionState, PlaylistDetail,
-    PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest, PlaylistMembershipRequest, PlaylistMembershipSnapshot,
-    PlaylistPlayerContribution, PlaylistSummary,
-};
+use super::ShellViewModel;
 use super::inspect::InspectState;
 use super::workspace::{LibraryCategory, MainRegion, StartupStatus, WorkspacePanel};
-use super::ShellViewModel;
+use crate::backend::services::repository::{
+    PlaybackSessionState, PlaylistDetail, PlaylistItemsByPathsAddRequest,
+    PlaylistItemsOrderRequest, PlaylistMembershipRequest, PlaylistMembershipSnapshot,
+    PlaylistPlayerContribution, PlaylistSummary,
+};
 
-#[path = "player_support.rs"]
-mod support;
 #[path = "player_clip.rs"]
 mod clip;
-pub(crate) use clip::{decode_loaded, decode_media, LoadedItem, StillShow};
+#[path = "player_support.rs"]
+mod support;
 #[cfg(test)]
 pub(crate) use clip::fulfill_loads;
+pub(crate) use clip::{LoadedItem, StillShow, decode_loaded, decode_media};
 #[path = "wav_player.rs"]
 mod wav_player;
+pub(crate) use support::{
+    AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE, builtin_audio_formats, capability_id, resolution_notice,
+    resolve_player,
+};
+use support::{
+    NextStep, PlayerMatch, StoredSession, cycle_mode, default_settings, find_player_for_extension,
+    format_time, mode_label, next_ready_id, preferences_json, previous_ready_id,
+    queue_item_from_playlist, read_preferences_file, read_sessions_file, read_settings_file,
+    ready_ids, sessions_json, settings_json, shuffle_order, system_media_session_available,
+    write_json,
+};
+pub use support::{preferences_path, sessions_path, settings_path};
+pub use wav_player::PreviewPcm;
 pub(crate) use wav_player::pcm_from_bytes;
 #[cfg(test)]
 pub(crate) use wav_player::sound_device_compiled_in;
-pub use wav_player::PreviewPcm;
-pub use support::{preferences_path, sessions_path, settings_path};
-pub(crate) use support::{builtin_audio_formats, capability_id, resolution_notice, resolve_player, AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE};
-use support::{
-    PlayerMatch, StoredSession, cycle_mode, default_settings, find_player_for_extension, format_time, mode_label,
-    next_ready_id, preferences_json, previous_ready_id, queue_item_from_playlist, read_preferences_file,
-    read_sessions_file, read_settings_file, ready_ids, sessions_json, settings_json, shuffle_order,
-    system_media_session_available, write_json, NextStep,
-};
 
 /// 列表循环、随机、单曲循环。和 Vue 的切换顺序一致。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -83,6 +87,8 @@ pub struct QueueItem {
     pub thumbnail_path: Option<String>,
     /// 在线条目（网易云这类来源的单曲）：本地没有文件，装载前先准备播放源（`playback_prep.rs`）。
     pub is_virtual: bool,
+    /// 已经落在本机的文件。预览页打开和定位用它，不拼仓库根。
+    pub local_absolute_path: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -95,33 +101,70 @@ pub struct MembershipAction {
 
 pub enum PlayerMessage {
     SetCandidates(Vec<PlayerCandidate>),
-    SetPreference { capability_id: String, plugin_id: Option<String> },
-    PlayListed { item_id: Option<String> },
-    PlayItem { item_id: String },
-    PlayNext { natural_end: bool },
+    SetPreference {
+        capability_id: String,
+        plugin_id: Option<String>,
+    },
+    PlayListed {
+        item_id: Option<String>,
+    },
+    PlayItem {
+        item_id: String,
+    },
+    PlayNext {
+        natural_end: bool,
+    },
     PlayPrevious,
     CycleMode,
     SetPlaying(bool),
     Seek(u64),
     SetVolume(f32),
     SetImageDuration(u32),
-    SetObjectFit { cover: bool },
+    SetObjectFit {
+        cover: bool,
+    },
     ToggleQueue,
-    /// 播放条卡片排版后的宽度。窄于宽排版的下限时改成三行。
+    /// 播放条卡片排版后的宽度。只记下来；三行排版只看窗口是不是不宽于 1120。
     BarResized(f32),
     /// `repo_id` 为空时停止当前会话。仓库切换要带上被换掉的仓库。
-    Stop { repo_id: Option<String>, clear_stored: bool },
-    ToggleMembership { playlist_id: String, kind: String, extension: String, asset_id: String, is_virtual: bool, path: String },
-    MembershipsLoaded { repo_id: String, result: Result<BTreeMap<String, Vec<String>>, String> },
+    Stop {
+        repo_id: Option<String>,
+        clear_stored: bool,
+    },
+    ToggleMembership {
+        playlist_id: String,
+        kind: String,
+        extension: String,
+        asset_id: String,
+        is_virtual: bool,
+        path: String,
+    },
+    MembershipsLoaded {
+        repo_id: String,
+        result: Result<BTreeMap<String, Vec<String>>, String>,
+    },
     MembershipSaved(Result<PlaylistMembershipSnapshot, String>),
     /// 按路径加入（目录、虚拟条目）以后读回的那张播放集。不一定是页面上点开的那张，不能当成「点开了它」。
     PathsAdded(Result<PlaylistDetail, String>),
-    Reorder { source: String, before: Option<String> },
-    OpenPreview { item_id: Option<String> },
+    /// 播放集页移除或排序交回的那张。先换上这份详情，再重读播放集列表和成员索引。
+    ItemsChanged(Result<PlaylistDetail, String>),
+    Reorder {
+        source: String,
+        before: Option<String>,
+    },
+    OpenPreview {
+        item_id: Option<String>,
+    },
     RestoreDetail(Result<PlaylistDetail, String>),
     /// 当前项经仓库服务读出并解码后的结果。`still` 回带请求时的类别；`prep` 是在线条目准备播放源的结果
     /// （后端写下的访问、失败能不能重试），本地文件是默认值。
-    ItemLoaded { item_id: String, generation: u64, still: bool, result: Result<LoadedItem, String>, prep: super::SourcePrep },
+    ItemLoaded {
+        item_id: String,
+        generation: u64,
+        still: bool,
+        result: Result<LoadedItem, String>,
+        prep: super::SourcePrep,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -129,14 +172,27 @@ pub enum PlayerEffect {
     PersistSettings,
     PersistSessions,
     PersistPreferences,
-    LoadMemberships { repo_id: String },
+    LoadMemberships {
+        repo_id: String,
+    },
     SetMembership(PlaylistMembershipRequest),
     AddByPaths(PlaylistItemsByPathsAddRequest),
     Reorder(PlaylistItemsOrderRequest),
-    RestoreDetail { repo_id: String, playlist_id: String },
+    RestoreDetail {
+        repo_id: String,
+        playlist_id: String,
+    },
     /// 经仓库服务读出当前项的字节。`still` 为真时按图片解码，否则按音视频。`virtual_entry` 是在线条目：
     /// 先经 `momobako.playback.prepare` 准备播放源，再读准备好的本地文件。
-    LoadItem { repo_id: String, item_id: String, path: String, extension: String, still: bool, generation: u64, virtual_entry: bool },
+    LoadItem {
+        repo_id: String,
+        item_id: String,
+        path: String,
+        extension: String,
+        still: bool,
+        generation: u64,
+        virtual_entry: bool,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -150,7 +206,9 @@ pub struct PlayerState {
     pub wants_playing: bool,
     pub can_play: bool,
     pub queue_open: bool,
-    /// 播放条卡片的实际宽度，排版回报后才有；0 表示还没量到。只影响画面。
+    /// 正在放的播放集的播放器类型。没有当前项时，播放条封面的类型字仍按它认。
+    pub(crate) active_player_type_id: Option<String>,
+    /// 播放条卡片的实际宽度，排版回报后才有；0 表示还没量到。三行排版不看它。
     pub(crate) bar_width: f32,
     pub notice: String,
     pub history: Vec<String>,
@@ -166,6 +224,8 @@ pub struct PlayerState {
     pub preferences: BTreeMap<String, String>,
     pub memberships: BTreeMap<String, Vec<String>>,
     pub listed: Option<PlaylistDetail>,
+    /// 已读回的播放集详情，键是 `仓库:播放集`。点开时先画这一份，再拉新的。
+    detail_cache: BTreeMap<String, PlaylistDetail>,
     transient_seq: u64,
     restore_playlist_id: Option<String>,
     stored: BTreeMap<String, StoredSession>,
@@ -208,6 +268,7 @@ impl Default for PlayerState {
             wants_playing: false,
             can_play: false,
             queue_open: false,
+            active_player_type_id: None,
             bar_width: 0.0,
             notice: String::new(),
             history: Vec::new(),
@@ -221,6 +282,7 @@ impl Default for PlayerState {
             preferences: BTreeMap::new(),
             memberships: BTreeMap::new(),
             listed: None,
+            detail_cache: BTreeMap::new(),
             transient_seq: 0,
             restore_playlist_id: None,
             stored: BTreeMap::new(),
@@ -298,15 +360,42 @@ impl PlayerState {
     }
 
     pub fn object_fit_text(&self) -> &'static str {
-        if self.settings.object_fit_cover { "填充" } else { "适应" }
+        if self.settings.object_fit_cover {
+            "填充"
+        } else {
+            "适应"
+        }
     }
 
     pub fn time_text(&self) -> String {
-        format!("{} / {}", format_time(self.session.current_time_ms), format_time(self.session.duration_ms.unwrap_or(0)))
+        format!(
+            "{} / {}",
+            format_time(self.session.current_time_ms),
+            format_time(self.session.duration_ms.unwrap_or(0))
+        )
+    }
+
+    /// 播放条认播放器类别用的类型。
+    ///
+    /// 有当前项时用这一项的类型。没有当前项时退回正在放的播放集的类型，和 Vue
+    /// `currentPlayer()` 在 `currentItem()` 为空时用 `activePlaylist.playerTypeId` 一样。
+    /// 空字符串认不出播放器，封面写「媒体」。
+    pub(crate) fn bar_player_type_id(&self) -> Option<&str> {
+        if self.current_item().is_some() {
+            return self
+                .current_item()
+                .map(|item| item.player_type_id.as_str())
+                .filter(|id| !id.is_empty());
+        }
+        self.active_player_type_id
+            .as_deref()
+            .filter(|id| !id.is_empty())
     }
 
     pub fn current_item(&self) -> Option<&QueueItem> {
-        self.queue.iter().find(|item| Some(&item.id) == self.current_id.as_ref())
+        self.queue
+            .iter()
+            .find(|item| Some(&item.id) == self.current_id.as_ref())
     }
 
     /// 换上这个仓库的播放集列表：读成员索引，再看存下的会话能不能恢复。
@@ -317,7 +406,9 @@ impl PlayerState {
             self.memberships.clear();
             return;
         }
-        self.effects.push(PlayerEffect::LoadMemberships { repo_id: repo_id.to_string() });
+        self.effects.push(PlayerEffect::LoadMemberships {
+            repo_id: repo_id.to_string(),
+        });
         self.queue_restore();
     }
 
@@ -342,38 +433,62 @@ impl PlayerState {
         let Some(stored) = self.stored.get(&repo_id).cloned() else {
             return;
         };
-        if !self.playlists.iter().any(|playlist| playlist.playlist_id == stored.playlist_id) {
+        if !self
+            .playlists
+            .iter()
+            .any(|playlist| playlist.playlist_id == stored.playlist_id)
+        {
             return;
         }
         if !self.player_type_known(&stored.player_type_id) {
             if self.players_loaded {
-                eprintln!("Nana 存下的播放会话用的播放器已经不在：{}", stored.player_type_id);
+                eprintln!(
+                    "Nana 存下的播放会话用的播放器已经不在：{}",
+                    stored.player_type_id
+                );
                 self.clear_stored(&repo_id);
             }
             return;
         }
         self.restore_playlist_id = Some(stored.playlist_id.clone());
-        self.effects.push(PlayerEffect::RestoreDetail { repo_id, playlist_id: stored.playlist_id });
+        self.effects.push(PlayerEffect::RestoreDetail {
+            repo_id,
+            playlist_id: stored.playlist_id,
+        });
     }
 
     /// 内置候选或插件登记的播放器里有这个类型。
     fn player_type_known(&self, player_type_id: &str) -> bool {
-        self.candidates.iter().any(|candidate| candidate.player_type_id == player_type_id)
-            || self.contributions.iter().any(|contribution| contribution.player_type_id == player_type_id)
+        self.candidates
+            .iter()
+            .any(|candidate| candidate.player_type_id == player_type_id)
+            || self
+                .contributions
+                .iter()
+                .any(|contribution| contribution.player_type_id == player_type_id)
     }
 
-    fn note_detail(&mut self, detail: &PlaylistDetail) {
+    /// 记下读回的播放集。返回 `true` 表示这次走了会话恢复，调用方不要再从头播放。
+    ///
+    /// 播放队列只在它本来就是这一张时跟着换。正在放另一张时，刷新页面上的这一张不把播放队列换掉：
+    /// Vue 的播放队列跟播放器走，不跟点开的页面走。
+    fn note_detail(&mut self, detail: &PlaylistDetail) -> bool {
+        // 读回的是真详情才进缓存。失败不会走到这里，不会把失败写成一份播放集。
+        self.remember_playlist_detail(detail);
         if self.restore_playlist_id.as_deref() == Some(detail.playlist.playlist_id.as_str()) {
             self.restore_playlist_id = None;
             self.restore(detail);
-            return;
+            return true;
         }
-        let same_playlist = self.listed.as_ref().is_some_and(|listed| listed.playlist.playlist_id == detail.playlist.playlist_id)
-            || self.queue.iter().any(|item| item.playlist_id == detail.playlist.playlist_id);
+        let playback_is_this = self
+            .queue
+            .iter()
+            .any(|item| !item.transient && item.playlist_id == detail.playlist.playlist_id);
         self.listed = Some(detail.clone());
-        if same_playlist {
+        if playback_is_this {
             self.sync_queue(detail);
         }
+        false
     }
 
     fn restore(&mut self, detail: &PlaylistDetail) {
@@ -388,11 +503,16 @@ impl PlayerState {
             return;
         }
         self.listed = Some(detail.clone());
+        self.active_player_type_id = Some(detail.playlist.player_type_id.clone());
         self.repo_id = Some(repo_id);
         self.mode = stored.mode;
         self.wants_playing = stored.is_playing;
         self.session.volume = stored.volume;
-        self.queue = detail.items.iter().map(|item| queue_item_from_playlist(item, &detail.playlist)).collect();
+        self.queue = detail
+            .items
+            .iter()
+            .map(|item| queue_item_from_playlist(item, &detail.playlist))
+            .collect();
         self.play_item(&stored.current_item_id, stored.is_playing);
         // Vue `setActivePlaylist(.., { restore: true })` 沿用存下的进度和时长，装好以后能跳转就跳过去；
         // 装载期间播放条显示的也是存下的进度，会话文件不被装载清零。
@@ -408,7 +528,10 @@ impl PlayerState {
         if detail.playlist.playlist_id != stored.playlist_id {
             return false;
         }
-        let ready = detail.items.iter().any(|item| item.playlist_item_id == stored.current_item_id && item.status == "ready");
+        let ready = detail
+            .items
+            .iter()
+            .any(|item| item.playlist_item_id == stored.current_item_id && item.status == "ready");
         self.player_type_known(&stored.player_type_id) && ready
     }
 
@@ -417,23 +540,84 @@ impl PlayerState {
             eprintln!("Nana 没有点开的播放集，不能播放");
             return;
         };
+        self.play_detail(&detail, item_id, inspect);
+    }
+
+    /// 侧栏行上的「播放」读回了详情。
+    ///
+    /// 照 Vue `playPlaylist`：从第一条就绪条目自动播放，没有就绪的就用第一条，并且不调用 `selectPlaylist`。
+    /// 正在看的播放集页留在原地；没点开过播放集时也不因此打开一页。正在看的就是这一张时，用这份新详情换上页上的条目。
+    /// 返回 `true` 表示播放的就是正在看的那张，壳层可以刷新它的条目编号。
+    fn play_sidebar(&mut self, detail: &PlaylistDetail, inspect: &mut InspectState) -> bool {
+        let same_page = self
+            .listed
+            .as_ref()
+            .is_some_and(|page| page.playlist.playlist_id == detail.playlist.playlist_id);
+        if self.restore_playlist_id.as_deref() == Some(detail.playlist.playlist_id.as_str()) {
+            let open_page = self.listed.clone();
+            self.restore_playlist_id = None;
+            self.restore(detail);
+            if !same_page {
+                self.listed = open_page;
+            } else {
+                self.remember_playlist_detail(detail);
+            }
+            return same_page;
+        }
+        if same_page {
+            self.listed = Some(detail.clone());
+            self.remember_playlist_detail(detail);
+        }
+        self.play_detail(detail, None, inspect);
+        same_page
+    }
+
+    /// 从一份播放集详情开始放。`item_id` 为空时先找第一条就绪的，没有就用第一条。不改播放集页。
+    fn play_detail(
+        &mut self,
+        detail: &PlaylistDetail,
+        item_id: Option<String>,
+        inspect: &mut InspectState,
+    ) {
+        // 没有当前项时封面仍要按这个类型写「音频 / 图片 / 视频」。认不得就留空，封面写「媒体」。
+        self.active_player_type_id = Some(detail.playlist.player_type_id.clone());
         if detail.items.is_empty() {
-            eprintln!("Nana 播放集还是空的：{}", detail.playlist.playlist_id);
+            self.fail_empty_playlist(detail);
+            self.publish(inspect);
             return;
         }
         let repo_id = detail.playlist.repo_id.clone();
-        if self.repo_id.as_ref().is_some_and(|current| current != &repo_id) {
+        if self
+            .repo_id
+            .as_ref()
+            .is_some_and(|current| current != &repo_id)
+        {
             self.stop_runtime(true, inspect);
         }
         self.repo_id = Some(repo_id);
-        self.queue = detail.items.iter().map(|item| queue_item_from_playlist(item, &detail.playlist)).collect();
+        self.queue = detail
+            .items
+            .iter()
+            .map(|item| queue_item_from_playlist(item, &detail.playlist))
+            .collect();
         self.history.clear();
         self.shuffle_order.clear();
-        let start = item_id
-            .or_else(|| detail.items.iter().find(|item| item.status == "ready").map(|item| item.playlist_item_id.clone()))
-            .or_else(|| detail.items.first().map(|item| item.playlist_item_id.clone()));
+        let ready = detail
+            .items
+            .iter()
+            .find(|item| item.status == "ready")
+            .map(|item| item.playlist_item_id.clone());
+        let start = item_id.or(ready).or_else(|| {
+            detail
+                .items
+                .first()
+                .map(|item| item.playlist_item_id.clone())
+        });
         let Some(start) = start else {
-            eprintln!("Nana 播放集没有可以开始的条目：{}", detail.playlist.playlist_id);
+            eprintln!(
+                "Nana 播放集没有可以开始的条目：{}",
+                detail.playlist.playlist_id
+            );
             return;
         };
         if self.mode == PlaybackMode::Shuffle {
@@ -441,6 +625,58 @@ impl PlayerState {
         }
         self.play_item(&start, true);
         self.publish(inspect);
+    }
+
+    /// 播放集一项也没有。
+    ///
+    /// 照 Vue `setActivePlaylist` 再 `loadCurrentItem`：没有当前项时，播放器类型认得就在播放条次行写
+    /// 「当前没有可播放条目」，认不得写「缺少对应播放插件」。进度归零，上一首不再接着放。
+    /// 没有当前项时 Vue 的 `currentSession()` 是空的，这里也不写会话文件。队列本来开着就留着。
+    fn fail_empty_playlist(&mut self, detail: &PlaylistDetail) {
+        let repo_id = detail.playlist.repo_id.clone();
+        if self
+            .repo_id
+            .as_ref()
+            .is_some_and(|current| current != &repo_id)
+        {
+            if let Some(previous) = self.repo_id.clone().filter(|id| !id.is_empty()) {
+                self.clear_stored(&previous);
+            }
+        }
+        self.repo_id = Some(repo_id.clone());
+        self.wav.clear();
+        self.cursor_item = None;
+        self.loaded_item = None;
+        self.retry_item = None;
+        self.resume = None;
+        self.preview_path.clear();
+        self.load_generation = self.load_generation.wrapping_add(1);
+        self.drop_clip_frames();
+        self.queue.clear();
+        self.history.clear();
+        self.shuffle_order.clear();
+        self.current_id = None;
+        self.wants_playing = false;
+        self.can_play = false;
+        self.notice.clear();
+        self.session.repo_id = repo_id;
+        self.session.playlist_id = detail.playlist.playlist_id.clone();
+        self.session.playlist_item_id = None;
+        self.session.status = "failed".into();
+        self.session.current_time_ms = 0;
+        self.session.duration_ms = None;
+        self.session.can_seek = false;
+        self.session.can_volume = false;
+        let message = if self.player_type_known(&detail.playlist.player_type_id) {
+            "当前没有可播放条目"
+        } else {
+            "缺少对应播放插件"
+        };
+        eprintln!(
+            "Nana 播放集还是空的：{}：{message}",
+            detail.playlist.playlist_id
+        );
+        self.session.error = Some(message.into());
     }
 
     /// 选中队列项并尝试装载。装载失败时会话保持 failed，不会变成 playing。
@@ -487,19 +723,33 @@ impl PlayerState {
 
     fn resolve_next(&mut self, natural_end: bool) -> Option<String> {
         let ready = ready_ids(&self.queue);
-        match next_ready_id(self.mode, self.current_id.as_deref(), &ready, &self.shuffle_order, natural_end) {
+        match next_ready_id(
+            self.mode,
+            self.current_id.as_deref(),
+            &ready,
+            &self.shuffle_order,
+            natural_end,
+        ) {
             NextStep::None => None,
             NextStep::Item(id) => Some(id),
             NextStep::ReshuffleMissing => {
                 self.ensure_shuffle();
                 let ready = ready_ids(&self.queue);
-                match next_ready_id(self.mode, self.current_id.as_deref(), &ready, &self.shuffle_order, natural_end) {
+                match next_ready_id(
+                    self.mode,
+                    self.current_id.as_deref(),
+                    &ready,
+                    &self.shuffle_order,
+                    natural_end,
+                ) {
                     NextStep::Item(id) => Some(id),
                     NextStep::ReshuffleWrap => {
                         self.ensure_shuffle();
                         self.shuffle_order.first().cloned()
                     }
-                    NextStep::None | NextStep::ReshuffleMissing => self.shuffle_order.first().cloned(),
+                    NextStep::None | NextStep::ReshuffleMissing => {
+                        self.shuffle_order.first().cloned()
+                    }
                 }
             }
             NextStep::ReshuffleWrap => {
@@ -511,7 +761,9 @@ impl PlayerState {
 
     fn play_previous(&mut self, inspect: &mut InspectState) {
         let ready = ready_ids(&self.queue);
-        let Some(previous) = previous_ready_id(self.mode, self.current_id.as_deref(), &ready, &self.history) else {
+        let Some(previous) =
+            previous_ready_id(self.mode, self.current_id.as_deref(), &ready, &self.history)
+        else {
             return;
         };
         self.history.pop();
@@ -553,7 +805,11 @@ impl PlayerState {
             return;
         };
         let session = self.session.clone();
-        let action = if playing { wav_player::Action::Play } else { wav_player::Action::Pause };
+        let action = if playing {
+            wav_player::Action::Play
+        } else {
+            wav_player::Action::Pause
+        };
         let (session, error) = wav_player::drive(output, &self.wav, session, action);
         self.session = session;
         if let Some(error) = error {
@@ -575,7 +831,12 @@ impl PlayerState {
             return;
         };
         let session = self.session.clone();
-        let (session, error) = wav_player::drive(output, &self.wav, session, wav_player::Action::Seek(position_ms));
+        let (session, error) = wav_player::drive(
+            output,
+            &self.wav,
+            session,
+            wav_player::Action::Seek(position_ms),
+        );
         self.session = session;
         if let Some(error) = error {
             eprintln!("Nana 播放进度失败：{error}");
@@ -599,7 +860,12 @@ impl PlayerState {
             return;
         }
         let session = self.session.clone();
-        let (session, error) = wav_player::drive(wav_player::Output::Cursor, &self.wav, session, wav_player::Action::Volume(volume));
+        let (session, error) = wav_player::drive(
+            wav_player::Output::Cursor,
+            &self.wav,
+            session,
+            wav_player::Action::Volume(volume),
+        );
         self.session = session;
         if let Some(error) = error {
             eprintln!("Nana 播放音量失败：{error}");
@@ -609,9 +875,13 @@ impl PlayerState {
     }
 
     fn set_image_duration(&mut self, value: u32) {
-        self.settings.image_duration_ms = support::normalize_image_duration_ms(Some(f64::from(value)));
+        self.settings.image_duration_ms =
+            support::normalize_image_duration_ms(Some(f64::from(value)));
         self.effects.push(PlayerEffect::PersistSettings);
-        if self.current_item().is_some_and(|item| item.file_class == "image") {
+        if self
+            .current_item()
+            .is_some_and(|item| item.file_class == "image")
+        {
             self.apply_image_duration();
             self.persist_if_needed();
         }
@@ -634,13 +904,24 @@ impl PlayerState {
     }
 
     fn ensure_shuffle(&mut self) {
-        self.shuffle_order = shuffle_order(self.current_id.as_deref(), &ready_ids(&self.queue), self.shuffle_seed);
+        self.shuffle_order = shuffle_order(
+            self.current_id.as_deref(),
+            &ready_ids(&self.queue),
+            self.shuffle_seed,
+        );
         self.shuffle_seed = self.shuffle_seed.wrapping_add(1).max(1);
     }
 
-    fn stop_for(&mut self, repo_id: Option<String>, clear_stored: bool, inspect: &mut InspectState) {
+    fn stop_for(
+        &mut self,
+        repo_id: Option<String>,
+        clear_stored: bool,
+        inspect: &mut InspectState,
+    ) {
         let target = repo_id.clone().or_else(|| self.repo_id.clone());
-        let applies = repo_id.as_ref().is_none_or(|repo_id| self.repo_id.as_ref() == Some(repo_id) || self.session.repo_id == *repo_id);
+        let applies = repo_id.as_ref().is_none_or(|repo_id| {
+            self.repo_id.as_ref() == Some(repo_id) || self.session.repo_id == *repo_id
+        });
         if applies {
             self.stop_runtime(false, inspect);
         }
@@ -669,7 +950,11 @@ impl PlayerState {
         self.shuffle_order.clear();
         self.notice.clear();
         if let Some(detail) = self.listed.clone() {
-            self.queue = detail.items.iter().map(|item| queue_item_from_playlist(item, &detail.playlist)).collect();
+            self.queue = detail
+                .items
+                .iter()
+                .map(|item| queue_item_from_playlist(item, &detail.playlist))
+                .collect();
         }
         self.session.status = "ended".into();
         self.session.current_time_ms = 0;
@@ -685,11 +970,19 @@ impl PlayerState {
     }
 
     fn sync_queue(&mut self, detail: &PlaylistDetail) {
-        let mut queue = detail.items.iter().map(|item| queue_item_from_playlist(item, &detail.playlist)).collect::<Vec<_>>();
+        let mut queue = detail
+            .items
+            .iter()
+            .map(|item| queue_item_from_playlist(item, &detail.playlist))
+            .collect::<Vec<_>>();
         let kept: Vec<_> = self
             .queue
             .iter()
-            .filter(|item| item.transient && (self.current_id.as_ref() == Some(&item.id) || self.history.iter().any(|id| id == &item.id)))
+            .filter(|item| {
+                item.transient
+                    && (self.current_id.as_ref() == Some(&item.id)
+                        || self.history.iter().any(|id| id == &item.id))
+            })
             .cloned()
             .collect();
         queue.extend(kept);
@@ -710,9 +1003,12 @@ impl PlayerState {
         if removed.is_empty() {
             return;
         }
-        self.queue.retain(|item| !removed.iter().any(|id| id == &item.id));
-        self.history.retain(|id| !removed.iter().any(|removed_id| removed_id == id));
-        self.shuffle_order.retain(|id| !removed.iter().any(|removed_id| removed_id == id));
+        self.queue
+            .retain(|item| !removed.iter().any(|id| id == &item.id));
+        self.history
+            .retain(|id| !removed.iter().any(|removed_id| removed_id == id));
+        self.shuffle_order
+            .retain(|id| !removed.iter().any(|removed_id| removed_id == id));
     }
 
     fn fail_session(&mut self, message: String) {
@@ -727,7 +1023,10 @@ impl PlayerState {
             eprintln!("Nana 播放器能力标识不能为空");
             return;
         }
-        match plugin_id.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()) {
+        match plugin_id
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+        {
             Some(plugin_id) => {
                 self.preferences.insert(capability_id, plugin_id);
             }
@@ -739,17 +1038,38 @@ impl PlayerState {
     }
 
     fn resolve_type(&self, player_type_id: &str) -> support::PlayerResolution {
-        let candidates: Vec<_> = self.candidates.iter().filter(|candidate| candidate.player_type_id == player_type_id).cloned().collect();
+        let candidates: Vec<_> = self
+            .candidates
+            .iter()
+            .filter(|candidate| candidate.player_type_id == player_type_id)
+            .cloned()
+            .collect();
         resolve_player(player_type_id, &candidates, &self.preferences)
     }
 
-    fn transient_item(&mut self, entry: &PreviewEntry<'_>, filename: &str, extension: &str, player_type_id: &str, label: &str, file_class: &str) -> QueueItem {
+    fn transient_item(
+        &mut self,
+        entry: &PreviewEntry<'_>,
+        filename: &str,
+        extension: &str,
+        player_type_id: &str,
+        label: &str,
+        file_class: &str,
+    ) -> QueueItem {
         self.transient_seq += 1;
         let (path, asset_id) = (entry.path, entry.asset_id);
-        let asset = if asset_id.trim().is_empty() { path.to_string() } else { asset_id.to_string() };
+        let asset = if asset_id.trim().is_empty() {
+            path.to_string()
+        } else {
+            asset_id.to_string()
+        };
         QueueItem {
             id: format!("transient:{asset}:{}", self.transient_seq),
-            playlist_id: self.listed.as_ref().map(|detail| detail.playlist.playlist_id.clone()).unwrap_or_else(|| "__transient__".into()),
+            playlist_id: self
+                .listed
+                .as_ref()
+                .map(|detail| detail.playlist.playlist_id.clone())
+                .unwrap_or_else(|| "__transient__".into()),
             asset_id: asset,
             path: path.to_string(),
             filename: filename.to_string(),
@@ -762,6 +1082,7 @@ impl PlayerState {
             file_class: file_class.to_string(),
             thumbnail_path: None,
             is_virtual: entry.is_virtual,
+            local_absolute_path: None,
         }
     }
 
@@ -778,17 +1099,20 @@ impl PlayerState {
         if item.playlist_id.is_empty() {
             return;
         }
-        self.stored.insert(repo_id, StoredSession {
-            repo_id: self.repo_id.clone().unwrap_or_default(),
-            playlist_id: item.playlist_id.clone(),
-            player_type_id: item.player_type_id.clone(),
-            current_item_id: item.id.clone(),
-            current_time_ms: self.session.current_time_ms,
-            duration_ms: self.session.duration_ms.unwrap_or(0),
-            mode: self.mode,
-            volume: self.session.volume,
-            is_playing: self.wants_playing,
-        });
+        self.stored.insert(
+            repo_id,
+            StoredSession {
+                repo_id: self.repo_id.clone().unwrap_or_default(),
+                playlist_id: item.playlist_id.clone(),
+                player_type_id: item.player_type_id.clone(),
+                current_item_id: item.id.clone(),
+                current_time_ms: self.session.current_time_ms,
+                duration_ms: self.session.duration_ms.unwrap_or(0),
+                mode: self.mode,
+                volume: self.session.volume,
+                is_playing: self.wants_playing,
+            },
+        );
         self.effects.push(PlayerEffect::PersistSessions);
     }
 
@@ -801,20 +1125,31 @@ impl PlayerState {
         clip::publish_clip(self, inspect);
     }
 
-    fn open_preview(&mut self, item_id: Option<&str>, model_panel: &mut WorkspacePanel, category: &mut LibraryCategory, selected: &mut Option<String>, inspect: &mut InspectState) {
+    /// 打开这一条的预览。返回是否找到了条目。
+    ///
+    /// 页和「立刻进入预览」由归约补上：这里只切到文件面板、全部分类，并记下路径、发起详情读取。
+    fn open_preview(
+        &mut self,
+        item_id: Option<&str>,
+        model_panel: &mut WorkspacePanel,
+        category: &mut LibraryCategory,
+        selected: &mut Option<String>,
+        inspect: &mut InspectState,
+    ) -> bool {
         let item = match item_id {
             Some(id) => support::listed_preview_item(&self.queue, self.listed.as_ref(), id),
             None => self.current_item().cloned(),
         };
         let Some(item) = item else {
             eprintln!("Nana 没有可打开预览的播放条目");
-            return;
+            return false;
         };
         let repo_id = self.repo_id.clone().unwrap_or_default();
         *model_panel = WorkspacePanel::Files;
         *category = LibraryCategory::All;
         *selected = Some(item.path.clone());
         inspect.open_playlist_item(&item.path, &repo_id, &item.asset_id);
+        true
     }
 }
 
@@ -835,26 +1170,34 @@ fn fresh_session(repo_id: &str) -> PlaybackSessionState {
     }
 }
 
-#[path = "player_reduce.rs"]
-mod reduce;
 #[path = "player_preview.rs"]
 mod preview;
+#[path = "player_reduce.rs"]
+mod reduce;
 pub(crate) use preview::{ClockStep, PreviewEntry};
 #[path = "player_library.rs"]
 mod library;
 pub(crate) use reduce::reduce_message;
 
 impl ShellViewModel {
+    /// 文件浏览面板和播放集页才有底栏播放条。回收站和智能文件夹在 Vue 里仍是文件浏览面板
+    /// （`isFileBrowserPanel`），播放条留在列表下面，不因为换了面板藏起来。
     pub(super) fn player_surface_visible(&self) -> bool {
         self.workspace.startup.status == StartupStatus::Ready
             && self.workspace.main_region() == MainRegion::HasRepository
-            && matches!(self.workspace.panel, WorkspacePanel::Files | WorkspacePanel::Playlist)
+            && matches!(
+                self.workspace.panel,
+                WorkspacePanel::Files
+                    | WorkspacePanel::Trash
+                    | WorkspacePanel::SmartFolder
+                    | WorkspacePanel::Playlist
+            )
     }
 }
 
 #[cfg(test)]
-#[path = "player_tests.rs"]
-mod tests;
-#[cfg(test)]
 #[path = "player_clip_tests.rs"]
 mod clip_tests;
+#[cfg(test)]
+#[path = "player_tests.rs"]
+mod tests;

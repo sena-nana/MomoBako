@@ -3,7 +3,7 @@
 //! [`SettingsView`] 按 `Settings.vue` 算好音频、外观、仓库服务、外部素材接入、缓存和 API 设计
 //! 各卡片要显示的文字；[`SettingsSignals`] 每张卡片一个信号，同步时只写变了的那张。
 
-use nana_ui::runtime::view::{signal, Signal};
+use nana_ui::runtime::view::{Signal, signal};
 
 use super::super::ShellViewModel;
 use super::support;
@@ -88,15 +88,32 @@ impl SettingsView {
     /// 从 ViewModel 取设置页卡片的投影，取舍和旧视图一致。
     pub(crate) fn project(model: &ShellViewModel) -> Self {
         let admin = &model.admin;
-        let audio = support::audio_view(&model.player.candidates, &admin.plugins, &model.player.preferences);
+        let audio = support::audio_view(
+            &model.player.candidates,
+            &admin.plugins,
+            &model.player.preferences,
+        );
         let status = admin.external.as_ref();
-        let text = |value: Option<&str>| value.map(str::to_string).unwrap_or_else(|| "未加载".into());
+        let text =
+            |value: Option<&str>| value.map(str::to_string).unwrap_or_else(|| "未加载".into());
         let config = admin.cache.as_ref().map(|cache| &cache.config);
-        let entries = admin.cache.as_ref().map(|cache| cache.entries.as_slice()).unwrap_or(&[]);
-        let endpoints = admin.api_design.as_ref().map(|api| api.endpoints.as_slice()).unwrap_or(&[]);
+        let entries = admin
+            .cache
+            .as_ref()
+            .map(|cache| cache.entries.as_slice())
+            .unwrap_or(&[]);
+        let endpoints = admin
+            .api_design
+            .as_ref()
+            .map(|api| api.endpoints.as_slice())
+            .unwrap_or(&[]);
         Self {
             audio: AudioCard {
-                options: audio.choices.iter().map(|choice| (choice.plugin_id.clone(), choice.label.clone())).collect(),
+                options: audio
+                    .choices
+                    .iter()
+                    .map(|choice| (choice.plugin_id.clone(), choice.label.clone()))
+                    .collect(),
                 selected: audio.selected,
                 selectable: audio.selectable,
                 notice: audio.notice,
@@ -118,7 +135,16 @@ impl SettingsView {
                 started: text(status.map(|item| item.started_at.as_str())),
                 base_url: status.map(|item| item.base_url.clone()).unwrap_or_default(),
                 raw_token: status.map(|item| item.token.clone()).unwrap_or_default(),
-                json: status.map(|item| support::connection_json(&item.base_url, &item.token, &item.version, &item.started_at)).unwrap_or_default(),
+                json: status
+                    .map(|item| {
+                        support::connection_json(
+                            &item.base_url,
+                            &item.token,
+                            &item.version,
+                            &item.started_at,
+                        )
+                    })
+                    .unwrap_or_default(),
                 error: admin.external_error.clone(),
                 message: admin.external_message.clone(),
             },
@@ -140,7 +166,11 @@ impl SettingsView {
                     .collect(),
             },
             api: ApiCard {
-                transport: admin.api_design.as_ref().map(|api| api.transport.clone()).unwrap_or_else(|| "本地服务契约未加载".into()),
+                transport: admin
+                    .api_design
+                    .as_ref()
+                    .map(|api| api.transport.clone())
+                    .unwrap_or_else(|| "本地服务契约未加载".into()),
                 endpoints: endpoints
                     .iter()
                     .enumerate()

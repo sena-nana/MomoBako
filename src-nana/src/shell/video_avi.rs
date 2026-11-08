@@ -10,19 +10,41 @@ use super::{DecodedClip, VideoFrame};
 
 /// 能解就返回画面。认不出或不是这两种编码时返回 `Ok(None)`，让调用方继续试系统解码。
 pub(super) fn try_decode(bytes: &[u8]) -> Result<Option<DecodedClip>, String> {
+    decode_avi(bytes, supported_video)
+}
+
+/// 只解未压缩 BI_RGB（compression 为 0），和夹具 `clip.avi` 同一类。MJPEG 和其它压缩返回 `Ok(None)`。
+pub(super) fn try_decode_uncompressed(bytes: &[u8]) -> Result<Option<DecodedClip>, String> {
+    decode_avi(bytes, |stream| stream.compression == 0)
+}
+
+/// `accept` 为假时不解码帧，返回 `Ok(None)`。后面的帧循环和音轨换算与原来相同。
+fn decode_avi(
+    bytes: &[u8],
+    accept: impl Fn(&Stream) -> bool,
+) -> Result<Option<DecodedClip>, String> {
     let Some(avi) = parse(bytes) else {
         return Ok(None);
     };
-    let Some(video) = avi.streams.iter().enumerate().find(|(_, stream)| stream.video) else {
+    let Some(video) = avi
+        .streams
+        .iter()
+        .enumerate()
+        .find(|(_, stream)| stream.video)
+    else {
         return Ok(None);
     };
-    if !supported_video(video.1) {
+    if !accept(video.1) {
         return Ok(None);
     }
     let (index, stream) = video;
     let mut frames = Vec::new();
     let mut stored = 0usize;
-    for (ordinal, payload) in avi.frames.iter().filter(|(stream_index, _)| *stream_index == index) {
+    for (ordinal, payload) in avi
+        .frames
+        .iter()
+        .filter(|(stream_index, _)| *stream_index == index)
+    {
         let _ = ordinal;
         let frame = decode_frame(stream, payload)?;
         stored = stored.saturating_add(frame.rgba.len());
@@ -41,18 +63,31 @@ pub(super) fn try_decode(bytes: &[u8]) -> Result<Option<DecodedClip>, String> {
     for (ordinal, frame) in frames.iter_mut().enumerate() {
         frame.time_ms = (ordinal as u64).saturating_mul(scale).saturating_mul(1_000) / rate;
     }
-    let duration_ms = (frames.len() as u64).saturating_mul(scale).saturating_mul(1_000) / rate;
-    let pcm = avi.streams.iter().enumerate().find(|(_, stream)| stream.audio).and_then(|(audio_index, stream)| {
-        let mut pcm = Vec::new();
-        for (stream_index, payload) in &avi.audio {
-            if *stream_index == audio_index {
-                pcm.extend_from_slice(payload);
+    let duration_ms = (frames.len() as u64)
+        .saturating_mul(scale)
+        .saturating_mul(1_000)
+        / rate;
+    let pcm = avi
+        .streams
+        .iter()
+        .enumerate()
+        .find(|(_, stream)| stream.audio)
+        .and_then(|(audio_index, stream)| {
+            let mut pcm = Vec::new();
+            for (stream_index, payload) in &avi.audio {
+                if *stream_index == audio_index {
+                    pcm.extend_from_slice(payload);
+                }
             }
-        }
-        pcm_of(stream, pcm)
-    });
+            pcm_of(stream, pcm)
+        });
     let duration_ms = duration_ms.max(pcm.as_ref().map(|audio| audio.duration_ms).unwrap_or(0));
-    Ok(Some(DecodedClip { duration_ms, frames, pcm, cut: None }))
+    Ok(Some(DecodedClip {
+        duration_ms,
+        frames,
+        pcm,
+        cut: None,
+    }))
 }
 
 fn supported_video(stream: &Stream) -> bool {
@@ -108,7 +143,12 @@ fn decode_dib(stream: &Stream, payload: &[u8]) -> Result<VideoFrame, String> {
             rgba[dest + 3] = 255;
         }
     }
-    Ok(VideoFrame { time_ms: 0, width: width as u32, height: height as u32, rgba })
+    Ok(VideoFrame {
+        time_ms: 0,
+        width: width as u32,
+        height: height as u32,
+        rgba,
+    })
 }
 
 /// 音轨换成游标能放的 PCM。没有音轨格式、没有样本或换不了时没有声音，画面照常放。
@@ -147,7 +187,11 @@ fn parse(bytes: &[u8]) -> Option<Avi> {
     if bytes.len() < 12 || &bytes[0..4] != b"RIFF" || &bytes[8..12] != b"AVI " {
         return None;
     }
-    let mut avi = Avi { streams: Vec::new(), frames: Vec::new(), audio: Vec::new() };
+    let mut avi = Avi {
+        streams: Vec::new(),
+        frames: Vec::new(),
+        audio: Vec::new(),
+    };
     walk(&bytes[12..], &mut avi);
     (!avi.streams.is_empty()).then_some(avi)
 }
@@ -216,7 +260,9 @@ fn parse_strl(data: &[u8]) -> Option<Stream> {
         stream.compression = u32::from_le_bytes(format[16..20].try_into().ok()?);
     }
     if stream.audio {
-        stream.wave = WaveFormat::parse(&format).map_err(|error| eprintln!("Nana AVI 音轨格式认不出：{error}")).ok();
+        stream.wave = WaveFormat::parse(&format)
+            .map_err(|error| eprintln!("Nana AVI 音轨格式认不出：{error}"))
+            .ok();
     }
     Some(stream)
 }
@@ -247,7 +293,8 @@ fn for_each_chunk(data: &[u8], mut visit: impl FnMut([u8; 4], &[u8])) {
     let mut at = 0usize;
     while at + 8 <= data.len() {
         let id = [data[at], data[at + 1], data[at + 2], data[at + 3]];
-        let size = u32::from_le_bytes([data[at + 4], data[at + 5], data[at + 6], data[at + 7]]) as usize;
+        let size =
+            u32::from_le_bytes([data[at + 4], data[at + 5], data[at + 6], data[at + 7]]) as usize;
         let start = at + 8;
         let Some(end) = start.checked_add(size) else {
             break;
@@ -272,7 +319,11 @@ pub(crate) fn sample_uncompressed() -> Vec<u8> {
     let mut movi = Vec::new();
     push_chunk(&mut movi, b"00db", &solid(2, 2, [255, 0, 0, 255]));
     push_chunk(&mut movi, b"00db", &solid(2, 2, [0, 0, 255, 255]));
-    push_chunk(&mut movi, b"01wb", &vec![0u8, 0, 255, 127, 0, 0, 255, 127, 0, 0, 1, 0, 2, 0, 3, 0]);
+    push_chunk(
+        &mut movi,
+        b"01wb",
+        &vec![0u8, 0, 255, 127, 0, 0, 255, 127, 0, 0, 1, 0, 2, 0, 3, 0],
+    );
     let mut body = Vec::new();
     push_list(&mut body, b"hdrl", &hdrl);
     push_list(&mut body, b"movi", &movi);
@@ -290,7 +341,22 @@ pub(crate) fn sample_uncompressed() -> Vec<u8> {
 pub(crate) fn sample_frames(count: u32, width: u32, height: u32, fps: u32) -> Vec<u8> {
     let frame_bytes = width * height * 4;
     let mut avih = Vec::new();
-    for value in [1_000_000 / fps, frame_bytes * fps, 0, 0x10, count, 0, 1, frame_bytes, width, height, 0, 0, 0, 0] {
+    for value in [
+        1_000_000 / fps,
+        frame_bytes * fps,
+        0,
+        0x10,
+        count,
+        0,
+        1,
+        frame_bytes,
+        width,
+        height,
+        0,
+        0,
+        0,
+        0,
+    ] {
         avih.extend_from_slice(&value.to_le_bytes());
     }
     let mut strh = Vec::new();
@@ -319,7 +385,11 @@ pub(crate) fn sample_frames(count: u32, width: u32, height: u32, fps: u32) -> Ve
         index.extend_from_slice(&(movi.len() as u32 + 4).to_le_bytes());
         index.extend_from_slice(&frame_bytes.to_le_bytes());
         let shade = (ordinal * 255 / count.max(1)) as u8;
-        push_chunk(&mut movi, b"00db", &solid(width as usize, height as usize, [shade, shade, shade, 255]));
+        push_chunk(
+            &mut movi,
+            b"00db",
+            &solid(width as usize, height as usize, [shade, shade, shade, 255]),
+        );
     }
     let mut body = Vec::new();
     push_list(&mut body, b"hdrl", &hdrl);

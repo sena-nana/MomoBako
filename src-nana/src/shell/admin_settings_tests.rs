@@ -8,11 +8,43 @@ use crate::shell::{ShellMessage, ShellPage, ShellViewModel};
 
 /// 取走排下的副作用，数一数里面有几次写设置文件。
 fn saves(model: &mut ShellViewModel) -> usize {
-    model.admin.take_effects().into_iter().filter(|effect| matches!(effect, AdminEffect::SaveSettings)).count()
+    model
+        .admin
+        .take_effects()
+        .into_iter()
+        .filter(|effect| matches!(effect, AdminEffect::SaveSettings))
+        .count()
 }
 
 fn with_theme(theme: &str) -> ApplicationSettings {
-    ApplicationSettings { theme: theme.into(), ..ApplicationSettings::default() }
+    ApplicationSettings {
+        theme: theme.into(),
+        ..ApplicationSettings::default()
+    }
+}
+
+/// 设置页插件卡片的运行时芯片照 Vue `pluginRuntimeLabel`：`vue-module` 写「Vue 模块」，不写成「未知运行时」。
+#[test]
+fn vue_module_plugins_show_the_vue_runtime_chip() {
+    let mut harness = ShellHarness::mount(ShellViewModel::for_page(ShellPage::Settings));
+    assert!(
+        harness.find("Vue 模块").is_none(),
+        "随附清单现在不是 vue-module，不该先写出这枚芯片"
+    );
+    let plugin = harness
+        .model
+        .admin
+        .plugins
+        .iter_mut()
+        .find(|plugin| plugin.plugin_id == "momobako.local-filesystem")
+        .expect("设置页应有本地文件系统插件");
+    plugin.runtime = "vue-module".into();
+    harness.sync();
+    harness.flush();
+    assert!(
+        harness.find("Vue 模块").is_some(),
+        "vue-module 的运行时芯片应写「Vue 模块」"
+    );
 }
 
 /// 外观卡有「跟随系统」一档：点过暗色、浅色以后还能回到跟随系统。
@@ -25,7 +57,10 @@ fn the_theme_can_go_back_to_following_the_system() {
     harness.click_label("浅色");
     assert_eq!(harness.model.settings.theme, "light");
     harness.click_label("跟随系统");
-    assert_eq!(harness.model.settings.theme, "system", "点过暗色、浅色以后回不到跟随系统");
+    assert_eq!(
+        harness.model.settings.theme, "system",
+        "点过暗色、浅色以后回不到跟随系统"
+    );
     harness.assert_same_as_fresh_mount();
 }
 
@@ -50,15 +85,33 @@ fn a_late_save_result_does_not_revert_a_newer_theme() {
 fn a_settings_read_from_before_a_change_does_not_overwrite_it() {
     let mut model = ShellViewModel::default();
     model.reduce(ShellMessage::OpenSettings);
-    assert!(model.admin.take_effects().iter().any(|effect| matches!(effect, AdminEffect::LoadAppSettings)));
+    assert!(
+        model
+            .admin
+            .take_effects()
+            .iter()
+            .any(|effect| matches!(effect, AdminEffect::LoadAppSettings))
+    );
     model.reduce(ShellMessage::SettingsThemeChanged("dark".into()));
-    model.reduce(ShellMessage::SettingsLoaded(Ok((with_theme("light"), None))));
-    assert_eq!(model.settings.theme, "dark", "读到的旧设置把刚改的主题盖掉了");
+    model.reduce(ShellMessage::SettingsLoaded(Ok((
+        with_theme("light"),
+        None,
+    ))));
+    assert_eq!(
+        model.settings.theme, "dark",
+        "读到的旧设置把刚改的主题盖掉了"
+    );
 
     model.reduce(ShellMessage::SettingsSaved(Ok(with_theme("dark"))));
     model.reduce(ShellMessage::OpenSettings);
-    model.reduce(ShellMessage::SettingsLoaded(Ok((with_theme("light"), None))));
-    assert_eq!(model.settings.theme, "light", "读的这段时间没改过，照文件换上");
+    model.reduce(ShellMessage::SettingsLoaded(Ok((
+        with_theme("light"),
+        None,
+    ))));
+    assert_eq!(
+        model.settings.theme, "light",
+        "读的这段时间没改过，照文件换上"
+    );
 }
 
 /// 插件「打开目录」：查到目录时还没打开，不先说已打开；打不开时原因写在插件面板上，不进状态区；
@@ -66,16 +119,37 @@ fn a_settings_read_from_before_a_change_does_not_overwrite_it() {
 #[test]
 fn the_data_directory_notice_waits_for_the_open() {
     let mut model = ShellViewModel::default();
-    let finished = || ShellMessage::Admin(AdminMessage::DataDirectoryFinished { name: "user.one".into(), result: Ok("C:/plugins/user.one".into()) });
-    model.reduce(ShellMessage::Admin(AdminMessage::OpenDataDirectory("user.one".into())));
+    let finished = || {
+        ShellMessage::Admin(AdminMessage::DataDirectoryFinished {
+            name: "user.one".into(),
+            result: Ok("C:/plugins/user.one".into()),
+        })
+    };
+    model.reduce(ShellMessage::Admin(AdminMessage::OpenDataDirectory(
+        "user.one".into(),
+    )));
     model.reduce(finished());
-    assert!(model.admin.action_message.is_empty(), "还没打开就说已打开：{}", model.admin.action_message);
-    crate::host_bridge::perform(&mut model, |_, _| Err("路径不存在".into()), |_| Ok(()), || Ok(()));
+    assert!(
+        model.admin.action_message.is_empty(),
+        "还没打开就说已打开：{}",
+        model.admin.action_message
+    );
+    crate::host_bridge::perform(
+        &mut model,
+        |_, _| Err("路径不存在".into()),
+        |_| Ok(()),
+        || Ok(()),
+    );
     assert_eq!(model.admin.action_error, "插件设置目录打开失败：路径不存在");
     assert!(model.admin.action_message.is_empty());
-    assert!(model.status.failure().is_none(), "插件面板上已经写了，不再进状态区");
+    assert!(
+        model.status.failure().is_none(),
+        "插件面板上已经写了，不再进状态区"
+    );
 
-    model.reduce(ShellMessage::Admin(AdminMessage::OpenDataDirectory("user.one".into())));
+    model.reduce(ShellMessage::Admin(AdminMessage::OpenDataDirectory(
+        "user.one".into(),
+    )));
     model.reduce(finished());
     let mut opened = Vec::new();
     crate::host_bridge::perform(

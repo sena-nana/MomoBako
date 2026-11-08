@@ -12,17 +12,17 @@
 
 use std::sync::Arc;
 
-use nana_ui::icons_tabler::REFRESH;
-use nana_ui::runtime::view::{each, fields, signal, widget, AnyView, IntoView, Signal};
-use nana_ui::runtime::{
-    Activate, AlignSpec, Button, JustifySpec, LengthSpec, RadiusTier, ScrollAxes, ScrollView, SemanticColorRole, Stack,
-    Text, TextHorizontalAlignment,
-};
 use nana_ui::ButtonKind;
+use nana_ui::icons_tabler::REFRESH;
+use nana_ui::runtime::view::{AnyView, IntoView, Signal, each, fields, signal, widget};
+use nana_ui::runtime::{
+    Activate, AlignSpec, Button, JustifySpec, LengthSpec, RadiusTier, ScrollAxes, ScrollView,
+    SemanticColorRole, Stack, Text, TextHorizontalAlignment,
+};
 
 use super::hot::{FillPercentField, HotSignals};
 use super::shell_tint::SoftFill;
-use super::startup_view::{eyebrow, fill_section, line, margin, wrapping, ROOT_LINE_HEIGHT};
+use super::startup_view::{ROOT_LINE_HEIGHT, eyebrow, fill_section, line, margin, wrapping};
 use super::workspace::{StartupLog, StartupStatus, StartupStepItem, StartupStepState};
 use super::{ShellMessage, ShellViewModel};
 
@@ -79,7 +79,10 @@ impl StartupView {
                 .visible_logs()
                 .into_iter()
                 .enumerate()
-                .map(|(index, log)| LogRow { index, log: log.clone() })
+                .map(|(index, log)| LogRow {
+                    index,
+                    log: log.clone(),
+                })
                 .collect(),
         }
     }
@@ -97,7 +100,11 @@ impl StartupSignals {
     /// 在常驻作用域里建信号，初值是这一刻的投影。
     pub(crate) fn new(model: &ShellViewModel) -> Self {
         let view = StartupView::project(model);
-        Self { text: signal(view.text), steps: signal(view.steps), logs: signal(view.logs) }
+        Self {
+            text: signal(view.text),
+            steps: signal(view.steps),
+            logs: signal(view.logs),
+        }
     }
 
     /// 写入投影，只写变了的信号；信号已随文档回收时不写。
@@ -111,7 +118,10 @@ impl StartupSignals {
 /// 启动页：Vue 主区内容层 `overflow: auto`，窗口矮时整页连同内边距一起滚动；
 /// `.workspace-startup` 的 `min-height: 100%` 让内容在高窗口里上下居中。
 pub(super) fn view(signals: StartupSignals, hot: HotSignals) -> AnyView {
-    let section = widget(fill_section()).children((panel(signals, hot),)).key("workspace-startup").into_any();
+    let section = widget(fill_section())
+        .children((panel(signals, hot),))
+        .key("workspace-startup")
+        .into_any();
     super::route_home::scroll_route(section, "workspace-startup-scroll")
 }
 
@@ -119,30 +129,72 @@ pub(super) fn view(signals: StartupSignals, hot: HotSignals) -> AnyView {
 fn panel(signals: StartupSignals, hot: HotSignals) -> AnyView {
     let text = signals.text;
     let initial = text.get_untracked();
-    let title = widget(line(initial.title.clone(), 20.0, 700, SemanticColorRole::Text, 25.0))
-        .prop::<String, fields::text::value>(move || text.with(|text| text.title.clone()))
-        .key("startup-title");
-    let meta = widget(line(initial.meta.clone(), 13.0, 400, SemanticColorRole::Muted, 13.0 * ROOT_LINE_HEIGHT))
-        .prop::<String, fields::text::value>(move || text.with(|text| text.meta.clone()))
-        .key("startup-meta");
-    let detail = widget(margin(-2.0, 0.0)).visible(move || text.with(|text| !text.detail.is_empty())).children((
-        widget(wrapping(initial.detail.clone(), 13.0, 400, SemanticColorRole::Text, 19.5))
-            .prop::<String, fields::text::value>(move || text.with(|text| text.detail.clone()))
-            .key("startup-detail"),
-    ));
-    let steps = widget(margin(2.0, 0.0)).children((each(signals.steps, step_key, step_row).gap(8.0).key("startup-steps"),));
-    let error = widget(Stack::column(0.0).width(LengthSpec::Fill).padding_xy(12.0, 10.0).painter(SoftFill::err()))
-        .visible(move || text.with(|text| text.error.is_some()))
-        .children((widget(wrapping(initial.error.clone().unwrap_or_default(), 13.0, 400, SemanticColorRole::Danger, 13.0 * ROOT_LINE_HEIGHT))
-            .prop::<String, fields::text::value>(move || text.with(|text| text.error.clone().unwrap_or_default()))
-            .key("startup-error"),));
-    let retry = Button::new("重试").kind(ButtonKind::Ghost).icon(REFRESH).icon_size(14.0);
-    let retry = widget(Stack::row(0.0)).visible(move || text.with(|text| text.retry)).children((widget(retry)
-        .key("startup-retry")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::StartupRetry)),));
-    widget(Stack::column(12.0).width(LengthSpec::Fill).with_layout(|layout| {
-        layout.max_width = Some(LengthSpec::Px(PANEL_WIDTH));
-    }))
+    let title = widget(line(
+        initial.title.clone(),
+        20.0,
+        700,
+        SemanticColorRole::Text,
+        25.0,
+    ))
+    .prop::<String, fields::text::value>(move || text.with(|text| text.title.clone()))
+    .key("startup-title");
+    let meta = widget(line(
+        initial.meta.clone(),
+        13.0,
+        400,
+        SemanticColorRole::Muted,
+        13.0 * ROOT_LINE_HEIGHT,
+    ))
+    .prop::<String, fields::text::value>(move || text.with(|text| text.meta.clone()))
+    .key("startup-meta");
+    let detail = widget(margin(-2.0, 0.0))
+        .visible(move || text.with(|text| !text.detail.is_empty()))
+        .children((widget(wrapping(
+            initial.detail.clone(),
+            13.0,
+            400,
+            SemanticColorRole::Text,
+            19.5,
+        ))
+        .prop::<String, fields::text::value>(move || text.with(|text| text.detail.clone()))
+        .key("startup-detail"),));
+    let steps = widget(margin(2.0, 0.0)).children((each(signals.steps, step_key, step_row)
+        .gap(8.0)
+        .key("startup-steps"),));
+    let error = widget(
+        Stack::column(0.0)
+            .width(LengthSpec::Fill)
+            .padding_xy(12.0, 10.0)
+            .painter(SoftFill::err()),
+    )
+    .visible(move || text.with(|text| text.error.is_some()))
+    .children((widget(wrapping(
+        initial.error.clone().unwrap_or_default(),
+        13.0,
+        400,
+        SemanticColorRole::Danger,
+        13.0 * ROOT_LINE_HEIGHT,
+    ))
+    .prop::<String, fields::text::value>(move || {
+        text.with(|text| text.error.clone().unwrap_or_default())
+    })
+    .key("startup-error"),));
+    let retry = Button::new("重试")
+        .kind(ButtonKind::Ghost)
+        .icon(REFRESH)
+        .icon_size(14.0);
+    let retry = widget(Stack::row(0.0))
+        .visible(move || text.with(|text| text.retry))
+        .children((widget(retry)
+            .key("startup-retry")
+            .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::StartupRetry)),));
+    widget(
+        Stack::column(12.0)
+            .width(LengthSpec::Fill)
+            .with_layout(|layout| {
+                layout.max_width = Some(LengthSpec::Px(PANEL_WIDTH));
+            }),
+    )
     .children((
         eyebrow("MOMOBAKO", "startup-eyebrow"),
         title,
@@ -160,10 +212,15 @@ fn panel(signals: StartupSignals, hot: HotSignals) -> AnyView {
 
 /// 6px 进度条：`--bg-subtle` 胶囊轨道，强调色填充，最少露出 4px。填充宽度绑在热信号上，逐帧走动效。
 fn progress_bar(percent: Signal<f32>) -> AnyView {
-    let fill = widget(Stack::row(0.0).surface(SemanticColorRole::Accent).radius_px(999.0).with_layout(|layout| {
-        layout.min_width = Some(LengthSpec::Px(4.0));
-        layout.height = Some(LengthSpec::Fill);
-    }))
+    let fill = widget(
+        Stack::row(0.0)
+            .surface(SemanticColorRole::Accent)
+            .radius_px(999.0)
+            .with_layout(|layout| {
+                layout.min_width = Some(LengthSpec::Px(4.0));
+                layout.height = Some(LengthSpec::Fill);
+            }),
+    )
     .prop::<f32, FillPercentField>(percent);
     widget(
         Stack::row(0.0)
@@ -205,17 +262,48 @@ fn step_row(item: StartupStepItem) -> AnyView {
         .align(AlignSpec::Center)
         .justify(JustifySpec::Center);
     let badge = match item.state {
-        StartupStepState::Current => badge.surface(SemanticColorRole::AccentSoft).outline(SemanticColorRole::Accent, 1.0).radius_px(999.0),
-        StartupStepState::Done => badge.painter(SoftFill::ok().border(SemanticColorRole::Success, 1.0).pill()),
-        StartupStepState::Error => badge.painter(SoftFill::err().border(SemanticColorRole::Danger, 1.0).pill()),
-        StartupStepState::Pending => badge.surface(SemanticColorRole::Subtle).outline(SemanticColorRole::Border, 1.0).radius_px(999.0),
+        StartupStepState::Current => badge
+            .surface(SemanticColorRole::AccentSoft)
+            .outline(SemanticColorRole::Accent, 1.0)
+            .radius_px(999.0),
+        StartupStepState::Done => badge.painter(
+            SoftFill::ok()
+                .border(SemanticColorRole::Success, 1.0)
+                .pill(),
+        ),
+        StartupStepState::Error => badge.painter(
+            SoftFill::err()
+                .border(SemanticColorRole::Danger, 1.0)
+                .pill(),
+        ),
+        StartupStepState::Pending => badge
+            .surface(SemanticColorRole::Subtle)
+            .outline(SemanticColorRole::Border, 1.0)
+            .radius_px(999.0),
     };
-    let copy = widget(Stack::column(2.0).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0)).children((
-        widget(wrapping(item.label, 13.0, 600, label_color, 17.55)).key(format!("startup-label-{}", item.number)),
-        widget(wrapping(item.detail, 12.0, 400, SemanticColorRole::Muted, 17.4)).key(format!("startup-copy-{}", item.number)),
+    let copy = widget(
+        Stack::column(2.0)
+            .min_width(LengthSpec::Px(0.0))
+            .grow(1.0)
+            .shrink(1.0),
+    )
+    .children((
+        widget(wrapping(item.label, 13.0, 600, label_color, 17.55))
+            .key(format!("startup-label-{}", item.number)),
+        widget(wrapping(
+            item.detail,
+            12.0,
+            400,
+            SemanticColorRole::Muted,
+            17.4,
+        ))
+        .key(format!("startup-copy-{}", item.number)),
     ));
     widget(Stack::bar(10.0).align(AlignSpec::Start))
-        .children((widget(badge).children((widget(number).key(format!("startup-index-{}", item.number)),)), copy))
+        .children((
+            widget(badge).children((widget(number).key(format!("startup-index-{}", item.number)),)),
+            copy,
+        ))
         .into_any()
 }
 
@@ -228,23 +316,51 @@ fn log_columns(left: Text, right: AnyView) -> AnyView {
         layout.min_width = Some(LengthSpec::Px(LOG_TIME_WIDTH));
         layout.flex_shrink = Some(0.0);
     }
-    widget(Stack::bar(10.0).align(AlignSpec::Start)).children((widget(left).into_any(), right)).into_any()
+    widget(Stack::bar(10.0).align(AlignSpec::Start))
+        .children((widget(left).into_any(), right))
+        .into_any()
 }
 
 /// 「加载日志」：最近 8 条，新的在前。框体描边不动，里面的内容超过 240px 时滚动。没有日志时不占布局。
 fn log_panel(logs: Signal<Vec<LogRow>>) -> AnyView {
     let count = logs.with_untracked(Vec::len);
-    let summary = widget(line(format!("{count} 条最近记录"), 12.0, 400, SemanticColorRole::Muted, 12.0 * ROOT_LINE_HEIGHT))
-        .prop::<String, fields::text::value>(move || logs.with(|logs| format!("{} 条最近记录", logs.len())))
-        .into_any();
-    let header = log_columns(line("加载日志", 13.0, 700, SemanticColorRole::Text, 13.0 * ROOT_LINE_HEIGHT), summary);
+    let summary = widget(line(
+        format!("{count} 条最近记录"),
+        12.0,
+        400,
+        SemanticColorRole::Muted,
+        12.0 * ROOT_LINE_HEIGHT,
+    ))
+    .prop::<String, fields::text::value>(move || {
+        logs.with(|logs| format!("{} 条最近记录", logs.len()))
+    })
+    .into_any();
+    let header = log_columns(
+        line(
+            "加载日志",
+            13.0,
+            700,
+            SemanticColorRole::Text,
+            13.0 * ROOT_LINE_HEIGHT,
+        ),
+        summary,
+    );
     let entries = each(logs, LogRow::clone, log_row).gap(7.0);
-    let content = widget(Stack::column(8.0).width(LengthSpec::Fill).padding_xy(12.0, 10.0)).children((header, entries));
-    let scroll = widget(ScrollView::new(ScrollAxes::Vertical).label("首屏加载日志").with_layout(|layout| {
-        layout.width = Some(LengthSpec::Fill);
-        layout.max_height = Some(LengthSpec::Px(LOG_PANEL_MAX_HEIGHT - 2.0));
-        layout.min_height = Some(LengthSpec::Px(0.0));
-    }))
+    let content = widget(
+        Stack::column(8.0)
+            .width(LengthSpec::Fill)
+            .padding_xy(12.0, 10.0),
+    )
+    .children((header, entries));
+    let scroll = widget(
+        ScrollView::new(ScrollAxes::Vertical)
+            .label("首屏加载日志")
+            .with_layout(|layout| {
+                layout.width = Some(LengthSpec::Fill);
+                layout.max_height = Some(LengthSpec::Px(LOG_PANEL_MAX_HEIGHT - 2.0));
+                layout.min_height = Some(LengthSpec::Px(0.0));
+            }),
+    )
     .children((content,));
     widget(
         Stack::column(0.0)
@@ -275,8 +391,18 @@ fn log_row(row: LogRow) -> AnyView {
     if let Some(detail) = record.detail {
         lines.push(widget(wrapping(detail, 11.0, 400, SemanticColorRole::Muted, 15.95)).into_any());
     }
-    let body = widget(Stack::column(2.0).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0)).children(lines).into_any();
-    let columns = log_columns(line(record.time, 12.0, 400, SemanticColorRole::Muted, 17.4), body);
+    let body = widget(
+        Stack::column(2.0)
+            .min_width(LengthSpec::Px(0.0))
+            .grow(1.0)
+            .shrink(1.0),
+    )
+    .children(lines)
+    .into_any();
+    let columns = log_columns(
+        line(record.time, 12.0, 400, SemanticColorRole::Muted, 17.4),
+        body,
+    );
     widget(Stack::column(0.0).width(LengthSpec::Fill))
         .children((columns,))
         .key(format!("startup-log-{}", row.index))

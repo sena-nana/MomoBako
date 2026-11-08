@@ -259,9 +259,12 @@ pub(super) fn run_git(repo_root: &Path, args: &[&str]) -> Result<(), String> {
 }
 
 pub(super) fn find_7z_binary() -> Option<&'static str> {
-    ["7z", "7zz", "7za"]
-        .into_iter()
-        .find(|binary| child_process::command(binary).arg("--help").output().is_ok())
+    ["7z", "7zz", "7za"].into_iter().find(|binary| {
+        child_process::command(binary)
+            .arg("--help")
+            .output()
+            .is_ok()
+    })
 }
 
 pub(super) fn compression_flag(value: &str) -> &'static str {

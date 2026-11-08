@@ -9,7 +9,12 @@ fn workspace_with(repo_id: &str) -> WorkspaceState {
 }
 
 fn asset(path: &str, untagged: bool, accessed: bool, deleted: bool) -> ShortcutAsset {
-    ShortcutAsset { path: path.into(), untagged, accessed, deleted }
+    ShortcutAsset {
+        path: path.into(),
+        untagged,
+        accessed,
+        deleted,
+    }
 }
 
 fn shortcut(id: &str, kind: &str, path: Option<&str>, target_id: Option<&str>) -> SidebarShortcut {
@@ -62,10 +67,14 @@ fn trash_shortcut_browses_trash_and_files_shortcut_leaves_it() {
     assert_eq!(workspace.panel, WorkspacePanel::Files);
     assert_eq!(workspace.library_category, LibraryCategory::Untagged);
     assert!(!sidebar.browsing_trash);
-    let browse: Vec<_> = sidebar.effects.iter().filter_map(|effect| match effect {
-        SidebarEffect::Browse { trash, path, .. } => Some((*trash, path.clone())),
-        _ => None,
-    }).collect();
+    let browse: Vec<_> = sidebar
+        .effects
+        .iter()
+        .filter_map(|effect| match effect {
+            SidebarEffect::Browse { trash, path, .. } => Some((*trash, path.clone())),
+            _ => None,
+        })
+        .collect();
     assert_eq!(browse, vec![(true, String::new()), (false, String::new())]);
 }
 
@@ -109,12 +118,40 @@ fn folder_expansion_follows_current_directory_and_prunes_stale_paths() {
     assert!(!sidebar.expanded_folders.iter().any(|path| path == "photos"));
     sidebar.apply_tree("other", Ok(Vec::new().into()));
     assert_eq!(sidebar.expanded_folders, ["photos/trips"]);
-    sidebar.apply_tree("repo", Ok(vec![SidebarFolder {
-        path: "photos/trips".into(),
-        label: "trips".into(),
-        children: Vec::new(),
-    }].into()));
+    sidebar.apply_tree(
+        "repo",
+        Ok(vec![SidebarFolder {
+            path: "photos/trips".into(),
+            label: "trips".into(),
+            children: Vec::new(),
+        }]
+        .into()),
+    );
     assert_eq!(sidebar.expanded_folders, ["photos/trips"]);
+    assert!(!sidebar.tree_loading);
+}
+
+/// 新树到达：仓库不一致时展开路径原样留下；匹配时丢掉树里没有的路径，空路径始终保留。
+#[test]
+fn tree_replacement_drops_missing_expanded_paths_and_keeps_the_empty_path() {
+    let mut sidebar = SidebarState::default();
+    sidebar.bind_repository(Some("repo"), false);
+    sidebar.expanded_folders = vec![String::new(), "photos".into(), "gone".into()];
+    sidebar.tree_loading = true;
+    sidebar.apply_tree("other", Ok(Vec::new().into()));
+    assert_eq!(sidebar.expanded_folders, ["", "photos", "gone"]);
+    assert!(sidebar.tree_loading, "过期目录树不结束这次读取");
+
+    sidebar.apply_tree(
+        "repo",
+        Ok(vec![SidebarFolder {
+            path: "photos".into(),
+            label: "photos".into(),
+            children: Vec::new(),
+        }]
+        .into()),
+    );
+    assert_eq!(sidebar.expanded_folders, ["", "photos"]);
     assert!(!sidebar.tree_loading);
 }
 
@@ -122,32 +159,43 @@ fn folder_expansion_follows_current_directory_and_prunes_stale_paths() {
 fn smart_folder_query_ignores_stale_results_and_expands_ancestors() {
     let mut sidebar = SidebarState::default();
     sidebar.bind_repository(Some("repo"), false);
-    sidebar.apply_smart_folders("repo", Ok(vec![SidebarSmartFolder {
-        id: "root".into(),
-        parent_id: None,
-        name: "根".into(),
-        filter: Default::default(),
-        children: vec![SidebarSmartFolder {
-            id: "child".into(),
-            parent_id: Some("root".into()),
-            name: "子".into(),
+    sidebar.apply_smart_folders(
+        "repo",
+        Ok(vec![SidebarSmartFolder {
+            id: "root".into(),
+            parent_id: None,
+            name: "根".into(),
             filter: Default::default(),
-            children: Vec::new(),
-        }],
-    }]));
+            children: vec![SidebarSmartFolder {
+                id: "child".into(),
+                parent_id: Some("root".into()),
+                name: "子".into(),
+                filter: Default::default(),
+                children: Vec::new(),
+            }],
+        }]),
+    );
     let mut workspace = workspace_with("repo");
     assert!(!sidebar.select_smart_folder(&mut workspace, "", false));
     assert!(sidebar.select_smart_folder(&mut workspace, "child", false));
     assert_eq!(sidebar.expanded_smart_folders, ["root"]);
     assert!(sidebar.smart_loading);
-    let summary = |id: &str, count: usize| SmartResultSummary { smart_folder_id: id.into(), name: "子".into(), count, text: format!("{count} 条结果") };
+    let summary = |id: &str, count: usize| SmartResultSummary {
+        smart_folder_id: id.into(),
+        name: "子".into(),
+        count,
+        text: format!("{count} 条结果"),
+    };
     assert!(!sidebar.note_smart_query("repo", "other", Ok(summary("other", 3))));
     assert!(sidebar.smart_loading);
     assert!(sidebar.note_smart_query("repo", "child", Err("查询失败".into())));
     assert!(!sidebar.smart_loading);
     assert_eq!(sidebar.smart_error, "查询失败");
     assert!(sidebar.note_smart_query("repo", "child", Ok(summary("child", 2))));
-    assert_eq!(sidebar.smart_result.as_ref().map(|summary| summary.count), Some(2));
+    assert_eq!(
+        sidebar.smart_result.as_ref().map(|summary| summary.count),
+        Some(2)
+    );
     assert!(sidebar.smart_error.is_empty());
 }
 
@@ -212,10 +260,13 @@ fn binding_same_repository_does_not_request_the_tree_again() {
     sidebar.bind_repository(Some("repo"), false);
     assert_eq!(sidebar.effects.len(), first);
     sidebar.bind_repository(Some("repo"), true);
-    assert!(sidebar.effects.iter().skip(first).all(|effect| !matches!(
-        effect,
-        SidebarEffect::LoadTree { .. }
-    )));
+    assert!(
+        sidebar
+            .effects
+            .iter()
+            .skip(first)
+            .all(|effect| !matches!(effect, SidebarEffect::LoadTree { .. }))
+    );
     assert!(sidebar.folders.is_empty());
     assert!(sidebar.quick_access.is_empty());
 }
@@ -223,18 +274,26 @@ fn binding_same_repository_does_not_request_the_tree_again() {
 #[test]
 fn smart_folder_create_requires_a_name_and_replaces_the_tree() {
     let mut model = super::super::ShellViewModel::default();
-    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::OpenSmartFolderDialog));
+    model.reduce(super::super::ShellMessage::Sidebar(
+        SidebarMessage::OpenSmartFolderDialog,
+    ));
     assert!(!model.sidebar.smart_draft.open);
-    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SubmitSmartFolder));
+    model.reduce(super::super::ShellMessage::Sidebar(
+        SidebarMessage::SubmitSmartFolder,
+    ));
     assert_eq!(model.sidebar.smart_draft.error, "先选择一个资源库。");
     assert!(model.sidebar.effects.is_empty());
 
     model.workspace.active_repo_id = Some("repo".into());
     model.sidebar.bind_repository(Some("repo"), false);
     let _ = model.sidebar.take_effects();
-    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::OpenSmartFolderDialog));
+    model.reduce(super::super::ShellMessage::Sidebar(
+        SidebarMessage::OpenSmartFolderDialog,
+    ));
     assert!(model.sidebar.smart_draft.open);
-    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SubmitSmartFolder));
+    model.reduce(super::super::ShellMessage::Sidebar(
+        SidebarMessage::SubmitSmartFolder,
+    ));
     assert_eq!(model.sidebar.smart_draft.error, "名称不能为空");
     assert!(model.sidebar.effects.is_empty());
 
@@ -242,7 +301,9 @@ fn smart_folder_create_requires_a_name_and_replaces_the_tree() {
     set_field(&mut model, SmartFolderField::Parent, "parent");
     set_field(&mut model, SmartFolderField::Formats, "psd，png");
     set_field(&mut model, SmartFolderField::Match, "or");
-    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SubmitSmartFolder));
+    model.reduce(super::super::ShellMessage::Sidebar(
+        SidebarMessage::SubmitSmartFolder,
+    ));
     assert!(model.sidebar.smart_draft.busy);
     assert!(model.sidebar.effects.iter().any(|effect| matches!(
         effect,
@@ -252,55 +313,88 @@ fn smart_folder_create_requires_a_name_and_replaces_the_tree() {
     assert_eq!(request.name, "高评分");
     assert_eq!(request.parent_id.as_deref(), Some("parent"));
     assert_eq!(request.smart_folder_id, None);
-    assert_eq!(request.filter.formats.unwrap(), ["psd".to_string(), "png".to_string()]);
+    assert_eq!(
+        request.filter.formats.unwrap(),
+        ["psd".to_string(), "png".to_string()]
+    );
     assert_eq!(request.filter.match_mode.as_deref(), Some("or"));
 
     set_field(&mut model, SmartFolderField::Name, "忽略");
-    assert_eq!(model.sidebar.smart_draft.name, " 高评分 ");
+    assert_eq!(model.sidebar.smart_draft.name, "忽略", "保存中名称仍可改");
+    assert_eq!(
+        model.sidebar.smart_create_request("repo").name,
+        "高评分",
+        "已经发出的请求仍用提交当时的名字"
+    );
 
-    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SmartFolderSaved {
-        repo_id: "other".into(),
-        result: Ok(SmartFolderOutcome { folders: Vec::new(), change: SmartFolderChange::Created(None) }),
-    }));
+    model.reduce(super::super::ShellMessage::Sidebar(
+        SidebarMessage::SmartFolderSaved {
+            repo_id: "other".into(),
+            result: Ok(SmartFolderOutcome {
+                folders: Vec::new(),
+                change: SmartFolderChange::Created(None),
+            }),
+        },
+    ));
     assert_eq!(model.sidebar.smart_draft.error, "智能文件夹结果已过期");
     assert!(model.sidebar.smart_draft.open);
     assert!(model.sidebar.smart_folders.is_empty());
 
-    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SubmitSmartFolder));
-    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SmartFolderSaved {
-        repo_id: "repo".into(),
-        result: Err("写入失败".into()),
-    }));
+    model.reduce(super::super::ShellMessage::Sidebar(
+        SidebarMessage::SubmitSmartFolder,
+    ));
+    model.reduce(super::super::ShellMessage::Sidebar(
+        SidebarMessage::SmartFolderSaved {
+            repo_id: "repo".into(),
+            result: Err("写入失败".into()),
+        },
+    ));
     assert!(model.sidebar.smart_draft.open);
     assert!(!model.sidebar.smart_draft.busy);
     assert_eq!(model.sidebar.smart_draft.error, "写入失败");
 
-    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SubmitSmartFolder));
-    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SmartFolderSaved {
-        repo_id: "repo".into(),
-        result: Ok(SmartFolderOutcome {
-            folders: vec![SidebarSmartFolder {
-                id: "parent".into(),
-                parent_id: None,
-                name: "父级".into(),
-                filter: Default::default(),
-                children: vec![SidebarSmartFolder {
-                    id: "child".into(),
-                    parent_id: Some("parent".into()),
-                    name: "高评分".into(),
+    model.reduce(super::super::ShellMessage::Sidebar(
+        SidebarMessage::SubmitSmartFolder,
+    ));
+    model.reduce(super::super::ShellMessage::Sidebar(
+        SidebarMessage::SmartFolderSaved {
+            repo_id: "repo".into(),
+            result: Ok(SmartFolderOutcome {
+                folders: vec![SidebarSmartFolder {
+                    id: "parent".into(),
+                    parent_id: None,
+                    name: "父级".into(),
                     filter: Default::default(),
-                    children: Vec::new(),
+                    children: vec![SidebarSmartFolder {
+                        id: "child".into(),
+                        parent_id: Some("parent".into()),
+                        name: "高评分".into(),
+                        filter: Default::default(),
+                        children: Vec::new(),
+                    }],
                 }],
-            }],
-            change: SmartFolderChange::Created(Some("child".into())),
-        }),
-    }));
+                change: SmartFolderChange::Created(Some("child".into())),
+            }),
+        },
+    ));
     assert!(!model.sidebar.smart_draft.open);
     assert_eq!(model.sidebar.smart_folders[0].children[0].name, "高评分");
-    assert!(model.sidebar.expanded_smart_folders.iter().any(|id| id == "parent"));
-    assert_eq!(model.sidebar.active_smart_folder_id.as_deref(), Some("child"), "新建以后打开新建的那个");
+    assert!(
+        model
+            .sidebar
+            .expanded_smart_folders
+            .iter()
+            .any(|id| id == "parent")
+    );
+    assert_eq!(
+        model.sidebar.active_smart_folder_id.as_deref(),
+        Some("child"),
+        "新建以后打开新建的那个"
+    );
 
-    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::OpenSmartFolderDialog));
+    model.reduce(super::super::ShellMessage::Sidebar(
+        SidebarMessage::OpenSmartFolderDialog,
+    ));
     model.workspace.active_repo_id = Some("next".into());
     model.sidebar.bind_repository(Some("next"), false);
     assert!(!model.sidebar.smart_draft.open);
@@ -323,9 +417,133 @@ fn clear_recent_only_queues_from_the_recent_view() {
     ));
 }
 
+/// 点文件快捷访问：父目录还没回来时列表不改选中；回来的正是这一层、并且这一页有该文件时，
+/// 这一行成为当前项，只读素材、不打开预览。别的目录的快照不选；这一页没有该文件时也不选。
+#[test]
+fn quick_access_file_is_selected_when_the_parent_directory_arrives() {
+    let mut model = super::super::ShellViewModel::default();
+    model.workspace.active_repo_id = Some("repo".into());
+    model.files.selected = vec!["old.png".into()];
+    model.files.primary = Some("old.png".into());
+    model.sidebar.quick_access = vec![
+        shortcut("file", "file", Some("photos\\cat.png"), None),
+        shortcut("gone", "file", Some("album/missing.png"), None),
+    ];
+    model.reduce(super::super::ShellMessage::Sidebar(
+        SidebarMessage::OpenQuickAccess("file".into()),
+    ));
+    assert_eq!(model.sidebar.pending_quick_file(), Some("photos/cat.png"));
+    assert_eq!(
+        model.files.primary.as_deref(),
+        Some("old.png"),
+        "父目录还没回来时不改文件列表的当前项"
+    );
+
+    model.reduce(super::super::ShellMessage::FileBrowserLoaded(Ok(
+        directory_snapshot("elsewhere", &["elsewhere/note.png"]),
+    )));
+    assert_eq!(
+        model.sidebar.pending_quick_file(),
+        Some("photos/cat.png"),
+        "别的目录不消耗这次选择"
+    );
+    assert_ne!(model.files.primary.as_deref(), Some("photos/cat.png"));
+
+    let mut cat = listed_file("photos/cat.png");
+    cat.asset_id = Some("asset-cat".into());
+    model.reduce(super::super::ShellMessage::FileBrowserLoaded(Ok(
+        directory_with("photos", vec![cat]),
+    )));
+    assert_eq!(model.files.selected_paths(), ["photos/cat.png"]);
+    assert_eq!(model.files.primary.as_deref(), Some("photos/cat.png"));
+    assert_eq!(model.files.anchor.as_deref(), Some("photos/cat.png"));
+    assert_eq!(
+        model.files.select_only.as_deref(),
+        Some("photos/cat.png"),
+        "只选中，不打开预览"
+    );
+    assert_eq!(model.page, super::super::ShellPage::FileList);
+    assert_eq!(model.inspect.target_path.as_deref(), Some("photos/cat.png"));
+    assert!(model.sidebar.pending_quick_file().is_none());
+    assert!(matches!(
+        model.files.take_effects().last(),
+        Some(super::super::files::FilesEffect::LoadAsset { asset_id, .. }) if asset_id == "asset-cat"
+    ));
+
+    model.reduce(super::super::ShellMessage::Sidebar(
+        SidebarMessage::OpenQuickAccess("gone".into()),
+    ));
+    model.reduce(super::super::ShellMessage::FileBrowserLoaded(Ok(
+        directory_snapshot("album", &["album/keep.png"]),
+    )));
+    assert!(
+        model.sidebar.pending_quick_file().is_none(),
+        "这一页没有该文件就不再等"
+    );
+    assert_ne!(model.files.primary.as_deref(), Some("album/missing.png"));
+}
+
+fn listed_file(path: &str) -> crate::backend::services::repository::FileBrowserEntry {
+    crate::backend::services::repository::FileBrowserEntry {
+        path: path.into(),
+        name: path.rsplit('/').next().unwrap_or(path).into(),
+        kind: "file".into(),
+        extension: Some("png".into()),
+        size_bytes: None,
+        size_label: None,
+        modified_at: None,
+        asset_id: None,
+        status: None,
+        thumbnail_path: None,
+        thumbnail_custom: false,
+        hardlink_group_id: None,
+        hardlink_state: None,
+        tags: Vec::new(),
+        alias_paths: Vec::new(),
+        folder_metadata: None,
+        metadata: std::collections::BTreeMap::new(),
+        is_virtual: false,
+        provider_id: None,
+        provider_item_id: None,
+        source_payload: None,
+        local_absolute_path: None,
+    }
+}
+
+fn directory_snapshot(
+    path: &str,
+    files: &[&str],
+) -> crate::backend::services::repository::FileBrowserSnapshot {
+    directory_with(path, files.iter().copied().map(listed_file).collect())
+}
+
+fn directory_with(
+    path: &str,
+    entries: Vec<crate::backend::services::repository::FileBrowserEntry>,
+) -> crate::backend::services::repository::FileBrowserSnapshot {
+    crate::backend::services::repository::FileBrowserSnapshot {
+        repo_id: "repo".into(),
+        root_path: "C:/repo".into(),
+        backend_plugin_id: "filesystem".into(),
+        backend_kind: "local".into(),
+        cache_state: crate::backend::services::repository::RepositoryStructureCacheState::Ready,
+        indexed_at: None,
+        current_path: path.into(),
+        total_entries: entries.len(),
+        loaded_count: entries.len(),
+        next_offset: None,
+        has_more: false,
+        special_location: None,
+        tree: None,
+        entries,
+    }
+}
+
 fn set_field(model: &mut super::super::ShellViewModel, field: SmartFolderField, value: &str) {
-    model.reduce(super::super::ShellMessage::Sidebar(SidebarMessage::SetSmartFolderField {
-        field,
-        value: value.into(),
-    }));
+    model.reduce(super::super::ShellMessage::Sidebar(
+        SidebarMessage::SetSmartFolderField {
+            field,
+            value: value.into(),
+        },
+    ));
 }

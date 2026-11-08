@@ -16,14 +16,25 @@ fn loading() -> ShellViewModel {
 #[test]
 fn projection_follows_the_startup_state() {
     let mut model = loading();
-    model.workspace.startup.set_progress(2, "扫描资源库文件", "同步");
+    model
+        .workspace
+        .startup
+        .set_progress(2, "扫描资源库文件", "同步");
     let view = StartupView::project(&model);
     assert_eq!(view.text.title, "扫描资源库文件");
     assert_eq!(view.text.meta, "第 2 / 4 步");
     assert_eq!(view.text.detail, "同步");
     assert!(!view.text.retry);
     let states = view.steps.iter().map(|step| step.state).collect::<Vec<_>>();
-    assert_eq!(states, [StartupStepState::Done, StartupStepState::Current, StartupStepState::Pending, StartupStepState::Pending]);
+    assert_eq!(
+        states,
+        [
+            StartupStepState::Done,
+            StartupStepState::Current,
+            StartupStepState::Pending,
+            StartupStepState::Pending
+        ]
+    );
 
     model.workspace.startup.fail("索引损坏");
     let failed = StartupView::project(&model);
@@ -45,12 +56,31 @@ fn projection_follows_the_startup_state() {
 #[test]
 fn unrelated_updates_keep_every_startup_node() {
     let mut harness = ShellHarness::mount(loading());
-    let keys = ["workspace-startup-scroll", "startup-title", "startup-meta", "startup-progress", "startup-steps", "startup-index-1", "startup-logs"];
-    let nodes = keys.map(|key| harness.keyed(key).unwrap_or_else(|| panic!("启动页缺少 {key}")));
+    let keys = [
+        "workspace-startup-scroll",
+        "startup-title",
+        "startup-meta",
+        "startup-progress",
+        "startup-steps",
+        "startup-index-1",
+        "startup-logs",
+    ];
+    let nodes = keys.map(|key| {
+        harness
+            .keyed(key)
+            .unwrap_or_else(|| panic!("启动页缺少 {key}"))
+    });
     let branch = harness.route_branch();
     let remounts = harness.view_stats().remounts;
     let unrelated = [
-        ShellMessage::ThumbnailPixels(vec![ThumbnailFrame { path: "a.png".into(), natural_width: 1, natural_height: 1, width: 1, height: 1, rgba: vec![0; 4] }]),
+        ShellMessage::ThumbnailPixels(vec![ThumbnailFrame {
+            path: "a.png".into(),
+            natural_width: 1,
+            natural_height: 1,
+            width: 1,
+            height: 1,
+            rgba: vec![0; 4],
+        }]),
         ShellMessage::Player(crate::shell::player::PlayerMessage::SetVolume(0.3)),
         ShellMessage::Inspect(crate::shell::InspectMessage::SetQuery("封面".into())),
     ];
@@ -58,11 +88,19 @@ fn unrelated_updates_keep_every_startup_node() {
         harness.apply(message);
         harness.flush();
         for (key, id) in keys.iter().zip(nodes) {
-            assert_eq!(harness.keyed(key), Some(id), "无关更新换掉了启动页节点 {key}");
+            assert_eq!(
+                harness.keyed(key),
+                Some(id),
+                "无关更新换掉了启动页节点 {key}"
+            );
         }
     }
     assert_eq!(harness.route_branch(), branch, "常驻路由的分支不该重挂");
-    assert_eq!(harness.view_stats().remounts, remounts, "常驻启动页不该重挂");
+    assert_eq!(
+        harness.view_stats().remounts,
+        remounts,
+        "常驻启动页不该重挂"
+    );
     harness.assert_same_as_fresh_mount();
 }
 
@@ -71,16 +109,36 @@ fn unrelated_updates_keep_every_startup_node() {
 fn startup_progress_patches_fields_and_rebuilds_only_changed_steps() {
     let mut harness = ShellHarness::mount(loading());
     let title = harness.keyed("startup-title").expect("标题");
-    let rows = (1..=4).map(|number| harness.keyed(&format!("startup-index-{number}")).expect("步骤")).collect::<Vec<_>>();
+    let rows = (1..=4)
+        .map(|number| {
+            harness
+                .keyed(&format!("startup-index-{number}"))
+                .expect("步骤")
+        })
+        .collect::<Vec<_>>();
     assert!(harness.find("重试").is_none(), "加载中不显示重试");
 
-    harness.model.workspace.startup.set_progress(2, "扫描资源库文件", "同步");
+    harness
+        .model
+        .workspace
+        .startup
+        .set_progress(2, "扫描资源库文件", "同步");
     harness.sync();
     harness.flush();
-    assert_eq!(harness.keyed("startup-title"), Some(title), "标题应原地改字");
+    assert_eq!(
+        harness.keyed("startup-title"),
+        Some(title),
+        "标题应原地改字"
+    );
     assert!(harness.find("扫描资源库文件").is_some(), "标题没有跟上");
     assert!(harness.find("第 2 / 4 步").is_some(), "步数没有跟上");
-    let after = (1..=4).map(|number| harness.keyed(&format!("startup-index-{number}")).expect("步骤")).collect::<Vec<_>>();
+    let after = (1..=4)
+        .map(|number| {
+            harness
+                .keyed(&format!("startup-index-{number}"))
+                .expect("步骤")
+        })
+        .collect::<Vec<_>>();
     assert_ne!(after[0], rows[0], "第 1 步变成完成，整行重建");
     assert_ne!(after[1], rows[1], "第 2 步变成当前，整行重建");
     assert_eq!(after[2..], rows[2..], "状态没变的步骤不该重建");
@@ -110,6 +168,9 @@ fn leaving_and_reentering_the_startup_route_follows_the_model() {
     harness.model = ready;
     harness.sync();
     harness.flush();
-    assert!(harness.keyed("startup-title").is_none(), "就绪后不该还有启动页");
+    assert!(
+        harness.keyed("startup-title").is_none(),
+        "就绪后不该还有启动页"
+    );
     harness.assert_same_as_fresh_mount();
 }

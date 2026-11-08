@@ -6,15 +6,18 @@
 //! 预览、播放和「打开」记下访问以后照 Vue `patchActiveSnapshotAssetAccess` 当场改这一条的访问时间，只留最近的
 //! 50 条（和后端 `MAX_RECENT_ACCESS_ENTRIES` 一样），侧栏「最近使用」的计数跟着变，不重读摘要；「清空记录」成功照
 //! `clearActiveSnapshotRecentAccess` 全部清掉。后端已经写了访问时间的（预览源、在线条目的播放源）只改这里；本地
-//! 文件直接读字节、后端没有经手的，排一次 `record_entry_access`，回来再改这里。分类视图的列表不从这里取。
+//! 文件直接读字节、后端没有经手的，排一次 `record_entry_access`，回来再改这里。分类视图的列表也从这份摘要筛，
+//! 不另读目录。
 
 use std::cmp::Ordering;
 
 use crate::backend::services::repository::{AssetSummary, RepositorySnapshot};
 
+use super::ShellViewModel;
+use super::files::FileRow;
 use super::search_collate::compare_zh;
 use super::sidebar::{ShortcutAsset, SidebarShortcut};
-use super::ShellViewModel;
+use super::workspace::{LibraryCategory, WorkspacePanel};
 
 /// 每个资源库只留最近这么多条访问时间，和后端 `MAX_RECENT_ACCESS_ENTRIES` 一样。
 const RECENT_LIMIT: usize = 50;
@@ -59,7 +62,11 @@ impl LibraryAssets {
             return false;
         }
         let path = normalize_path(path);
-        let Some(asset) = self.assets.iter_mut().find(|asset| asset.path == path && asset.status != "deleted") else {
+        let Some(asset) = self
+            .assets
+            .iter_mut()
+            .find(|asset| asset.path == path && asset.status != "deleted")
+        else {
             eprintln!("Nana 访问记录的条目不在资源库摘要里，忽略：{path}");
             return false;
         };
@@ -79,6 +86,25 @@ impl LibraryAssets {
         true
     }
 
+    /// Vue `libraryCategoryEntries`：没删的素材按分类筛。最近使用再按访问时间倒序。没有对应条目时是空的。
+    pub(super) fn category_assets(&self, category: LibraryCategory) -> Vec<AssetSummary> {
+        let mut assets: Vec<&AssetSummary> = self
+            .assets
+            .iter()
+            .filter(|asset| asset.status != "deleted")
+            .collect();
+        match category {
+            LibraryCategory::All => {}
+            LibraryCategory::Uncategorized => assets.retain(|asset| !asset.path.contains('/')),
+            LibraryCategory::Untagged => assets.retain(|asset| asset.tags.is_empty()),
+            LibraryCategory::Recent => {
+                assets.retain(|asset| accessed(asset));
+                assets.sort_by(|left, right| compare_recent(left, right));
+            }
+        }
+        assets.into_iter().cloned().collect()
+    }
+
     /// 侧栏快捷方式计数要的字段。
     pub(super) fn shortcut_assets(&self) -> Vec<ShortcutAsset> {
         self.assets
@@ -95,7 +121,9 @@ impl LibraryAssets {
     /// 算法：有访问时间的素材按 Vue `compareRecentAssetAccess` 排好，第 50 条以后的访问时间清掉，和后端写入时的
     /// 修剪一致。
     fn prune_recent(&mut self) {
-        let mut ranked: Vec<usize> = (0..self.assets.len()).filter(|index| accessed(&self.assets[*index])).collect();
+        let mut ranked: Vec<usize> = (0..self.assets.len())
+            .filter(|index| accessed(&self.assets[*index]))
+            .collect();
         if ranked.len() <= RECENT_LIMIT {
             return;
         }
@@ -107,7 +135,10 @@ impl LibraryAssets {
 }
 
 fn accessed(asset: &AssetSummary) -> bool {
-    asset.last_accessed_at.as_deref().is_some_and(|value| !value.trim().is_empty())
+    asset
+        .last_accessed_at
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
 }
 
 /// Vue `compareRecentAssetAccess`：访问时间倒序，再修改时间倒序，再文件名的中文顺序。时间是 RFC 3339 原文，
@@ -141,7 +172,12 @@ impl ShellViewModel {
                 target_id: shortcut.target_id.clone(),
             })
             .collect();
-        self.sidebar.apply_snapshot(&self.library.shortcut_assets(), snapshot.overview.trash_count, quick_access);
+        self.sidebar.apply_snapshot(
+            &self.library.shortcut_assets(),
+            snapshot.overview.trash_count,
+            quick_access,
+        );
+        self.sync_category_rows();
     }
 
     /// 后端已经写下一次访问（预览源、在线条目的播放源、`record_entry_access`）：当场改素材，侧栏「最近使用」的
@@ -149,6 +185,7 @@ impl ShellViewModel {
     pub(super) fn note_entry_access(&mut self, repo_id: &str, path: &str, recorded_at: &str) {
         if self.library.note_access(repo_id, path, recorded_at) {
             self.sidebar.recount(&self.library.shortcut_assets());
+            self.sync_category_rows();
         }
     }
 
@@ -156,7 +193,30 @@ impl ShellViewModel {
     pub(super) fn clear_library_access(&mut self, repo_id: &str) {
         if self.library.clear_access(repo_id) {
             self.sidebar.recount(&self.library.shortcut_assets());
+            self.sync_category_rows();
         }
+    }
+
+    /// 分类视图的列表照 Vue 从已经读回的仓库摘要筛出来。不在分类视图时清掉，避免下次进去还留着上一份。
+    /// 同一张缩略图已经能画时接着用，重筛不把卡片闪回类型图标；行换了就让生成队列再看一眼还没有图的文件。
+    pub(super) fn sync_category_rows(&mut self) {
+        let showing = self.workspace.panel == WorkspacePanel::Files
+            && self.workspace.library_category != LibraryCategory::All;
+        let mut incoming = if showing {
+            let category = self.workspace.library_category;
+            self.library
+                .category_assets(category)
+                .iter()
+                .map(FileRow::from_asset)
+                .collect()
+        } else {
+            Vec::new()
+        };
+        if showing {
+            self.files.carry_thumbnails(&mut incoming);
+        }
+        self.files.category_rows = incoming;
+        self.files.note_listed_rows_changed();
     }
 
     /// 本地文件读好了字节，或者交给系统程序打开：后端没有经手，排一次访问记录。路径为空时不排。
@@ -166,11 +226,19 @@ impl ShellViewModel {
             eprintln!("Nana 访问记录缺少资源库或路径，不记：{repo_id} {path}");
             return;
         }
-        self.library.effects.push(LibraryEffect::RecordAccess { repo_id: repo_id.to_string(), path });
+        self.library.effects.push(LibraryEffect::RecordAccess {
+            repo_id: repo_id.to_string(),
+            path,
+        });
     }
 
     /// 访问记录的结果。成功当场改素材；失败只记日志，不挡住打开和预览。
-    pub(super) fn note_access_recorded(&mut self, repo_id: &str, path: &str, result: Result<String, String>) {
+    pub(super) fn note_access_recorded(
+        &mut self,
+        repo_id: &str,
+        path: &str,
+        result: Result<String, String>,
+    ) {
         match result {
             Ok(recorded_at) => self.note_entry_access(repo_id, path, &recorded_at),
             Err(error) => eprintln!("Nana 记录访问失败：{path}：{error}"),

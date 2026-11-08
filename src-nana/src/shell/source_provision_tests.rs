@@ -4,17 +4,17 @@
 //! `repositoryProvisioning` 推出，已有仓库更新配置再配缓存，新仓库跳过首次同步创建，
 //! 随后后台同步；敏感字段一律不进仓库配置。
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::backend::services::repository::{
-    PluginDependencyStatus, PluginManifest, RepositoryAuthenticationStatus, RepositoryBackendSummary, RepositoryLocalCacheStatus,
-    RepositorySummary,
+    PluginDependencyStatus, PluginManifest, RepositoryAuthenticationStatus,
+    RepositoryBackendSummary, RepositoryLocalCacheStatus, RepositorySummary,
 };
 
 use super::super::super::workspace::{WorkspaceEffect, WorkspaceRepository};
 use super::super::super::{ShellMessage, ShellViewModel};
 use super::super::{AdminEffect, AdminMessage, PluginCallOrigin};
-use super::{status_label, SourceStep};
+use super::{SourceStep, status_label};
 
 const PLUGIN: &str = "momobako.netease.source";
 const REPO: &str = "netease-cloud-music-10086";
@@ -106,21 +106,47 @@ fn with_repository(model: &mut ShellViewModel) {
         repo_id: REPO.into(),
         name: "桃子的网易云".into(),
         path: "netease-cloud-music://account/10086".into(),
-        backend: RepositoryBackendSummary { plugin_id: PLUGIN.into(), kind: "netease-cloud-music".into(), name: "网易云".into(), capabilities: Vec::new() },
+        backend: RepositoryBackendSummary {
+            plugin_id: PLUGIN.into(),
+            kind: "netease-cloud-music".into(),
+            name: "网易云".into(),
+            capabilities: Vec::new(),
+        },
         status: "ready".into(),
         asset_count: 0,
         updated_at: String::new(),
-        local_cache: Some(RepositoryLocalCacheStatus { required: true, path: Some("D:/cache/old".into()), status: "ready".into() }),
-        authentication: Some(RepositoryAuthenticationStatus { required: true, logged_in: true, login_expired: false }),
+        local_cache: Some(RepositoryLocalCacheStatus {
+            required: true,
+            path: Some("D:/cache/old".into()),
+            status: "ready".into(),
+        }),
+        authentication: Some(RepositoryAuthenticationStatus {
+            required: true,
+            logged_in: true,
+            login_expired: false,
+        }),
     }]);
 }
 
 /// 取出唯一的插件调用：方法、仓库、载荷和流程步骤。
 fn take_call(model: &mut ShellViewModel) -> (String, Option<String>, Value, SourceStep) {
     match model.admin.take_effects().as_slice() {
-        [AdminEffect::CallPlugin { plugin_id, method, payload, repository_id, origin: PluginCallOrigin::SourceAuth(step) }] => {
+        [
+            AdminEffect::CallPlugin {
+                plugin_id,
+                method,
+                payload,
+                repository_id,
+                origin: PluginCallOrigin::SourceAuth(step),
+            },
+        ] => {
             assert_eq!(plugin_id, PLUGIN);
-            (method.clone(), repository_id.clone(), payload.clone(), step.clone())
+            (
+                method.clone(),
+                repository_id.clone(),
+                payload.clone(),
+                step.clone(),
+            )
         }
         other => panic!("unexpected {other:?}"),
     }
@@ -128,54 +154,176 @@ fn take_call(model: &mut ShellViewModel) -> (String, Option<String>, Value, Sour
 
 /// 建好扫码会话并选好缓存目录。
 fn open_session(model: &mut ShellViewModel, repo_id: Option<&str>) {
-    send(model, AdminMessage::BeginSourceAuth { plugin_id: PLUGIN.into(), repo_id: repo_id.map(str::to_string) });
+    send(
+        model,
+        AdminMessage::BeginSourceAuth {
+            plugin_id: PLUGIN.into(),
+            repo_id: repo_id.map(str::to_string),
+        },
+    );
     let (_, _, _, mut step) = take_call(model);
     if let SourceStep::BeginStatus { .. } = step {
         finish(model, step, Ok(json!({ "accountId": 10086 })));
         step = take_call(model).3;
     }
     assert_eq!(step, SourceStep::CreateSession);
-    finish(model, step, Ok(json!({ "unikey": "key-1", "qrurl": "https://music.163.com/login?codekey=key-1" })));
+    finish(
+        model,
+        step,
+        Ok(json!({ "unikey": "key-1", "qrurl": "https://music.163.com/login?codekey=key-1" })),
+    );
     if model.admin.source_auth.cache_path.is_empty() {
-        send(model, AdminMessage::SetSourceCachePath(" D:/cache/new ".into()));
+        send(
+            model,
+            AdminMessage::SetSourceCachePath(" D:/cache/new ".into()),
+        );
     }
 }
 
 fn poll(model: &mut ShellViewModel, result: Value) {
-    send(model, AdminMessage::PollSourceAuth { plugin_id: PLUGIN.into() });
+    send(
+        model,
+        AdminMessage::PollSourceAuth {
+            plugin_id: PLUGIN.into(),
+        },
+    );
     let (method, repository, payload, step) = take_call(model);
-    assert_eq!((method.as_str(), repository, step.clone()), ("auth.pollQrSession", None, SourceStep::Poll));
-    assert_eq!(payload, json!({ "key": "key-1", "sessionId": "key-1", "persistSession": true }));
+    assert_eq!(
+        (method.as_str(), repository, step.clone()),
+        ("auth.pollQrSession", None, SourceStep::Poll)
+    );
+    assert_eq!(
+        payload,
+        json!({ "key": "key-1", "sessionId": "key-1", "persistSession": true })
+    );
     finish(model, step, Ok(result));
+}
+
+/// 选择缓存目录的系统对话框标题带上插件显示名。
+///
+/// Vue `chooseCachePath` 写的是 `选择${manifest.name}缓存目录`。名称空白或找不到插件时退回「选择缓存目录」。调用在途时不弹。
+#[test]
+fn source_cache_dialog_uses_the_vue_plugin_name() {
+    let mut named = model();
+    named.admin.plugins[0].name = "网易云音乐".into();
+    open_session(&mut named, None);
+    assert!(!named.admin.source_auth.busy);
+    send(&mut named, AdminMessage::ChooseSourceCache);
+    assert_cache_dialog_title(&mut named, "选择网易云音乐缓存目录");
+
+    let mut blank = model();
+    blank.admin.plugins[0].name = "  ".into();
+    open_session(&mut blank, None);
+    send(&mut blank, AdminMessage::ChooseSourceCache);
+    assert_cache_dialog_title(&mut blank, "选择缓存目录");
+
+    let mut missing = model();
+    missing.admin.plugins.clear();
+    missing.admin.source_auth.plugin_id = PLUGIN.into();
+    send(&mut missing, AdminMessage::ChooseSourceCache);
+    assert_cache_dialog_title(&mut missing, "选择缓存目录");
+
+    let mut busy = model();
+    send(
+        &mut busy,
+        AdminMessage::BeginSourceAuth {
+            plugin_id: PLUGIN.into(),
+            repo_id: None,
+        },
+    );
+    assert!(busy.admin.source_auth.busy);
+    send(&mut busy, AdminMessage::ChooseSourceCache);
+    assert!(
+        busy.input
+            .take_platform_commands(nana_ui_platform::WindowId(1), false)
+            .is_empty(),
+        "登录调用在途时不弹缓存目录对话框"
+    );
+}
+
+/// 取出刚排队的缓存目录对话框，标题必须是 `expected`。
+fn assert_cache_dialog_title(model: &mut ShellViewModel, expected: &str) {
+    let commands = model
+        .input
+        .take_platform_commands(nana_ui_platform::WindowId(1), false);
+    assert!(
+        matches!(
+            commands.as_slice(),
+            [nana_ui_platform::host::WindowCommand::OpenFileDialog { request, .. }]
+                if request.kind == nana_ui::FileDialogKind::PickFolder && request.title.as_deref() == Some(expected)
+        ),
+        "缓存目录对话框标题应为「{expected}」，实际 {commands:?}"
+    );
 }
 
 /// 登录完成：后台同步来源仓库，并切到它；切过去时照 Vue 后台读它的仓库动作。
 fn assert_synced_and_switched(model: &mut ShellViewModel) {
     let effects = model.admin.take_effects();
-    assert!(effects.iter().any(|effect| matches!(effect, AdminEffect::SyncRepository { repo_id } if repo_id == REPO)), "{effects:?}");
-    assert!(effects.iter().all(|effect| matches!(effect, AdminEffect::SyncRepository { .. } | AdminEffect::LoadActions { .. })), "{effects:?}");
+    assert!(
+        effects.iter().any(
+            |effect| matches!(effect, AdminEffect::SyncRepository { repo_id } if repo_id == REPO)
+        ),
+        "{effects:?}"
+    );
+    assert!(
+        effects.iter().all(|effect| matches!(
+            effect,
+            AdminEffect::SyncRepository { .. } | AdminEffect::LoadActions { .. }
+        )),
+        "{effects:?}"
+    );
 }
 
 #[test]
 fn new_account_waits_for_a_cache_directory_before_polling() {
     let mut model = model();
-    send(&mut model, AdminMessage::BeginSourceAuth { plugin_id: PLUGIN.into(), repo_id: None });
+    send(
+        &mut model,
+        AdminMessage::BeginSourceAuth {
+            plugin_id: PLUGIN.into(),
+            repo_id: None,
+        },
+    );
     let (method, repository, payload, step) = take_call(&mut model);
-    assert_eq!((method.as_str(), repository), ("auth.createQrSession", None));
+    assert_eq!(
+        (method.as_str(), repository),
+        ("auth.createQrSession", None)
+    );
     assert_eq!(payload, json!({ "qrImage": true, "qrimg": true }));
     assert!(model.admin.source_auth.busy);
-    send(&mut model, AdminMessage::BeginSourceAuth { plugin_id: PLUGIN.into(), repo_id: None });
+    send(
+        &mut model,
+        AdminMessage::BeginSourceAuth {
+            plugin_id: PLUGIN.into(),
+            repo_id: None,
+        },
+    );
     assert!(model.admin.take_effects().is_empty());
 
-    finish(&mut model, step, Ok(json!({ "unikey": "key-1", "qrurl": "https://music.163.com/login?codekey=key-1" })));
-    assert_eq!(model.admin.source_auth.message, "请扫码并在手机端确认，然后检查登录结果。");
+    finish(
+        &mut model,
+        step,
+        Ok(json!({ "unikey": "key-1", "qrurl": "https://music.163.com/login?codekey=key-1" })),
+    );
+    assert_eq!(
+        model.admin.source_auth.message,
+        "请扫码并在手机端确认，然后检查登录结果。"
+    );
     assert!(!model.admin.source_auth.busy);
     assert!(!model.admin.source_auth.can_poll(true));
-    send(&mut model, AdminMessage::PollSourceAuth { plugin_id: PLUGIN.into() });
+    send(
+        &mut model,
+        AdminMessage::PollSourceAuth {
+            plugin_id: PLUGIN.into(),
+        },
+    );
     assert!(model.admin.take_effects().is_empty());
     send(&mut model, AdminMessage::SetSourceCachePath("   ".into()));
     assert!(model.admin.source_auth.cache_path.is_empty());
-    send(&mut model, AdminMessage::SetSourceCachePath(" D:/cache/new ".into()));
+    send(
+        &mut model,
+        AdminMessage::SetSourceCachePath(" D:/cache/new ".into()),
+    );
     assert!(model.admin.source_auth.can_poll(true));
 
     send(&mut model, AdminMessage::CancelSourceAuth);
@@ -192,7 +340,10 @@ fn unconfirmed_scan_only_updates_the_notice() {
     assert_eq!(model.admin.source_auth.message, "等待扫码");
     assert!(model.admin.take_effects().is_empty());
     poll(&mut model, json!({ "code": 802 }));
-    assert_eq!(model.admin.source_auth.message, "尚未完成确认，请稍后重新检查。");
+    assert_eq!(
+        model.admin.source_auth.message,
+        "尚未完成确认，请稍后重新检查。"
+    );
     assert!(model.admin.source_auth.session.is_some());
 }
 
@@ -200,99 +351,217 @@ fn unconfirmed_scan_only_updates_the_notice() {
 fn new_account_creates_the_repository_without_secrets_then_syncs() {
     let mut model = model();
     open_session(&mut model, None);
-    poll(&mut model, json!({
-        "loggedIn": true,
-        "credentialRef": "keyring:netease:10086",
-        "backendConfig": {
-            "accountId": "10086",
-            "cookie": "c",
-            "MUSIC_U_Cookie": "c2",
-            "password": "p",
-            "clientSecret": "s",
-            "token": "t",
-            "tokenType": "bearer",
-            "region": "cn"
-        },
-        "profile": { "nickname": "桃子" }
-    }));
+    poll(
+        &mut model,
+        json!({
+            "loggedIn": true,
+            "credentialRef": "keyring:netease:10086",
+            "backendConfig": {
+                "accountId": "10086",
+                "cookie": "c",
+                "MUSIC_U_Cookie": "c2",
+                "password": "p",
+                "clientSecret": "s",
+                "token": "t",
+                "tokenType": "bearer",
+                "region": "cn"
+            },
+            "profile": { "nickname": "桃子" }
+        }),
+    );
     match model.admin.take_effects().as_slice() {
-        [AdminEffect::CreateSourceRepository { repo_id, name, path, backend_plugin_id, backend_config }] => {
-            assert_eq!((repo_id.as_str(), name.as_str(), path.as_str(), backend_plugin_id.as_str()), (REPO, "桃子", "D:/cache/new", PLUGIN));
+        [
+            AdminEffect::CreateSourceRepository {
+                repo_id,
+                name,
+                path,
+                backend_plugin_id,
+                backend_config,
+            },
+        ] => {
+            assert_eq!(
+                (
+                    repo_id.as_str(),
+                    name.as_str(),
+                    path.as_str(),
+                    backend_plugin_id.as_str()
+                ),
+                (REPO, "桃子", "D:/cache/new", PLUGIN)
+            );
             assert_eq!(backend_config["accountId"], "10086");
             assert_eq!(backend_config["credentialRef"], "keyring:netease:10086");
-            assert_eq!(backend_config["sourceUri"], "netease-cloud-music://account/10086");
+            assert_eq!(
+                backend_config["sourceUri"],
+                "netease-cloud-music://account/10086"
+            );
             assert_eq!(backend_config["localCachePath"], "D:/cache/new");
-            assert_eq!((backend_config["tokenType"].as_str(), backend_config["region"].as_str()), (Some("bearer"), Some("cn")));
-            assert!(backend_config["lastSyncAt"].as_str().is_some_and(|text| text.ends_with('Z')));
-            for key in ["cookie", "MUSIC_U_Cookie", "password", "clientSecret", "token"] {
+            assert_eq!(
+                (
+                    backend_config["tokenType"].as_str(),
+                    backend_config["region"].as_str()
+                ),
+                (Some("bearer"), Some("cn"))
+            );
+            assert!(
+                backend_config["lastSyncAt"]
+                    .as_str()
+                    .is_some_and(|text| text.ends_with('Z'))
+            );
+            for key in [
+                "cookie",
+                "MUSIC_U_Cookie",
+                "password",
+                "clientSecret",
+                "token",
+            ] {
                 assert!(backend_config.get(key).is_none(), "{key} 不能存进仓库配置");
             }
         }
         other => panic!("unexpected {other:?}"),
     }
     let _ = model.workspace.take_effects();
-    finish(&mut model, SourceStep::ProvisionCreate { repo_id: REPO.into(), name: "桃子".into() }, Ok(json!({
-        "repository": {
-            "repoId": REPO,
-            "name": "桃子",
-            "path": "D:/cache/new",
-            "status": "ready",
-            "backend": { "pluginId": PLUGIN, "capabilities": ["read"] },
-            "localCache": { "required": true, "status": "ready" }
-        }
-    })));
+    finish(
+        &mut model,
+        SourceStep::ProvisionCreate {
+            repo_id: REPO.into(),
+            name: "桃子".into(),
+        },
+        Ok(json!({
+            "repository": {
+                "repoId": REPO,
+                "name": "桃子",
+                "path": "D:/cache/new",
+                "status": "ready",
+                "backend": { "pluginId": PLUGIN, "capabilities": ["read"] },
+                "localCache": { "required": true, "status": "ready" }
+            }
+        })),
+    );
     assert_eq!(model.admin.source_auth.message, "已创建 桃子，正在同步。");
     assert!(model.admin.source_auth.session.is_none());
     assert!(!model.admin.source_auth.busy);
-    assert!(model.workspace.repositories.iter().any(|item| item.repo_id == REPO && item.cache_required));
+    assert!(
+        model
+            .workspace
+            .repositories
+            .iter()
+            .any(|item| item.repo_id == REPO && item.cache_required)
+    );
     // Vue `createNewRepository` 建完就 `selectRepository` 切过去：回到启动页同步新仓库，不先读列表。
     assert!(
         model.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::SyncRepository { repo_id, .. } if repo_id == REPO)),
         "建完切到新仓库并同步"
     );
-    assert_eq!(model.workspace.startup.mode, crate::shell::workspace::StartupMode::Switch);
-    assert_eq!(model.operation.shown().map(|row| row.label.as_str()), Some("加载资源库"), "换仓库接手任务弹层这一行");
+    assert_eq!(
+        model.workspace.startup.mode,
+        crate::shell::workspace::StartupMode::Switch
+    );
+    assert_eq!(
+        model.operation.shown().map(|row| row.label.as_str()),
+        Some("加载资源库"),
+        "换仓库接手任务弹层这一行"
+    );
     assert_synced_and_switched(&mut model);
 
-    finish(&mut model, SourceStep::Sync { repo_id: REPO.into() }, Err("网络断开".into()));
+    finish(
+        &mut model,
+        SourceStep::Sync {
+            repo_id: REPO.into(),
+        },
+        Err("网络断开".into()),
+    );
     assert_eq!(model.admin.source_auth.error, "后台同步失败：网络断开");
-    finish(&mut model, SourceStep::Sync { repo_id: REPO.into() }, Ok(Value::Null));
-    assert!(model.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::RefreshRepositories { .. })));
+    finish(
+        &mut model,
+        SourceStep::Sync {
+            repo_id: REPO.into(),
+        },
+        Ok(Value::Null),
+    );
+    assert!(
+        model
+            .workspace
+            .take_effects()
+            .iter()
+            .any(|effect| matches!(effect, WorkspaceEffect::RefreshRepositories { .. }))
+    );
 }
 
 #[test]
 fn existing_account_updates_the_config_then_the_cache_directory() {
     let mut model = model();
     with_repository(&mut model);
-    send(&mut model, AdminMessage::BeginSourceAuth { plugin_id: PLUGIN.into(), repo_id: Some(REPO.into()) });
+    send(
+        &mut model,
+        AdminMessage::BeginSourceAuth {
+            plugin_id: PLUGIN.into(),
+            repo_id: Some(REPO.into()),
+        },
+    );
     assert_eq!(model.admin.source_auth.cache_path, "D:/cache/old");
     let (method, repository, _, step) = take_call(&mut model);
-    assert_eq!((method.as_str(), repository.as_deref(), step.clone()), ("auth.getLoginStatus", Some(REPO), SourceStep::BeginStatus { repo_id: REPO.into() }));
+    assert_eq!(
+        (method.as_str(), repository.as_deref(), step.clone()),
+        (
+            "auth.getLoginStatus",
+            Some(REPO),
+            SourceStep::BeginStatus {
+                repo_id: REPO.into()
+            }
+        )
+    );
     finish(&mut model, step, Ok(json!({ "account": { "id": 10086 } })));
-    assert_eq!(model.admin.source_auth.expected_account_id.as_deref(), Some("10086"));
+    assert_eq!(
+        model.admin.source_auth.expected_account_id.as_deref(),
+        Some("10086")
+    );
     let step = take_call(&mut model).3;
     finish(&mut model, step, Ok(json!({ "sessionId": "key-1" })));
 
-    poll(&mut model, json!({ "accountId": "10086", "credentialRef": "keyring:netease:10086" }));
+    poll(
+        &mut model,
+        json!({ "accountId": "10086", "credentialRef": "keyring:netease:10086" }),
+    );
     let update = match model.admin.take_effects().as_slice() {
-        [AdminEffect::UpdateBackendConfig { repo_id, backend_config, step }] => {
+        [
+            AdminEffect::UpdateBackendConfig {
+                repo_id,
+                backend_config,
+                step,
+            },
+        ] => {
             assert_eq!(repo_id, REPO);
             assert_eq!(backend_config["localCachePath"], "D:/cache/old");
             step.clone()
         }
         other => panic!("unexpected {other:?}"),
     };
-    assert_eq!(update, SourceStep::ProvisionUpdate { repo_id: REPO.into(), name: "桃子的网易云".into() });
+    assert_eq!(
+        update,
+        SourceStep::ProvisionUpdate {
+            repo_id: REPO.into(),
+            name: "桃子的网易云".into()
+        }
+    );
     finish(&mut model, update, Ok(json!({})));
     let cache = match model.admin.take_effects().as_slice() {
-        [AdminEffect::ConfigureSourceCache { repo_id, path, step }] => {
+        [
+            AdminEffect::ConfigureSourceCache {
+                repo_id,
+                path,
+                step,
+            },
+        ] => {
             assert_eq!((repo_id.as_str(), path.as_str()), (REPO, "D:/cache/old"));
             step.clone()
         }
         other => panic!("unexpected {other:?}"),
     };
     finish(&mut model, cache, Ok(json!({})));
-    assert_eq!(model.admin.source_auth.message, "已更新 桃子的网易云 的登录状态，正在同步。");
+    assert_eq!(
+        model.admin.source_auth.message,
+        "已更新 桃子的网易云 的登录状态，正在同步。"
+    );
     assert_synced_and_switched(&mut model);
 }
 
@@ -301,8 +570,14 @@ fn another_account_or_a_missing_credential_reference_is_refused() {
     let mut model = model();
     with_repository(&mut model);
     open_session(&mut model, Some(REPO));
-    poll(&mut model, json!({ "accountId": "20000", "credentialRef": "keyring:netease:20000" }));
-    assert_eq!(model.admin.source_auth.error, "扫码账号与当前仓库不一致，请使用原账号重新登录。");
+    poll(
+        &mut model,
+        json!({ "accountId": "20000", "credentialRef": "keyring:netease:20000" }),
+    );
+    assert_eq!(
+        model.admin.source_auth.error,
+        "扫码账号与当前仓库不一致，请使用原账号重新登录。"
+    );
     assert!(model.admin.take_effects().is_empty());
     assert!(!model.admin.source_auth.busy);
 
@@ -310,7 +585,10 @@ fn another_account_or_a_missing_credential_reference_is_refused() {
     model.admin.plugins = vec![manifest()];
     open_session(&mut model, None);
     poll(&mut model, json!({ "loggedIn": true, "accountId": 1 }));
-    assert_eq!(model.admin.source_auth.error, "Source 未返回安全凭据引用，已拒绝保存登录配置。");
+    assert_eq!(
+        model.admin.source_auth.error,
+        "Source 未返回安全凭据引用，已拒绝保存登录配置。"
+    );
     assert!(model.admin.take_effects().is_empty());
 }
 
@@ -319,27 +597,80 @@ fn check_and_sign_out_keep_the_repository() {
     let mut model = model();
     with_repository(&mut model);
     assert_eq!(status_label(&model, REPO), "已登录");
-    send(&mut model, AdminMessage::CheckSourceAuth { plugin_id: PLUGIN.into(), repo_id: REPO.into() });
+    send(
+        &mut model,
+        AdminMessage::CheckSourceAuth {
+            plugin_id: PLUGIN.into(),
+            repo_id: REPO.into(),
+        },
+    );
     let (method, repository, payload, step) = take_call(&mut model);
-    assert_eq!((method.as_str(), repository.as_deref(), payload), ("auth.getLoginStatus", Some(REPO), json!({})));
-    finish(&mut model, step, Ok(json!({ "loggedIn": true, "loginExpired": true })));
+    assert_eq!(
+        (method.as_str(), repository.as_deref(), payload),
+        ("auth.getLoginStatus", Some(REPO), json!({}))
+    );
+    finish(
+        &mut model,
+        step,
+        Ok(json!({ "loggedIn": true, "loginExpired": true })),
+    );
     assert_eq!(status_label(&model, REPO), "登录失效");
 
-    send(&mut model, AdminMessage::ClearSourceAuth { plugin_id: PLUGIN.into(), repo_id: REPO.into() });
+    send(
+        &mut model,
+        AdminMessage::ClearSourceAuth {
+            plugin_id: PLUGIN.into(),
+            repo_id: REPO.into(),
+        },
+    );
     let (method, _, _, step) = take_call(&mut model);
-    assert_eq!((method.as_str(), step.clone()), ("auth.clearLogin", SourceStep::Clear { repo_id: REPO.into() }));
+    assert_eq!(
+        (method.as_str(), step.clone()),
+        (
+            "auth.clearLogin",
+            SourceStep::Clear {
+                repo_id: REPO.into()
+            }
+        )
+    );
     finish(&mut model, step, Ok(json!({})));
-    assert_eq!(model.admin.source_auth.message, "已退出 桃子的网易云，仓库和缓存仍保留。");
+    assert_eq!(
+        model.admin.source_auth.message,
+        "已退出 桃子的网易云，仓库和缓存仍保留。"
+    );
 
     model.admin.source_auth.status_by_repo.clear();
-    send(&mut model, AdminMessage::ClearSourceAuth { plugin_id: PLUGIN.into(), repo_id: REPO.into() });
+    send(
+        &mut model,
+        AdminMessage::ClearSourceAuth {
+            plugin_id: PLUGIN.into(),
+            repo_id: REPO.into(),
+        },
+    );
     let step = take_call(&mut model).3;
-    assert_eq!(step, SourceStep::ClearStatus { repo_id: REPO.into() });
-    finish(&mut model, step, Ok(json!({ "accountId": "10086", "credentialRef": "keyring:netease:10086", "cookie": "c" })));
+    assert_eq!(
+        step,
+        SourceStep::ClearStatus {
+            repo_id: REPO.into()
+        }
+    );
+    finish(
+        &mut model,
+        step,
+        Ok(
+            json!({ "accountId": "10086", "credentialRef": "keyring:netease:10086", "cookie": "c" }),
+        ),
+    );
     let step = take_call(&mut model).3;
     finish(&mut model, step, Ok(json!({})));
     let update = match model.admin.take_effects().as_slice() {
-        [AdminEffect::UpdateBackendConfig { backend_config, step, .. }] => {
+        [
+            AdminEffect::UpdateBackendConfig {
+                backend_config,
+                step,
+                ..
+            },
+        ] => {
             assert_eq!(backend_config["loginExpired"], true);
             assert!(backend_config.get("cookie").is_none());
             step.clone()
@@ -348,7 +679,13 @@ fn check_and_sign_out_keep_the_repository() {
     };
     let _ = model.workspace.take_effects();
     finish(&mut model, update, Ok(json!({})));
-    assert!(model.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::RefreshRepositories { .. })));
+    assert!(
+        model
+            .workspace
+            .take_effects()
+            .iter()
+            .any(|effect| matches!(effect, WorkspaceEffect::RefreshRepositories { .. }))
+    );
     assert_eq!(status_label(&model, REPO), "登录失效");
     assert!(!model.admin.source_auth.busy);
 }
@@ -356,7 +693,13 @@ fn check_and_sign_out_keep_the_repository() {
 #[test]
 fn failures_release_the_buttons_and_switching_plugins_resets_the_page() {
     let mut model = model();
-    send(&mut model, AdminMessage::BeginSourceAuth { plugin_id: PLUGIN.into(), repo_id: None });
+    send(
+        &mut model,
+        AdminMessage::BeginSourceAuth {
+            plugin_id: PLUGIN.into(),
+            repo_id: None,
+        },
+    );
     let step = take_call(&mut model).3;
     send(&mut model, AdminMessage::CancelSourceAuth);
     assert!(model.admin.source_auth.busy);
@@ -369,7 +712,10 @@ fn failures_release_the_buttons_and_switching_plugins_resets_the_page() {
     model.admin.plugins.push(other);
     send(&mut model, AdminMessage::ToggleSettings(PLUGIN.into()));
     model.admin.source_auth.message = "旧提示".into();
-    send(&mut model, AdminMessage::ToggleSettings("user.other".into()));
+    send(
+        &mut model,
+        AdminMessage::ToggleSettings("user.other".into()),
+    );
     assert_eq!(model.admin.source_auth.plugin_id, "user.other");
     assert!(model.admin.source_auth.message.is_empty());
 }

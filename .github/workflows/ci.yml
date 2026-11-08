@@ -55,9 +55,10 @@ jobs:
         run: corepack yarn verify
 
   build-external-plugins:
-    name: Build External Plugins
+    name: Build External Plugins and Nana package inputs
     runs-on: windows-latest
-    timeout-minutes: 40
+    # Nana dist 冷编译和插件构建都可能较慢；dry-run 不下载 packager、不启动进程。
+    timeout-minutes: 90
 
     steps:
       - name: Checkout
@@ -90,6 +91,14 @@ jobs:
       - name: Package external plugins
         working-directory: External/Plugins
         run: corepack yarn package
+
+      - name: Build Nana dist executable
+        run: corepack yarn nana:build
+
+      - name: Validate Nana package inputs
+        # 真实 exe + .momoplug envelope/triple + installer/portable 配置均走一遍；
+        # 完整 nana:package 仍留在 release workflow 执行。
+        run: corepack yarn nana:package --dry-run
 
   build-docs:
     name: Build docs

@@ -6,9 +6,11 @@
 
 use super::super::input;
 use super::super::inspect::InspectMessage;
-use super::super::workspace::WorkspacePanel;
+use super::super::workspace::{WorkspaceEffect, WorkspacePanel};
 use super::super::{ShellMessage, ShellViewModel};
-use super::{FileContext, FileDialog, FilesEffect, FilesMessage, FilesState, MenuBranch, SelectionMode};
+use super::{
+    FileContext, FileDialog, FilesEffect, FilesMessage, FilesState, MenuBranch, SelectionMode,
+};
 
 /// 文件页里 Escape 能关掉的一层。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -30,11 +32,7 @@ impl FilesState {
             FilesMessage::ActivateRow(path) => {
                 self.activate_row(ctx, &path, SelectionMode::Replace);
             }
-            FilesMessage::OpenRow(path) => {
-                self.select_only = None;
-                self.click_load = None;
-                self.open_row(ctx, &path);
-            }
+            FilesMessage::OpenRow(path) => self.open_row_message(ctx, &path),
             FilesMessage::OpenEntryMenu { path, x, y } => self.open_entry_menu(ctx, &path, x, y),
             FilesMessage::CloseEntryMenu => {
                 self.entry_menu = None;
@@ -42,10 +40,17 @@ impl FilesState {
                 self.menu_pending = None;
             }
             FilesMessage::ArmMenuConfirm(item) => self.menu_pending = Some(item),
-            FilesMessage::MenuBranchChanged { branch, source, inside } if self.entry_menu.is_some() => self.menu_branch.note(source, branch, inside),
+            FilesMessage::MenuBranchChanged {
+                branch,
+                source,
+                inside,
+            } if self.entry_menu.is_some() => self.menu_branch.note(source, branch, inside),
             // 菜单关掉以后才到的进出（节点拆掉时的离开）不再记。
             FilesMessage::MenuBranchChanged { .. } => {}
             FilesMessage::ListResized(width) => self.note_list_width(width),
+            FilesMessage::ExitPreview => {
+                eprintln!("Nana 预览返回要由壳层按正在看的文件收起");
+            }
             FilesMessage::ToggleTags { path, expanded } => self.tags_open = Some((path, !expanded)),
             FilesMessage::SetTagDraft(value) => self.tag_draft = value,
             // 这两条要改检视草稿，在 `reduce_message` 里转成检视消息。
@@ -109,21 +114,53 @@ impl FilesState {
             FilesMessage::ConfirmHardlink => {
                 self.confirm_hardlink(ctx);
             }
-            FilesMessage::MutationSnapshot { result, created_name } => match result {
+            FilesMessage::MutationSnapshot {
+                result,
+                created_name,
+            } => match result {
                 Ok(snapshot) => self.apply_mutation_snapshot(ctx, snapshot, created_name),
                 Err(error) => self.note_mutation_failed(error),
             },
-            FilesMessage::ProtocolFinished { result, reload, hardlinks } => {
+            FilesMessage::ProtocolFinished {
+                result,
+                reload,
+                hardlinks,
+                folder_tree,
+            } => {
+                // 先记树，再改选和重读。重读会换掉在途目录，不能拿它来判断这份协议结果过不过期。
+                if result.is_ok() {
+                    self.note_protocol_folder_tree(ctx, folder_tree);
+                } else if folder_tree.is_some() {
+                    eprintln!("Nana 协议失败，不把文件夹树写入侧栏");
+                }
                 self.note_protocol_finished(ctx, result, reload, hardlinks);
             }
+            // 结果要写进工具页，由壳层入口处理。
+            FilesMessage::EagleImportSettled { .. } => {}
             FilesMessage::HardlinksLoaded { epoch, result } => self.note_hardlinks(epoch, result),
-            FilesMessage::HardlinksRefreshed { epoch, result } => self.note_hardlinks_silent(epoch, result),
-            FilesMessage::HardlinksChecked { epoch, result: Ok(prompts) } => self.note_hardlinks_synced(epoch, prompts),
-            FilesMessage::HardlinksChecked { epoch, result: Err(error) } => self.note_hardlinks_check_failed(epoch, &error),
+            FilesMessage::HardlinksRefreshed { epoch, result } => {
+                self.note_hardlinks_silent(epoch, result)
+            }
+            FilesMessage::HardlinksChecked {
+                epoch,
+                result: Ok(prompts),
+            } => self.note_hardlinks_synced(epoch, prompts),
+            FilesMessage::HardlinksChecked {
+                epoch,
+                result: Err(error),
+            } => self.note_hardlinks_check_failed(epoch, &error),
             FilesMessage::HardlinkConfirmed { result, .. } => self.note_hardlink_confirmed(result),
             FilesMessage::NoteError(error) => self.note_error(error),
-            FilesMessage::ThumbnailSaved { path, thumbnail_path, custom } => self.note_thumbnail_saved(&path, thumbnail_path, custom),
-            FilesMessage::ThumbnailEnsured { repo_id, path, result } => self.note_thumbnail_ensured(ctx, &repo_id, &path, result),
+            FilesMessage::ThumbnailSaved {
+                path,
+                thumbnail_path,
+                custom,
+            } => self.note_thumbnail_saved(&path, thumbnail_path, custom),
+            FilesMessage::ThumbnailEnsured {
+                repo_id,
+                path,
+                result,
+            } => self.note_thumbnail_ensured(ctx, &repo_id, &path, result),
             // 要读仓库和面板，在 `reduce_message` 里转成宿主拖放消息。
             FilesMessage::HostDrop(_) => {}
         }
@@ -148,10 +185,22 @@ impl FilesState {
     }
 
     /// 元数据保存读回的素材：同一素材的文件行（当前目录和智能文件夹结果里的）换上读回的元数据和索引标签。
-    pub(in crate::shell) fn note_saved_asset(&mut self, detail: &crate::backend::services::repository::AssetDetail) {
+    pub(in crate::shell) fn note_saved_asset(
+        &mut self,
+        detail: &crate::backend::services::repository::AssetDetail,
+    ) {
         let asset_id = detail.summary.asset_id.as_str();
-        for row in self.rows.iter_mut().chain(self.virtual_rows.iter_mut()).filter(|row| row.asset_id.as_deref() == Some(asset_id)) {
-            row.metadata = detail.metadata.iter().map(|entry| (entry.key.clone(), entry.value.clone())).collect();
+        for row in self
+            .rows
+            .iter_mut()
+            .chain(self.virtual_rows.iter_mut())
+            .filter(|row| row.asset_id.as_deref() == Some(asset_id))
+        {
+            row.metadata = detail
+                .metadata
+                .iter()
+                .map(|entry| (entry.key.clone(), entry.value.clone()))
+                .collect();
             row.tags = detail.summary.tags.clone();
         }
     }
@@ -182,20 +231,52 @@ impl FilesState {
 }
 
 /// 壳层把文件消息交到这里。不是文件消息的原样还回去；要换成别的壳层消息时返回那条消息。
-pub(in crate::shell) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) -> Option<ShellMessage> {
+pub(in crate::shell) fn reduce_message(
+    model: &mut ShellViewModel,
+    message: ShellMessage,
+) -> Option<ShellMessage> {
     if let ShellMessage::AssetDetailLoaded(Ok(detail)) = &message {
         model.files.note_detail_arrived(&detail.summary.path);
+        model.files.note_detail_metadata(detail);
     }
     // 元数据保存读回了服务器上的素材（成功或冲突都是服务器现在的样子）：文件行换上它的元数据和索引标签，
     // 详情导语、只读行和作品信息不再是保存前的旧值（Vue `applyAssetResponse`）。
+    // 正在叠的就是这份素材时，详情卡改用服务器现在的元数据，不留保存前的旧键。
     if let ShellMessage::Inspect(InspectMessage::MetadataSaved(Ok((_, detail)))) = &message {
         model.files.note_saved_asset(detail);
+        model.files.refresh_detail_metadata(detail);
     }
     let ShellMessage::Files(message) = message else {
         return Some(message);
     };
     if let FilesMessage::HardlinkConfirmed { repo_id, result } = message {
         super::hardlink::finish_confirm(model, &repo_id, result);
+        return None;
+    }
+    if let FilesMessage::EagleImportSettled { result } = message {
+        super::super::admin::note_eagle_import_settled(model, result.is_ok());
+        if result.as_ref().ok().is_some_and(|report| report.is_none()) {
+            eprintln!("Nana Eagle 导入响应里没有可显示的 summary，不显示结果");
+        }
+        model.admin.eagle_import = match &result {
+            Ok(report) => report.clone(),
+            Err(_) => None,
+        };
+        let reload = result.is_ok();
+        let protocol = match result {
+            Ok(_) => Ok(()),
+            Err(error) => Err(error),
+        };
+        model.files.note_protocol_finished(
+            &FileContext::from_model(model),
+            protocol,
+            reload,
+            false,
+        );
+        if reload {
+            // Eagle 导入走 `finishWorkspaceImport`，成功后同样重读摘要。
+            queue_snapshot_after_file_change(model, false);
+        }
         return None;
     }
     // 拖放的意图按此刻的仓库条件（有没有仓库、可写、在文件面板）收成宿主拖放消息，交给输入归约。
@@ -206,7 +287,8 @@ pub(in crate::shell) fn reduce_message(model: &mut ShellViewModel, message: Shel
     }
     // 压缩包导出还没有保存位置时，先弹系统保存对话框，不把空路径交给导出协议。
     let export = &model.files.export;
-    let archive_without_path = export.target != "git" && export.output_path.trim().is_empty() && !export.busy;
+    let archive_without_path =
+        export.target != "git" && export.output_path.trim().is_empty() && !export.busy;
     let message = if matches!(message, FilesMessage::SubmitExport) && archive_without_path {
         FilesMessage::ChooseExportOutput
     } else {
@@ -216,9 +298,15 @@ pub(in crate::shell) fn reduce_message(model: &mut ShellViewModel, message: Shel
         let extension = model.files.export.format.trim().to_string();
         let file_name = model.workspace.active_repository().and_then(|repository| {
             let name = repository.name.trim();
-            if name.is_empty() || extension.is_empty() { None } else { Some(format!("{name}.{extension}")) }
+            if name.is_empty() || extension.is_empty() {
+                None
+            } else {
+                Some(format!("{name}.{extension}"))
+            }
         });
-        model.input.queue_repository_export_dialog(file_name, extension);
+        model
+            .input
+            .queue_repository_export_dialog(file_name, extension);
         return None;
     }
     match &message {
@@ -239,16 +327,43 @@ pub(in crate::shell) fn reduce_message(model: &mut ShellViewModel, message: Shel
             model.files.tag_draft.clear();
             return Some(ShellMessage::Inspect(InspectMessage::AddTag(tag)));
         }
+        // Vue `exitPreview` 只清掉预览路径。有声音的继续放，只有画面的停在当前位置。
+        FilesMessage::ExitPreview => {
+            let target = model.inspect.target_path.clone();
+            model.files.close_preview(target.as_deref());
+            model.player.disarm_preview_audio();
+            return None;
+        }
         _ => {}
     }
     let context = FileContext::from_model(model);
+    if queue_live_import(model, &context, &message) {
+        return None;
+    }
+    let tool_file_import = match &message {
+        FilesMessage::ProtocolFinished { result, .. } => Some(result.is_ok()),
+        _ => None,
+    };
     let show_on_files = matches!(
         message,
-        FilesMessage::OpenDialog(FileDialog::Import | FileDialog::ImportArchive | FileDialog::ImportEagle)
-            | FilesMessage::OpenEagle(_)
+        FilesMessage::OpenDialog(
+            FileDialog::Import | FileDialog::ImportArchive | FileDialog::ImportEagle
+        ) | FilesMessage::OpenEagle(_)
     );
+    // 成功才重读。回收站面板上的快照是还原、全部还原或清空，Vue 还重读仓库列表。
+    let refresh_snapshot = match &message {
+        FilesMessage::MutationSnapshot { result: Ok(_), .. } => {
+            Some(model.workspace.panel == WorkspacePanel::Trash)
+        }
+        FilesMessage::ProtocolFinished { result: Ok(()), .. } => Some(false),
+        _ => None,
+    };
     let preview_path = match message {
-        FilesMessage::ActivateRow(path) => model.files.activate_row(&context, &path, model.input.modifiers.selection_mode()),
+        FilesMessage::ActivateRow(path) => {
+            model
+                .files
+                .activate_row(&context, &path, model.input.modifiers.selection_mode())
+        }
         FilesMessage::OpenRow(ref path) | FilesMessage::OpenEntryMenu { ref path, .. } => {
             let path = path.clone();
             model.files.reduce(&context, message);
@@ -259,16 +374,101 @@ pub(in crate::shell) fn reduce_message(model: &mut ShellViewModel, message: Shel
             None
         }
     };
+    // 采用了的快照若带着文件夹树，写进侧栏。读目录的快照在 `apply_file_browser` 里写。
+    if let Some((repo_id, tree)) = model.files.take_adopted_tree() {
+        model
+            .sidebar
+            .apply_tree(&repo_id, Ok(crate::shell::SidebarTree::from_nodes(&tree)));
+    }
+    // 选中里有文件夹的移走和多选删除，再按 Vue `refreshRepositoryTree` 另读一次。失败不在这里编树。
+    if let Some(repo_id) = model.files.take_folder_tree_reread() {
+        model.sidebar.reload_folder_tree(&repo_id);
+    }
+    if let Some(also_list) = refresh_snapshot {
+        queue_snapshot_after_file_change(model, also_list);
+    }
+    if let Some(mode) = model.files.take_eagle_menu_mode() {
+        model.input.queue_eagle_menu_import(mode);
+    }
     if let Some(path) = preview_path {
-        let file = model.files.visible_rows(&context).into_iter().find(|row| row.path == path && row.kind != "directory");
+        let file = model
+            .files
+            .visible_rows(&context)
+            .into_iter()
+            .find(|row| row.path == path && row.kind != "directory");
         if let Some(row) = file {
-            if model.inspect.target_path.as_deref() != Some(row.path.as_str()) {
-                model.inspect.begin_selection(&row.path);
+            let path = row.path.clone();
+            if model.inspect.target_path.as_deref() != Some(path.as_str()) {
+                model.inspect.begin_selection(&path);
+                if !super::super::files_view::previewing(model) {
+                    super::super::inspect_view::seed_detail_card_editor(model, &path);
+                }
             }
+            // 即使重复选中当前条目也要同步列表元数据，避免旧预览色板泄漏到新的取样色板。
+            // 预览页可能已经开着；详情还没回来时，右侧事实先用这一条列表上的事实。
+            super::super::inspect_view::seed_preview_facts(model, &path);
         }
+    }
+    if let Some(succeeded) = tool_file_import {
+        super::super::admin::note_file_import_settled(model, succeeded);
     }
     if show_on_files && model.files.dialog != FileDialog::Closed {
         model.workspace.panel = WorkspacePanel::Files;
     }
     None
+}
+
+/// 文件变更成功以后照 Vue `refreshAfterFileMutation` 静默重读仓库摘要。
+///
+/// 侧栏「回收站」和分类计数都读这份摘要。`also_list` 时再静默重读仓库列表：还原、全部还原和清空
+/// 会带 `repositorySummary`，删除、复制、移动、导入、新建和重命名不带。失败不读。没有活动仓库或
+/// 工作区还没读好时只记日志。
+fn queue_snapshot_after_file_change(model: &mut ShellViewModel, also_list: bool) {
+    let Some(repo_id) = model.workspace.active_repo_id.clone() else {
+        eprintln!("Nana 文件变更完成时没有活动仓库，不重读摘要");
+        return;
+    };
+    if !model.workspace.content_loaded() {
+        eprintln!("Nana 工作区还没读好，文件变更不重读摘要：{repo_id}");
+        return;
+    }
+    model
+        .workspace
+        .effects
+        .push(WorkspaceEffect::LoadSnapshotSilent { repo_id });
+    if also_list {
+        model
+            .workspace
+            .effects
+            .push(WorkspaceEffect::RefreshRepositoriesSilent);
+    }
+}
+
+/// 实况的文件夹和 ZIP 导入走系统选择器。离屏场景（`acceptance_scene`）打不开系统对话框，
+/// 仍打开页内的空路径框。当前不能导入时只记日志，不打开任何框，也不提交。
+fn queue_live_import(
+    model: &mut ShellViewModel,
+    ctx: &FileContext,
+    message: &FilesMessage,
+) -> bool {
+    if model.acceptance_scene {
+        return false;
+    }
+    let folder = match message {
+        FilesMessage::OpenDialog(FileDialog::Import) => true,
+        FilesMessage::OpenDialog(FileDialog::ImportArchive) => false,
+        _ => return false,
+    };
+    if model.files.mutating || !model.files.can_import(ctx) {
+        eprintln!("Nana 当前视图不能导入");
+        return true;
+    }
+    if folder {
+        model.input.queue_import_folder_dialog();
+    } else {
+        model.input.queue_import_archive_dialog();
+    }
+    // 只有文件导入工具页点的这一下，成功后才在这一页写完成提示。
+    super::super::admin::arm_tool_file_import(model, folder);
+    true
 }

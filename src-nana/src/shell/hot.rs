@@ -12,13 +12,13 @@ use std::cell::Cell;
 use std::sync::Arc;
 use std::time::Duration;
 
-use nana_ui::runtime::view::{signal, FieldWrite, PropSource, Signal, StyledComponent};
+use nana_ui::runtime::view::{FieldWrite, PropSource, Signal, StyledComponent, signal};
 use nana_ui::runtime::{IconGlyph, LengthSpec, Stack, Workspace};
 use nana_ui::{RegionId, WorkspaceMutation};
 use nana_ui_core::PaintTransform;
 
-use super::motion::{shift_scale, spin_transform, MotionState};
 use super::ShellViewModel;
+use super::motion::{MotionState, shift_scale, spin_transform};
 
 /// 弹层外框的透明度和变换：淡入上移。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -31,7 +31,10 @@ impl LayerPaint {
     /// 弹层：透明度和 4px 上移。
     pub(crate) fn panel(motion: &MotionState) -> Self {
         let frame = motion.panel_frame();
-        Self { opacity: frame.opacity, transform: shift_scale(frame.shift, 1.0) }
+        Self {
+            opacity: frame.opacity,
+            transform: shift_scale(frame.shift, 1.0),
+        }
     }
 }
 
@@ -47,6 +50,8 @@ pub(crate) struct MotionFrame {
     pub footer_opacity: f32,
     /// 不确定进度条填充的透明度（`progress-pulse` 呼吸）。
     pub pulse_opacity: f32,
+    /// 准备卡色条的 `translateX` 百分比，相对色条自己的宽度。
+    pub sweep_percent: f32,
     /// 侧栏呈现宽度，折叠动画中逐帧变化。`ShellView` 直接写进工作区，不经信号，见 [`set_resources_width`]。
     pub sidebar_width: f32,
 }
@@ -61,6 +66,7 @@ impl MotionFrame {
             spinner_degrees: motion.spinner_degrees(),
             footer_opacity: motion.footer_opacity(),
             pulse_opacity: motion.pulse_opacity(),
+            sweep_percent: motion.preview_sweep_percent(),
             sidebar_width: motion.sidebar_presented_width(),
         }
     }
@@ -79,7 +85,10 @@ impl TaskFills {
 
     /// 某一行这一刻的填充百分比；这一行没有轨道时为 `None`。
     pub(crate) fn get(&self, key: &str) -> Option<f32> {
-        self.0.iter().find(|(row, _)| row == key).map(|(_, fill)| *fill)
+        self.0
+            .iter()
+            .find(|(row, _)| row == key)
+            .map(|(_, fill)| *fill)
     }
 }
 
@@ -98,8 +107,15 @@ impl PlaybackView {
     /// 按播放会话的当前时间和时长取值，算法和播放条挂载时相同。
     pub(crate) fn project(model: &ShellViewModel) -> Self {
         let session = &model.player.session;
-        let (ratio, time, position) = super::player_view::bar::clock_parts(session.current_time_ms, session.duration_ms.unwrap_or(0));
-        Self { ratio, time, position }
+        let (ratio, time, position) = super::player_view::bar::clock_parts(
+            session.current_time_ms,
+            session.duration_ms.unwrap_or(0),
+        );
+        Self {
+            ratio,
+            time,
+            position,
+        }
     }
 }
 
@@ -131,25 +147,36 @@ pub(crate) struct HotSignals {
     pub spinner: Signal<f32>,
     pub footer: Signal<f32>,
     pub pulse: Signal<f32>,
+    /// 准备卡色条的 `translateX` 百分比。
+    pub sweep: Signal<f32>,
     pub task_fills: Signal<TaskFills>,
     pub progress: Signal<f32>,
     pub time: Signal<String>,
     pub position: Signal<f64>,
+    /// 文件列表框选矩形。拖动中每帧更新，列表不重挂。
+    pub selection_box: Signal<super::files_selection_box::SelectionBox>,
 }
 
 impl HotSignals {
     /// 在当前作用域里建信号，初值是这一刻的投影。只在骨架的挂载闭包里调用，否则信号会留到线程结束。
-    pub(crate) fn new(motion: MotionFrame, fills: TaskFills, playback: &PlaybackView) -> Self {
+    pub(crate) fn new(
+        motion: MotionFrame,
+        fills: TaskFills,
+        playback: &PlaybackView,
+        selection_box: super::files_selection_box::SelectionBox,
+    ) -> Self {
         Self {
             panel: signal(motion.panel),
             startup: signal(motion.startup_percent),
             spinner: signal(motion.spinner_degrees),
             footer: signal(motion.footer_opacity),
             pulse: signal(motion.pulse_opacity),
+            sweep: signal(motion.sweep_percent),
             task_fills: signal(fills),
             progress: signal(playback.ratio),
             time: signal(playback.time.clone()),
             position: signal(playback.position),
+            selection_box: signal(selection_box),
         }
     }
 
@@ -159,16 +186,24 @@ impl HotSignals {
     }
 
     /// 写入这一帧的投影，只写变了的。信号可能已经随文档回收，回收了就不写。
-    pub(crate) fn write(&self, motion: MotionFrame, fills: TaskFills, playback: &PlaybackView) {
+    pub(crate) fn write(
+        &self,
+        motion: MotionFrame,
+        fills: TaskFills,
+        playback: &PlaybackView,
+        selection_box: super::files_selection_box::SelectionBox,
+    ) {
         self.panel.try_set_if_changed(motion.panel);
         self.startup.try_set_if_changed(motion.startup_percent);
         self.spinner.try_set_if_changed(motion.spinner_degrees);
         self.footer.try_set_if_changed(motion.footer_opacity);
         self.pulse.try_set_if_changed(motion.pulse_opacity);
+        self.sweep.try_set_if_changed(motion.sweep_percent);
         self.task_fills.try_set_if_changed(fills);
         self.progress.try_set_if_changed(playback.ratio);
         self.time.try_set_if_changed(playback.time.clone());
         self.position.try_set_if_changed(playback.position);
+        self.selection_box.try_set_if_changed(selection_box);
     }
 }
 
@@ -206,7 +241,10 @@ impl TitleSignals {
 }
 
 fn filter_look(view: &TitleBarView) -> FilterLook {
-    FilterLook { open: view.filter_open, active: view.filter_open || view.filter_count > 0 }
+    FilterLook {
+        open: view.filter_open,
+        active: view.filter_open || view.filter_count > 0,
+    }
 }
 
 /// 受控输入框的草稿：信号驱动输入框，`projected` 记着上次从 ViewModel 写进去的值。
@@ -225,7 +263,10 @@ pub(crate) struct ModelField {
 impl ModelField {
     /// 在当前作用域里建信号，初值是 ViewModel 当前的值。
     pub(crate) fn new(value: &str) -> Self {
-        Self { signal: signal(value.to_owned()), projected: signal(value.to_owned()) }
+        Self {
+            signal: signal(value.to_owned()),
+            projected: signal(value.to_owned()),
+        }
     }
 
     pub(crate) fn signal(&self) -> Signal<String> {
@@ -234,10 +275,15 @@ impl ModelField {
 
     /// ViewModel 的值相对上次投影变了才写进信号。返回是否写了；信号已随作用域回收时不写。
     pub(crate) fn sync(&self, value: &str) -> bool {
-        if self.projected.defined_at().is_none() || self.projected.with_untracked(|projected| projected == value) {
+        if self.projected.defined_at().is_none()
+            || self
+                .projected
+                .with_untracked(|projected| projected == value)
+        {
             return false;
         }
-        self.projected.update(|projected| value.clone_into(projected));
+        self.projected
+            .update(|projected| value.clone_into(projected));
         self.signal.try_set_if_changed(value.to_owned())
     }
 }
@@ -268,7 +314,10 @@ pub(crate) fn current<T>(pick: impl FnOnce(&HotSignals) -> Signal<T>) -> Option<
 /// 热字段的属性：挂载期间有热信号就直接绑定信号，否则写成 `fallback` 常量。
 ///
 /// 只在挂载闭包里同步建的视图拿得到信号；`each_virtual` 的行这类之后才建的视图拿到的是常量。
-pub(crate) fn prop<T: Clone + 'static>(pick: impl FnOnce(&HotSignals) -> Signal<T>, fallback: T) -> PropSource<T> {
+pub(crate) fn prop<T: Clone + 'static>(
+    pick: impl FnOnce(&HotSignals) -> Signal<T>,
+    fallback: T,
+) -> PropSource<T> {
     match CURRENT.with(Cell::get) {
         Some(signals) => PropSource::Signal(pick(&signals)),
         None => PropSource::Const(fallback),
@@ -300,7 +349,8 @@ impl FieldWrite<Stack, f32> for FillPercentField {
     const FIELD: &'static str = "Stack.style.layout.width%";
 
     fn write(target: &mut Stack, percent: f32) {
-        Arc::make_mut(&mut <Stack as StyledComponent>::node_style_mut(target).layout).width = Some(fill_percent(percent));
+        Arc::make_mut(&mut <Stack as StyledComponent>::node_style_mut(target).layout).width =
+            Some(fill_percent(percent));
     }
 
     fn differs(target: &Stack, percent: &f32) -> bool {
@@ -375,7 +425,10 @@ pub(crate) fn set_resources_width(target: &mut Workspace, width: f32) -> bool {
     if region.size_value() == Some(wanted) {
         return false;
     }
-    target.apply(WorkspaceMutation::SetRegionSize(RegionId::Resources, wanted), Duration::ZERO)
+    target.apply(
+        WorkspaceMutation::SetRegionSize(RegionId::Resources, wanted),
+        Duration::ZERO,
+    )
 }
 
 /// 侧栏呈现宽度换成资源区尺寸。

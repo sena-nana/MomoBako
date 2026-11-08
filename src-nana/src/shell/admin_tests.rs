@@ -7,20 +7,21 @@ use std::collections::BTreeMap;
 use serde_json::json;
 
 use crate::backend::services::repository::{
-    ApiDesignSnapshot, CacheConfig, CacheSnapshot, PluginConfigSnapshot, PluginDependencyStatus, PluginManifest, RepositoryAction,
-    RepositoryActionStep, RepositoryBackendSummary, RepositorySummary, SystemLogLocation, SystemLogPage, SystemLogRecord,
-    SystemLogSource, TaskProgressSnapshot,
+    ApiDesignSnapshot, CacheConfig, CacheSnapshot, PluginConfigSnapshot, PluginDependencyStatus,
+    PluginManifest, RepositoryAction, RepositoryActionStep, RepositoryBackendSummary,
+    RepositorySummary, SystemLogLocation, SystemLogPage, SystemLogRecord, SystemLogSource,
+    TaskProgressSnapshot,
 };
 use crate::backend::services::runtime::ExternalApiConnectionStatus;
 
 use super::super::files::{FileDialog, FilesMessage};
-use super::super::player::{PlayerCandidate, AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE};
+use super::super::player::{AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE, PlayerCandidate};
+use super::super::repo_operation::OperationStart;
 use super::super::workspace::{WorkspacePanel, WorkspaceRepository};
 use super::super::{ShellMessage, ShellViewModel};
 use super::api::{ApiMessage, HttpResponse};
 use super::support::{self, action_can_run};
 use super::tool_native::{self, ImportButton, ImportView};
-use super::super::repo_operation::OperationStart;
 use super::{AdminEffect, AdminMessage, PluginCallOrigin, ToolPageEntry};
 
 fn send(model: &mut ShellViewModel, message: AdminMessage) {
@@ -83,7 +84,15 @@ fn tool_plugin(id: &str, pages: serde_json::Value) -> PluginManifest {
     manifest
 }
 
-fn log_record(id: &str, timestamp: &str, level: &str, kind: &str, plugin_id: &str, repo_id: &str, message: &str) -> SystemLogRecord {
+fn log_record(
+    id: &str,
+    timestamp: &str,
+    level: &str,
+    kind: &str,
+    plugin_id: &str,
+    repo_id: &str,
+    message: &str,
+) -> SystemLogRecord {
     SystemLogRecord {
         id: id.into(),
         timestamp: timestamp.into(),
@@ -97,7 +106,11 @@ fn log_record(id: &str, timestamp: &str, level: &str, kind: &str, plugin_id: &st
             plugin_id: (!plugin_id.is_empty()).then(|| plugin_id.to_string()),
             repo_id: (!repo_id.is_empty()).then(|| repo_id.to_string()),
         },
-        location: SystemLogLocation { module_path: Some("app".into()), file: Some("main.rs".into()), line: Some(12) },
+        location: SystemLogLocation {
+            module_path: Some("app".into()),
+            file: Some("main.rs".into()),
+            line: Some(12),
+        },
         context: json!({"token": "other"}),
     }
 }
@@ -148,7 +161,12 @@ fn repository(id: &str, plugin_id: &str, name: &str) -> RepositorySummary {
         repo_id: id.into(),
         name: id.into(),
         path: format!("C:/{id}"),
-        backend: RepositoryBackendSummary { plugin_id: plugin_id.into(), kind: "local".into(), name: name.into(), capabilities: Vec::new() },
+        backend: RepositoryBackendSummary {
+            plugin_id: plugin_id.into(),
+            kind: "local".into(),
+            name: name.into(),
+            capabilities: Vec::new(),
+        },
         status: "ready".into(),
         asset_count: 0,
         updated_at: String::new(),
@@ -171,25 +189,41 @@ fn candidate(plugin_id: &str, label: &str) -> PlayerCandidate {
 }
 
 fn cache() -> CacheSnapshot {
-    CacheSnapshot { config: CacheConfig { metadata_capacity: 1, thumbnail_capacity: 2, query_capacity: 3 }, entries: Vec::new() }
+    CacheSnapshot {
+        config: CacheConfig {
+            metadata_capacity: 1,
+            thumbnail_capacity: 2,
+            query_capacity: 3,
+        },
+        entries: Vec::new(),
+    }
 }
 
 fn api_design() -> ApiDesignSnapshot {
-    ApiDesignSnapshot { transport: "tauri-ipc".into(), endpoints: Vec::new() }
+    ApiDesignSnapshot {
+        transport: "tauri-ipc".into(),
+        endpoints: Vec::new(),
+    }
 }
 
 /// 一次成功的设置页数据。
 /// 送回一次成功的设置包。插件列表换新以后排下的播放器类型读取在这里取走。
 fn load_bundle(model: &mut ShellViewModel, plugins: Vec<PluginManifest>) {
-    send(model, AdminMessage::SettingsBundleLoaded {
-        plugins: Ok(plugins),
-        hooks: Ok(Vec::new()),
-        cache: Ok(cache()),
-        api: Ok(api_design()),
-        external: Ok(connection()),
-    });
+    send(
+        model,
+        AdminMessage::SettingsBundleLoaded {
+            plugins: Ok(plugins),
+            hooks: Ok(Vec::new()),
+            cache: Ok(cache()),
+            api: Ok(api_design()),
+            external: Ok(connection()),
+        },
+    );
     let effects = model.admin.take_effects();
-    assert!(matches!(effects.as_slice(), [AdminEffect::LoadPlaylistPlayers]), "插件列表换新后应只排下播放器类型的读取：{effects:?}");
+    assert!(
+        matches!(effects.as_slice(), [AdminEffect::LoadPlaylistPlayers]),
+        "插件列表换新后应只排下播放器类型的读取：{effects:?}"
+    );
 }
 
 #[test]
@@ -197,28 +231,64 @@ fn settings_bundle_is_all_or_nothing_and_success_clears_the_error() {
     let mut model = ShellViewModel::default();
     model.reduce(ShellMessage::OpenSettings);
     assert!(model.admin.loading_settings);
-    assert!(model.admin.take_effects().iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)));
-    send(&mut model, AdminMessage::SettingsBundleLoaded {
-        plugins: Ok(vec![plugin("next", "system", "service", "service")]),
-        hooks: Ok(Vec::new()),
-        cache: Ok(cache()),
-        api: Err("API 设计读取失败".into()),
-        external: Ok(connection()),
-    });
+    assert!(
+        model
+            .admin
+            .take_effects()
+            .iter()
+            .any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle))
+    );
+    send(
+        &mut model,
+        AdminMessage::SettingsBundleLoaded {
+            plugins: Ok(vec![plugin("next", "system", "service", "service")]),
+            hooks: Ok(Vec::new()),
+            cache: Ok(cache()),
+            api: Err("API 设计读取失败".into()),
+            external: Ok(connection()),
+        },
+    );
     assert!(!model.admin.loading_settings);
     assert!(model.admin.plugins.is_empty());
     assert!(model.admin.cache.is_none());
     assert!(model.admin.external.is_none());
     assert_eq!(model.admin.load_error, "API 设计读取失败");
 
-    let tools = tool_plugin("momobako.tool.file-manager", json!([{ "toolPageId": "momobako.tool.file-manager", "label": "文件导入" }]));
-    load_bundle(&mut model, vec![plugin("next", "system", "service", "service"), tools]);
+    let tools = tool_plugin(
+        "momobako.tool.file-manager",
+        json!([{ "toolPageId": "momobako.tool.file-manager", "label": "文件导入" }]),
+    );
+    load_bundle(
+        &mut model,
+        vec![plugin("next", "system", "service", "service"), tools],
+    );
     assert_eq!(model.admin.plugins.len(), 2);
-    assert_eq!(model.admin.cache.as_ref().map(|item| item.config.query_capacity), Some(3));
-    assert_eq!(model.admin.external.as_ref().map(|item| item.ready), Some(true));
+    assert_eq!(
+        model
+            .admin
+            .cache
+            .as_ref()
+            .map(|item| item.config.query_capacity),
+        Some(3)
+    );
+    assert_eq!(
+        model.admin.external.as_ref().map(|item| item.ready),
+        Some(true)
+    );
     assert!(model.admin.load_error.is_empty());
-    assert_eq!(model.admin.tool_pages.iter().map(|page| page.id.as_str()).collect::<Vec<_>>(), ["momobako.tool.file-manager"]);
-    assert_eq!(model.admin.active_tool_page_id.as_deref(), Some("momobako.tool.file-manager"));
+    assert_eq!(
+        model
+            .admin
+            .tool_pages
+            .iter()
+            .map(|page| page.id.as_str())
+            .collect::<Vec<_>>(),
+        ["momobako.tool.file-manager"]
+    );
+    assert_eq!(
+        model.admin.active_tool_page_id.as_deref(),
+        Some("momobako.tool.file-manager")
+    );
 }
 
 #[test]
@@ -231,11 +301,19 @@ fn plugins_group_search_and_confirm_delete() {
     let parser = plugin("parser.one", "", "", "parser");
     load_bundle(&mut model, vec![user, custom, parser]);
     assert_eq!(
-        model.admin.grouped_plugins().into_iter().map(|(category, _)| category).collect::<Vec<_>>(),
+        model
+            .admin
+            .grouped_plugins()
+            .into_iter()
+            .map(|(category, _)| category)
+            .collect::<Vec<_>>(),
         ["source", "parser", "unclassified"]
     );
     send(&mut model, AdminMessage::SetKeyword("only-custom".into()));
-    assert_eq!(model.admin.grouped_plugins(), vec![("unclassified".into(), vec!["custom.one".into()])]);
+    assert_eq!(
+        model.admin.grouped_plugins(),
+        vec![("unclassified".into(), vec!["custom.one".into()])]
+    );
 
     send(&mut model, AdminMessage::RequestDelete("parser.one".into()));
     assert!(model.admin.pending_delete.is_none());
@@ -246,12 +324,20 @@ fn plugins_group_search_and_confirm_delete() {
     send(&mut model, AdminMessage::RequestDelete("user.one".into()));
     send(&mut model, AdminMessage::ConfirmDelete);
     assert!(model.admin.managing);
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::DeletePlugin(id)) if id == "user.one"));
-    send(&mut model, AdminMessage::PluginsReplaced(Err("删除被拒绝".into())));
+    assert!(
+        matches!(model.admin.take_effects().pop(), Some(AdminEffect::DeletePlugin(id)) if id == "user.one")
+    );
+    send(
+        &mut model,
+        AdminMessage::PluginsReplaced(Err("删除被拒绝".into())),
+    );
     assert_eq!(model.admin.pending_delete.as_deref(), Some("user.one"));
     assert_eq!(model.admin.action_error, "删除被拒绝");
     send(&mut model, AdminMessage::ConfirmDelete);
-    send(&mut model, AdminMessage::PluginsReplaced(Ok(vec![plugin("parser.one", "", "parser", "parser")])));
+    send(
+        &mut model,
+        AdminMessage::PluginsReplaced(Ok(vec![plugin("parser.one", "", "parser", "parser")])),
+    );
     assert_eq!(model.admin.action_message, "插件已删除。");
     assert!(model.admin.action_error.is_empty());
     assert!(model.admin.pending_delete.is_none());
@@ -264,6 +350,7 @@ fn plugin_labels_follow_the_vue_taxonomy() {
     assert_eq!(support::plugin_category(&manifest), "source");
     assert_eq!(support::category_label("library-kind"), "库类型");
     assert_eq!(support::category_label("made-up"), "未分类");
+    assert_eq!(support::plugin_runtime_label("vue-module"), "Vue 模块");
     assert_eq!(support::plugin_runtime_label("process"), "未知运行时");
     assert_eq!(support::plugin_source_label("user"), "用户插件");
     manifest.requires = vec!["a".into(), "b".into()];
@@ -279,39 +366,133 @@ fn plugin_labels_follow_the_vue_taxonomy() {
     assert_eq!(support::plugin_status_label(&manifest), "错误");
     assert_eq!(support::settings_fields(&manifest).len(), 4);
     assert_eq!(support::plugin_settings_label(&manifest), "插件设置");
-    manifest.contributes["settings"]["settingsPage"] = json!({ "label": "下载服务", "description": "队列和目录" });
+    manifest.contributes["settings"]["settingsPage"] =
+        json!({ "label": "下载服务", "description": "队列和目录" });
     assert_eq!(support::plugin_settings_label(&manifest), "下载服务");
-    assert_eq!(support::plugin_settings_description(&manifest), "队列和目录");
+    assert_eq!(
+        support::plugin_settings_description(&manifest),
+        "队列和目录"
+    );
     manifest.contributes = json!({ "source": { "authentication": { "kind": "qr" } } });
     assert_eq!(support::plugin_settings_label(&manifest), "账号与来源");
-    assert_eq!(support::plugin_settings_description(&manifest), "管理来源账号、登录状态与关联仓库。");
+    assert_eq!(
+        support::plugin_settings_description(&manifest),
+        "管理来源账号、登录状态与关联仓库。"
+    );
 }
 
 #[test]
 fn plugin_fields_reject_bad_json_and_reset_empty_numbers() {
     let mut model = ShellViewModel::default();
-    load_bundle(&mut model, vec![plugin("user.one", "user", "service", "service")]);
-    send(&mut model, AdminMessage::JsonDraft { plugin_id: "user.one".into(), key: "raw".into(), value: "{".into() });
-    send(&mut model, AdminMessage::CommitDraft { plugin_id: "user.one".into(), key: "raw".into() });
+    load_bundle(
+        &mut model,
+        vec![plugin("user.one", "user", "service", "service")],
+    );
+    send(
+        &mut model,
+        AdminMessage::JsonDraft {
+            plugin_id: "user.one".into(),
+            key: "raw".into(),
+            value: "{".into(),
+        },
+    );
+    send(
+        &mut model,
+        AdminMessage::CommitDraft {
+            plugin_id: "user.one".into(),
+            key: "raw".into(),
+        },
+    );
     assert_eq!(model.admin.action_error, "原始 不是有效 JSON。");
     assert!(model.admin.take_effects().is_empty());
-    send(&mut model, AdminMessage::JsonDraft { plugin_id: "user.one".into(), key: "raw".into(), value: " ".into() });
-    send(&mut model, AdminMessage::CommitDraft { plugin_id: "user.one".into(), key: "raw".into() });
-    assert!(model.admin.take_effects().is_empty(), "和现在的值（空）显示的一样，不保存");
-    send(&mut model, AdminMessage::JsonDraft { plugin_id: "user.one".into(), key: "raw".into(), value: "[1]".into() });
-    send(&mut model, AdminMessage::CommitDraft { plugin_id: "user.one".into(), key: "raw".into() });
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::SetConfig { value, .. }) if value == json!([1])));
+    send(
+        &mut model,
+        AdminMessage::JsonDraft {
+            plugin_id: "user.one".into(),
+            key: "raw".into(),
+            value: " ".into(),
+        },
+    );
+    send(
+        &mut model,
+        AdminMessage::CommitDraft {
+            plugin_id: "user.one".into(),
+            key: "raw".into(),
+        },
+    );
+    assert!(
+        model.admin.take_effects().is_empty(),
+        "和现在的值（空）显示的一样，不保存"
+    );
+    send(
+        &mut model,
+        AdminMessage::JsonDraft {
+            plugin_id: "user.one".into(),
+            key: "raw".into(),
+            value: "[1]".into(),
+        },
+    );
+    send(
+        &mut model,
+        AdminMessage::CommitDraft {
+            plugin_id: "user.one".into(),
+            key: "raw".into(),
+        },
+    );
+    assert!(
+        matches!(model.admin.take_effects().pop(), Some(AdminEffect::SetConfig { value, .. }) if value == json!([1]))
+    );
     model.reduce(ShellMessage::PluginConfigLoaded(Err("写入失败".into())));
     assert_eq!(model.admin.action_error, "写入失败");
 
-    send(&mut model, AdminMessage::ConfigInput { plugin_id: "user.one".into(), key: "limit".into(), text: "  ".into(), checked: None });
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::DeleteConfig { key, .. }) if key == "limit"));
-    send(&mut model, AdminMessage::ConfigInput { plugin_id: "user.one".into(), key: "limit".into(), text: "12".into(), checked: None });
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::SetConfig { value, .. }) if value == json!(12.0)));
-    send(&mut model, AdminMessage::ConfigInput { plugin_id: "user.one".into(), key: "on".into(), text: String::new(), checked: Some(true) });
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::SetConfig { value, .. }) if value == json!(true)));
-    send(&mut model, AdminMessage::ConfigInput { plugin_id: "user.one".into(), key: "mode".into(), text: "\"a\"".into(), checked: None });
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::SetConfig { value, .. }) if value == json!("a")));
+    send(
+        &mut model,
+        AdminMessage::ConfigInput {
+            plugin_id: "user.one".into(),
+            key: "limit".into(),
+            text: "  ".into(),
+            checked: None,
+        },
+    );
+    assert!(
+        matches!(model.admin.take_effects().pop(), Some(AdminEffect::DeleteConfig { key, .. }) if key == "limit")
+    );
+    send(
+        &mut model,
+        AdminMessage::ConfigInput {
+            plugin_id: "user.one".into(),
+            key: "limit".into(),
+            text: "12".into(),
+            checked: None,
+        },
+    );
+    assert!(
+        matches!(model.admin.take_effects().pop(), Some(AdminEffect::SetConfig { value, .. }) if value == json!(12.0))
+    );
+    send(
+        &mut model,
+        AdminMessage::ConfigInput {
+            plugin_id: "user.one".into(),
+            key: "on".into(),
+            text: String::new(),
+            checked: Some(true),
+        },
+    );
+    assert!(
+        matches!(model.admin.take_effects().pop(), Some(AdminEffect::SetConfig { value, .. }) if value == json!(true))
+    );
+    send(
+        &mut model,
+        AdminMessage::ConfigInput {
+            plugin_id: "user.one".into(),
+            key: "mode".into(),
+            text: "\"a\"".into(),
+            checked: None,
+        },
+    );
+    assert!(
+        matches!(model.admin.take_effects().pop(), Some(AdminEffect::SetConfig { value, .. }) if value == json!("a"))
+    );
     model.reduce(ShellMessage::PluginConfigLoaded(Ok(PluginConfigSnapshot {
         plugin_id: "user.one".into(),
         data_directory: "data".into(),
@@ -319,8 +500,16 @@ fn plugin_fields_reject_bad_json_and_reset_empty_numbers() {
         values: [("mode".into(), json!("a"))].into_iter().collect(),
     })));
     assert_eq!(model.admin.action_message, "插件设置已保存。");
-    send(&mut model, AdminMessage::ResetConfig { plugin_id: "user.one".into(), key: "mode".into() });
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::DeleteConfig { key, .. }) if key == "mode"));
+    send(
+        &mut model,
+        AdminMessage::ResetConfig {
+            plugin_id: "user.one".into(),
+            key: "mode".into(),
+        },
+    );
+    assert!(
+        matches!(model.admin.take_effects().pop(), Some(AdminEffect::DeleteConfig { key, .. }) if key == "mode")
+    );
     model.reduce(ShellMessage::PluginConfigLoaded(Err(String::new())));
     assert_eq!(model.admin.action_error, "插件设置重置失败。");
 }
@@ -328,13 +517,21 @@ fn plugin_fields_reject_bad_json_and_reset_empty_numbers() {
 #[test]
 fn plugin_settings_toggle_route_and_directory() {
     let mut model = ShellViewModel::default();
-    load_bundle(&mut model, vec![plugin("user.one", "user", "service", "service")]);
+    load_bundle(
+        &mut model,
+        vec![plugin("user.one", "user", "service", "service")],
+    );
     send(&mut model, AdminMessage::RoutePlugin("  ".into()));
     send(&mut model, AdminMessage::RoutePlugin("missing".into()));
     assert!(model.admin.take_effects().is_empty());
     send(&mut model, AdminMessage::RoutePlugin("user.one".into()));
-    assert_eq!(model.admin.active_settings_plugin_id.as_deref(), Some("user.one"));
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::LoadConfig(id)) if id == "user.one"));
+    assert_eq!(
+        model.admin.active_settings_plugin_id.as_deref(),
+        Some("user.one")
+    );
+    assert!(
+        matches!(model.admin.take_effects().pop(), Some(AdminEffect::LoadConfig(id)) if id == "user.one")
+    );
     model.reduce(ShellMessage::PluginConfigLoaded(Ok(PluginConfigSnapshot {
         plugin_id: "user.one".into(),
         data_directory: "data".into(),
@@ -346,13 +543,33 @@ fn plugin_settings_toggle_route_and_directory() {
     send(&mut model, AdminMessage::RoutePlugin("user.one".into()));
     assert!(model.admin.take_effects().is_empty());
 
-    send(&mut model, AdminMessage::OpenDataDirectory("user.one".into()));
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::OpenDataDirectory { name, .. }) if name == "user.one"));
-    send(&mut model, AdminMessage::DataDirectoryFinished { name: "user.one".into(), result: Ok("C:/plugin".into()) });
-    assert!(model.admin.action_message.is_empty(), "宿主打开以后才写已打开");
+    send(
+        &mut model,
+        AdminMessage::OpenDataDirectory("user.one".into()),
+    );
+    assert!(
+        matches!(model.admin.take_effects().pop(), Some(AdminEffect::OpenDataDirectory { name, .. }) if name == "user.one")
+    );
+    send(
+        &mut model,
+        AdminMessage::DataDirectoryFinished {
+            name: "user.one".into(),
+            result: Ok("C:/plugin".into()),
+        },
+    );
+    assert!(
+        model.admin.action_message.is_empty(),
+        "宿主打开以后才写已打开"
+    );
     crate::host_bridge::perform(&mut model, |_, _| Ok(()), |_| Ok(()), || Ok(()));
     assert_eq!(model.admin.action_message, "已打开“user.one”设置目录。");
-    send(&mut model, AdminMessage::DataDirectoryFinished { name: "user.one".into(), result: Err(String::new()) });
+    send(
+        &mut model,
+        AdminMessage::DataDirectoryFinished {
+            name: "user.one".into(),
+            result: Err(String::new()),
+        },
+    );
     assert_eq!(model.admin.action_error, "插件设置目录打开失败。");
 
     send(&mut model, AdminMessage::ToggleSettings("user.one".into()));
@@ -362,19 +579,45 @@ fn plugin_settings_toggle_route_and_directory() {
 #[test]
 fn enable_and_install_report_vue_messages() {
     let mut model = ShellViewModel::default();
-    load_bundle(&mut model, vec![plugin("user.one", "user", "service", "service")]);
-    send(&mut model, AdminMessage::SetEnabled { plugin_id: "user.one".into(), enabled: false });
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::SetEnabled { enabled: false, .. })));
-    send(&mut model, AdminMessage::PluginsReplaced(Ok(vec![plugin("user.one", "user", "service", "service")])));
+    load_bundle(
+        &mut model,
+        vec![plugin("user.one", "user", "service", "service")],
+    );
+    send(
+        &mut model,
+        AdminMessage::SetEnabled {
+            plugin_id: "user.one".into(),
+            enabled: false,
+        },
+    );
+    assert!(matches!(
+        model.admin.take_effects().pop(),
+        Some(AdminEffect::SetEnabled { enabled: false, .. })
+    ));
+    send(
+        &mut model,
+        AdminMessage::PluginsReplaced(Ok(vec![plugin("user.one", "user", "service", "service")])),
+    );
     assert_eq!(model.admin.action_message, "插件已禁用。");
     send(&mut model, AdminMessage::ChooseArchive);
     assert!(model.admin.action_message.is_empty());
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::RequestOpenDialog)));
+    assert!(matches!(
+        model.admin.take_effects().pop(),
+        Some(AdminEffect::RequestOpenDialog)
+    ));
     send(&mut model, AdminMessage::InstallArchive(Some("  ".into())));
     assert!(model.admin.take_effects().is_empty());
-    send(&mut model, AdminMessage::InstallArchive(Some("plugin.momoplug".into())));
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::Install(path)) if path == "plugin.momoplug"));
-    send(&mut model, AdminMessage::PluginsReplaced(Err(String::new())));
+    send(
+        &mut model,
+        AdminMessage::InstallArchive(Some("plugin.momoplug".into())),
+    );
+    assert!(
+        matches!(model.admin.take_effects().pop(), Some(AdminEffect::Install(path)) if path == "plugin.momoplug")
+    );
+    send(
+        &mut model,
+        AdminMessage::PluginsReplaced(Err(String::new())),
+    );
     assert_eq!(model.admin.action_error, "插件安装失败。");
 }
 
@@ -385,7 +628,10 @@ fn theme_corners_and_external_connection() {
     assert!(model.admin.take_effects().is_empty());
     model.reduce(ShellMessage::SettingsThemeChanged("dark".into()));
     assert_eq!(model.settings.theme, "dark");
-    assert!(matches!(model.admin.take_effects().as_slice(), [AdminEffect::SaveSettings]));
+    assert!(matches!(
+        model.admin.take_effects().as_slice(),
+        [AdminEffect::SaveSettings]
+    ));
 
     send(&mut model, AdminMessage::SetCornerStyle("square".into()));
     assert!(model.admin.take_effects().is_empty());
@@ -395,27 +641,53 @@ fn theme_corners_and_external_connection() {
     assert_eq!(model.admin.corner_radius, 20.0);
     send(&mut model, AdminMessage::SetCornerRadius("nope".into()));
     assert_eq!(model.admin.corner_radius, 20.0);
-    assert!(model.admin.take_effects().iter().all(|effect| matches!(effect, AdminEffect::PersistCorners)));
+    assert!(
+        model
+            .admin
+            .take_effects()
+            .iter()
+            .all(|effect| matches!(effect, AdminEffect::PersistCorners))
+    );
 
     let directory = std::env::temp_dir().join(format!("momobako-corners-{}", std::process::id()));
     std::fs::create_dir_all(&directory).expect("临时目录");
     let path = directory.join("corners.json");
     support::write_corners(&path, "round", 8.0);
     model.admin.load_corners_file(&path);
-    assert_eq!((model.admin.corner_style.as_str(), model.admin.corner_radius), ("round", 8.0));
+    assert_eq!(
+        (model.admin.corner_style.as_str(), model.admin.corner_radius),
+        ("round", 8.0)
+    );
     let _ = std::fs::remove_dir_all(&directory);
 
     assert_eq!(support::external_status_label(None), "未加载");
-    assert_eq!(support::mask_token(Some("1234567890abcdef")), "1234567890...abcdef");
+    assert_eq!(
+        support::mask_token(Some("1234567890abcdef")),
+        "1234567890...abcdef"
+    );
     send(&mut model, AdminMessage::ExportExternal);
     assert_eq!(model.admin.external_error, "连接 JSON 尚未加载。");
-    send(&mut model, AdminMessage::CopyExternal { label: "Base URL".into(), value: String::new() });
+    send(
+        &mut model,
+        AdminMessage::CopyExternal {
+            label: "Base URL".into(),
+            value: String::new(),
+        },
+    );
     assert_eq!(model.admin.external_error, "Base URL 尚未加载。");
     model.admin.external = Some(connection());
-    send(&mut model, AdminMessage::CopyExternal { label: "Token".into(), value: "1234567890abcdef".into() });
+    send(
+        &mut model,
+        AdminMessage::CopyExternal {
+            label: "Token".into(),
+            value: "1234567890abcdef".into(),
+        },
+    );
     assert_eq!(model.admin.external_message, "Token 已复制。");
     assert!(model.admin.external_error.is_empty());
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::CopyText(text)) if text == "1234567890abcdef"));
+    assert!(
+        matches!(model.admin.take_effects().pop(), Some(AdminEffect::CopyText(text)) if text == "1234567890abcdef")
+    );
     send(&mut model, AdminMessage::ExportExternal);
     match model.admin.take_effects().pop() {
         Some(AdminEffect::RequestSaveDialog { content }) => {
@@ -427,11 +699,19 @@ fn theme_corners_and_external_connection() {
     }
     send(&mut model, AdminMessage::CompleteExport(None));
     assert!(model.admin.take_effects().is_empty());
-    send(&mut model, AdminMessage::CompleteExport(Some("external-api.json".into())));
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::WriteFile { path, .. }) if path == "external-api.json"));
+    send(
+        &mut model,
+        AdminMessage::CompleteExport(Some("external-api.json".into())),
+    );
+    assert!(
+        matches!(model.admin.take_effects().pop(), Some(AdminEffect::WriteFile { path, .. }) if path == "external-api.json")
+    );
     send(&mut model, AdminMessage::WriteFinished(Ok(())));
     assert_eq!(model.admin.external_message, "external-api.json 已导出。");
-    send(&mut model, AdminMessage::WriteFinished(Err("磁盘已满".into())));
+    send(
+        &mut model,
+        AdminMessage::WriteFinished(Err("磁盘已满".into())),
+    );
     assert_eq!(model.admin.external_error, "导出失败：磁盘已满");
 }
 
@@ -447,7 +727,10 @@ fn repository_backends_and_audio_player_choices() {
             repository("three", "webdav", "WebDAV"),
         ]),
     });
-    assert_eq!(support::backend_summary(&model.admin.backends), "本地 (2) / WebDAV (1)");
+    assert_eq!(
+        support::backend_summary(&model.admin.backends),
+        "本地 (2) / WebDAV (1)"
+    );
     assert_eq!(support::backend_summary(&[]), "无");
 
     // 原生候选登记了音频能力时照 Vue：插件名从清单里找，偏好不可用时回退到官方实现；什么都没有才报缺失。
@@ -455,21 +738,54 @@ fn repository_backends_and_audio_player_choices() {
     official.name = "官方音频播放器".into();
     let plugins = [official];
     let mut preferences = BTreeMap::new();
-    let view = support::audio_view(&[candidate("momobako.player.audio", "音频顺序播放")], &plugins, &preferences);
-    assert_eq!(audio_labels(&view), ["官方音频播放器 · momobako.player.audio"]);
+    let view = support::audio_view(
+        &[candidate("momobako.player.audio", "音频顺序播放")],
+        &plugins,
+        &preferences,
+    );
+    assert_eq!(
+        audio_labels(&view),
+        ["官方音频播放器 · momobako.player.audio"]
+    );
     assert_eq!(view.selected, "momobako.player.audio");
     assert!(view.selectable && view.notice.is_none());
     preferences.insert(AUDIO_CAPABILITY.to_string(), "missing.player".to_string());
-    let view = support::audio_view(&[candidate("momobako.player.audio", "音频顺序播放")], &plugins, &preferences);
+    let view = support::audio_view(
+        &[candidate("momobako.player.audio", "音频顺序播放")],
+        &plugins,
+        &preferences,
+    );
     assert_eq!(view.choices[0].label, "missing.player（不可用）");
-    assert_eq!(view.notice, Some(("所选播放器当前不可用，已回退到 官方音频播放器。".into(), false)));
+    assert_eq!(
+        view.notice,
+        Some((
+            "所选播放器当前不可用，已回退到 官方音频播放器。".into(),
+            false
+        ))
+    );
     let view = support::audio_view(&[], &[], &BTreeMap::new());
     assert!(view.choices.is_empty() && !view.selectable);
-    assert_eq!(view.notice, Some(("官方音频播放器未启用或缺失，音频播放暂不可用。".into(), true)));
+    assert_eq!(
+        view.notice,
+        Some((
+            "官方音频播放器未启用或缺失，音频播放暂不可用。".into(),
+            true
+        ))
+    );
 
     model.player.candidates = vec![candidate("momobako.player.audio", "音频顺序播放")];
-    send(&mut model, AdminMessage::SetAudioPlayer(Some(" momobako.player.audio ".into())));
-    assert_eq!(model.player.preferences.get(AUDIO_CAPABILITY).map(String::as_str), Some("momobako.player.audio"));
+    send(
+        &mut model,
+        AdminMessage::SetAudioPlayer(Some(" momobako.player.audio ".into())),
+    );
+    assert_eq!(
+        model
+            .player
+            .preferences
+            .get(AUDIO_CAPABILITY)
+            .map(String::as_str),
+        Some("momobako.player.audio")
+    );
 }
 
 /// 生产里的原生候选只有内置解码器，音频能力的实现来自插件清单：装了官方音频播放器就和 Vue 一样显示它；
@@ -477,49 +793,79 @@ fn repository_backends_and_audio_player_choices() {
 #[test]
 fn audio_card_reads_plugin_players_and_falls_back_to_the_builtin_decoder() {
     let builtin = ShellViewModel::default().player.candidates;
-    let official: PluginManifest =
-        serde_json::from_str(include_str!("../../../External/Plugins/player-audio/manifest.json")).expect("官方音频播放器清单");
+    let official: PluginManifest = serde_json::from_str(include_str!(
+        "../../../External/Plugins/player-audio/manifest.json"
+    ))
+    .expect("官方音频播放器清单");
 
     let view = support::audio_view(&builtin, std::slice::from_ref(&official), &BTreeMap::new());
-    assert_eq!(audio_labels(&view), ["Audio Player · momobako.player.audio"]);
+    assert_eq!(
+        audio_labels(&view),
+        ["Audio Player · momobako.player.audio"]
+    );
     assert_eq!(view.selected, "momobako.player.audio");
     assert!(view.selectable && view.notice.is_none());
 
-    // 媒体基础只在 Windows 上有，内置解码器在那里多出 M4A / AAC / Opus。
+    // Opus 各平台都可用；媒体基础只在 Windows 上补 M4A / AAC。
     let builtin_label = if cfg!(windows) {
-        "内置解码器 · WAV / MP3 / FLAC / Ogg / M4A / AAC / Opus"
+        "内置解码器 · WAV / MP3 / FLAC / Ogg / Opus / M4A / AAC"
     } else {
-        "内置解码器 · WAV / MP3 / FLAC / Ogg"
+        "内置解码器 · WAV / MP3 / FLAC / Ogg / Opus"
     };
     let none = support::audio_view(&builtin, &[], &BTreeMap::new());
     assert_eq!(audio_labels(&none), [builtin_label]);
     assert_eq!(none.selected, "");
-    assert!(!none.selectable && none.notice.is_none(), "内置解码器能放音频，不报缺失");
+    assert!(
+        !none.selectable && none.notice.is_none(),
+        "内置解码器能放音频，不报缺失"
+    );
     let mut disabled = official.clone();
     disabled.enabled = false;
-    assert_eq!(support::audio_view(&builtin, &[disabled], &BTreeMap::new()), none, "停用的插件不算实现");
+    assert_eq!(
+        support::audio_view(&builtin, &[disabled], &BTreeMap::new()),
+        none,
+        "停用的插件不算实现"
+    );
 
-    let preferences = BTreeMap::from([(AUDIO_CAPABILITY.to_string(), "momobako.player.audio".to_string())]);
+    let preferences = BTreeMap::from([(
+        AUDIO_CAPABILITY.to_string(),
+        "momobako.player.audio".to_string(),
+    )]);
     let gone = support::audio_view(&builtin, &[], &preferences);
     assert_eq!(audio_labels(&gone), ["momobako.player.audio（不可用）"]);
-    assert_eq!(gone.notice, Some(("所选播放器当前不可用，已回退到 内置解码器。".into(), false)));
+    assert_eq!(
+        gone.notice,
+        Some(("所选播放器当前不可用，已回退到 内置解码器。".into(), false))
+    );
 
     let mut third = official.clone();
     third.plugin_id = "user.player.lyric".into();
     third.name = "Lyric Player".into();
     let view = support::audio_view(&builtin, &[third], &BTreeMap::new());
-    assert_eq!(audio_labels(&view), [builtin_label, "Lyric Player · user.player.lyric"]);
+    assert_eq!(
+        audio_labels(&view),
+        [builtin_label, "Lyric Player · user.player.lyric"]
+    );
     assert_eq!(view.selected, "", "没选的第三方实现不接管音频");
     assert!(view.selectable && view.notice.is_none());
 
     let mut model = ShellViewModel::default();
     model.player.preferences = preferences;
-    send(&mut model, AdminMessage::SetAudioPlayer(Some(String::new())));
-    assert!(model.player.preferences.get(AUDIO_CAPABILITY).is_none(), "选内置解码器等于清掉偏好");
+    send(
+        &mut model,
+        AdminMessage::SetAudioPlayer(Some(String::new())),
+    );
+    assert!(
+        model.player.preferences.get(AUDIO_CAPABILITY).is_none(),
+        "选内置解码器等于清掉偏好"
+    );
 }
 
 fn audio_labels(view: &support::AudioView) -> Vec<String> {
-    view.choices.iter().map(|choice| choice.label.clone()).collect()
+    view.choices
+        .iter()
+        .map(|choice| choice.label.clone())
+        .collect()
 }
 
 #[test]
@@ -527,36 +873,86 @@ fn logs_filter_sort_pause_and_context() {
     let mut model = ShellViewModel::default();
     model.reduce(ShellMessage::LogsLoaded(Ok(SystemLogPage {
         records: vec![
-            log_record("b", "2020-02-01T00:00:00Z", "error", "helper", "plug", "repo", "失败"),
-            log_record("a", "2020-01-01T00:00:00Z", "info", "host", "", "", "开始 needle"),
+            log_record(
+                "b",
+                "2020-02-01T00:00:00Z",
+                "error",
+                "helper",
+                "plug",
+                "repo",
+                "失败",
+            ),
+            log_record(
+                "a",
+                "2020-01-01T00:00:00Z",
+                "info",
+                "host",
+                "",
+                "",
+                "开始 needle",
+            ),
         ],
         next_cursor: None,
     })));
     assert!(model.admin.log_would_scroll);
-    assert_eq!(model.admin.filtered_logs().iter().map(|record| record.id.as_str()).collect::<Vec<_>>(), ["a", "b"]);
+    assert_eq!(
+        model
+            .admin
+            .filtered_logs()
+            .iter()
+            .map(|record| record.id.as_str())
+            .collect::<Vec<_>>(),
+        ["a", "b"]
+    );
     send(&mut model, AdminMessage::ToggleLogLevel("error".into()));
     assert_eq!(model.admin.filtered_logs().len(), 1);
-    assert_eq!(support::active_filter_count(&model.admin.log_levels, &model.admin.log_kinds, "", "", ""), 1);
+    assert_eq!(
+        support::active_filter_count(&model.admin.log_levels, &model.admin.log_kinds, "", "", ""),
+        1
+    );
     send(&mut model, AdminMessage::SetLogSearch("needle".into()));
     assert!(model.admin.filtered_logs().is_empty());
     send(&mut model, AdminMessage::ResetLogFilters);
-    assert_eq!(support::active_filter_count(&model.admin.log_levels, &model.admin.log_kinds, "", "", ""), 0);
+    assert_eq!(
+        support::active_filter_count(&model.admin.log_levels, &model.admin.log_kinds, "", "", ""),
+        0
+    );
     send(&mut model, AdminMessage::SetLogPaused(true));
     assert!(!model.admin.log_would_scroll);
     send(&mut model, AdminMessage::SetLogSearch("不存在".into()));
     assert!(!model.admin.log_would_scroll);
     assert_eq!(model.admin.logs.len(), 2);
-    assert_eq!(support::unique_sorted(model.admin.logs.iter().filter_map(|record| record.source.plugin_id.clone())), ["plug"]);
+    assert_eq!(
+        support::unique_sorted(
+            model
+                .admin
+                .logs
+                .iter()
+                .filter_map(|record| record.source.plugin_id.clone())
+        ),
+        ["plug"]
+    );
     send(&mut model, AdminMessage::ToggleLogContext("a".into()));
     assert!(model.admin.log_context_open.contains("a"));
     send(&mut model, AdminMessage::ToggleLogContext("a".into()));
     assert!(model.admin.log_context_open.is_empty());
     assert_eq!(support::level_label("warn"), "警告");
     assert_eq!(support::source_kind_label("frontend-plugin"), "前端插件");
-    assert_eq!(support::location_label(&model.admin.logs[0]), "app:main.rs:12");
+    assert_eq!(
+        support::location_label(&model.admin.logs[0]),
+        "app:main.rs:12"
+    );
 
     for index in 0..502 {
-        model.admin.merge_log(log_record(&format!("n{index:03}"), &format!("2021-01-01T00:{:02}:{:02}Z", index / 60, index % 60), "info", "host", "", "", "x"));
+        model.admin.merge_log(log_record(
+            &format!("n{index:03}"),
+            &format!("2021-01-01T00:{:02}:{:02}Z", index / 60, index % 60),
+            "info",
+            "host",
+            "",
+            "",
+            "x",
+        ));
     }
     assert_eq!(model.admin.logs.len(), 500);
     assert_eq!(model.admin.logs[0].id, "n501");
@@ -568,10 +964,26 @@ fn logs_follow_the_end_while_tracking_and_hold_when_paused() {
     assert!(model.admin_logs_follow_end());
     send(&mut model, AdminMessage::SetLogPaused(true));
     assert!(!model.admin_logs_follow_end());
-    model.admin.merge_log(log_record("late", "2026-10-08T08:00:00Z", "info", "host", "", "", "新记录"));
+    model.admin.merge_log(log_record(
+        "late",
+        "2026-10-08T08:00:00Z",
+        "info",
+        "host",
+        "",
+        "",
+        "新记录",
+    ));
     assert!(!model.admin_logs_follow_end());
     send(&mut model, AdminMessage::SetLogPaused(false));
-    model.admin.merge_log(log_record("later", "2026-10-08T08:01:00Z", "info", "host", "", "", "又一条"));
+    model.admin.merge_log(log_record(
+        "later",
+        "2026-10-08T08:01:00Z",
+        "info",
+        "host",
+        "",
+        "",
+        "又一条",
+    ));
     assert!(model.admin_logs_follow_end());
     model.workspace.panel = WorkspacePanel::Files;
     assert!(!model.admin_logs_follow_end());
@@ -580,30 +992,49 @@ fn logs_follow_the_end_while_tracking_and_hold_when_paused() {
 #[test]
 fn task_popover_merges_repository_operation_and_closes() {
     let mut model = ShellViewModel::default();
-    model.reduce(ShellMessage::TaskProgressLoaded(vec![TaskProgressSnapshot {
-        task_id: "task-1".into(),
-        protocol_id: "momobako.sync".into(),
-        status: "running".into(),
-        phase: Some("scanning".into()),
-        label: Some("扫描".into()),
-        current: None,
-        total: None,
-        percent: Some(10.0),
-        error: None,
-        updated_at: "1970-01-01T00:00:00.020Z".into(),
-    }]));
-    let operation = model.operation.start(OperationStart::new("导入", "复制", 8.0));
+    model.reduce(ShellMessage::TaskProgressLoaded(vec![
+        TaskProgressSnapshot {
+            task_id: "task-1".into(),
+            protocol_id: "momobako.sync".into(),
+            status: "running".into(),
+            phase: Some("scanning".into()),
+            label: Some("扫描".into()),
+            current: None,
+            total: None,
+            percent: Some(10.0),
+            error: None,
+            updated_at: "1970-01-01T00:00:00.020Z".into(),
+        },
+    ]));
+    let operation = model
+        .operation
+        .start(OperationStart::new("导入", "复制", 8.0));
     let rows = model.task_rows();
-    assert_eq!((rows[0].id.as_str(), rows[0].source.as_str()), ("workspace-operation", "资源库"));
-    assert_eq!((rows[1].id.as_str(), rows[1].source.as_str(), rows[1].detail.as_str()), ("task-1", "任务", "scanning"));
+    assert_eq!(
+        (rows[0].id.as_str(), rows[0].source.as_str()),
+        ("workspace-operation", "资源库")
+    );
+    assert_eq!(
+        (
+            rows[1].id.as_str(),
+            rows[1].source.as_str(),
+            rows[1].detail.as_str()
+        ),
+        ("task-1", "任务", "scanning")
+    );
     // 弹层外的点击层和关闭按钮发 `CloseTaskPopover`；Escape 走全局那一条，关最上面一层。
     send(&mut model, AdminMessage::ToggleTaskPopover);
     assert!(model.admin.popover_open);
     send(&mut model, AdminMessage::CloseTaskPopover);
     assert!(!model.admin.popover_open);
     send(&mut model, AdminMessage::ToggleTaskPopover);
-    assert!(crate::shell::escape_layer(&model).is_some(), "任务弹层是 Escape 能关的一层");
-    model.reduce(ShellMessage::Sidebar(crate::shell::SidebarMessage::Gap(crate::shell::GapMessage::Escape)));
+    assert!(
+        crate::shell::escape_layer(&model).is_some(),
+        "任务弹层是 Escape 能关的一层"
+    );
+    model.reduce(ShellMessage::Sidebar(crate::shell::SidebarMessage::Gap(
+        crate::shell::GapMessage::Escape,
+    )));
     assert!(!model.admin.popover_open);
     model.operation.cancel(operation);
     model.task_progress.clear();
@@ -616,24 +1047,44 @@ fn repository_actions_follow_selection_and_refuse_when_not_runnable() {
     model.repository_id = Some("repo".into());
     model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Actions));
     assert!(model.admin.actions_loading);
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::LoadActions { repo_id }) if repo_id == "repo"));
+    assert!(
+        matches!(model.admin.take_effects().pop(), Some(AdminEffect::LoadActions { repo_id }) if repo_id == "repo")
+    );
     model.repository_id = Some("other".into());
-    send(&mut model, AdminMessage::ActionsLoaded { repo_id: "repo".into(), result: Ok(vec![action("import", "ready", true)]) });
+    send(
+        &mut model,
+        AdminMessage::ActionsLoaded {
+            repo_id: "repo".into(),
+            result: Ok(vec![action("import", "ready", true)]),
+        },
+    );
     assert!(model.admin.actions.is_empty());
     model.repository_id = Some("repo".into());
     model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Files));
     model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Actions));
     let _ = model.admin.take_effects();
-    send(&mut model, AdminMessage::ActionsLoaded {
-        repo_id: "repo".into(),
-        result: Ok(vec![action("import", "blocked", false), action("copy", "ready", true)]),
-    });
+    send(
+        &mut model,
+        AdminMessage::ActionsLoaded {
+            repo_id: "repo".into(),
+            result: Ok(vec![
+                action("import", "blocked", false),
+                action("copy", "ready", true),
+            ]),
+        },
+    );
     assert_eq!(model.admin.active_action_id.as_deref(), Some("import"));
     assert_eq!(support::action_status_label("blocked", false), "不支持");
     assert!(!action_can_run("ready", true, 0, false));
     send(&mut model, AdminMessage::RunAction(Some("copy".into())));
     assert!(model.admin.take_effects().is_empty());
-    send(&mut model, AdminMessage::ActionsLoaded { repo_id: "repo".into(), result: Err("读取失败".into()) });
+    send(
+        &mut model,
+        AdminMessage::ActionsLoaded {
+            repo_id: "repo".into(),
+            result: Err("读取失败".into()),
+        },
+    );
     assert_eq!(model.admin.actions.len(), 2);
     assert_eq!(model.admin.actions_error, "读取失败");
     model.files.set_selected_paths(vec!["a.txt".into()]);
@@ -657,38 +1108,91 @@ fn repository_actions_follow_selection_and_refuse_when_not_runnable() {
         login_expired: false,
         logged_out: false,
     });
-    send(&mut model, AdminMessage::ActionRunFinished { result: Ok(action("copy", "ready", true)) });
+    send(
+        &mut model,
+        AdminMessage::ActionRunFinished {
+            result: Ok(action("copy", "ready", true)),
+        },
+    );
     assert!(!model.admin.actions_running);
     assert!(model.files.take_effects().iter().any(|effect| matches!(effect, crate::shell::FilesEffect::Browse { repo_id, .. } if repo_id == "repo")));
     assert!(model.workspace.take_effects().iter().any(|effect| matches!(effect, crate::shell::WorkspaceEffect::LoadSnapshotSilent { repo_id } if repo_id == "repo")));
-    assert_eq!(model.operation.shown().map(|row| row.label.as_str()), Some("读取目录"));
+    assert_eq!(
+        model.operation.shown().map(|row| row.label.as_str()),
+        Some("读取目录")
+    );
 }
 
 #[test]
 fn tool_pages_follow_enabled_manifests_and_keep_the_selection() {
-    let mut native = tool_plugin("backend.tool", json!([{ "toolPageId": "backend.page", "label": "后端" }]));
+    let mut native = tool_plugin(
+        "backend.tool",
+        json!([{ "toolPageId": "backend.page", "label": "后端" }]),
+    );
     native.runtime = "native-dylib".into();
-    let mut disabled = tool_plugin("disabled.tool", json!([{ "toolPageId": "disabled.page", "label": "停用" }]));
+    let mut disabled = tool_plugin(
+        "disabled.tool",
+        json!([{ "toolPageId": "disabled.page", "label": "停用" }]),
+    );
     disabled.enabled = false;
-    let mut broken = tool_plugin("broken.tool", json!([{ "toolPageId": "broken.page", "label": "出错" }]));
+    let mut broken = tool_plugin(
+        "broken.tool",
+        json!([{ "toolPageId": "broken.page", "label": "出错" }]),
+    );
     broken.status = "error".into();
     let pages = support::tool_pages_from_plugins(&[
-        tool_plugin("a.tool", json!([{ "toolPageId": "zeta", "label": "Zeta", "order": 5 }, { "toolPageId": "  ", "label": "空" }])),
-        tool_plugin("b.tool", json!([{ "toolPageId": "momobako.tool.api-playground", "label": "API Playground", "description": "调试" }])),
-        tool_plugin("c.tool", json!([{ "toolPageId": "alpha", "label": "Alpha", "order": 5 }])),
+        tool_plugin(
+            "a.tool",
+            json!([{ "toolPageId": "zeta", "label": "Zeta", "order": 5 }, { "toolPageId": "  ", "label": "空" }]),
+        ),
+        tool_plugin(
+            "b.tool",
+            json!([{ "toolPageId": "momobako.tool.api-playground", "label": "API Playground", "description": "调试" }]),
+        ),
+        tool_plugin(
+            "c.tool",
+            json!([{ "toolPageId": "alpha", "label": "Alpha", "order": 5 }]),
+        ),
         native,
         disabled,
         broken,
     ]);
-    assert_eq!(pages.iter().map(|page| page.id.as_str()).collect::<Vec<_>>(), ["alpha", "zeta", "momobako.tool.api-playground", "backend.page"]);
-    assert_eq!((pages[2].native, pages[2].plugin_name.as_str(), pages[2].description.as_str()), (true, "b.tool", "调试"));
+    assert_eq!(
+        pages
+            .iter()
+            .map(|page| page.id.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "alpha",
+            "zeta",
+            "momobako.tool.api-playground",
+            "backend.page"
+        ]
+    );
+    assert_eq!(
+        (
+            pages[2].native,
+            pages[2].plugin_name.as_str(),
+            pages[2].description.as_str()
+        ),
+        (true, "b.tool", "调试")
+    );
     assert!(!pages[0].native);
 
     let mut model = ShellViewModel::default();
     send(&mut model, AdminMessage::SetToolPages(Vec::new()));
     assert!(model.admin.active_tool_page_id.is_none());
-    let entry = |id: &str| ToolPageEntry { id: id.into(), label: id.into(), plugin_name: "tool".into(), description: String::new(), native: false };
-    send(&mut model, AdminMessage::SetToolPages(vec![entry("old"), entry("new")]));
+    let entry = |id: &str| ToolPageEntry {
+        id: id.into(),
+        label: id.into(),
+        plugin_name: "tool".into(),
+        description: String::new(),
+        native: false,
+    };
+    send(
+        &mut model,
+        AdminMessage::SetToolPages(vec![entry("old"), entry("new")]),
+    );
     assert_eq!(model.admin.active_tool_page_id.as_deref(), Some("old"));
     send(&mut model, AdminMessage::SelectToolPage("missing".into()));
     send(&mut model, AdminMessage::SelectToolPage("new".into()));
@@ -715,7 +1219,11 @@ fn attach_repository(model: &mut ShellViewModel, capabilities: Vec<String>) {
 }
 
 fn import_button(buttons: &[ImportButton], id: &str) -> FilesMessage {
-    buttons.iter().find(|item| item.id == id).map(|item| item.message.clone()).unwrap_or_else(|| panic!("missing {id}"))
+    buttons
+        .iter()
+        .find(|item| item.id == id)
+        .map(|item| item.message.clone())
+        .unwrap_or_else(|| panic!("missing {id}"))
 }
 
 #[test]
@@ -725,70 +1233,138 @@ fn builtin_import_pages_follow_the_file_machine() {
     let blocked = ImportView::project(&model, support::TOOL_FILE_MANAGER);
     assert!(!blocked.enabled);
     assert_eq!(blocked.reason, Some("当前没有可用仓库。"));
-    assert_eq!(tool_native::import_block_reason(&model), Some("当前没有可用仓库。"));
-    assert!(tool_native::import_message(blocked.enabled, import_button(&buttons, "folder")).is_none());
+    assert_eq!(
+        tool_native::import_block_reason(&model),
+        Some("当前没有可用仓库。")
+    );
+    assert!(
+        tool_native::import_message(blocked.enabled, import_button(&buttons, "folder")).is_none()
+    );
 
     attach_repository(&mut model, vec!["write".into()]);
     let open = ImportView::project(&model, support::TOOL_FILE_MANAGER);
     assert!(open.enabled);
     assert!(tool_native::import_block_reason(&model).is_none());
     let folder = import_button(&buttons, "folder");
-    assert!(matches!(&folder, FilesMessage::OpenDialog(FileDialog::Import)));
+    assert!(matches!(
+        &folder,
+        FilesMessage::OpenDialog(FileDialog::Import)
+    ));
     model.reduce(tool_native::import_message(open.enabled, folder).expect("folder"));
-    assert!(matches!(model.files.dialog, FileDialog::Import));
+    assert_eq!(
+        model.files.dialog,
+        FileDialog::Closed,
+        "实况导入打开系统选择器，不打开手填路径框"
+    );
+    let commands = model
+        .input
+        .take_platform_commands(nana_ui_platform::WindowId(1), false);
+    assert!(
+        matches!(commands.as_slice(), [nana_ui_platform::host::WindowCommand::OpenFileDialog { request, .. }] if request.title.as_deref() == Some("选择导入文件夹")),
+        "实况文件夹导入应排队系统选目录：{commands:?}"
+    );
 
-    let eagle = tool_native::import_buttons(support::TOOL_EAGLE_IMPORTER);
-    let copy = import_button(&eagle, "copy");
-    assert!(matches!(&copy, FilesMessage::OpenEagle(mode) if mode == "copy"));
-    let enabled = ImportView::project(&model, support::TOOL_EAGLE_IMPORTER).enabled;
-    model.reduce(tool_native::import_message(enabled, copy).expect("copy"));
-    assert_eq!(model.files.eagle_mode, "copy");
+    let unselected = ImportView::project(&model, support::TOOL_EAGLE_IMPORTER);
+    assert!(unselected.enabled);
+    assert_eq!(
+        tool_native::eagle_path_label(&unselected.library_path),
+        "尚未选择"
+    );
+    assert!(tool_native::eagle_import_message(&unselected, "copy").is_none());
+    model.admin.eagle_library_path = "D:/eagle.library".into();
+    let selected = ImportView::project(&model, support::TOOL_EAGLE_IMPORTER);
+    assert_eq!(
+        tool_native::eagle_path_label(&selected.library_path),
+        "D:/eagle.library"
+    );
+    assert!(matches!(
+        tool_native::eagle_import_message(&selected, "copy"),
+        Some(ShellMessage::Admin(AdminMessage::RunEagleImport(mode))) if mode == "copy"
+    ));
 
     model.workspace.repositories[0].capabilities.clear();
-    assert_eq!(tool_native::import_block_reason(&model), Some("当前仓库处于只读状态。"));
+    assert_eq!(
+        tool_native::import_block_reason(&model),
+        Some("当前仓库处于只读状态。")
+    );
     model.workspace.repositories[0].capabilities = vec!["write".into()];
     model.workspace.panel = WorkspacePanel::Trash;
-    assert_eq!(tool_native::import_block_reason(&model), Some("回收站视图不支持导入。"));
+    assert_eq!(
+        tool_native::import_block_reason(&model),
+        Some("回收站视图不支持导入。")
+    );
     model.workspace.panel = WorkspacePanel::SmartFolder;
-    assert_eq!(tool_native::import_block_reason(&model), Some("虚拟视图不支持导入。"));
+    assert_eq!(
+        tool_native::import_block_reason(&model),
+        Some("虚拟视图不支持导入。")
+    );
 }
 
 #[test]
 fn api_playground_falls_back_and_sends_http_and_plugin_calls() {
     let mut model = ShellViewModel::default();
     model.admin.external = Some(connection());
-    send(&mut model, AdminMessage::Api(ApiMessage::SetKeyword("repositories".into())));
+    send(
+        &mut model,
+        AdminMessage::Api(ApiMessage::SetKeyword("repositories".into())),
+    );
     let selected = super::api::selected_ref(&model).expect("兜底端点");
     assert_eq!(selected.path, "/external/v1/repositories");
     assert!(model.admin.api.include_auth);
-    assert_eq!(super::api::request_url(&model), "http://127.0.0.1:9/external/v1/repositories");
+    assert_eq!(
+        super::api::request_url(&model),
+        "http://127.0.0.1:9/external/v1/repositories"
+    );
     send(&mut model, AdminMessage::Api(ApiMessage::Send));
     match model.admin.take_effects().pop() {
         Some(AdminEffect::HttpRequest(request)) => {
-            assert_eq!((request.method.as_str(), request.body.as_deref()), ("GET", None));
-            assert!(request.headers.contains(&("Authorization".into(), "Bearer 1234567890abcdef".into())));
+            assert_eq!(
+                (request.method.as_str(), request.body.as_deref()),
+                ("GET", None)
+            );
+            assert!(
+                request
+                    .headers
+                    .contains(&("Authorization".into(), "Bearer 1234567890abcdef".into()))
+            );
         }
         other => panic!("unexpected {other:?}"),
     }
     assert!(model.admin.api.sending);
-    send(&mut model, AdminMessage::Api(ApiMessage::HttpFinished(Ok(HttpResponse {
-        status: 200,
-        status_text: "OK".into(),
-        headers: vec![("Content-Type".into(), "application/json".into())],
-        body: "{\"items\":[]}".into(),
-    }))));
+    send(
+        &mut model,
+        AdminMessage::Api(ApiMessage::HttpFinished(Ok(HttpResponse {
+            status: 200,
+            status_text: "OK".into(),
+            headers: vec![("Content-Type".into(), "application/json".into())],
+            body: "{\"items\":[]}".into(),
+        }))),
+    );
     assert_eq!(model.admin.api.response_status, "200 OK");
     assert!(model.admin.api.response_headers.contains("content-type"));
     assert!(model.admin.api.response_body.contains("\"items\": []"));
     assert!(!model.admin.api.sending);
 
     send(&mut model, AdminMessage::Api(ApiMessage::Copy));
-    assert!(matches!(model.admin.take_effects().pop(), Some(AdminEffect::CopyText(text)) if text.starts_with("curl -X GET 'http://127.0.0.1:9/external/v1/repositories'")));
+    assert!(
+        matches!(model.admin.take_effects().pop(), Some(AdminEffect::CopyText(text)) if text.starts_with("curl -X GET 'http://127.0.0.1:9/external/v1/repositories'"))
+    );
     assert_eq!(model.admin.api.notice, "请求已复制。");
 
-    send(&mut model, AdminMessage::Api(ApiMessage::SetKeyword(String::new())));
-    send(&mut model, AdminMessage::Api(ApiMessage::SelectEndpoint("external-http:POST:/external/v1/assets:add".into())));
-    send(&mut model, AdminMessage::Api(ApiMessage::SetRequestText("{".into())));
+    send(
+        &mut model,
+        AdminMessage::Api(ApiMessage::SetKeyword(String::new())),
+    );
+    send(
+        &mut model,
+        AdminMessage::Api(ApiMessage::SelectEndpoint(
+            "external-http:POST:/external/v1/assets:add".into(),
+        )),
+    );
+    send(
+        &mut model,
+        AdminMessage::Api(ApiMessage::SetRequestText("{".into())),
+    );
     send(&mut model, AdminMessage::Api(ApiMessage::Send));
     assert!(model.admin.take_effects().is_empty());
     assert_eq!(model.admin.api.response_status, "ERROR");
@@ -808,32 +1384,65 @@ fn api_playground_falls_back_and_sends_http_and_plugin_calls() {
             request_template: None,
         }],
     });
-    send(&mut model, AdminMessage::Api(ApiMessage::SelectEndpoint("plugin-call:momobako.service.downloader:downloader.getRuntimeStatus".into())));
+    send(
+        &mut model,
+        AdminMessage::Api(ApiMessage::SelectEndpoint(
+            "plugin-call:momobako.service.downloader:downloader.getRuntimeStatus".into(),
+        )),
+    );
     assert_eq!(model.admin.api.request_text, "{}");
     send(&mut model, AdminMessage::Api(ApiMessage::Send));
     assert!(matches!(
         model.admin.take_effects().pop(),
         Some(AdminEffect::CallPlugin { method, origin: PluginCallOrigin::Playground, .. }) if method == "downloader.getRuntimeStatus"
     ));
-    send(&mut model, AdminMessage::Api(ApiMessage::PluginFinished(Ok(json!({ "payload": { "running": true } })))));
+    send(
+        &mut model,
+        AdminMessage::Api(ApiMessage::PluginFinished(Ok(
+            json!({ "payload": { "running": true } }),
+        ))),
+    );
     assert_eq!(model.admin.api.response_status, "OK");
-    assert!(model.admin.api.response_headers.contains("downloader.getRuntimeStatus"));
+    assert!(
+        model
+            .admin
+            .api
+            .response_headers
+            .contains("downloader.getRuntimeStatus")
+    );
     send(&mut model, AdminMessage::Api(ApiMessage::Send));
-    send(&mut model, AdminMessage::Api(ApiMessage::PluginFinished(Err("插件未启用".into()))));
-    assert_eq!((model.admin.api.response_status.as_str(), model.admin.api.error.as_str()), ("ERROR", "插件未启用"));
+    send(
+        &mut model,
+        AdminMessage::Api(ApiMessage::PluginFinished(Err("插件未启用".into()))),
+    );
+    assert_eq!(
+        (
+            model.admin.api.response_status.as_str(),
+            model.admin.api.error.as_str()
+        ),
+        ("ERROR", "插件未启用")
+    );
 }
 
 #[test]
 fn file_plugin_call_keeps_repository_and_writes_activity() {
     let mut model = ShellViewModel::default();
-    send(&mut model, AdminMessage::CallFilePlugin {
-        plugin_id: "momobako.netease.source".into(),
-        method: "media.clearTrackCache".into(),
-        payload: json!({"songId": 9}),
-        repository_id: Some("repo".into()),
-    });
+    send(
+        &mut model,
+        AdminMessage::CallFilePlugin {
+            plugin_id: "momobako.netease.source".into(),
+            method: "media.clearTrackCache".into(),
+            payload: json!({"songId": 9}),
+            repository_id: Some("repo".into()),
+        },
+    );
     match model.admin.take_effects().pop() {
-        Some(AdminEffect::CallPlugin { method, repository_id, origin, .. }) => {
+        Some(AdminEffect::CallPlugin {
+            method,
+            repository_id,
+            origin,
+            ..
+        }) => {
             assert_eq!(method, "media.clearTrackCache");
             assert_eq!(repository_id.as_deref(), Some("repo"));
             assert_eq!(origin, PluginCallOrigin::FileMenu);
@@ -842,9 +1451,24 @@ fn file_plugin_call_keeps_repository_and_writes_activity() {
     }
     // Vue 来源动作完成后 `context.refreshRepo()`：重读资源库列表。
     model.workspace.take_effects();
-    send(&mut model, AdminMessage::FilePluginFinished { method: "media.clearTrackCache".into(), result: Ok(json!({})) });
-    assert!(matches!(model.workspace.take_effects().as_slice(), [crate::shell::WorkspaceEffect::RefreshRepositories { .. }]));
-    send(&mut model, AdminMessage::FilePluginFinished { method: "media.clearTrackCache".into(), result: Err(String::new()) });
+    send(
+        &mut model,
+        AdminMessage::FilePluginFinished {
+            method: "media.clearTrackCache".into(),
+            result: Ok(json!({})),
+        },
+    );
+    assert!(matches!(
+        model.workspace.take_effects().as_slice(),
+        [crate::shell::WorkspaceEffect::RefreshRepositories { .. }]
+    ));
+    send(
+        &mut model,
+        AdminMessage::FilePluginFinished {
+            method: "media.clearTrackCache".into(),
+            result: Err(String::new()),
+        },
+    );
     assert_eq!(model.files.error, "media.clearTrackCache 调用失败。");
 }
 
@@ -859,25 +1483,66 @@ fn source_playlist_is_created_locally_then_the_repository_refreshes() {
         path: "playlists/night".into(),
     };
     let mut model = ShellViewModel::default();
-    send(&mut model, AdminMessage::CreateSourcePlaylist { playlist: playlist(Some("netease-3")), repository_id: Some("repo".into()) });
+    send(
+        &mut model,
+        AdminMessage::CreateSourcePlaylist {
+            playlist: playlist(Some("netease-3")),
+            repository_id: Some("repo".into()),
+        },
+    );
     match model.admin.take_effects().as_slice() {
-        [AdminEffect::CreateSourcePlaylist { repo_id, playlist_id, name, player_type_id, path }] => {
-            assert_eq!((repo_id.as_str(), playlist_id.as_str(), name.as_str()), ("repo", "netease-3", "夜曲"));
-            assert_eq!((player_type_id.as_str(), path.as_str()), ("momobako.playlist.audio-sequence", "playlists/night"));
+        [
+            AdminEffect::CreateSourcePlaylist {
+                repo_id,
+                playlist_id,
+                name,
+                player_type_id,
+                path,
+            },
+        ] => {
+            assert_eq!(
+                (repo_id.as_str(), playlist_id.as_str(), name.as_str()),
+                ("repo", "netease-3", "夜曲")
+            );
+            assert_eq!(
+                (player_type_id.as_str(), path.as_str()),
+                ("momobako.playlist.audio-sequence", "playlists/night")
+            );
         }
         other => panic!("unexpected {other:?}"),
     }
     model.workspace.take_effects();
     send(&mut model, AdminMessage::SourcePlaylistFinished(Ok(())));
-    assert!(matches!(model.workspace.take_effects().as_slice(), [crate::shell::WorkspaceEffect::RefreshRepositories { .. }]));
-    send(&mut model, AdminMessage::SourcePlaylistFinished(Err("播放集已存在".into())));
+    assert!(matches!(
+        model.workspace.take_effects().as_slice(),
+        [crate::shell::WorkspaceEffect::RefreshRepositories { .. }]
+    ));
+    send(
+        &mut model,
+        AdminMessage::SourcePlaylistFinished(Err("播放集已存在".into())),
+    );
     assert_eq!(model.files.error, "播放集已存在");
 
-    send(&mut model, AdminMessage::CreateSourcePlaylist { playlist: playlist(None), repository_id: Some("repo".into()) });
+    send(
+        &mut model,
+        AdminMessage::CreateSourcePlaylist {
+            playlist: playlist(None),
+            repository_id: Some("repo".into()),
+        },
+    );
     assert_eq!(model.files.error, "来源目录缺少播放列表标识");
-    send(&mut model, AdminMessage::CreateSourcePlaylist { playlist: playlist(Some("netease-3")), repository_id: None });
+    send(
+        &mut model,
+        AdminMessage::CreateSourcePlaylist {
+            playlist: playlist(Some("netease-3")),
+            repository_id: None,
+        },
+    );
     assert_eq!(model.files.error, "没有当前资源库，不能创建播放列表。");
-    assert!(model.admin.take_effects().is_empty(), "缺仓库或缺歌单标识都不建");
+    assert!(
+        model.admin.take_effects().is_empty(),
+        "缺仓库或缺歌单标识都不建"
+    );
 }
 
 #[test]
@@ -895,7 +1560,15 @@ fn slashes_and_repeated_ids_in_external_data_still_mount() {
     load_bundle(&mut model, vec![odd.clone(), odd]);
     send(&mut model, AdminMessage::ToggleSettings("user/tool".into()));
     model.reduce(ShellMessage::LogsLoaded(Ok(SystemLogPage {
-        records: vec![log_record("log/1", "2026-01-01T00:00:00Z", "info", "host", "", "", "斜杠日志")],
+        records: vec![log_record(
+            "log/1",
+            "2026-01-01T00:00:00Z",
+            "info",
+            "host",
+            "",
+            "",
+            "斜杠日志",
+        )],
         next_cursor: None,
     })));
     send(&mut model, AdminMessage::ToggleLogContext("log/1".into()));
@@ -925,22 +1598,48 @@ fn asmr_shortcuts_publish_onto_the_filter_bar() {
 /// 以前选中底是 `accent-soft`，白色的勾落在几乎同色的浅底上，浅色主题下看不见。
 #[test]
 fn a_checked_native_checkbox_keeps_its_mark_visible() {
-    use nana_ui::theme::{builtin_theme_arc, ComponentRecipeId, ThemeAppearance};
+    use nana_ui::theme::{ComponentRecipeId, ThemeAppearance, builtin_theme_arc};
 
     fn luminance(color: [f32; 4]) -> f32 {
-        let channel = |value: f32| if value <= 0.04045 { value / 12.92 } else { ((value + 0.055) / 1.055).powf(2.4) };
+        let channel = |value: f32| {
+            if value <= 0.04045 {
+                value / 12.92
+            } else {
+                ((value + 0.055) / 1.055).powf(2.4)
+            }
+        };
         0.2126 * channel(color[0]) + 0.7152 * channel(color[1]) + 0.0722 * channel(color[2])
     }
     let checkbox = super::style::native_checkbox(nana_ui::runtime::Checkbox::new("", true), 18.0);
-    let fill_role = checkbox.style.interaction.selected.background.expect("选中底色");
+    let fill_role = checkbox
+        .style
+        .interaction
+        .selected
+        .background
+        .expect("选中底色");
     for mode in [ThemeAppearance::Light, ThemeAppearance::Dark] {
         let theme = builtin_theme_arc(mode);
         let colors = theme.style_model();
         let fill = colors.color(fill_role).as_rgba_array();
-        let mark = colors.color(theme.recipes().foreground(ComponentRecipeId::Checkbox, true)).as_rgba_array();
-        assert!(fill[3] >= 1.0, "{mode:?}：选中底要不透明，勾的对比才不随下面的底变");
-        let (light, dark) = (luminance(fill).max(luminance(mark)), luminance(fill).min(luminance(mark)));
+        let mark = colors
+            .color(
+                theme
+                    .recipes()
+                    .foreground(ComponentRecipeId::Checkbox, true),
+            )
+            .as_rgba_array();
+        assert!(
+            fill[3] >= 1.0,
+            "{mode:?}：选中底要不透明，勾的对比才不随下面的底变"
+        );
+        let (light, dark) = (
+            luminance(fill).max(luminance(mark)),
+            luminance(fill).min(luminance(mark)),
+        );
         let contrast = (light + 0.05) / (dark + 0.05);
-        assert!(contrast >= 3.0, "{mode:?}：选中勾选框的「✓」和底色对比只有 {contrast:.2}");
+        assert!(
+            contrast >= 3.0,
+            "{mode:?}：选中勾选框的「✓」和底色对比只有 {contrast:.2}"
+        );
     }
 }

@@ -4,11 +4,11 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
+use super::super::super::ShellViewModel;
 use super::super::super::files::FileRow;
 use super::super::super::inspect::{AssetFacet, SearchRow, SortDirection};
 use super::super::super::inspect_shortcuts::SearchShortcut;
 use super::super::super::workspace::WorkspaceRepository;
-use super::super::super::ShellViewModel;
 use super::*;
 
 fn shell() -> ShellViewModel {
@@ -30,7 +30,10 @@ fn shell() -> ShellViewModel {
 }
 
 fn meta(pairs: &[(&str, Value)]) -> BTreeMap<String, Value> {
-    pairs.iter().map(|(key, value)| (key.to_string(), value.clone())).collect()
+    pairs
+        .iter()
+        .map(|(key, value)| (key.to_string(), value.clone()))
+        .collect()
 }
 
 fn hit(filename: &str, tags: &[&str], metadata: BTreeMap<String, Value>) -> SearchRow {
@@ -52,6 +55,7 @@ fn file(path: &str, metadata: BTreeMap<String, Value>) -> FileRow {
         kind: "file".into(),
         asset_id: Some(path.into()),
         is_virtual: false,
+        local_absolute_path: None,
         thumbnail_path: None,
         hardlink_state: None,
         extension: None,
@@ -62,6 +66,7 @@ fn file(path: &str, metadata: BTreeMap<String, Value>) -> FileRow {
         size_label: String::new(),
         modified_at: String::new(),
         tags: Vec::new(),
+        alias_paths: Vec::new(),
         thumbnail_custom: false,
         provider_id: None,
         provider_item_id: None,
@@ -75,19 +80,42 @@ fn options_merge_snapshot_results_and_folder_metadata() {
     let mut model = shell();
     model.inspect.search_ui.facets_repo = Some("repo".into());
     model.inspect.search_ui.facets = vec![
-        AssetFacet { tags: vec!["封面".into(), " 参考 ".into()], extension: "png".into() },
-        AssetFacet { tags: vec!["文档".into()], extension: "pdf".into() },
-        AssetFacet { tags: Vec::new(), extension: String::new() },
+        AssetFacet {
+            tags: vec!["封面".into(), " 参考 ".into()],
+            extension: "png".into(),
+        },
+        AssetFacet {
+            tags: vec!["文档".into()],
+            extension: "pdf".into(),
+        },
+        AssetFacet {
+            tags: Vec::new(),
+            extension: String::new(),
+        },
     ];
-    model.inspect.results = vec![hit("clip.MP4", &["参考", "动画"], meta(&[("color", Value::from("红色")), ("shape", Value::from(3))]))];
+    model.inspect.results = vec![hit(
+        "clip.MP4",
+        &["参考", "动画"],
+        meta(&[("color", Value::from("红色")), ("shape", Value::from(3))]),
+    )];
     model.files.rows = vec![
-        file("cover.png", meta(&[("color", Value::from("#3fa796")), ("shape", Value::from("横版"))])),
+        file(
+            "cover.png",
+            meta(&[
+                ("color", Value::from("#3fa796")),
+                ("shape", Value::from("横版")),
+            ]),
+        ),
         file("page.pdf", meta(&[("color", Value::from(true))])),
     ];
     let options = filter_options(&model);
     assert_eq!(options.formats, ["mp4", "pdf", "png"]);
     assert_eq!(options.tags, ["参考", "动画", "封面", "文档"]);
-    assert_eq!(options.colors, ["#3fa796", "红色", "true"], "zh 排序：符号、汉字、拉丁字母");
+    assert_eq!(
+        options.colors,
+        ["#3fa796", "红色", "true"],
+        "zh 排序：符号、汉字、拉丁字母"
+    );
     assert_eq!(options.shapes, ["3", "横版"]);
 
     model.inspect.search_ui.facets_repo = Some("other".into());
@@ -108,11 +136,21 @@ fn selected_values_stay_in_the_options_so_they_can_be_removed() {
 
 #[test]
 fn swatches_take_hex_then_known_names_then_the_accent() {
-    assert_eq!(swatch_color("#3FA796"), SwatchColor::Rgb([0x3f, 0xa7, 0x96]));
-    assert_eq!(swatch_color(" #e05252 "), SwatchColor::Rgb([0xe0, 0x52, 0x52]));
+    assert_eq!(
+        swatch_color("#3FA796"),
+        SwatchColor::Rgb([0x3f, 0xa7, 0x96])
+    );
+    assert_eq!(
+        swatch_color(" #e05252 "),
+        SwatchColor::Rgb([0xe0, 0x52, 0x52])
+    );
     assert_eq!(swatch_color("红色"), SwatchColor::Rgb([0xe0, 0x52, 0x52]));
     assert_eq!(swatch_color("Grey"), SwatchColor::Rgb([0x8c, 0x92, 0x99]));
-    assert_eq!(swatch_color("#abc"), SwatchColor::Accent, "三位色值不是 #RRGGBB");
+    assert_eq!(
+        swatch_color("#abc"),
+        SwatchColor::Accent,
+        "三位色值不是 #RRGGBB"
+    );
     assert_eq!(swatch_color("青色"), SwatchColor::Accent);
 }
 
@@ -121,13 +159,28 @@ fn result_context_lists_format_tags_color_shape_and_rating() {
     let row = hit(
         "cover.PNG",
         &["封面", "参考", "海报", "多余"],
-        meta(&[("color", Value::from("红色")), ("shape", Value::from("横版")), ("rating", Value::from(4))]),
+        meta(&[
+            ("color", Value::from("红色")),
+            ("shape", Value::from("横版")),
+            ("rating", Value::from(4)),
+        ]),
     );
-    assert_eq!(result_context(&row), ["png", "封面", "参考", "海报", "红色", "横版", "4 星"]);
+    assert_eq!(
+        result_context(&row),
+        ["png", "封面", "参考", "海报", "红色", "横版", "4 星"]
+    );
     let half = hit("notes", &[], meta(&[("rating", Value::from(4.5))]));
     assert_eq!(result_context(&half), ["文件", "4.5 星"]);
-    let text_rating = hit("a.txt", &[], meta(&[("rating", Value::from("5")), ("color", Value::Null)]));
-    assert_eq!(result_context(&text_rating), ["txt"], "字符串评分和空颜色不显示");
+    let text_rating = hit(
+        "a.txt",
+        &[],
+        meta(&[("rating", Value::from("5")), ("color", Value::Null)]),
+    );
+    assert_eq!(
+        result_context(&text_rating),
+        ["txt"],
+        "字符串评分和空颜色不显示"
+    );
     let zero = hit("a.txt", &[], meta(&[("rating", Value::from(0))]));
     assert_eq!(result_context(&zero), ["txt"]);
 }
@@ -136,7 +189,10 @@ fn result_context_lists_format_tags_color_shape_and_rating() {
 fn scope_and_summary_follow_filters_and_query() {
     let mut model = shell();
     assert_eq!(scope_label(&model), "全局搜索");
-    assert_eq!(summary(&model), "输入关键词、标签或评分条件后，这里会展示跨仓库结果。");
+    assert_eq!(
+        summary(&model),
+        "输入关键词、标签或评分条件后，这里会展示跨仓库结果。"
+    );
     model.inspect.query = "封面".into();
     assert_eq!(summary(&model), "当前查询: 封面");
     model.inspect.filters.formats = vec!["png".into()];
@@ -150,17 +206,29 @@ fn scope_and_summary_follow_filters_and_query() {
 #[test]
 fn empty_result_tells_waiting_from_no_match_and_names_the_scope() {
     let mut model = shell();
-    assert_eq!(empty_result(&model), Some(("等待搜索条件", "输入关键词、标签或评分条件后，这里会展示结果。".to_string())));
+    assert_eq!(
+        empty_result(&model),
+        Some((
+            "等待搜索条件",
+            "输入关键词、标签或评分条件后，这里会展示结果。".to_string()
+        ))
+    );
     model.inspect.query = "封面".into();
     model.inspect.searched = true;
     assert_eq!(
         empty_result(&model),
-        Some(("没有匹配的文件", "全部资源库里没有符合当前条件的文件。调整关键词、标签或评分条件后再试。".to_string()))
+        Some((
+            "没有匹配的文件",
+            "全部资源库里没有符合当前条件的文件。调整关键词、标签或评分条件后再试。".to_string()
+        ))
     );
     model.inspect.filters.tags = vec!["参考".into()];
     assert_eq!(
         empty_result(&model),
-        Some(("没有匹配的文件", "默认资源库里没有符合当前条件的文件。调整关键词、标签或评分条件后再试。".to_string()))
+        Some((
+            "没有匹配的文件",
+            "默认资源库里没有符合当前条件的文件。调整关键词、标签或评分条件后再试。".to_string()
+        ))
     );
     model.inspect.search_error = "搜索失败：索引损坏".into();
     assert_eq!(empty_result(&model), None, "失败不说成没有命中");
@@ -180,9 +248,16 @@ fn shortcuts_show_only_when_entries_or_results_belong_to_the_library() {
     }];
     model.files.rows = vec![file("cover.png", BTreeMap::new())];
     assert!(active_shortcuts(&model).is_empty());
-    model.inspect.results = vec![hit("voice.mp3", &[], meta(&[("workId", Value::from("RJ01"))]))];
+    model.inspect.results = vec![hit(
+        "voice.mp3",
+        &[],
+        meta(&[("workId", Value::from("RJ01"))]),
+    )];
     assert_eq!(active_shortcuts(&model).len(), 1);
     model.inspect.results.clear();
-    model.files.rows = vec![file("voice.mp3", meta(&[("libraryKind", Value::from("asmr"))]))];
+    model.files.rows = vec![file(
+        "voice.mp3",
+        meta(&[("libraryKind", Value::from("asmr"))]),
+    )];
     assert_eq!(active_shortcuts(&model).len(), 1);
 }

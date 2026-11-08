@@ -39,6 +39,9 @@ pub enum SmartFolderField {
 }
 
 /// 智能文件夹草稿。匹配方式默认全部满足，排序默认升序。
+///
+/// `submitted` 是点「创建 / 保存」那一刻的草稿。保存中界面上的字段仍可改（Vue 的输入框、
+/// 下拉和多行都没有 `disabled`），已经发出的请求按这一份收，不跟着后来的修改变。
 #[derive(Clone, Debug)]
 pub struct SmartFolderDraft {
     pub open: bool,
@@ -69,6 +72,8 @@ pub struct SmartFolderDraft {
     pub dates: String,
     pub mode_edit: bool,
     pub target_id: String,
+    /// 提交当时的草稿。没有进行中的保存时为空。
+    pub submitted: Option<Box<SmartFolderDraft>>,
 }
 
 impl Default for SmartFolderDraft {
@@ -102,6 +107,7 @@ impl Default for SmartFolderDraft {
             dates: String::new(),
             mode_edit: false,
             target_id: String::new(),
+            submitted: None,
         }
     }
 }
@@ -123,15 +129,36 @@ impl SmartFolderDraft {
             colors: join_list(filter.colors.as_deref()),
             shapes: join_list(filter.shapes.as_deref()),
             min_rating: filter.min_rating.map(format_number).unwrap_or_default(),
-            match_mode: if filter.match_mode.as_deref() == Some("or") { "or" } else { "and" }.into(),
+            match_mode: if filter.match_mode.as_deref() == Some("or") {
+                "or"
+            } else {
+                "and"
+            }
+            .into(),
             metadata: format_metadata(filter.metadata_filters.as_deref()),
             exclude_query: filter.exclude_query.clone().unwrap_or_default(),
             exclude_paths: join_list(filter.exclude_path_prefixes.as_deref()),
             exclude_tags: join_list(filter.exclude_tags.as_deref()),
             exclude_formats: join_list(filter.exclude_formats.as_deref()),
-            sort_field: filter.sort.as_ref().map(|sort| sort.field.clone()).unwrap_or_default(),
-            sort_direction: if filter.sort.as_ref().is_some_and(|sort| sort.direction == "desc") { "desc" } else { "asc" }.into(),
-            limit: filter.limit.map(|limit| limit.to_string()).unwrap_or_default(),
+            sort_field: filter
+                .sort
+                .as_ref()
+                .map(|sort| sort.field.clone())
+                .unwrap_or_default(),
+            sort_direction: if filter
+                .sort
+                .as_ref()
+                .is_some_and(|sort| sort.direction == "desc")
+            {
+                "desc"
+            } else {
+                "asc"
+            }
+            .into(),
+            limit: filter
+                .limit
+                .map(|limit| limit.to_string())
+                .unwrap_or_default(),
             exclude_metadata: format_metadata(filter.exclude_metadata_filters.as_deref()),
             exclude_numbers: format_numbers(filter.exclude_number_filters.as_deref()),
             exclude_dates: format_dates(filter.exclude_date_filters.as_deref()),
@@ -210,7 +237,11 @@ impl SidebarState {
         if self.smart_draft.busy {
             return;
         }
-        self.smart_draft = SmartFolderDraft { open: true, parent_id: parent_id.unwrap_or_default(), ..SmartFolderDraft::default() };
+        self.smart_draft = SmartFolderDraft {
+            open: true,
+            parent_id: parent_id.unwrap_or_default(),
+            ..SmartFolderDraft::default()
+        };
     }
 
     pub fn close_smart_dialog(&mut self) {
@@ -220,16 +251,16 @@ impl SidebarState {
         self.smart_draft = SmartFolderDraft::default();
     }
 
+    /// 改对话框里的一个字段。保存中也改：Vue 的输入框、下拉和多行都没有 `disabled`。
+    /// 已经发出的请求看 [`SmartFolderDraft::submitted`]，不看这份新文字。
     pub fn set_smart_field(&mut self, field: SmartFolderField, value: String) {
-        if self.smart_draft.busy {
-            return;
-        }
         *self.smart_draft.slot(field) = value;
     }
 
-    /// 名称和仓库都有效时才发出创建或保存请求。
+    /// 名称和仓库都有效时才发出创建或保存请求。保存中再提交（名称框回车、再点主按钮）不另发一次。
     pub fn submit_smart_folder(&mut self, repo_id: Option<&str>) {
         if self.smart_draft.busy {
+            eprintln!("Nana 智能文件夹保存进行中，不重复提交");
             return;
         }
         let Some(repo_id) = repo_id.map(str::trim).filter(|id| !id.is_empty()) else {
@@ -243,49 +274,86 @@ impl SidebarState {
         }
         self.smart_draft.error.clear();
         self.smart_draft.busy = true;
+        // 先记下提交当时的草稿，再把请求放进副作用。之后改输入框不影响这一次。
+        let mut snapshot = self.smart_draft.clone();
+        snapshot.submitted = None;
+        self.smart_draft.submitted = Some(Box::new(snapshot));
         if self.smart_draft.mode_edit {
-            self.effects.push(SidebarEffect::UpdateSmartFolder { repo_id: repo_id.to_string() });
+            self.effects.push(SidebarEffect::UpdateSmartFolder {
+                repo_id: repo_id.to_string(),
+            });
         } else {
-            self.effects.push(SidebarEffect::CreateSmartFolder { repo_id: repo_id.to_string() });
+            self.effects.push(SidebarEffect::CreateSmartFolder {
+                repo_id: repo_id.to_string(),
+            });
         }
     }
 
-    /// 把当前草稿收成保存请求。
-    pub fn smart_update_request(&self, repo_id: &str) -> crate::backend::services::repository::SmartFolderUpdateRequest {
+    /// 收成保存请求的那份草稿：有提交快照就用快照，否则用现在的输入。
+    fn request_draft(&self) -> &SmartFolderDraft {
+        self.smart_draft
+            .submitted
+            .as_deref()
+            .unwrap_or(&self.smart_draft)
+    }
+
+    /// 把提交当时的草稿收成保存请求。没有进行中的保存时用现在的输入。
+    pub fn smart_update_request(
+        &self,
+        repo_id: &str,
+    ) -> crate::backend::services::repository::SmartFolderUpdateRequest {
+        let draft = self.request_draft();
         crate::backend::services::repository::SmartFolderUpdateRequest {
             repo_id: repo_id.to_string(),
-            smart_folder_id: self.smart_draft.target_id.clone(),
-            parent_id: parent_id(&self.smart_draft),
-            name: self.smart_draft.name.trim().to_string(),
-            filter: filter_from_draft(&self.smart_draft),
+            smart_folder_id: draft.target_id.clone(),
+            parent_id: parent_id(draft),
+            name: draft.name.trim().to_string(),
+            filter: filter_from_draft(draft),
         }
     }
 
-    /// 把当前草稿收成创建请求。文件夹标识由服务分配。
-    pub fn smart_create_request(&self, repo_id: &str) -> crate::backend::services::repository::SmartFolderMutationRequest {
+    /// 把提交当时的草稿收成创建请求。文件夹标识由服务分配。没有进行中的保存时用现在的输入。
+    pub fn smart_create_request(
+        &self,
+        repo_id: &str,
+    ) -> crate::backend::services::repository::SmartFolderMutationRequest {
+        let draft = self.request_draft();
         crate::backend::services::repository::SmartFolderMutationRequest {
             repo_id: repo_id.to_string(),
             smart_folder_id: None,
-            parent_id: parent_id(&self.smart_draft),
-            name: self.smart_draft.name.trim().to_string(),
-            filter: filter_from_draft(&self.smart_draft),
+            parent_id: parent_id(draft),
+            name: draft.name.trim().to_string(),
+            filter: filter_from_draft(draft),
         }
     }
 
     /// 新建、保存和删除都返回整棵树。成功换上树、关闭对话框并展开父级，返回真；失败和换了仓库以后才回来的
     /// 结果把错误留在对话框里，返回假。打开新建的、重查和退出被删的在壳层上做（`sidebar_smart_flow.rs`）。
-    pub fn note_smart_saved(&mut self, repo_id: &str, result: Result<Vec<SidebarSmartFolder>, String>) -> bool {
+    pub fn note_smart_saved(
+        &mut self,
+        repo_id: &str,
+        result: Result<Vec<SidebarSmartFolder>, String>,
+    ) -> bool {
         self.smart_draft.busy = false;
         if self.bound_repo_id.as_deref() != Some(repo_id) {
             eprintln!("Nana 忽略过期的智能文件夹创建结果：{repo_id}");
+            self.smart_draft.submitted = None;
             self.smart_draft.error = "智能文件夹结果已过期".into();
             return false;
         }
         match result {
             Ok(folders) => {
-                let parent = self.smart_draft.parent_id.trim().to_string();
+                // 有提交快照时展开提交当时的父级。删除没有快照，仍用对话框里的父级。
+                let parent = self
+                    .smart_draft
+                    .submitted
+                    .as_ref()
+                    .map(|draft| draft.parent_id.trim().to_string())
+                    .unwrap_or_else(|| self.smart_draft.parent_id.trim().to_string());
+                self.smart_draft.submitted = None;
                 self.apply_smart_folders(repo_id, Ok(folders));
-                if !parent.is_empty() && !self.expanded_smart_folders.iter().any(|id| id == &parent) {
+                if !parent.is_empty() && !self.expanded_smart_folders.iter().any(|id| id == &parent)
+                {
                     self.expanded_smart_folders.push(parent);
                 }
                 self.smart_draft = SmartFolderDraft::default();
@@ -295,6 +363,7 @@ impl SidebarState {
             }
             Err(error) => {
                 eprintln!("Nana 保存智能文件夹失败：{error}");
+                self.smart_draft.submitted = None;
                 self.smart_draft.error = error;
                 false
             }
@@ -328,7 +397,12 @@ pub fn filter_from_draft(draft: &SmartFolderDraft) -> SmartFolderFilter {
         match_mode: (draft.match_mode == "or").then(|| "or".into()),
         sort: filled(&draft.sort_field).map(|field| SearchSort {
             field,
-            direction: if draft.sort_direction == "desc" { "desc" } else { "asc" }.into(),
+            direction: if draft.sort_direction == "desc" {
+                "desc"
+            } else {
+                "asc"
+            }
+            .into(),
         }),
         limit: positive_number(&draft.limit).map(|limit| limit as usize),
     }
@@ -345,13 +419,21 @@ fn filled(value: &str) -> Option<String> {
 
 /// 有限且大于 0 的数，对应 Vue `Number(x) > 0`。
 fn positive_number(value: &str) -> Option<f64> {
-    value.trim().parse::<f64>().ok().filter(|number| number.is_finite() && *number > 0.0)
+    value
+        .trim()
+        .parse::<f64>()
+        .ok()
+        .filter(|number| number.is_finite() && *number > 0.0)
 }
 
 /// Vue `splitListInput`：按半角逗号、全角逗号和换行拆开，去空白、去重，保留顺序。
 fn split_list(value: &str) -> Option<Vec<String>> {
     let mut items: Vec<String> = Vec::new();
-    for item in value.split([',', '，', '\n']).map(str::trim).filter(|item| !item.is_empty()) {
+    for item in value
+        .split([',', '，', '\n'])
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+    {
         if !items.iter().any(|existing| existing == item) {
             items.push(item.to_string());
         }
@@ -361,7 +443,10 @@ fn split_list(value: &str) -> Option<Vec<String>> {
 
 /// 拆成 `key=...` 条目：按换行和逗号分开，去空白。
 fn entries(value: &str) -> impl Iterator<Item = &str> {
-    value.split(['\n', ',', '，']).map(str::trim).filter(|item| !item.is_empty())
+    value
+        .split(['\n', ',', '，'])
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
 }
 
 /// Vue `parseMetadataFiltersInput`：`key=value`，键和值都不能为空。
@@ -370,7 +455,10 @@ fn parse_metadata(value: &str) -> Option<Vec<SearchMetadataFilter>> {
         .filter_map(|item| {
             let (key, filter_value) = item.split_once('=')?;
             let (key, filter_value) = (key.trim(), filter_value.trim());
-            (!key.is_empty() && !filter_value.is_empty()).then(|| SearchMetadataFilter { key: key.into(), value: filter_value.into() })
+            (!key.is_empty() && !filter_value.is_empty()).then(|| SearchMetadataFilter {
+                key: key.into(),
+                value: filter_value.into(),
+            })
         })
         .collect();
     (!filters.is_empty()).then_some(filters)
@@ -378,7 +466,12 @@ fn parse_metadata(value: &str) -> Option<Vec<SearchMetadataFilter>> {
 
 /// Vue `parseNumberFiltersInput`：`key=min..max`，两端都可空但不能同时为空。
 fn parse_numbers(value: &str) -> Option<Vec<SearchNumberFilter>> {
-    let bound = |text: &str| text.trim().parse::<f64>().ok().filter(|number| number.is_finite());
+    let bound = |text: &str| {
+        text.trim()
+            .parse::<f64>()
+            .ok()
+            .filter(|number| number.is_finite())
+    };
     let filters: Vec<_> = entries(value)
         .filter_map(|item| {
             let mut parts = item.split('=');
@@ -388,7 +481,11 @@ fn parse_numbers(value: &str) -> Option<Vec<SearchNumberFilter>> {
                 return None;
             }
             let (min, max) = range.split_once("..").unwrap_or((range, ""));
-            let filter = SearchNumberFilter { key: key.into(), min: bound(min), max: bound(max) };
+            let filter = SearchNumberFilter {
+                key: key.into(),
+                min: bound(min),
+                max: bound(max),
+            };
             (filter.min.is_some() || filter.max.is_some()).then_some(filter)
         })
         .collect();
@@ -406,7 +503,11 @@ fn parse_dates(value: &str) -> Option<Vec<SearchDateFilter>> {
                 return None;
             }
             let (from, to) = range.split_once("..").unwrap_or((range, ""));
-            let filter = SearchDateFilter { key: key.into(), from: filled(from), to: filled(to) };
+            let filter = SearchDateFilter {
+                key: key.into(),
+                from: filled(from),
+                to: filled(to),
+            };
             (filter.from.is_some() || filter.to.is_some()).then_some(filter)
         })
         .collect();
@@ -419,14 +520,26 @@ fn join_list(values: Option<&[String]>) -> String {
 
 fn format_metadata(filters: Option<&[SearchMetadataFilter]>) -> String {
     filters
-        .map(|filters| filters.iter().map(|item| format!("{}={}", item.key, item.value)).collect::<Vec<_>>().join("\n"))
+        .map(|filters| {
+            filters
+                .iter()
+                .map(|item| format!("{}={}", item.key, item.value))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
         .unwrap_or_default()
 }
 
 fn format_numbers(filters: Option<&[SearchNumberFilter]>) -> String {
     let side = |value: Option<f64>| value.map(format_number).unwrap_or_default();
     filters
-        .map(|filters| filters.iter().map(|item| format!("{}={}..{}", item.key, side(item.min), side(item.max))).collect::<Vec<_>>().join("\n"))
+        .map(|filters| {
+            filters
+                .iter()
+                .map(|item| format!("{}={}..{}", item.key, side(item.min), side(item.max)))
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
         .unwrap_or_default()
 }
 
@@ -435,7 +548,14 @@ fn format_dates(filters: Option<&[SearchDateFilter]>) -> String {
         .map(|filters| {
             filters
                 .iter()
-                .map(|item| format!("{}={}..{}", item.key, item.from.clone().unwrap_or_default(), item.to.clone().unwrap_or_default()))
+                .map(|item| {
+                    format!(
+                        "{}={}..{}",
+                        item.key,
+                        item.from.clone().unwrap_or_default(),
+                        item.to.clone().unwrap_or_default()
+                    )
+                })
                 .collect::<Vec<_>>()
                 .join("\n")
         })
@@ -444,7 +564,11 @@ fn format_dates(filters: Option<&[SearchDateFilter]>) -> String {
 
 /// 整数不带小数点，和 JS `String(4)` 一样写成 `4`。
 pub(super) fn format_number(value: f64) -> String {
-    if value.fract() == 0.0 && value.abs() < 1e15 { format!("{}", value as i64) } else { value.to_string() }
+    if value.fract() == 0.0 && value.abs() < 1e15 {
+        format!("{}", value as i64)
+    } else {
+        value.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -475,33 +599,56 @@ mod tests {
         };
         let filter = filter_from_draft(&draft);
         assert_eq!(filter.query.as_deref(), Some("cover"));
-        assert_eq!(filter.formats.as_deref(), Some(["psd".to_string(), "png".to_string()].as_slice()));
+        assert_eq!(
+            filter.formats.as_deref(),
+            Some(["psd".to_string(), "png".to_string()].as_slice())
+        );
         assert_eq!(filter.min_rating, Some(4.0));
         assert_eq!(filter.match_mode.as_deref(), Some("or"));
         assert_eq!(filter.metadata_filters.as_ref().map(Vec::len), Some(1));
-        assert_eq!(filter.exclude_path_prefixes.as_deref(), Some(["Archive".to_string(), "Temp".to_string()].as_slice()));
-        assert_eq!(filter.sort.as_ref().map(|sort| sort.direction.as_str()), Some("desc"));
+        assert_eq!(
+            filter.exclude_path_prefixes.as_deref(),
+            Some(["Archive".to_string(), "Temp".to_string()].as_slice())
+        );
+        assert_eq!(
+            filter.sort.as_ref().map(|sort| sort.direction.as_str()),
+            Some("desc")
+        );
         assert_eq!(filter.limit, Some(100));
         let numbers = filter.number_filters.clone().expect("数值范围");
         assert_eq!(numbers.len(), 2, "两端都空的条目不写入");
         assert_eq!(numbers[1].max, Some(10485760.0));
         assert!(filter.tags.is_none() && filter.exclude_query.is_none());
 
-        let folder = SidebarSmartFolder { id: "sf".into(), parent_id: Some("root".into()), name: "高评分".into(), filter, children: Vec::new() };
+        let folder = SidebarSmartFolder {
+            id: "sf".into(),
+            parent_id: Some("root".into()),
+            name: "高评分".into(),
+            filter,
+            children: Vec::new(),
+        };
         let edit = SmartFolderDraft::from_folder(&folder);
         assert!(edit.open && edit.mode_edit);
         assert_eq!(edit.action_label(), "保存");
         assert_eq!(edit.parent_id, "root");
         assert_eq!(edit.formats, "psd，png");
         assert_eq!(edit.min_rating, "4");
-        assert_eq!(edit.numbers, "width=1024..4096\noriginalSizeBytes=..10485760");
+        assert_eq!(
+            edit.numbers,
+            "width=1024..4096\noriginalSizeBytes=..10485760"
+        );
         assert_eq!(edit.dates, "fileCreatedAt=2024-01-01T00:00:00Z..");
         assert_eq!(edit.sort_direction, "desc");
     }
 
     #[test]
     fn zero_rating_and_limit_are_left_out() {
-        let draft = SmartFolderDraft { name: "x".into(), min_rating: "0".into(), limit: "abc".into(), ..SmartFolderDraft::default() };
+        let draft = SmartFolderDraft {
+            name: "x".into(),
+            min_rating: "0".into(),
+            limit: "abc".into(),
+            ..SmartFolderDraft::default()
+        };
         let filter = filter_from_draft(&draft);
         assert_eq!(filter.min_rating, None);
         assert_eq!(filter.limit, None);
@@ -518,24 +665,49 @@ mod tests {
             id: "parent".into(),
             parent_id: None,
             name: "任一".into(),
-            filter: SmartFolderFilter { match_mode: Some("or".into()), ..SmartFolderFilter::default() },
+            filter: SmartFolderFilter {
+                match_mode: Some("or".into()),
+                ..SmartFolderFilter::default()
+            },
             children: Vec::new(),
         };
         let child = SidebarSmartFolder {
             id: "child".into(),
             parent_id: Some(parent.id.clone()),
             name: "子级".into(),
-            filter: SmartFolderFilter { tags: Some(vec!["封面".into()]), ..SmartFolderFilter::default() },
+            filter: SmartFolderFilter {
+                tags: Some(vec!["封面".into()]),
+                ..SmartFolderFilter::default()
+            },
             children: Vec::new(),
         };
         let edit = SmartFolderDraft::from_folder(&child);
-        assert_eq!(edit.match_mode, "and", "没写匹配方式时对话框显示「全部匹配」");
-        assert_eq!(filter_from_draft(&edit).match_mode, None, "原样保存不改写子级的匹配方式");
+        assert_eq!(
+            edit.match_mode, "and",
+            "没写匹配方式时对话框显示「全部匹配」"
+        );
+        assert_eq!(
+            filter_from_draft(&edit).match_mode,
+            None,
+            "原样保存不改写子级的匹配方式"
+        );
 
-        let created = SmartFolderDraft { open: true, parent_id: parent.id.clone(), name: "新子级".into(), ..SmartFolderDraft::default() };
-        assert_eq!(filter_from_draft(&created).match_mode, None, "新建的子级照样继承父级");
+        let created = SmartFolderDraft {
+            open: true,
+            parent_id: parent.id.clone(),
+            name: "新子级".into(),
+            ..SmartFolderDraft::default()
+        };
+        assert_eq!(
+            filter_from_draft(&created).match_mode,
+            None,
+            "新建的子级照样继承父级"
+        );
 
-        let any = SmartFolderDraft { match_mode: "or".into(), ..edit };
+        let any = SmartFolderDraft {
+            match_mode: "or".into(),
+            ..edit
+        };
         assert_eq!(filter_from_draft(&any).match_mode.as_deref(), Some("or"));
     }
 }

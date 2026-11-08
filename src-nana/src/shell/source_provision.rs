@@ -7,7 +7,7 @@
 
 use std::collections::BTreeMap;
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use super::super::repo_operation::{OperationId, OperationPatch, OperationStart};
 use super::super::{ShellViewModel, WorkspaceRepository};
@@ -66,12 +66,16 @@ impl SourceAuthState {
         let Some(session) = self.session.as_ref() else {
             return String::new();
         };
-        text_at(session.get("sessionId")).or_else(|| text_at(session.get("unikey"))).unwrap_or_default()
+        text_at(session.get("sessionId"))
+            .or_else(|| text_at(session.get("unikey")))
+            .unwrap_or_default()
     }
 
     /// 「检查登录结果」可用：有会话、缓存目录满足要求、没有调用在途。
     pub fn can_poll(&self, requires_cache: bool) -> bool {
-        !self.session_key().is_empty() && (!requires_cache || !self.cache_path.trim().is_empty()) && !self.busy
+        !self.session_key().is_empty()
+            && (!requires_cache || !self.cache_path.trim().is_empty())
+            && !self.busy
     }
 
     fn reset_notice(&mut self) {
@@ -82,7 +86,11 @@ impl SourceAuthState {
 
 /// 插件声明的认证对象。
 pub(crate) fn authentication(plugin: &PluginManifest) -> Option<&Value> {
-    plugin.contributes.get("source").and_then(|item| item.get("authentication")).filter(|item| !item.is_null())
+    plugin
+        .contributes
+        .get("source")
+        .and_then(|item| item.get("authentication"))
+        .filter(|item| !item.is_null())
 }
 
 fn auth_method(plugin: &PluginManifest, key: &str) -> Option<String> {
@@ -90,7 +98,9 @@ fn auth_method(plugin: &PluginManifest, key: &str) -> Option<String> {
 }
 
 fn provisioning(plugin: &PluginManifest, key: &str) -> Option<String> {
-    authentication(plugin).and_then(|auth| auth.get("repositoryProvisioning")).and_then(|item| text_at(item.get(key)))
+    authentication(plugin)
+        .and_then(|auth| auth.get("repositoryProvisioning"))
+        .and_then(|item| text_at(item.get(key)))
 }
 
 /// `repositoryProvisioning.requiresLocalCache`。
@@ -103,7 +113,10 @@ pub(crate) fn requires_local_cache(plugin: &PluginManifest) -> bool {
 }
 
 /// 这个来源插件名下的仓库：插件标识和历史标识都算。
-pub(crate) fn source_repositories<'a>(model: &'a ShellViewModel, plugin: &PluginManifest) -> Vec<&'a WorkspaceRepository> {
+pub(crate) fn source_repositories<'a>(
+    model: &'a ShellViewModel,
+    plugin: &PluginManifest,
+) -> Vec<&'a WorkspaceRepository> {
     let mut accepted = vec![plugin.plugin_id.as_str()];
     accepted.extend(plugin.legacy_plugin_ids.iter().map(String::as_str));
     accepted.extend(plugin.compat.legacy_plugin_ids.iter().map(String::as_str));
@@ -111,13 +124,24 @@ pub(crate) fn source_repositories<'a>(model: &'a ShellViewModel, plugin: &Plugin
         .workspace
         .repositories
         .iter()
-        .filter(|repository| accepted.iter().any(|id| repository.backend_plugin_id == *id))
+        .filter(|repository| {
+            accepted
+                .iter()
+                .any(|id| repository.backend_plugin_id == *id)
+        })
         .collect()
 }
 
 /// 仓库的完整摘要，带登录状态和本地缓存。
-pub(crate) fn summary<'a>(model: &'a ShellViewModel, repo_id: &str) -> Option<&'a RepositorySummary> {
-    model.admin.repository_summaries.iter().find(|item| item.repo_id == repo_id)
+pub(crate) fn summary<'a>(
+    model: &'a ShellViewModel,
+    repo_id: &str,
+) -> Option<&'a RepositorySummary> {
+    model
+        .admin
+        .repository_summaries
+        .iter()
+        .find(|item| item.repo_id == repo_id)
 }
 
 /// 仓库行上的登录状态：先看本页查过的，再看仓库摘要。都没有是「未检查」。
@@ -125,7 +149,11 @@ pub(crate) fn status_label(model: &ShellViewModel, repo_id: &str) -> &'static st
     if let Some(status) = model.admin.source_auth.status_by_repo.get(repo_id) {
         let logged_in = status.get("loggedIn").and_then(Value::as_bool) == Some(true);
         let expired = status.get("loginExpired").and_then(Value::as_bool) == Some(true);
-        return if logged_in && !expired { "已登录" } else { "登录失效" };
+        return if logged_in && !expired {
+            "已登录"
+        } else {
+            "登录失效"
+        };
     }
     match summary(model, repo_id).and_then(|item| item.authentication.as_ref()) {
         None => "未检查",
@@ -143,18 +171,56 @@ pub(crate) fn display_path(model: &ShellViewModel, repository: &WorkspaceReposit
 }
 
 fn plugin_of(model: &ShellViewModel, plugin_id: &str) -> Option<PluginManifest> {
-    model.admin.plugins.iter().find(|plugin| plugin.plugin_id == plugin_id).cloned()
+    model
+        .admin
+        .plugins
+        .iter()
+        .find(|plugin| plugin.plugin_id == plugin_id)
+        .cloned()
+}
+
+/// 选择缓存目录时系统对话框要用的插件显示名。
+///
+/// 照 Vue `chooseCachePath` 的 `props.manifest.name`。找不到当前来源插件，或名称去掉空白后是空的，记日志并返回空串，标题退回「选择缓存目录」。
+pub(crate) fn cache_dialog_plugin_name(model: &ShellViewModel) -> String {
+    let plugin_id = model.admin.source_auth.plugin_id.as_str();
+    match model
+        .admin
+        .plugins
+        .iter()
+        .find(|plugin| plugin.plugin_id == plugin_id)
+    {
+        Some(plugin) if !plugin.name.trim().is_empty() => plugin.name.trim().to_string(),
+        Some(_) => {
+            eprintln!("Nana 选择缓存目录时来源插件没有名称：{plugin_id}");
+            String::new()
+        }
+        None => {
+            eprintln!("Nana 选择缓存目录找不到来源插件：{plugin_id}");
+            String::new()
+        }
+    }
 }
 
 /// 进入或离开某个插件的设置时调用：不是同一个插件就清空状态。
 pub(crate) fn bind_plugin(model: &mut ShellViewModel, plugin_id: Option<&str>) {
     let current = model.admin.source_auth.plugin_id.as_str();
     if plugin_id != Some(current) {
-        model.admin.source_auth = SourceAuthState { plugin_id: plugin_id.unwrap_or_default().to_string(), ..SourceAuthState::default() };
+        model.admin.source_auth = SourceAuthState {
+            plugin_id: plugin_id.unwrap_or_default().to_string(),
+            ..SourceAuthState::default()
+        };
     }
 }
 
-fn call(model: &mut ShellViewModel, plugin_id: &str, method: String, payload: Value, repository_id: Option<String>, step: SourceStep) {
+fn call(
+    model: &mut ShellViewModel,
+    plugin_id: &str,
+    method: String,
+    payload: Value,
+    repository_id: Option<String>,
+    step: SourceStep,
+) {
     model.admin.push_effect(AdminEffect::CallPlugin {
         plugin_id: plugin_id.to_string(),
         method,
@@ -189,7 +255,13 @@ pub(crate) fn begin(model: &mut ShellViewModel, plugin_id: &str, repo_id: Option
             .and_then(|item| item.local_cache.as_ref())
             .and_then(|cache| cache.path.clone())
             .unwrap_or_default(),
-        Some(repo_id) => model.workspace.repositories.iter().find(|item| item.repo_id == repo_id).map(|item| item.path.clone()).unwrap_or_default(),
+        Some(repo_id) => model
+            .workspace
+            .repositories
+            .iter()
+            .find(|item| item.repo_id == repo_id)
+            .map(|item| item.path.clone())
+            .unwrap_or_default(),
         None => String::new(),
     };
     let state = &mut model.admin.source_auth;
@@ -201,7 +273,14 @@ pub(crate) fn begin(model: &mut ShellViewModel, plugin_id: &str, repo_id: Option
     state.expected_account_id = None;
     match repo_id {
         Some(repo_id) => match auth_method(&plugin, "statusMethod") {
-            Some(method) => call(model, plugin_id, method, json!({}), Some(repo_id.clone()), SourceStep::BeginStatus { repo_id }),
+            Some(method) => call(
+                model,
+                plugin_id,
+                method,
+                json!({}),
+                Some(repo_id.clone()),
+                SourceStep::BeginStatus { repo_id },
+            ),
             None => fail(model, "认证声明没有 statusMethod。".into()),
         },
         None => create_session(model, &plugin),
@@ -210,7 +289,14 @@ pub(crate) fn begin(model: &mut ShellViewModel, plugin_id: &str, repo_id: Option
 
 fn create_session(model: &mut ShellViewModel, plugin: &PluginManifest) {
     match auth_method(plugin, "createSessionMethod") {
-        Some(method) => call(model, &plugin.plugin_id, method, json!({ "qrImage": true, "qrimg": true }), None, SourceStep::CreateSession),
+        Some(method) => call(
+            model,
+            &plugin.plugin_id,
+            method,
+            json!({ "qrImage": true, "qrimg": true }),
+            None,
+            SourceStep::CreateSession,
+        ),
         None => fail(model, "认证声明没有 createSessionMethod。".into()),
     }
 }
@@ -244,7 +330,16 @@ pub(crate) fn refresh_status(model: &mut ShellViewModel, plugin_id: &str, repo_i
     };
     model.admin.source_auth.busy = true;
     model.admin.source_auth.reset_notice();
-    call(model, plugin_id, method, json!({}), Some(repo_id.to_string()), SourceStep::RefreshStatus { repo_id: repo_id.into() });
+    call(
+        model,
+        plugin_id,
+        method,
+        json!({}),
+        Some(repo_id.to_string()),
+        SourceStep::RefreshStatus {
+            repo_id: repo_id.into(),
+        },
+    );
 }
 
 /// 退出登录：先拿状态（本页查过就用缓存），再调退出方法。
@@ -265,14 +360,32 @@ pub(crate) fn clear(model: &mut ShellViewModel, plugin_id: &str, repo_id: &str) 
         return;
     }
     match auth_method(&plugin, "statusMethod") {
-        Some(method) => call(model, plugin_id, method, json!({}), Some(repo_id.into()), SourceStep::ClearStatus { repo_id: repo_id.into() }),
+        Some(method) => call(
+            model,
+            plugin_id,
+            method,
+            json!({}),
+            Some(repo_id.into()),
+            SourceStep::ClearStatus {
+                repo_id: repo_id.into(),
+            },
+        ),
         None => fail(model, "认证声明没有 statusMethod。".into()),
     }
 }
 
 fn call_clear(model: &mut ShellViewModel, plugin: &PluginManifest, repo_id: &str) {
     match auth_method(plugin, "clearMethod") {
-        Some(method) => call(model, &plugin.plugin_id, method, json!({}), Some(repo_id.into()), SourceStep::Clear { repo_id: repo_id.into() }),
+        Some(method) => call(
+            model,
+            &plugin.plugin_id,
+            method,
+            json!({}),
+            Some(repo_id.into()),
+            SourceStep::Clear {
+                repo_id: repo_id.into(),
+            },
+        ),
         None => fail(model, "认证声明没有 clearMethod。".into()),
     }
 }
@@ -283,7 +396,11 @@ pub(crate) fn poll(model: &mut ShellViewModel, plugin_id: &str) {
         eprintln!("Nana 来源扫码检查找不到插件：{plugin_id}");
         return;
     };
-    if !model.admin.source_auth.can_poll(requires_local_cache(&plugin)) {
+    if !model
+        .admin
+        .source_auth
+        .can_poll(requires_local_cache(&plugin))
+    {
         eprintln!("Nana 来源扫码还不能检查：没有会话、缺缓存目录或调用在途");
         return;
     }
@@ -294,7 +411,14 @@ pub(crate) fn poll(model: &mut ShellViewModel, plugin_id: &str) {
     let key = model.admin.source_auth.session_key();
     model.admin.source_auth.busy = true;
     model.admin.source_auth.reset_notice();
-    call(model, plugin_id, method, json!({ "key": key, "sessionId": key, "persistSession": true }), None, SourceStep::Poll);
+    call(
+        model,
+        plugin_id,
+        method,
+        json!({ "key": key, "sessionId": key, "persistSession": true }),
+        None,
+        SourceStep::Poll,
+    );
 }
 
 /// 一步结束。成功按步骤推进，失败写错误。
@@ -331,7 +455,11 @@ pub(crate) fn finish(model: &mut ShellViewModel, step: SourceStep, result: Resul
             state.busy = false;
         }
         SourceStep::RefreshStatus { repo_id } => {
-            model.admin.source_auth.status_by_repo.insert(repo_id, payload);
+            model
+                .admin
+                .source_auth
+                .status_by_repo
+                .insert(repo_id, payload);
             model.admin.source_auth.busy = false;
         }
         SourceStep::ClearStatus { repo_id } => {
@@ -339,20 +467,27 @@ pub(crate) fn finish(model: &mut ShellViewModel, step: SourceStep, result: Resul
             call_clear(model, &plugin, &repo_id);
         }
         SourceStep::Clear { repo_id } => {
-            let status = model.admin.source_auth.pending_clear_status.take().unwrap_or(Value::Null);
+            let status = model
+                .admin
+                .source_auth
+                .pending_clear_status
+                .take()
+                .unwrap_or(Value::Null);
             let credential = text_at(status.get("credentialRef"));
             match (account_id(&status), credential) {
-                (Some(account), Some(_)) => match public_backend_config(&plugin, &status, &account, "") {
-                    Ok(mut config) => {
-                        config.insert("loginExpired".into(), Value::Bool(true));
-                        model.admin.push_effect(AdminEffect::UpdateBackendConfig {
-                            repo_id: repo_id.clone(),
-                            backend_config: Value::Object(config),
-                            step: SourceStep::ClearUpdate { repo_id },
-                        });
+                (Some(account), Some(_)) => {
+                    match public_backend_config(&plugin, &status, &account, "") {
+                        Ok(mut config) => {
+                            config.insert("loginExpired".into(), Value::Bool(true));
+                            model.admin.push_effect(AdminEffect::UpdateBackendConfig {
+                                repo_id: repo_id.clone(),
+                                backend_config: Value::Object(config),
+                                step: SourceStep::ClearUpdate { repo_id },
+                            });
+                        }
+                        Err(error) => fail(model, error),
                     }
-                    Err(error) => fail(model, error),
-                },
+                }
                 _ => finish_clear(model, &repo_id),
             }
         }
@@ -372,16 +507,26 @@ pub(crate) fn finish(model: &mut ShellViewModel, step: SourceStep, result: Resul
             } else {
                 // Vue：先 `refreshRepositoryWorkspace()` 再 `selectRepository(repoId)`，这里合成一次读列表、读完切过去。
                 model.workspace.refresh_repositories(Some(repo_id.clone()));
-                complete(model, &repo_id, format!("已更新 {name} 的登录状态，正在同步。"));
+                complete(
+                    model,
+                    &repo_id,
+                    format!("已更新 {name} 的登录状态，正在同步。"),
+                );
             }
         }
         SourceStep::ProvisionCache { repo_id, name } => {
             model.workspace.refresh_repositories(Some(repo_id.clone()));
-            complete(model, &repo_id, format!("已更新 {name} 的登录状态，正在同步。"));
+            complete(
+                model,
+                &repo_id,
+                format!("已更新 {name} 的登录状态，正在同步。"),
+            );
         }
         SourceStep::ProvisionCreate { repo_id, name } => {
             if let Some(operation) = model.admin.source_auth.create_operation.take() {
-                model.operation.update(operation, OperationPatch::step("切换到新资源库", 72.0));
+                model
+                    .operation
+                    .update(operation, OperationPatch::step("切换到新资源库", 72.0));
             }
             adopt_created(model, &payload);
             model.select_workspace_repository(&repo_id);
@@ -392,9 +537,18 @@ pub(crate) fn finish(model: &mut ShellViewModel, step: SourceStep, result: Resul
 }
 
 fn finish_clear(model: &mut ShellViewModel, repo_id: &str) {
-    let name = model.workspace.repositories.iter().find(|item| item.repo_id == repo_id).map(|item| item.name.clone()).unwrap_or_else(|| repo_id.to_string());
+    let name = model
+        .workspace
+        .repositories
+        .iter()
+        .find(|item| item.repo_id == repo_id)
+        .map(|item| item.name.clone())
+        .unwrap_or_else(|| repo_id.to_string());
     let state = &mut model.admin.source_auth;
-    state.status_by_repo.insert(repo_id.to_string(), json!({ "loggedIn": false, "loginExpired": true }));
+    state.status_by_repo.insert(
+        repo_id.to_string(),
+        json!({ "loggedIn": false, "loginExpired": true }),
+    );
     state.message = format!("已退出 {name}，仓库和缓存仍保留。");
     state.busy = false;
 }
@@ -403,31 +557,45 @@ fn finish_clear(model: &mut ShellViewModel, repo_id: &str) {
 fn provision(model: &mut ShellViewModel, plugin: &PluginManifest, result: Value) {
     let account = account_id(&result);
     let confirmed = result.get("loggedIn").and_then(Value::as_bool) == Some(true)
-        || result.get("backendConfig").is_some_and(|item| !item.is_null())
+        || result
+            .get("backendConfig")
+            .is_some_and(|item| !item.is_null())
         || text_at(result.get("credentialRef")).is_some();
     let Some(account) = account.filter(|_| confirmed) else {
         let state = &mut model.admin.source_auth;
-        state.message = text_at(result.get("message")).unwrap_or_else(|| "尚未完成确认，请稍后重新检查。".into());
+        state.message = text_at(result.get("message"))
+            .unwrap_or_else(|| "尚未完成确认，请稍后重新检查。".into());
         state.busy = false;
         return;
     };
     if let Some(expected) = model.admin.source_auth.expected_account_id.clone()
         && expected != account
     {
-        return fail(model, "扫码账号与当前仓库不一致，请使用原账号重新登录。".into());
+        return fail(
+            model,
+            "扫码账号与当前仓库不一致，请使用原账号重新登录。".into(),
+        );
     }
     let repo_id = model
         .admin
         .source_auth
         .target_repo_id
         .clone()
-        .unwrap_or_else(|| format!("{}-{account}", provisioning(plugin, "repoIdPrefix").unwrap_or_else(|| plugin.kind.clone())));
+        .unwrap_or_else(|| {
+            format!(
+                "{}-{account}",
+                provisioning(plugin, "repoIdPrefix").unwrap_or_else(|| plugin.kind.clone())
+            )
+        });
     let cache = model.admin.source_auth.cache_path.trim().to_string();
     let config = match public_backend_config(plugin, &result, &account, &cache) {
         Ok(config) => config,
         Err(error) => return fail(model, error),
     };
-    let existing = source_repositories(model, plugin).into_iter().find(|item| item.repo_id == repo_id).map(|item| item.name.clone());
+    let existing = source_repositories(model, plugin)
+        .into_iter()
+        .find(|item| item.repo_id == repo_id)
+        .map(|item| item.name.clone());
     match existing {
         Some(name) => model.admin.push_effect(AdminEffect::UpdateBackendConfig {
             repo_id: repo_id.clone(),
@@ -436,20 +604,28 @@ fn provision(model: &mut ShellViewModel, plugin: &PluginManifest, result: Value)
         }),
         None => {
             let name = repository_name(plugin, &result, &account);
-            let scheme = provisioning(plugin, "sourceUriScheme").unwrap_or_else(|| plugin.kind.clone());
-            let path = if cache.is_empty() { format!("{scheme}://account/{account}") } else { cache };
+            let scheme =
+                provisioning(plugin, "sourceUriScheme").unwrap_or_else(|| plugin.kind.clone());
+            let path = if cache.is_empty() {
+                format!("{scheme}://account/{account}")
+            } else {
+                cache
+            };
             // Vue `createNewRepository(.., { skipInitialSync: true })`：「创建资源库 · 初始化资源库」8%。
             let operation = model.operation.start(
-                OperationStart::new("创建资源库", "初始化资源库", 8.0).runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_CREATE]),
+                OperationStart::new("创建资源库", "初始化资源库", 8.0)
+                    .runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_CREATE]),
             );
             model.admin.source_auth.create_operation = Some(operation);
-            model.admin.push_effect(AdminEffect::CreateSourceRepository {
-                repo_id,
-                name,
-                path,
-                backend_plugin_id: plugin.plugin_id.clone(),
-                backend_config: Value::Object(config),
-            });
+            model
+                .admin
+                .push_effect(AdminEffect::CreateSourceRepository {
+                    repo_id,
+                    name,
+                    path,
+                    backend_plugin_id: plugin.plugin_id.clone(),
+                    backend_config: Value::Object(config),
+                });
         }
     }
 }
@@ -460,7 +636,9 @@ fn complete(model: &mut ShellViewModel, repo_id: &str, message: String) {
     state.message = message;
     state.session = None;
     state.busy = false;
-    model.admin.push_effect(AdminEffect::SyncRepository { repo_id: repo_id.to_string() });
+    model.admin.push_effect(AdminEffect::SyncRepository {
+        repo_id: repo_id.to_string(),
+    });
 }
 
 /// 把建仓返回的仓库先放进列表，切换不用等列表刷新。
@@ -473,7 +651,12 @@ fn adopt_created(model: &mut ShellViewModel, payload: &Value) {
         eprintln!("Nana 来源建仓返回没有仓库标识");
         return;
     };
-    if model.workspace.repositories.iter().any(|item| item.repo_id == repo_id) {
+    if model
+        .workspace
+        .repositories
+        .iter()
+        .any(|item| item.repo_id == repo_id)
+    {
         return;
     }
     let backend = repository.get("backend");
@@ -484,17 +667,35 @@ fn adopt_created(model: &mut ShellViewModel, payload: &Value) {
         name: text_at(repository.get("name")).unwrap_or_default(),
         path: text_at(repository.get("path")).unwrap_or_default(),
         status: text_at(repository.get("status")).unwrap_or_else(|| "ready".into()),
-        backend_plugin_id: backend.and_then(|item| text_at(item.get("pluginId"))).unwrap_or_default(),
+        backend_plugin_id: backend
+            .and_then(|item| text_at(item.get("pluginId")))
+            .unwrap_or_default(),
         capabilities: backend
             .and_then(|item| item.get("capabilities"))
             .and_then(Value::as_array)
-            .map(|items| items.iter().filter_map(|item| item.as_str().map(str::to_string)).collect())
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|item| item.as_str().map(str::to_string))
+                    .collect()
+            })
             .unwrap_or_default(),
-        cache_required: cache.and_then(|item| item.get("required")).and_then(Value::as_bool) == Some(true),
-        cache_status: cache.and_then(|item| text_at(item.get("status"))).unwrap_or_default(),
+        cache_required: cache
+            .and_then(|item| item.get("required"))
+            .and_then(Value::as_bool)
+            == Some(true),
+        cache_status: cache
+            .and_then(|item| text_at(item.get("status")))
+            .unwrap_or_default(),
         cache_path: cache.and_then(|item| text_at(item.get("path"))),
-        login_expired: authentication.and_then(|item| item.get("loginExpired")).and_then(Value::as_bool) == Some(true),
-        logged_out: authentication.and_then(|item| item.get("loggedIn")).and_then(Value::as_bool) == Some(false),
+        login_expired: authentication
+            .and_then(|item| item.get("loginExpired"))
+            .and_then(Value::as_bool)
+            == Some(true),
+        logged_out: authentication
+            .and_then(|item| item.get("loggedIn"))
+            .and_then(Value::as_bool)
+            == Some(false),
     });
 }
 
@@ -503,20 +704,37 @@ fn repository_name(plugin: &PluginManifest, result: &Value, account: &str) -> St
     result
         .get("profile")
         .and_then(|item| text_at(item.get("nickname")))
-        .or_else(|| result.get("account").and_then(|item| text_at(item.get("userName"))))
+        .or_else(|| {
+            result
+                .get("account")
+                .and_then(|item| text_at(item.get("userName")))
+        })
         .unwrap_or_else(|| format!("{} {account}", plugin.name))
 }
 
 /// 登录结果里的账号：`accountId`、`backendConfig.accountId`、`account.id` 依次找。
 pub(crate) fn account_id(payload: &Value) -> Option<String> {
     text_at(payload.get("accountId"))
-        .or_else(|| payload.get("backendConfig").and_then(|item| text_at(item.get("accountId"))))
-        .or_else(|| payload.get("account").and_then(|item| text_at(item.get("id"))))
+        .or_else(|| {
+            payload
+                .get("backendConfig")
+                .and_then(|item| text_at(item.get("accountId")))
+        })
+        .or_else(|| {
+            payload
+                .get("account")
+                .and_then(|item| text_at(item.get("id")))
+        })
 }
 
 /// 可以存进仓库的后端配置：去掉敏感字段，补账号、凭据引用、来源地址、缓存目录和同步时间。
 /// 没有凭据引用就拒绝，和 Vue 同一句话。
-pub(crate) fn public_backend_config(plugin: &PluginManifest, result: &Value, account: &str, cache: &str) -> Result<Map<String, Value>, String> {
+pub(crate) fn public_backend_config(
+    plugin: &PluginManifest,
+    result: &Value,
+    account: &str,
+    cache: &str,
+) -> Result<Map<String, Value>, String> {
     let mut config = Map::new();
     if let Some(object) = result.get("backendConfig").and_then(Value::as_object) {
         for (key, value) in object {
@@ -527,18 +745,28 @@ pub(crate) fn public_backend_config(plugin: &PluginManifest, result: &Value, acc
             config.insert(key.clone(), value.clone());
         }
     }
-    let credential = text_at(result.get("credentialRef")).or_else(|| text_at(config.get("credentialRef")));
+    let credential =
+        text_at(result.get("credentialRef")).or_else(|| text_at(config.get("credentialRef")));
     let Some(credential) = credential else {
         return Err("Source 未返回安全凭据引用，已拒绝保存登录配置。".into());
     };
     let scheme = provisioning(plugin, "sourceUriScheme").unwrap_or_else(|| plugin.kind.clone());
     config.insert("accountId".into(), Value::String(account.to_string()));
     config.insert("credentialRef".into(), Value::String(credential));
-    config.insert("sourceUri".into(), Value::String(format!("{scheme}://account/{account}")));
+    config.insert(
+        "sourceUri".into(),
+        Value::String(format!("{scheme}://account/{account}")),
+    );
     if !cache.trim().is_empty() {
-        config.insert("localCachePath".into(), Value::String(cache.trim().to_string()));
+        config.insert(
+            "localCachePath".into(),
+            Value::String(cache.trim().to_string()),
+        );
     }
-    config.insert("lastSyncAt".into(), Value::String(super::support::now_iso8601()));
+    config.insert(
+        "lastSyncAt".into(),
+        Value::String(super::support::now_iso8601()),
+    );
     Ok(config)
 }
 
@@ -551,7 +779,11 @@ fn secret_key(key: &str) -> bool {
 /// 字符串或数字都当文本；空白不算。
 fn text_at(value: Option<&Value>) -> Option<String> {
     let value = value?;
-    if let Some(text) = value.as_str().map(str::trim).filter(|text| !text.is_empty()) {
+    if let Some(text) = value
+        .as_str()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+    {
         return Some(text.to_string());
     }
     if value.is_number() {

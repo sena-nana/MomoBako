@@ -14,7 +14,10 @@ struct PluginDir {
 
 impl PluginDir {
     fn new(name: &str, files: &[&str]) -> Self {
-        let path = std::env::temp_dir().join(format!("momobako-plugin-host-{name}-{}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "momobako-plugin-host-{name}-{}",
+            std::process::id()
+        ));
         let _ = fs::remove_dir_all(&path);
         fs::create_dir_all(&path).expect("随附插件目录");
         for file in files {
@@ -64,12 +67,15 @@ fn packages_follow_the_manifest_and_ignore_leftovers() {
         ],
     );
 
-    let packages = bundled_packages(&dir.path, true, Some(&manifest())).expect("清单").expect("要同步");
+    let packages = bundled_packages(&dir.path, true, Some(&manifest()))
+        .expect("清单")
+        .expect("要同步");
 
     assert_eq!(
         packages,
         vec![
-            dir.path.join("local-filesystem-1.0.0-x86_64-pc-windows-msvc.momoplug"),
+            dir.path
+                .join("local-filesystem-1.0.0-x86_64-pc-windows-msvc.momoplug"),
             dir.path.join("library-audio-0.1.0-any.momoplug"),
         ],
         "旧版本留下的包不算随附插件"
@@ -78,11 +84,22 @@ fn packages_follow_the_manifest_and_ignore_leftovers() {
 
 #[test]
 fn a_package_without_manifest_lists_its_plugin_dir() {
-    let dir = PluginDir::new("no-manifest", &["b-0.1.0-any.momoplug", "a-0.1.0-any.momoplug"]);
+    let dir = PluginDir::new(
+        "no-manifest",
+        &["b-0.1.0-any.momoplug", "a-0.1.0-any.momoplug"],
+    );
 
-    let packages = bundled_packages(&dir.path, true, None).expect("清单").expect("要同步");
+    let packages = bundled_packages(&dir.path, true, None)
+        .expect("清单")
+        .expect("要同步");
 
-    assert_eq!(packages, vec![dir.path.join("a-0.1.0-any.momoplug"), dir.path.join("b-0.1.0-any.momoplug")]);
+    assert_eq!(
+        packages,
+        vec![
+            dir.path.join("a-0.1.0-any.momoplug"),
+            dir.path.join("b-0.1.0-any.momoplug")
+        ]
+    );
 }
 
 #[test]
@@ -95,5 +112,9 @@ fn development_reads_the_packages_dir_and_skips_when_it_is_missing() {
     );
 
     let missing = dir.path.join("not-packaged-yet");
-    assert_eq!(bundled_packages(&missing, false, None).expect("清单"), None, "还没打包插件时不同步");
+    assert_eq!(
+        bundled_packages(&missing, false, None).expect("清单"),
+        None,
+        "还没打包插件时不同步"
+    );
 }

@@ -35,7 +35,8 @@ pub fn thumbnail_slot(path: &str) -> String {
 
 /// 槽对应的缩略图文件；不是缩略图槽或文件为空时为 `None`。
 pub fn slot_file(slot: &str) -> Option<&str> {
-    slot.strip_prefix(SLOT_PREFIX).filter(|path| !path.is_empty())
+    slot.strip_prefix(SLOT_PREFIX)
+        .filter(|path| !path.is_empty())
 }
 
 /// 解码后的缩略图。布局用原始宽高，纹理用缩小后的像素。
@@ -71,12 +72,18 @@ pub fn decode_preview_pixels(bytes: &[u8]) -> Result<super::PreviewPixels, Strin
     }
     let rgba = image.to_rgba8();
     let (width, height) = rgba.dimensions();
-    Ok(super::PreviewPixels { width, height, rgba: rgba.into_raw() })
+    Ok(super::PreviewPixels {
+        width,
+        height,
+        rgba: rgba.into_raw(),
+    })
 }
 
 /// 解码图片并按 EXIF 方向摆正。格式按内容认；EXIF 读不出时照原样，不让整张图失败。
 fn decode_oriented(bytes: &[u8]) -> image::ImageResult<DynamicImage> {
-    let mut decoder = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?.into_decoder()?;
+    let mut decoder = ImageReader::new(Cursor::new(bytes))
+        .with_guessed_format()?
+        .into_decoder()?;
     let orientation = decoder.orientation().unwrap_or_else(|error| {
         eprintln!("Nana 图片的 EXIF 方向读不出，按原样显示：{error}");
         image::metadata::Orientation::NoTransforms
@@ -102,8 +109,13 @@ fn looks_like_svg(bytes: &[u8]) -> bool {
 /// 算法：先按文档尺寸画（最长边超过 [`SVG_EDGE`] 时缩到它以内）；文档比它小时按原比例拉到最长边正好是
 /// [`SVG_EDGE`] 重画一次。拉伸的画法交回预乘的像素，还原成直通 alpha，和别的图片一样由上传那一步再预乘。
 fn rasterize_svg(bytes: &[u8]) -> Result<super::PreviewPixels, String> {
-    let font = Some(nana_svg_raster::SvgFont { bytes: nana_ui_core::fonts::UI_FONT_REGULAR, family: nana_ui_core::fonts::UI_FONT_FAMILY });
-    let Some(document) = nana_svg_raster::rasterize_document_capped_with_font(bytes, SVG_EDGE, font) else {
+    let font = Some(nana_svg_raster::SvgFont {
+        bytes: nana_ui_core::fonts::UI_FONT_REGULAR,
+        family: nana_ui_core::fonts::UI_FONT_FAMILY,
+    });
+    let Some(document) =
+        nana_svg_raster::rasterize_document_capped_with_font(bytes, SVG_EDGE, font)
+    else {
         eprintln!("Nana SVG 解析或绘制失败");
         return Err("SVG 解析或绘制失败".into());
     };
@@ -121,9 +133,17 @@ fn rasterize_svg(bytes: &[u8]) -> Result<super::PreviewPixels, String> {
         Some(raster) => {
             let mut rgba = raster.rgba.to_vec();
             unpremultiply(&mut rgba);
-            super::PreviewPixels { width: raster.width, height: raster.height, rgba }
+            super::PreviewPixels {
+                width: raster.width,
+                height: raster.height,
+                rgba,
+            }
         }
-        None => super::PreviewPixels { width: document.width, height: document.height, rgba: document.rgba.to_vec() },
+        None => super::PreviewPixels {
+            width: document.width,
+            height: document.height,
+            rgba: document.rgba.to_vec(),
+        },
     };
     Ok(pixels)
 }

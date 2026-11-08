@@ -141,7 +141,10 @@ impl HostLocations {
 
     /// 是安装版或便携版的发布包。
     pub fn is_packaged(&self) -> bool {
-        matches!(self.layout, Some(RuntimeLayout::Installed | RuntimeLayout::Portable))
+        matches!(
+            self.layout,
+            Some(RuntimeLayout::Installed | RuntimeLayout::Portable)
+        )
     }
 }
 

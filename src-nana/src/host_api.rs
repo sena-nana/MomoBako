@@ -33,13 +33,17 @@ impl<P: PlaybackMediaPlugin> PlaybackSessionController<P> {
     }
 
     pub fn play(&mut self) -> Result<(), String> {
-        self.plugin.play().map_err(|error| self.fail_message(error))?;
+        self.plugin
+            .play()
+            .map_err(|error| self.fail_message(error))?;
         self.state.status = "playing".into();
         Ok(())
     }
 
     pub fn pause(&mut self) -> Result<(), String> {
-        self.plugin.pause().map_err(|error| self.fail_message(error))?;
+        self.plugin
+            .pause()
+            .map_err(|error| self.fail_message(error))?;
         self.state.status = "paused".into();
         Ok(())
     }
@@ -48,7 +52,9 @@ impl<P: PlaybackMediaPlugin> PlaybackSessionController<P> {
         if !self.state.can_seek {
             return self.fail("当前播放器不支持进度控制".into());
         }
-        self.plugin.seek(position_ms).map_err(|error| self.fail_message(error))?;
+        self.plugin
+            .seek(position_ms)
+            .map_err(|error| self.fail_message(error))?;
         self.state.current_time_ms = position_ms;
         Ok(())
     }
@@ -58,7 +64,9 @@ impl<P: PlaybackMediaPlugin> PlaybackSessionController<P> {
             return self.fail("当前播放器不支持音量控制".into());
         }
         let volume = volume.clamp(0.0, 1.0);
-        self.plugin.set_volume(volume).map_err(|error| self.fail_message(error))?;
+        self.plugin
+            .set_volume(volume)
+            .map_err(|error| self.fail_message(error))?;
         self.state.volume = volume;
         Ok(())
     }
@@ -92,8 +100,14 @@ impl WindowCommand {
         maximized: bool,
     ) -> nana_ui_platform::host::WindowCommand {
         match self {
-            Self::Minimize => nana_ui_platform::host::WindowCommand::SetMinimized { id, minimized: true },
-            Self::ToggleMaximize => nana_ui_platform::host::WindowCommand::SetMaximized { id, maximized: !maximized },
+            Self::Minimize => nana_ui_platform::host::WindowCommand::SetMinimized {
+                id,
+                minimized: true,
+            },
+            Self::ToggleMaximize => nana_ui_platform::host::WindowCommand::SetMaximized {
+                id,
+                maximized: !maximized,
+            },
             Self::Close => nana_ui_platform::host::WindowCommand::Close(id),
         }
     }
@@ -150,12 +164,20 @@ mod tests {
 
     impl PlaybackMediaPlugin for MockPlayer {
         fn play(&mut self) -> Result<(), String> {
-            if self.fail_play { Err("播放器插件不可用".into()) } else { Ok(()) }
+            if self.fail_play {
+                Err("播放器插件不可用".into())
+            } else {
+                Ok(())
+            }
         }
 
-        fn pause(&mut self) -> Result<(), String> { Ok(()) }
+        fn pause(&mut self) -> Result<(), String> {
+            Ok(())
+        }
 
-        fn seek(&mut self, _: u64) -> Result<(), String> { Ok(()) }
+        fn seek(&mut self, _: u64) -> Result<(), String> {
+            Ok(())
+        }
 
         fn set_volume(&mut self, volume: f32) -> Result<(), String> {
             self.volume = volume;
@@ -183,24 +205,52 @@ mod tests {
     /// 装好的条目：控制成功时控制器改会话，播放器报错或不支持的控制都进 failed 并留下原因。
     #[test]
     fn playback_controller_owns_state_and_records_plugin_failure() {
-        let mut controller = PlaybackSessionController::new(MockPlayer { fail_play: false, volume: 1.0 }, paused(true));
+        let mut controller = PlaybackSessionController::new(
+            MockPlayer {
+                fail_play: false,
+                volume: 1.0,
+            },
+            paused(true),
+        );
         controller.seek(30_000).expect("能跳转");
         controller.set_volume(1.5).expect("能调音量");
         controller.play().expect("能播放");
-        assert_eq!((controller.state().status.as_str(), controller.state().current_time_ms, controller.state().volume), ("playing", 30_000, 1.0));
+        assert_eq!(
+            (
+                controller.state().status.as_str(),
+                controller.state().current_time_ms,
+                controller.state().volume
+            ),
+            ("playing", 30_000, 1.0)
+        );
 
-        let mut failing = PlaybackSessionController::new(MockPlayer { fail_play: true, volume: 1.0 }, paused(false));
+        let mut failing = PlaybackSessionController::new(
+            MockPlayer {
+                fail_play: true,
+                volume: 1.0,
+            },
+            paused(false),
+        );
         assert!(failing.play().is_err());
         assert_eq!(failing.state().status, "failed");
         assert_eq!(failing.state().error.as_deref(), Some("播放器插件不可用"));
         assert!(failing.seek(1_000).is_err());
-        assert_eq!(failing.state().error.as_deref(), Some("当前播放器不支持进度控制"));
+        assert_eq!(
+            failing.state().error.as_deref(),
+            Some("当前播放器不支持进度控制")
+        );
     }
 
     /// 只开 http、https、mailto、tel；盘符路径、`file:`、自定义协议和脚本协议都不开。
     #[test]
     fn only_web_mail_and_phone_links_are_openable() {
-        for url in ["https://example.com/cover", "HTTP://example.com", " https://x/?a=1&calc ", "mailto:a@b.c", "tel:+86123"] {
+        for url in [
+            "https://example.com/cover",
+            "HTTP://example.com",
+            " https://x/?a=1&calc ",
+            "mailto:a@b.c",
+            "tel:+86123",
+        ] {
             assert!(super::openable_url(url), "{url} 应该能打开");
         }
         for url in [

@@ -60,12 +60,14 @@ impl InspectState {
         match hint {
             ClockHint::None => {}
             ClockHint::Search => {
-                self.timers.search_due_ms = Some(self.timers.clock_ms.saturating_add(SEARCH_DELAY_MS));
+                self.timers.search_due_ms =
+                    Some(self.timers.clock_ms.saturating_add(SEARCH_DELAY_MS));
             }
             ClockHint::ClearMetadata => self.timers.clear_metadata(),
             ClockHint::Metadata => {
                 if self.can_edit() && self.dirty() && self.conflict.is_empty() {
-                    self.timers.metadata_due_ms = Some(self.timers.clock_ms.saturating_add(METADATA_DELAY_MS));
+                    self.timers.metadata_due_ms =
+                        Some(self.timers.clock_ms.saturating_add(METADATA_DELAY_MS));
                 } else {
                     self.timers.clear_metadata();
                 }
@@ -87,8 +89,14 @@ impl InspectState {
             return (false, false);
         }
         self.timers.clock_ms = self.timers.clock_ms.saturating_add(step);
-        let search = self.timers.search_due_ms.is_some_and(|due| self.timers.clock_ms >= due);
-        let metadata = self.timers.metadata_due_ms.is_some_and(|due| self.timers.clock_ms >= due);
+        let search = self
+            .timers
+            .search_due_ms
+            .is_some_and(|due| self.timers.clock_ms >= due);
+        let metadata = self
+            .timers
+            .metadata_due_ms
+            .is_some_and(|due| self.timers.clock_ms >= due);
         if search {
             self.timers.search_due_ms = None;
         }
@@ -130,12 +138,23 @@ impl LiveTimers {
 ///
 /// 搜索、保存这类计时器触发和播放切项会改界面结构，标脏让随后整体同步；只是播放进度往前走时
 /// 不标脏，进度和时间由热信号跟上。
-pub(crate) fn poll_timers(model: &mut super::super::ShellViewModel, step: crate::frame_clock::FrameStep) -> bool {
-    let writable = model.workspace.active_repository().is_some_and(|repository| {
-        super::super::files::repository_is_writable(&repository.status, &repository.capabilities)
-    });
+pub(crate) fn poll_timers(
+    model: &mut super::super::ShellViewModel,
+    step: crate::frame_clock::FrameStep,
+) -> bool {
+    let writable = model
+        .workspace
+        .active_repository()
+        .is_some_and(|repository| {
+            super::super::files::repository_is_writable(
+                &repository.status,
+                &repository.capabilities,
+            )
+        });
     let repo_id = model.workspace.active_repo_id.clone();
-    let fired = model.inspect.poll_own(step.ui_ms, writable, repo_id.as_deref());
+    let fired = model
+        .inspect
+        .poll_own(step.ui_ms, writable, repo_id.as_deref());
     let playback = super::bridge::advance_playback(model, step.media_ms);
     if fired || playback == ClockStep::Changed {
         model.mark_surface_dirty();

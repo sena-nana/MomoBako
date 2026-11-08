@@ -84,7 +84,10 @@ impl MainWindowSnapshot {
 pub fn main_window_descriptor() -> WindowDescriptor {
     WindowDescriptor::new("MomoBako")
         .initial_size(1200.0, 800.0)
-        .minimum_size(f64::from(MIN_MAIN_WINDOW_WIDTH), f64::from(MIN_MAIN_WINDOW_HEIGHT))
+        .minimum_size(
+            f64::from(MIN_MAIN_WINDOW_WIDTH),
+            f64::from(MIN_MAIN_WINDOW_HEIGHT),
+        )
 }
 
 /// 小于主窗口最小值的状态不能恢复。
@@ -93,11 +96,17 @@ pub fn is_restorable_main_window_state(state: &MainWindowState) -> bool {
 }
 
 /// 最大化快照沿用上一帧可恢复的正常几何，只把最大化标记打开。
-pub fn merge_main_window_state(previous: Option<MainWindowState>, snapshot: MainWindowSnapshot) -> MainWindowState {
+pub fn merge_main_window_state(
+    previous: Option<MainWindowState>,
+    snapshot: MainWindowSnapshot,
+) -> MainWindowState {
     if snapshot.maximized
         && let Some(previous) = previous.filter(is_restorable_main_window_state)
     {
-        return MainWindowState { maximized: true, ..previous };
+        return MainWindowState {
+            maximized: true,
+            ..previous
+        };
     }
     snapshot.into_state()
 }
@@ -115,7 +124,10 @@ impl Session {
     /// 测试把状态写到指定文件，避免碰到用户的应用数据目录。
     #[cfg(test)]
     pub fn at(path: PathBuf) -> Self {
-        Self { path: Some(path), ..Self::default() }
+        Self {
+            path: Some(path),
+            ..Self::default()
+        }
     }
 
     /// 启动时读回可恢复的状态，并给出窗口命令。读失败只记日志，窗口保持描述符里的默认尺寸。
@@ -191,7 +203,10 @@ impl Session {
         };
         self.cache.record(normal);
         if state.maximized {
-            self.cache.record(MainWindowSnapshot { maximized: true, ..normal });
+            self.cache.record(MainWindowSnapshot {
+                maximized: true,
+                ..normal
+            });
         }
     }
 }
@@ -204,7 +219,10 @@ pub fn restore_commands(id: WindowId, state: MainWindowState) -> Vec<WindowComma
         size: (state.width as f32, state.height as f32),
     }];
     if state.maximized {
-        commands.push(WindowCommand::SetMaximized { id, maximized: true });
+        commands.push(WindowCommand::SetMaximized {
+            id,
+            maximized: true,
+        });
     }
     commands
 }
@@ -238,7 +256,10 @@ fn capture(geometry: &WindowGeometry) -> Option<MainWindowSnapshot> {
 }
 
 fn state_path() -> Option<PathBuf> {
-    crate::app_paths::current().window_state_dir.as_ref().map(|dir| dir.join(STATE_FILE))
+    crate::app_paths::current()
+        .window_state_dir
+        .as_ref()
+        .map(|dir| dir.join(STATE_FILE))
 }
 
 fn load_main_window_state(path: Option<&Path>) -> Result<Option<MainWindowState>, String> {
@@ -311,26 +332,71 @@ mod tests {
 
     #[test]
     fn maximized_snapshot_keeps_last_normal_geometry() {
-        let previous = MainWindowState { x: 120, y: 80, width: 1180, height: 760, maximized: false };
-        let maximized_snapshot = MainWindowSnapshot { x: -8, y: -8, width: 1936, height: 1056, maximized: true };
+        let previous = MainWindowState {
+            x: 120,
+            y: 80,
+            width: 1180,
+            height: 760,
+            maximized: false,
+        };
+        let maximized_snapshot = MainWindowSnapshot {
+            x: -8,
+            y: -8,
+            width: 1936,
+            height: 1056,
+            maximized: true,
+        };
         assert_eq!(
             merge_main_window_state(Some(previous), maximized_snapshot),
-            MainWindowState { maximized: true, ..previous }
+            MainWindowState {
+                maximized: true,
+                ..previous
+            }
         );
     }
 
     #[test]
     fn normal_snapshot_replaces_previous_geometry() {
-        let previous = MainWindowState { x: 120, y: 80, width: 1180, height: 760, maximized: true };
-        let normal_snapshot = MainWindowSnapshot { x: 320, y: 180, width: 1320, height: 860, maximized: false };
-        assert_eq!(merge_main_window_state(Some(previous), normal_snapshot), normal_snapshot.into_state());
+        let previous = MainWindowState {
+            x: 120,
+            y: 80,
+            width: 1180,
+            height: 760,
+            maximized: true,
+        };
+        let normal_snapshot = MainWindowSnapshot {
+            x: 320,
+            y: 180,
+            width: 1320,
+            height: 860,
+            maximized: false,
+        };
+        assert_eq!(
+            merge_main_window_state(Some(previous), normal_snapshot),
+            normal_snapshot.into_state()
+        );
     }
 
     #[test]
     fn maximized_snapshot_without_restorable_previous_uses_current_snapshot() {
-        let previous = MainWindowState { x: 120, y: 80, width: 640, height: 480, maximized: false };
-        let maximized_snapshot = MainWindowSnapshot { x: -8, y: -8, width: 1936, height: 1056, maximized: true };
-        assert_eq!(merge_main_window_state(Some(previous), maximized_snapshot), maximized_snapshot.into_state());
+        let previous = MainWindowState {
+            x: 120,
+            y: 80,
+            width: 640,
+            height: 480,
+            maximized: false,
+        };
+        let maximized_snapshot = MainWindowSnapshot {
+            x: -8,
+            y: -8,
+            width: 1936,
+            height: 1056,
+            maximized: true,
+        };
+        assert_eq!(
+            merge_main_window_state(Some(previous), maximized_snapshot),
+            maximized_snapshot.into_state()
+        );
     }
 
     #[test]
@@ -342,8 +408,16 @@ mod tests {
             height: MIN_MAIN_WINDOW_HEIGHT,
             maximized: false,
         };
-        let too_short = MainWindowState { height: MIN_MAIN_WINDOW_HEIGHT - 1, width: MIN_MAIN_WINDOW_WIDTH, ..too_narrow };
-        let restorable = MainWindowState { width: MIN_MAIN_WINDOW_WIDTH, height: MIN_MAIN_WINDOW_HEIGHT, ..too_narrow };
+        let too_short = MainWindowState {
+            height: MIN_MAIN_WINDOW_HEIGHT - 1,
+            width: MIN_MAIN_WINDOW_WIDTH,
+            ..too_narrow
+        };
+        let restorable = MainWindowState {
+            width: MIN_MAIN_WINDOW_WIDTH,
+            height: MIN_MAIN_WINDOW_HEIGHT,
+            ..too_narrow
+        };
         assert!(!is_restorable_main_window_state(&too_narrow));
         assert!(!is_restorable_main_window_state(&too_short));
         assert!(is_restorable_main_window_state(&restorable));
@@ -352,46 +426,111 @@ mod tests {
     #[test]
     fn cache_keeps_latest_normal_geometry_after_maximized_snapshot() {
         let mut cache = Cache::default();
-        let normal_snapshot = MainWindowSnapshot { x: 320, y: 180, width: 1320, height: 860, maximized: false };
-        let maximized_snapshot = MainWindowSnapshot { x: -8, y: -8, width: 1936, height: 1056, maximized: true };
+        let normal_snapshot = MainWindowSnapshot {
+            x: 320,
+            y: 180,
+            width: 1320,
+            height: 860,
+            maximized: false,
+        };
+        let maximized_snapshot = MainWindowSnapshot {
+            x: -8,
+            y: -8,
+            width: 1936,
+            height: 1056,
+            maximized: true,
+        };
         cache.record(normal_snapshot);
         cache.record(maximized_snapshot);
         assert_eq!(cache.latest(), Some(maximized_snapshot));
-        assert_eq!(cache.latest_normal_state(), Some(normal_snapshot.into_state()));
+        assert_eq!(
+            cache.latest_normal_state(),
+            Some(normal_snapshot.into_state())
+        );
         assert_eq!(
             merge_main_window_state(cache.latest_normal_state(), maximized_snapshot),
-            MainWindowState { maximized: true, ..normal_snapshot.into_state() }
+            MainWindowState {
+                maximized: true,
+                ..normal_snapshot.into_state()
+            }
         );
     }
 
     #[test]
     fn ready_restores_bounds_then_maximize() {
         let mut session = Session::default();
-        let state = MainWindowState { x: 40, y: 24, width: 1280, height: 800, maximized: true };
+        let state = MainWindowState {
+            x: 40,
+            y: 24,
+            width: 1280,
+            height: 800,
+            maximized: true,
+        };
         let commands = session.arm(WindowId(7), Some(state));
         assert!(matches!(
             commands.first(),
-            Some(WindowCommand::SetBounds { position: (40.0, 24.0), size: (1280.0, 800.0), .. })
+            Some(WindowCommand::SetBounds {
+                position: (40.0, 24.0),
+                size: (1280.0, 800.0),
+                ..
+            })
         ));
-        assert!(matches!(commands.get(1), Some(WindowCommand::SetMaximized { maximized: true, .. })));
-        assert!(session.arm(WindowId(7), Some(MainWindowState { width: 100, height: 100, ..state })).is_empty());
+        assert!(matches!(
+            commands.get(1),
+            Some(WindowCommand::SetMaximized {
+                maximized: true,
+                ..
+            })
+        ));
+        assert!(
+            session
+                .arm(
+                    WindowId(7),
+                    Some(MainWindowState {
+                        width: 100,
+                        height: 100,
+                        ..state
+                    })
+                )
+                .is_empty()
+        );
     }
 
     #[test]
     fn geometry_waits_for_the_restored_frame_then_roundtrips() {
-        let path = std::env::temp_dir().join(format!("momobako-window-{}-{}.json", std::process::id(), line!()));
+        let path = std::env::temp_dir().join(format!(
+            "momobako-window-{}-{}.json",
+            std::process::id(),
+            line!()
+        ));
         let _ = std::fs::remove_file(&path);
         let mut session = Session::at(path.clone());
-        let state = MainWindowState { x: 40, y: 24, width: 1280, height: 800, maximized: false };
+        let state = MainWindowState {
+            x: 40,
+            y: 24,
+            width: 1280,
+            height: 800,
+            maximized: false,
+        };
         assert!(session.arm(WindowId(1), Some(state)).len() == 1);
         session.on_geometry(&geometry(0.0, 0.0, 1200.0, 800.0, false));
         assert!(!path.exists());
         session.on_geometry(&geometry(40.0, 24.0, 1280.0, 800.0, false));
-        let loaded = load_main_window_state(Some(&path)).expect("read").expect("state");
+        let loaded = load_main_window_state(Some(&path))
+            .expect("read")
+            .expect("state");
         assert_eq!(loaded, state);
         session.on_geometry(&geometry(-8.0, -8.0, 1936.0, 1056.0, true));
-        let maximized = load_main_window_state(Some(&path)).expect("read").expect("state");
-        assert_eq!(maximized, MainWindowState { maximized: true, ..state });
+        let maximized = load_main_window_state(Some(&path))
+            .expect("read")
+            .expect("state");
+        assert_eq!(
+            maximized,
+            MainWindowState {
+                maximized: true,
+                ..state
+            }
+        );
         let _ = std::fs::remove_file(&path);
     }
 
@@ -400,7 +539,13 @@ mod tests {
         let settings = main_window_descriptor();
         assert_eq!(settings.title, "MomoBako");
         assert_eq!(settings.initial_size, (1200.0, 800.0));
-        assert_eq!(settings.minimum_size, (f64::from(MIN_MAIN_WINDOW_WIDTH), f64::from(MIN_MAIN_WINDOW_HEIGHT)));
+        assert_eq!(
+            settings.minimum_size,
+            (
+                f64::from(MIN_MAIN_WINDOW_WIDTH),
+                f64::from(MIN_MAIN_WINDOW_HEIGHT)
+            )
+        );
     }
 
     #[test]

@@ -5,14 +5,14 @@
 //! 发送后把状态、响应头和响应体写回。外部 HTTP 走宿主的 http:// 连接；插件端点走插件调用。
 //! 快照只有这两种传输：领域服务的 ViewModel 在进程里调用，外面调不到，不列。
 
-#[path = "api_playground_view.rs"]
-pub(crate) mod view;
 #[path = "api_http.rs"]
 pub(crate) mod http;
+#[path = "api_playground_view.rs"]
+pub(crate) mod view;
 
 use std::time::Instant;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 pub(crate) use http::{HttpRequest, HttpResponse};
 
@@ -67,7 +67,11 @@ impl Endpoint {
     }
 
     fn plugin_target(&self) -> String {
-        format!("{}:{}", self.plugin_id.clone().unwrap_or_default(), self.plugin_method.clone().unwrap_or_default())
+        format!(
+            "{}:{}",
+            self.plugin_id.clone().unwrap_or_default(),
+            self.plugin_method.clone().unwrap_or_default()
+        )
     }
 
     /// 传输方式的显示名：HTTP、Plugin。
@@ -98,7 +102,10 @@ impl Endpoint {
     /// 补齐传输方式、方法和路径，同 Vue `normalizeEndpoint`。
     fn normalize(&mut self) {
         if self.transport.trim().is_empty() {
-            self.transport = if self.plugin_id.is_some() || self.plugin_method.is_some() || self.method == "PLUGIN" {
+            self.transport = if self.plugin_id.is_some()
+                || self.plugin_method.is_some()
+                || self.method == "PLUGIN"
+            {
                 "plugin-call".into()
             } else {
                 "external-http".into()
@@ -115,20 +122,33 @@ impl Endpoint {
 
 /// 快照为空时的三个外部 API，和 Vue 的 `FALLBACK_ENDPOINTS` 一致。
 fn fallback_endpoints() -> Vec<Endpoint> {
-    let http = |method: &str, path: &str, summary: &str, auth: bool, template: Option<Value>| Endpoint {
-        group: "External Asset API".into(),
-        transport: "external-http".into(),
-        method: method.into(),
-        path: path.into(),
-        summary: summary.into(),
-        plugin_id: None,
-        plugin_method: None,
-        requires_auth: auth,
-        request_template: template,
-    };
+    let http =
+        |method: &str, path: &str, summary: &str, auth: bool, template: Option<Value>| Endpoint {
+            group: "External Asset API".into(),
+            transport: "external-http".into(),
+            method: method.into(),
+            path: path.into(),
+            summary: summary.into(),
+            plugin_id: None,
+            plugin_method: None,
+            requires_auth: auth,
+            request_template: template,
+        };
     vec![
-        http("GET", "/external/v1/health", "检查外部 API 服务状态。", false, None),
-        http("GET", "/external/v1/repositories", "列出可接收外部素材的本地仓库。", true, None),
+        http(
+            "GET",
+            "/external/v1/health",
+            "检查外部 API 服务状态。",
+            false,
+            None,
+        ),
+        http(
+            "GET",
+            "/external/v1/repositories",
+            "列出可接收外部素材的本地仓库。",
+            true,
+            None,
+        ),
         http(
             "POST",
             "/external/v1/assets:add",
@@ -155,9 +175,18 @@ pub(crate) fn endpoints(model: &ShellViewModel) -> Vec<Endpoint> {
         .admin
         .api_design
         .as_ref()
-        .map(|api| api.endpoints.iter().map(Endpoint::from_definition).collect::<Vec<_>>())
+        .map(|api| {
+            api.endpoints
+                .iter()
+                .map(Endpoint::from_definition)
+                .collect::<Vec<_>>()
+        })
         .unwrap_or_default();
-    if snapshot.is_empty() { fallback_endpoints() } else { snapshot }
+    if snapshot.is_empty() {
+        fallback_endpoints()
+    } else {
+        snapshot
+    }
 }
 
 /// Playground 上的输入和请求消息。
@@ -200,14 +229,22 @@ pub struct ApiState {
 
 impl ApiState {
     pub fn transport(&self) -> &str {
-        if self.transport_filter.is_empty() { "all" } else { &self.transport_filter }
+        if self.transport_filter.is_empty() {
+            "all"
+        } else {
+            &self.transport_filter
+        }
     }
 }
 
 /// 选中的端点：键对得上就用它，否则第一个。第一次进来时按它填好方法和目标。
 pub(crate) fn selected(model: &mut ShellViewModel) -> Option<Endpoint> {
     let list = endpoints(model);
-    let current = list.iter().find(|endpoint| endpoint.key() == model.admin.api.selected_key).cloned().or_else(|| list.first().cloned())?;
+    let current = list
+        .iter()
+        .find(|endpoint| endpoint.key() == model.admin.api.selected_key)
+        .cloned()
+        .or_else(|| list.first().cloned())?;
     if current.key() != model.admin.api.selected_key {
         model.admin.api.selected_key = current.key();
         apply_endpoint(&mut model.admin.api, &current);
@@ -218,7 +255,10 @@ pub(crate) fn selected(model: &mut ShellViewModel) -> Option<Endpoint> {
 /// 只读查询：当前选中的端点。
 pub(crate) fn selected_ref(model: &ShellViewModel) -> Option<Endpoint> {
     let list = endpoints(model);
-    list.iter().find(|endpoint| endpoint.key() == model.admin.api.selected_key).cloned().or_else(|| list.first().cloned())
+    list.iter()
+        .find(|endpoint| endpoint.key() == model.admin.api.selected_key)
+        .cloned()
+        .or_else(|| list.first().cloned())
 }
 
 /// 按筛选条件留下的端点。没有命中时下拉框仍列全部，和 Vue 一致。
@@ -262,27 +302,47 @@ fn apply_endpoint(state: &mut ApiState, endpoint: &Endpoint) {
 
 /// 请求体模板：HTTP 的 GET/HEAD 为空，插件默认 `{}`。
 fn request_template(endpoint: &Endpoint) -> String {
-    if endpoint.transport == "external-http" && (endpoint.method == "GET" || endpoint.method == "HEAD") {
+    if endpoint.transport == "external-http"
+        && (endpoint.method == "GET" || endpoint.method == "HEAD")
+    {
         return String::new();
     }
-    let template = endpoint.request_template.clone().or_else(|| match endpoint.transport.as_str() {
-        "plugin-call" => Some(json!({})),
-        _ => None,
-    });
-    template.map(|value| serde_json::to_string_pretty(&value).unwrap_or_default()).unwrap_or_default()
+    let template =
+        endpoint
+            .request_template
+            .clone()
+            .or_else(|| match endpoint.transport.as_str() {
+                "plugin-call" => Some(json!({})),
+                _ => None,
+            });
+    template
+        .map(|value| serde_json::to_string_pretty(&value).unwrap_or_default())
+        .unwrap_or_default()
 }
 
 /// 外部 API 的根地址：去掉 `/external/v1` 后缀。
 pub(crate) fn root_url(model: &ShellViewModel) -> String {
-    let base = model.admin.external.as_ref().map(|item| item.base_url.clone()).unwrap_or_default();
+    let base = model
+        .admin
+        .external
+        .as_ref()
+        .map(|item| item.base_url.clone())
+        .unwrap_or_default();
     let trimmed = base.trim_end_matches('/');
-    trimmed.strip_suffix("/external/v1").unwrap_or(trimmed).to_string()
+    trimmed
+        .strip_suffix("/external/v1")
+        .unwrap_or(trimmed)
+        .to_string()
 }
 
 /// 实际请求地址：自定义目标优先。
 pub(crate) fn request_url(model: &ShellViewModel) -> String {
     let state = &model.admin.api;
-    let target = if state.custom_path.trim().is_empty() { state.path.clone() } else { state.custom_path.trim().to_string() };
+    let target = if state.custom_path.trim().is_empty() {
+        state.path.clone()
+    } else {
+        state.custom_path.trim().to_string()
+    };
     join_url(&root_url(model), &target)
 }
 
@@ -294,7 +354,11 @@ fn join_url(root: &str, path: &str) -> String {
     if lower.starts_with("http://") || lower.starts_with("https://") {
         return path.to_string();
     }
-    format!("{}/{}", root.trim_end_matches('/'), path.trim_start_matches('/'))
+    format!(
+        "{}/{}",
+        root.trim_end_matches('/'),
+        path.trim_start_matches('/')
+    )
 }
 
 fn trim_external_prefix(path: &str) -> String {
@@ -310,7 +374,11 @@ pub(crate) fn request_summary(model: &ShellViewModel) -> String {
     let Some(endpoint) = selected_ref(model) else {
         return "等待契约".into();
     };
-    format!("{} {}", endpoint.transport_label(), target_text(model, &endpoint))
+    format!(
+        "{} {}",
+        endpoint.transport_label(),
+        target_text(model, &endpoint)
+    )
 }
 
 /// 目标框里的文字：HTTP 是完整地址，插件是 `插件:方法`。
@@ -318,7 +386,11 @@ pub(crate) fn target_text(model: &ShellViewModel, endpoint: &Endpoint) -> String
     match endpoint.transport.as_str() {
         "external-http" => {
             let url = request_url(model);
-            if url.is_empty() { endpoint.path.clone() } else { url }
+            if url.is_empty() {
+                endpoint.path.clone()
+            } else {
+                url
+            }
         }
         "plugin-call" => endpoint.plugin_target(),
         _ => endpoint.path.clone(),
@@ -336,7 +408,11 @@ pub(crate) fn can_send(model: &ShellViewModel) -> bool {
     }
     match endpoint.transport.as_str() {
         "external-http" => {
-            let target = if state.custom_path.trim().is_empty() { state.path.clone() } else { state.custom_path.clone() };
+            let target = if state.custom_path.trim().is_empty() {
+                state.path.clone()
+            } else {
+                state.custom_path.clone()
+            };
             !root_url(model).is_empty() && !state.method.is_empty() && !target.trim().is_empty()
         }
         "plugin-call" => endpoint.plugin_id.is_some() && endpoint.plugin_method.is_some(),
@@ -346,7 +422,13 @@ pub(crate) fn can_send(model: &ShellViewModel) -> bool {
 
 /// Token 预览：前 10 位加后 6 位。
 pub(crate) fn token_preview(model: &ShellViewModel) -> String {
-    super::support::mask_token(model.admin.external.as_ref().map(|item| item.token.as_str()))
+    super::support::mask_token(
+        model
+            .admin
+            .external
+            .as_ref()
+            .map(|item| item.token.as_str()),
+    )
 }
 
 /// 归约 Playground 消息。
@@ -362,7 +444,10 @@ pub(crate) fn reduce(model: &mut ShellViewModel, message: ApiMessage) {
             keep_visible_selection(model);
         }
         ApiMessage::SelectEndpoint(key) => {
-            if let Some(endpoint) = endpoints(model).into_iter().find(|endpoint| endpoint.key() == key) {
+            if let Some(endpoint) = endpoints(model)
+                .into_iter()
+                .find(|endpoint| endpoint.key() == key)
+            {
                 model.admin.api.selected_key = key;
                 apply_endpoint(&mut model.admin.api, &endpoint);
             } else {
@@ -392,7 +477,11 @@ pub(crate) fn reduce(model: &mut ShellViewModel, message: ApiMessage) {
 /// 筛选后选中项不在列表里时，换成第一个可见端点。
 fn keep_visible_selection(model: &mut ShellViewModel) {
     let items = visible(model);
-    if items.is_empty() || items.iter().any(|endpoint| endpoint.key() == model.admin.api.selected_key) {
+    if items.is_empty()
+        || items
+            .iter()
+            .any(|endpoint| endpoint.key() == model.admin.api.selected_key)
+    {
         return;
     }
     let first = items[0].clone();
@@ -435,7 +524,12 @@ fn send(model: &mut ShellViewModel) {
             let state = &model.admin.api;
             let mut headers = Vec::new();
             if state.include_auth
-                && let Some(token) = model.admin.external.as_ref().map(|item| item.token.clone()).filter(|token| !token.is_empty())
+                && let Some(token) = model
+                    .admin
+                    .external
+                    .as_ref()
+                    .map(|item| item.token.clone())
+                    .filter(|token| !token.is_empty())
             {
                 headers.push(("Authorization".to_string(), format!("Bearer {token}")));
             }
@@ -449,19 +543,26 @@ fn send(model: &mut ShellViewModel) {
                     Err(error) => return fail(model, error),
                 }
             }
-            let request = HttpRequest { method: state.method.clone(), url: request_url(model), headers, body };
+            let request = HttpRequest {
+                method: state.method.clone(),
+                url: request_url(model),
+                headers,
+                body,
+            };
             model.admin.push_effect(AdminEffect::HttpRequest(request));
         }
-        "plugin-call" => match parse_request(&model.admin.api.request_text, "插件 Payload JSON 无效") {
-            Ok(payload) => model.admin.push_effect(AdminEffect::CallPlugin {
-                plugin_id: endpoint.plugin_id.clone().unwrap_or_default(),
-                method: endpoint.plugin_method.clone().unwrap_or_default(),
-                payload,
-                repository_id: None,
-                origin: PluginCallOrigin::Playground,
-            }),
-            Err(error) => fail(model, error),
-        },
+        "plugin-call" => {
+            match parse_request(&model.admin.api.request_text, "插件 Payload JSON 无效") {
+                Ok(payload) => model.admin.push_effect(AdminEffect::CallPlugin {
+                    plugin_id: endpoint.plugin_id.clone().unwrap_or_default(),
+                    method: endpoint.plugin_method.clone().unwrap_or_default(),
+                    payload,
+                    repository_id: None,
+                    origin: PluginCallOrigin::Playground,
+                }),
+                Err(error) => fail(model, error),
+            }
+        }
         other => fail(model, format!("unsupported transport: {other}")),
     }
 }
@@ -470,9 +571,13 @@ fn send(model: &mut ShellViewModel) {
 fn fail(model: &mut ShellViewModel, error: String) {
     eprintln!("Nana API Playground 请求失败：{error}");
     let state = &mut model.admin.api;
-    state.duration_ms = state.started.take().map(|started| started.elapsed().as_millis());
+    state.duration_ms = state
+        .started
+        .take()
+        .map(|started| started.elapsed().as_millis());
     state.response_status = "ERROR".into();
-    state.response_body = serde_json::to_string_pretty(&json!({ "error": error })).unwrap_or_default();
+    state.response_body =
+        serde_json::to_string_pretty(&json!({ "error": error })).unwrap_or_default();
     state.error = error;
     state.sending = false;
 }
@@ -483,10 +588,20 @@ fn finish_http(model: &mut ShellViewModel, result: Result<HttpResponse, String>)
         Err(error) => return fail(model, error),
     };
     let state = &mut model.admin.api;
-    state.duration_ms = state.started.take().map(|started| started.elapsed().as_millis());
-    state.response_status = format!("{} {}", response.status, response.status_text).trim().to_string();
-    let headers = response.headers.iter().map(|(name, value)| (name.to_ascii_lowercase(), Value::String(value.clone()))).collect::<serde_json::Map<_, _>>();
-    state.response_headers = serde_json::to_string_pretty(&Value::Object(headers)).unwrap_or_default();
+    state.duration_ms = state
+        .started
+        .take()
+        .map(|started| started.elapsed().as_millis());
+    state.response_status = format!("{} {}", response.status, response.status_text)
+        .trim()
+        .to_string();
+    let headers = response
+        .headers
+        .iter()
+        .map(|(name, value)| (name.to_ascii_lowercase(), Value::String(value.clone())))
+        .collect::<serde_json::Map<_, _>>();
+    state.response_headers =
+        serde_json::to_string_pretty(&Value::Object(headers)).unwrap_or_default();
     state.response_body = format_text(&response.body);
     state.sending = false;
 }
@@ -498,7 +613,10 @@ fn finish_plugin(model: &mut ShellViewModel, result: Result<Value, String>) {
     };
     let endpoint = selected_ref(model);
     let state = &mut model.admin.api;
-    state.duration_ms = state.started.take().map(|started| started.elapsed().as_millis());
+    state.duration_ms = state
+        .started
+        .take()
+        .map(|started| started.elapsed().as_millis());
     state.response_status = "OK".into();
     state.response_headers = serde_json::to_string_pretty(&json!({
         "transport": "plugin-call",
@@ -506,7 +624,11 @@ fn finish_plugin(model: &mut ShellViewModel, result: Result<Value, String>) {
         "method": endpoint.as_ref().and_then(|item| item.plugin_method.clone()),
     }))
     .unwrap_or_default();
-    state.response_body = if response.is_null() { String::new() } else { serde_json::to_string_pretty(&response).unwrap_or_default() };
+    state.response_body = if response.is_null() {
+        String::new()
+    } else {
+        serde_json::to_string_pretty(&response).unwrap_or_default()
+    };
     state.sending = false;
 }
 
@@ -531,8 +653,22 @@ fn copy(model: &mut ShellViewModel) {
     let state = &model.admin.api;
     let snippet = match endpoint.transport.as_str() {
         "external-http" => {
-            let token = if state.include_auth { model.admin.external.as_ref().map(|item| item.token.clone()).unwrap_or_default() } else { String::new() };
-            curl(&state.method, &request_url(model), &token, &state.request_text)
+            let token = if state.include_auth {
+                model
+                    .admin
+                    .external
+                    .as_ref()
+                    .map(|item| item.token.clone())
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            curl(
+                &state.method,
+                &request_url(model),
+                &token,
+                &state.request_text,
+            )
         }
         "plugin-call" => match parse_request(&state.request_text, "插件 Payload JSON 无效") {
             Ok(payload) => serde_json::to_string_pretty(&json!({
@@ -556,7 +692,10 @@ fn curl(method: &str, url: &str, token: &str, body: &str) -> String {
     let quote = |value: &str| format!("'{}'", value.replace('\'', "'\"'\"'"));
     let mut lines = vec![format!("curl -X {method} {}", quote(url))];
     if !token.is_empty() {
-        lines.push(format!("  -H {}", quote(&format!("Authorization: Bearer {token}"))));
+        lines.push(format!(
+            "  -H {}",
+            quote(&format!("Authorization: Bearer {token}"))
+        ));
     }
     if method != "GET" && method != "HEAD" {
         lines.push(format!("  -H {}", quote("Content-Type: application/json")));

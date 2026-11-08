@@ -13,14 +13,15 @@ use std::sync::Arc;
 
 use nana_ui::icons_tabler::{FILE, FOLDER_OPEN, PLUS, ROTATE, TRASH};
 use nana_ui::runtime::view::fields::{self, HiddenWhenEmpty};
-use nana_ui::runtime::view::{css, each, signal, widget, AnyView, IntoView, Signal};
+use nana_ui::runtime::view::{AnyView, IntoView, Signal, css, each, signal, widget};
 use nana_ui::runtime::{
-    Activate, AlignSpec, JustifySpec, LengthSpec, NodeStyle, PositionSpec, RadiusTier, SecondaryPress, Select, SelectChanged,
-    SelectOption, SemanticColorRole, Stack, TextChanged, TextInput,
+    Activate, AlignSpec, JustifySpec, LengthSpec, NodeStyle, PositionSpec, RadiusTier,
+    SecondaryPress, Select, SelectChanged, SelectOption, SemanticColorRole, Stack, TextChanged,
+    TextInput,
 };
 
 use super::super::files::{DisplayMode, FileContext, FileDialog, FilesMessage};
-use super::super::menu_focus::{focus_menu, MenuEdge, MenuSurface, MENU_KEYS};
+use super::super::menu_focus::{MENU_KEYS, MenuEdge, MenuSurface, focus_menu};
 use super::super::sidebar::SidebarMessage;
 use super::super::workspace::{LibraryCategory, WorkspacePanel};
 use super::super::{ShellMessage, ShellViewModel};
@@ -46,12 +47,21 @@ struct Crumb {
 /// 工具条上按面板出现的工具和它们能不能点。
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 struct Tools {
-    /// 最近使用分类里的「清空记录」，值是能不能点。
-    clear_recent: Option<bool>,
+    /// 最近使用分类里的「清空记录」。`None` 表示这一页不显示。
+    clear_recent: Option<ClearRecent>,
     /// 目录视图的新建文件和导入。
     create: Option<CreateTools>,
     /// 回收站的还原所有项目和清空回收站，值是能不能点。
     trash: Option<bool>,
+}
+
+/// 最近使用的清空按钮。处理中写成「清空中...」并且不能再点。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ClearRecent {
+    /// 有记录、有仓库、没锁、也没在清空时才能点。
+    enabled: bool,
+    /// 请求已经发出、结果还没回来。
+    clearing: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -70,7 +80,8 @@ impl Tools {
 
     /// 导入菜单开着：展开了而且能导入。
     fn menu_open(&self) -> bool {
-        self.create.is_some_and(|create| create.import_open && create.can_import)
+        self.create
+            .is_some_and(|create| create.import_open && create.can_import)
     }
 }
 
@@ -116,31 +127,65 @@ fn header_text(model: &ShellViewModel, ctx: &FileContext) -> HeaderText {
     } else {
         "当前目录"
     };
-    let subline = if ctx.is_virtual() { virtual_subline(model, ctx) } else { String::new() };
+    let subline = if ctx.is_virtual() {
+        virtual_subline(model, ctx)
+    } else {
+        String::new()
+    };
     HeaderText { eyebrow, subline }
 }
 
 /// 根目录加上每一级路径，都是同一种白底药丸。分类视图只有一枚不可点的标题。
 fn crumbs(model: &ShellViewModel, ctx: &FileContext) -> Vec<Crumb> {
     if ctx.is_virtual() {
-        return vec![Crumb { label: virtual_title(model), key: "file-crumb-root".into(), target: None }];
+        return vec![Crumb {
+            label: virtual_title(model),
+            key: "file-crumb-root".into(),
+            target: None,
+        }];
     }
     let root = if ctx.trash { "回收站" } else { "根目录" };
-    let mut crumbs = vec![Crumb { label: root.into(), key: "file-crumb-root".into(), target: Some(String::new()) }];
+    let mut crumbs = vec![Crumb {
+        label: root.into(),
+        key: "file-crumb-root".into(),
+        target: Some(String::new()),
+    }];
     let mut cursor = String::new();
-    for segment in model.files.current_path.split('/').filter(|segment| !segment.is_empty()) {
-        cursor = if cursor.is_empty() { segment.to_string() } else { format!("{cursor}/{segment}") };
+    for segment in model
+        .files
+        .current_path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+    {
+        cursor = if cursor.is_empty() {
+            segment.to_string()
+        } else {
+            format!("{cursor}/{segment}")
+        };
         let key = format!("file-crumb-{}", cursor.replace('/', "\u{2215}"));
-        crumbs.push(Crumb { label: segment.to_string(), key, target: Some(cursor.clone()) });
+        crumbs.push(Crumb {
+            label: segment.to_string(),
+            key,
+            target: Some(cursor.clone()),
+        });
     }
     crumbs
 }
 
 fn tools(model: &ShellViewModel, ctx: &FileContext) -> Tools {
     let files = &model.files;
-    let recent = model.workspace.panel == WorkspacePanel::Files && model.workspace.library_category == LibraryCategory::Recent;
-    let clear_recent = recent
-        .then(|| model.sidebar.counts.recent > 0 && model.workspace.active_repo_id.is_some() && !model.navigation_locked());
+    let recent = model.workspace.panel == WorkspacePanel::Files
+        && model.workspace.library_category == LibraryCategory::Recent;
+    let clear_recent = recent.then(|| {
+        let clearing = model.sidebar.clearing_recent;
+        ClearRecent {
+            enabled: model.sidebar.counts.recent > 0
+                && model.workspace.active_repo_id.is_some()
+                && !model.navigation_locked()
+                && !clearing,
+            clearing,
+        }
+    });
     let create = (!ctx.trash && !ctx.is_virtual()).then(|| CreateTools {
         mutating: files.mutating,
         can_create: files.can_create(ctx),
@@ -149,7 +194,11 @@ fn tools(model: &ShellViewModel, ctx: &FileContext) -> Tools {
         eagle_open: files.eagle_open,
     });
     let trash = ctx.trash.then(|| files.can_empty_trash(ctx));
-    Tools { clear_recent, create, trash }
+    Tools {
+        clear_recent,
+        create,
+        trash,
+    }
 }
 
 /// 头部：左列位置、右侧工具条，下边一条发丝线。
@@ -173,19 +222,35 @@ pub(super) fn header(signals: HeaderSignals) -> AnyView {
 fn location(signals: HeaderSignals) -> AnyView {
     let text = signals.text;
     let initial = text.get_untracked();
-    let breadcrumbs = each(signals.crumbs, Crumb::clone, crumb).horizontal(8.0).css(css! { flex-wrap: wrap; }).key("file-breadcrumbs");
-    widget(Stack::column(8.0).width(LengthSpec::Shrink).grow(0.0).shrink(0.0))
-        .children((
-            widget(style::eyebrow(initial.eyebrow))
-                .prop::<String, fields::text::value>(move || text.with(|text| text.eyebrow.to_string()))
-                .key("file-location"),
-            breadcrumbs,
-            widget(style::text(initial.subline.clone(), 14.0, 400, SemanticColorRole::Muted, 21.7))
-                .prop::<String, HiddenWhenEmpty<fields::text::value>>(move || text.with(|text| text.subline.clone()))
-                .key("file-location-subline"),
+    let breadcrumbs = each(signals.crumbs, Crumb::clone, crumb)
+        .horizontal(8.0)
+        .css(css! { flex-wrap: wrap; })
+        .key("file-breadcrumbs");
+    widget(
+        Stack::column(8.0)
+            .width(LengthSpec::Shrink)
+            .grow(0.0)
+            .shrink(0.0),
+    )
+    .children((
+        widget(style::eyebrow(initial.eyebrow))
+            .prop::<String, fields::text::value>(move || text.with(|text| text.eyebrow.to_string()))
+            .key("file-location"),
+        breadcrumbs,
+        widget(style::text(
+            initial.subline.clone(),
+            14.0,
+            400,
+            SemanticColorRole::Muted,
+            21.7,
         ))
-        .key("file-location-column")
-        .into_any()
+        .prop::<String, HiddenWhenEmpty<fields::text::value>>(move || {
+            text.with(|text| text.subline.clone())
+        })
+        .key("file-location-subline"),
+    ))
+    .key("file-location-column")
+    .into_any()
 }
 
 /// `files-breadcrumbs__item`：高 28、左右 10、白底、弱化色 14px/500，单行不折。
@@ -200,7 +265,9 @@ fn crumb(crumb: Crumb) -> AnyView {
     let button = style::styled_button(crumb.label, None, look).disabled(crumb.target.is_none());
     let mut node = widget(button).key(crumb.key);
     if let Some(target) = crumb.target {
-        node = node.on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(file_message(FilesMessage::OpenPath(target.clone()))));
+        node = node.on_cx(move |_, _: &Activate, cx| {
+            cx.dispatch_program_all(file_message(FilesMessage::OpenPath(target.clone())))
+        });
     }
     node.into_any()
 }
@@ -210,7 +277,9 @@ fn virtual_title(model: &ShellViewModel) -> String {
     if model.workspace.panel == WorkspacePanel::SmartFolder {
         return model.sidebar.smart_title();
     }
-    category_label(model.workspace.library_category).unwrap_or("分类视图").to_string()
+    category_label(model.workspace.library_category)
+        .unwrap_or("分类视图")
+        .to_string()
 }
 
 /// 虚拟视图的说明行：智能文件夹是查询结果的摘要（Vue `smartFolderSummary`，查回来以前为空），分类视图是
@@ -221,14 +290,17 @@ fn virtual_subline(model: &ShellViewModel, ctx: &FileContext) -> String {
     }
     let files = &model.files;
     let count = if ctx.category_virtual {
-        files.rows.iter().filter(|row| row.kind != "directory").count()
+        files.category_rows.len()
     } else {
         files.rows.len()
     };
     match model.workspace.library_category {
         LibraryCategory::All => String::new(),
         LibraryCategory::Recent => format!("按最近访问时间排序，共 {count} 项。"),
-        category => format!("{}共 {count} 项。", category_label(category).unwrap_or("分类视图")),
+        category => format!(
+            "{}共 {count} 项。",
+            category_label(category).unwrap_or("分类视图")
+        ),
     }
 }
 
@@ -245,20 +317,64 @@ fn category_label(category: LibraryCategory) -> Option<&'static str> {
 fn toolbar(signals: HeaderSignals) -> AnyView {
     let tools = signals.tools;
     let shown = move |pick: fn(&Tools) -> bool| move || tools.with(pick);
-    let clear = widget(style::styled_button("清空记录", Some(TRASH), ButtonLook::TOOLBAR))
-        .visible(shown(|tools| tools.clear_recent.is_some()))
-        .prop::<bool, fields::button::disabled>(move || tools.with(|tools| !tools.clear_recent.unwrap_or(false)))
-        .key("file-clear-recent")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Sidebar(SidebarMessage::ClearRecent)));
-    let trash_look = ButtonLook { foreground: SemanticColorRole::Danger, ..ButtonLook::TOOLBAR };
+    // Vue：有访问记录才能点；请求在途时改成「清空中...」并禁用，图标仍是垃圾桶。
+    let clear_label = move || {
+        if tools.with(|tools| tools.clear_recent.is_some_and(|item| item.clearing)) {
+            "清空中...".to_string()
+        } else {
+            "清空记录".to_string()
+        }
+    };
+    let clear = widget(style::styled_button(
+        clear_label(),
+        Some(TRASH),
+        ButtonLook::TOOLBAR,
+    ))
+    .visible(shown(|tools| tools.clear_recent.is_some()))
+    .prop::<bool, fields::button::disabled>(move || {
+        tools.with(|tools| !tools.clear_recent.is_some_and(|item| item.enabled))
+    })
+    .prop::<String, fields::button::label>(clear_label)
+    .key("file-clear-recent")
+    .on_cx(|_, _: &Activate, cx| {
+        cx.dispatch_program_all(ShellMessage::Sidebar(SidebarMessage::ClearRecent))
+    });
+    let trash_look = ButtonLook {
+        foreground: SemanticColorRole::Danger,
+        ..ButtonLook::TOOLBAR
+    };
     let items = (
         display_mode_field(signals.mode),
         clear,
         create_name_field(signals),
-        tool_button("建文件", FILE, "file-create-file", ButtonLook::TOOLBAR, tools, |tools| tools.create.map(|create| create.can_create), FilesMessage::SubmitCreateFile),
+        tool_button(
+            "建文件",
+            FILE,
+            "file-create-file",
+            ButtonLook::TOOLBAR,
+            tools,
+            |tools| tools.create.map(|create| create.can_create),
+            FilesMessage::SubmitCreateFile,
+        ),
         import_anchor(tools),
-        tool_button("还原所有项目", ROTATE, "file-restore-all", ButtonLook::TOOLBAR, tools, |tools| tools.trash, FilesMessage::RestoreAll),
-        tool_button("清空回收站", TRASH, "file-empty-trash", trash_look, tools, |tools| tools.trash, FilesMessage::EmptyTrash),
+        tool_button(
+            "还原所有项目",
+            ROTATE,
+            "file-restore-all",
+            ButtonLook::TOOLBAR,
+            tools,
+            |tools| tools.trash,
+            FilesMessage::RestoreAll,
+        ),
+        tool_button(
+            "清空回收站",
+            TRASH,
+            "file-empty-trash",
+            trash_look,
+            tools,
+            |tools| tools.trash,
+            FilesMessage::EmptyTrash,
+        ),
     );
     widget(
         Stack::row(10.0)
@@ -290,7 +406,9 @@ fn tool_button(
 ) -> AnyView {
     widget(style::styled_button(label, Some(icon), look))
         .visible(move || tools.with(|tools| state(tools).is_some()))
-        .prop::<bool, fields::button::disabled>(move || tools.with(|tools| !state(tools).unwrap_or(false)))
+        .prop::<bool, fields::button::disabled>(move || {
+            tools.with(|tools| !state(tools).unwrap_or(false))
+        })
         .key(key)
         .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(file_message(message.clone())))
         .into_any()
@@ -301,18 +419,28 @@ fn tool_button(
 /// Nana `Select` 总会画自己的底和边。这里让它四边各伸出 1px，放进一个裁剪层：边线被裁掉，
 /// 底色和外框同为 `--bg`，看上去就是 Vue 里框中直接放下拉的样子；角色和键盘行为仍是下拉框。
 fn display_mode_field(mode: Signal<DisplayMode>) -> AnyView {
-    let options = [DisplayMode::Adaptive, DisplayMode::Masonry, DisplayMode::Grid, DisplayMode::List]
-        .into_iter()
-        .map(|mode| SelectOption::new(mode.storage_value(), mode.label()))
-        .collect::<Vec<_>>();
+    let options = [
+        DisplayMode::Adaptive,
+        DisplayMode::Masonry,
+        DisplayMode::Grid,
+        DisplayMode::List,
+    ]
+    .into_iter()
+    .map(|mode| SelectOption::new(mode.storage_value(), mode.label()))
+    .collect::<Vec<_>>();
     let current = mode.get_untracked();
-    let mut select = Select::new(Some(current.storage_value().to_string())).options(options).placeholder("展示方式");
+    let mut select = Select::new(Some(current.storage_value().to_string()))
+        .options(options)
+        .placeholder("展示方式");
     select.style.foreground = Some(SemanticColorRole::Text);
     {
         let layout = Arc::make_mut(&mut select.style.layout);
         layout.height = Some(LengthSpec::Px(34.0));
         layout.min_height = Some(LengthSpec::Px(34.0));
-        layout.width = Some(LengthSpec::CalcPercentOffset { percent: 100.0, offset_px: 2.0 });
+        layout.width = Some(LengthSpec::CalcPercentOffset {
+            percent: 100.0,
+            offset_px: 2.0,
+        });
         layout.min_width = Some(LengthSpec::Px(0.0));
         layout.margin_left = Some(LengthSpec::Px(-1.0));
         layout.margin_top = Some(LengthSpec::Px(-1.0));
@@ -337,14 +465,19 @@ fn display_mode_field(mode: Signal<DisplayMode>) -> AnyView {
         .gap(0.0)
         .with_layout(|layout| layout.padding_right = Some(LengthSpec::Px(0.0)));
     let select = widget(select)
-        .prop::<Option<Arc<str>>, fields::select::value>(move || Some(Arc::from(mode.with(|mode| mode.storage_value()))))
+        .prop::<Option<Arc<str>>, fields::select::value>(move || {
+            Some(Arc::from(mode.with(|mode| mode.storage_value())))
+        })
         .key("file-display-mode")
         .on_cx(|_, event: &SelectChanged, cx| {
-            cx.dispatch_program_all(file_message(FilesMessage::SetDisplayMode(DisplayMode::parse(&event.value))));
+            cx.dispatch_program_all(file_message(FilesMessage::SetDisplayMode(
+                DisplayMode::parse(&event.value),
+            )));
         });
     widget(frame)
         .children((
-            widget(style::text("展示方式", 12.0, 400, SemanticColorRole::Muted, 18.6).nowrap(true)).key("file-display-label"),
+            widget(style::text("展示方式", 12.0, 400, SemanticColorRole::Muted, 18.6).nowrap(true))
+                .key("file-display-label"),
             widget(clip).key("file-display-clip").children((select,)),
         ))
         .key("file-display-field")
@@ -353,11 +486,13 @@ fn display_mode_field(mode: Signal<DisplayMode>) -> AnyView {
 
 /// `files-toolbar__field`：加号图标和不带边的输入，外面一圈 `--border`，至少 220 宽。
 /// 窄到放不下 220 时跟着工具条收窄，不压到左边的面包屑上。
+///
+/// 变更进行中只禁用「建文件」，这个输入框照 Vue 仍可改：下一份名字可以先写着。
+/// 建成成功才清空，移动、导入这些变更不清。
 fn create_name_field(signals: HeaderSignals) -> AnyView {
     let tools = signals.tools;
     let draft = signals.create_name;
-    let mutating = tools.with_untracked(|tools| tools.create().mutating);
-    let mut input = TextInput::new(draft.current()).placeholder("新建空文件，例如 note.txt").disabled(mutating);
+    let mut input = TextInput::new(draft.current()).placeholder("新建空文件，例如 note.txt");
     input.style.border = None;
     input.style.background = None;
     input.style.radius = None;
@@ -380,17 +515,25 @@ fn create_name_field(signals: HeaderSignals) -> AnyView {
     layout.padding_right = Some(LengthSpec::Px(0.0));
     layout.font_size = Some(14.0);
     layout.border_width = Some(0.0);
-    let frame = field_box(0.0, 34.0).width(LengthSpec::Px(222.0)).shrink(1.0);
+    let frame = field_box(0.0, 34.0)
+        .width(LengthSpec::Px(222.0))
+        .shrink(1.0);
     widget(frame)
         .visible(move || tools.with(|tools| tools.create.is_some()))
         .children((
-            widget(nana_ui::runtime::IconGlyph::new(PLUS).size(14.0).role(SemanticColorRole::Muted)).key("file-create-icon"),
+            widget(
+                nana_ui::runtime::IconGlyph::new(PLUS)
+                    .size(14.0)
+                    .role(SemanticColorRole::Muted),
+            )
+            .key("file-create-icon"),
             widget(input)
                 .model(draft.signal())
-                .prop::<bool, fields::text_input::disabled>(move || tools.with(|tools| tools.create().mutating))
                 .key("file-create-name")
                 .on_cx(|_, event: &TextChanged, cx| {
-                    cx.dispatch_program_all(file_message(FilesMessage::SetCreateName(event.value.to_string())));
+                    cx.dispatch_program_all(file_message(FilesMessage::SetCreateName(
+                        event.value.to_string(),
+                    )));
                 }),
         ))
         .key("file-create-field")
@@ -417,23 +560,32 @@ fn field_box(min_width: f32, height: f32) -> Stack {
 /// 「导入」是菜单按钮：点击开合菜单；焦点在它上面时 ArrowDown / ArrowUp（还有菜单键）打开菜单，
 /// 焦点落在首项或末项。
 fn import_anchor(tools: Signal<Tools>) -> AnyView {
-    let button = widget(style::styled_button("导入", Some(FOLDER_OPEN), ButtonLook::TOOLBAR).has_popup(true))
-        .prop::<bool, fields::button::disabled>(move || tools.with(|tools| !tools.create().can_import))
-        .key("file-import")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(file_message(FilesMessage::ToggleImportMenu)))
-        .on_cx(|_, event: &SecondaryPress, cx| {
-            let Some(edge) = MenuEdge::of_press(event) else {
-                return;
-            };
-            cx.dispatch_program_all(file_message(FilesMessage::OpenImportMenu));
-            cx.dispatch_program_all(focus_menu(MenuSurface::Import, edge));
-        })
-        .into_any();
-    widget(Stack::row(0.0).grow(0.0).shrink(0.0).with_layout(|layout| layout.position = PositionSpec::Relative))
-        .visible(move || tools.with(|tools| tools.create.is_some()))
-        .children((button, outside_closer(tools), import_menu(tools)))
-        .key("file-import-anchor")
-        .into_any()
+    let button = widget(
+        style::styled_button("导入", Some(FOLDER_OPEN), ButtonLook::TOOLBAR).has_popup(true),
+    )
+    .prop::<bool, fields::button::disabled>(move || tools.with(|tools| !tools.create().can_import))
+    .key("file-import")
+    .on_cx(|_, _: &Activate, cx| {
+        cx.dispatch_program_all(file_message(FilesMessage::ToggleImportMenu))
+    })
+    .on_cx(|_, event: &SecondaryPress, cx| {
+        let Some(edge) = MenuEdge::of_press(event) else {
+            return;
+        };
+        cx.dispatch_program_all(file_message(FilesMessage::OpenImportMenu));
+        cx.dispatch_program_all(focus_menu(MenuSurface::Import, edge));
+    })
+    .into_any();
+    widget(
+        Stack::row(0.0)
+            .grow(0.0)
+            .shrink(0.0)
+            .with_layout(|layout| layout.position = PositionSpec::Relative),
+    )
+    .visible(move || tools.with(|tools| tools.create.is_some()))
+    .children((button, outside_closer(tools), import_menu(tools)))
+    .key("file-import-anchor")
+    .into_any()
 }
 
 /// 菜单打开时铺满窗口的透明层：点在菜单外就收起，和 Vue 的全局 pointerdown 一样。
@@ -450,7 +602,9 @@ fn outside_closer(tools: Signal<Tools>) -> AnyView {
         .visible(move || tools.with(Tools::menu_open))
         .content(widget(Stack::column(0.0)))
         .key("file-import-closer")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(file_message(FilesMessage::ToggleImportMenu)))
+        .on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program_all(file_message(FilesMessage::ToggleImportMenu))
+        })
         .into_any()
 }
 
@@ -459,16 +613,43 @@ fn outside_closer(tools: Signal<Tools>) -> AnyView {
 /// Vue 这里用了未定义的 `--panel-bg`，回退成 #15171a 深底、浅色主题下字看不清；这里按设计意图用浮层色。
 fn import_menu(tools: Signal<Tools>) -> AnyView {
     let rows = (
-        menu_item("从文件夹导入", "file-import-folder", tools, FilesMessage::OpenDialog(FileDialog::Import)),
-        menu_item("从 ZIP 导入", "file-import-zip", tools, FilesMessage::OpenDialog(FileDialog::ImportArchive)),
-        menu_item("从 Eagle 导入", "file-import-eagle", tools, FilesMessage::ToggleEagleImport),
-        widget(Stack::column(6.0).with_layout(|layout| layout.padding_top = Some(LengthSpec::Px(2.0))))
-            .visible(move || tools.with(|tools| tools.create().eagle_open))
-            .children((
-                menu_item("复制导入", "file-import-eagle-copy", tools, FilesMessage::OpenEagle("copy".into())),
-                menu_item("剪切导入", "file-import-eagle-move", tools, FilesMessage::OpenEagle("move".into())),
-            ))
-            .key("file-import-eagle-actions"),
+        menu_item(
+            "从文件夹导入",
+            "file-import-folder",
+            tools,
+            FilesMessage::OpenDialog(FileDialog::Import),
+        ),
+        menu_item(
+            "从 ZIP 导入",
+            "file-import-zip",
+            tools,
+            FilesMessage::OpenDialog(FileDialog::ImportArchive),
+        ),
+        menu_item(
+            "从 Eagle 导入",
+            "file-import-eagle",
+            tools,
+            FilesMessage::ToggleEagleImport,
+        ),
+        widget(
+            Stack::column(6.0).with_layout(|layout| layout.padding_top = Some(LengthSpec::Px(2.0))),
+        )
+        .visible(move || tools.with(|tools| tools.create().eagle_open))
+        .children((
+            menu_item(
+                "复制导入",
+                "file-import-eagle-copy",
+                tools,
+                FilesMessage::OpenEagle("copy".into()),
+            ),
+            menu_item(
+                "剪切导入",
+                "file-import-eagle-move",
+                tools,
+                FilesMessage::OpenEagle("move".into()),
+            ),
+        ))
+        .key("file-import-eagle-actions"),
     );
     let surface = Stack::column(6.0)
         .width(LengthSpec::Shrink)
@@ -483,12 +664,15 @@ fn import_menu(tools: Signal<Tools>) -> AnyView {
             layout.offset_right = Some(LengthSpec::Px(0.0));
             layout.z_index = Some(20);
         });
-    widget(style::with_shadows(surface, vec![style::shadow(16.0, 32.0, 0.0, 0.24)]))
-        .visible(move || tools.with(Tools::menu_open))
-        .children(rows)
-        .key("file-import-menu")
-        .roving_focus(MENU_KEYS)
-        .into_any()
+    widget(style::with_shadows(
+        surface,
+        vec![style::shadow(16.0, 32.0, 0.0, 0.24)],
+    ))
+    .visible(move || tools.with(Tools::menu_open))
+    .children(rows)
+    .key("file-import-menu")
+    .roving_focus(MENU_KEYS)
+    .into_any()
 }
 
 /// `files-toolbar__menu-item`：撑满菜单宽，内边距上下 10、左右 12，文字靠左，圆角 10，悬停 `--bg-hover`。
@@ -496,21 +680,32 @@ fn import_menu(tools: Signal<Tools>) -> AnyView {
 ///
 /// Vue 里 Lilia 的全局 `button { height: 32px }` 把它压成 32 高，文字溢出内容盒；
 /// 这里按组件自己声明的内边距画：10 + 21.7 行高 + 10。
-fn menu_item(label: &'static str, key: &'static str, tools: Signal<Tools>, message: FilesMessage) -> AnyView {
+fn menu_item(
+    label: &'static str,
+    key: &'static str,
+    tools: Signal<Tools>,
+    message: FilesMessage,
+) -> AnyView {
     const LINE: f32 = 21.7;
     let enabled = move || tools.with(|tools| !tools.create().mutating);
     let initial = tools.with_untracked(|tools| !tools.create().mutating);
-    widget(nana_ui::runtime::ListItem::new(label).disabled(!initial).style(menu_item_style(initial)))
-        .prop::<bool, fields::list_item::disabled>(move || !enabled())
-        .prop::<NodeStyle, StyleField>(move || menu_item_style(enabled()))
-        .content(widget(style::text(label, 14.0, 500, SemanticColorRole::Text, LINE).nowrap(true)))
-        .key(key)
-        .on_cx(move |_, _: &Activate, cx| {
-            if tools.with_untracked(|tools| !tools.create().mutating) {
-                cx.dispatch_program_all(file_message(message.clone()));
-            }
-        })
-        .into_any()
+    widget(
+        nana_ui::runtime::ListItem::new(label)
+            .disabled(!initial)
+            .style(menu_item_style(initial)),
+    )
+    .prop::<bool, fields::list_item::disabled>(move || !enabled())
+    .prop::<NodeStyle, StyleField>(move || menu_item_style(enabled()))
+    .content(widget(
+        style::text(label, 14.0, 500, SemanticColorRole::Text, LINE).nowrap(true),
+    ))
+    .key(key)
+    .on_cx(move |_, _: &Activate, cx| {
+        if tools.with_untracked(|tools| !tools.create().mutating) {
+            cx.dispatch_program_all(file_message(message.clone()));
+        }
+    })
+    .into_any()
 }
 
 fn menu_item_style(enabled: bool) -> NodeStyle {
@@ -519,7 +714,10 @@ fn menu_item_style(enabled: bool) -> NodeStyle {
     let mut style = NodeStyle::default();
     style.radius = Some(RadiusTier::Lg);
     style.foreground = Some(SemanticColorRole::Text);
-    style.interaction.hovered = nana_ui::runtime::SemanticPaint { background: Some(SemanticColorRole::Hover), ..Default::default() };
+    style.interaction.hovered = nana_ui::runtime::SemanticPaint {
+        background: Some(SemanticColorRole::Hover),
+        ..Default::default()
+    };
     style.interaction.pressed = style.interaction.hovered;
     style.interaction.disabled = nana_ui::runtime::SemanticPaint::default();
     let layout = Arc::make_mut(&mut style.layout);

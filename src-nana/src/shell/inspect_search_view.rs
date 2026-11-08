@@ -9,14 +9,18 @@
 //! 筛选栏的视图在 `search_filter_bar.rs`，放在哪里由壳层决定。
 
 use nana_ui::icons_tabler::LOADER_2;
-use nana_ui::runtime::view::{computed, css, each, fields, widget, AnyView, IntoView, Item, Signal, Store, StoreList, StorePath};
+use nana_ui::runtime::view::{
+    AnyView, IntoView, Item, Signal, Store, StoreList, StorePath, computed, css, each, fields,
+    widget,
+};
 use nana_ui::runtime::{
-    Activate, AlignSpec, IconGlyph, JustifySpec, LengthSpec, ListItem, RadiusTier, SemanticColorRole, Stack,
+    Activate, AlignSpec, IconGlyph, JustifySpec, LengthSpec, ListItem, RadiusTier,
+    SemanticColorRole, Stack,
 };
 use nana_ui_core::BorderStyle;
 
-use super::inspect::InspectMessage;
 use super::ShellMessage;
+use super::inspect::InspectMessage;
 
 #[path = "search_filter_bar.rs"]
 mod filter_bar_view;
@@ -33,8 +37,8 @@ mod widgets;
 
 pub(crate) use filter_bar_view::resident_filter_bar;
 pub(crate) use filter_state::{FilterBarSignals, FilterBarView};
-pub(crate) use panel_state::{SearchPanelSignals, SearchPanelView};
 use panel_state::{HitChip, HitRow, SearchHead, SearchStatus};
+pub(crate) use panel_state::{SearchPanelSignals, SearchPanelView};
 
 /// 结果行在 Store 里的句柄。
 type HitItem = Item<Store<Vec<HitRow>>, String, HitRow>;
@@ -61,7 +65,13 @@ pub(crate) fn resident_search_panel(signals: SearchPanelSignals) -> AnyView {
             .grow(0.0)
             .shrink(0.0),
     )
-    .children((header(signals.head), error_state(status), searching_state(status), empty_state(status), results))
+    .children((
+        header(signals.head),
+        error_state(status),
+        searching_state(status),
+        empty_state(status),
+        results,
+    ))
     .key("search-workbench-panel")
     .into_any()
 }
@@ -76,36 +86,72 @@ fn header(head: Signal<SearchHead>) -> AnyView {
             .shrink(1.0),
     )
     .children((
-        widgets::bound(widgets::eyebrow(String::new()), move || head.with(|head| head.scope.clone())).key("search-workbench-scope"),
-        widget(widgets::margin_top(widgets::label("搜索结果", 24.0, 700, SemanticColorRole::Text), 4.0)).key("search-workbench-title"),
+        widgets::bound(widgets::eyebrow(String::new()), move || {
+            head.with(|head| head.scope.clone())
+        })
+        .key("search-workbench-scope"),
+        widget(widgets::margin_top(
+            widgets::label("搜索结果", 24.0, 700, SemanticColorRole::Text),
+            4.0,
+        ))
+        .key("search-workbench-title"),
         widgets::bound(
-            widgets::margin_top(widgets::wrapping_label(String::new(), 14.0, 400, SemanticColorRole::Muted), 8.0),
+            widgets::margin_top(
+                widgets::wrapping_label(String::new(), 14.0, 400, SemanticColorRole::Muted),
+                8.0,
+            ),
             move || head.with(|head| head.summary.clone()),
         )
         .key("search-workbench-summary"),
     ));
-    let stats = widget(Stack::row(10.0).align(AlignSpec::Center).wrap(true).grow(0.0).shrink(0.0))
-        .children((
-            widgets::stat(move || head.with(|head| head.repositories.clone()), "search-workbench-repositories"),
-            widgets::stat(move || head.with(|head| head.hits.clone()), "search-workbench-hits"),
-        ))
-        .key("search-workbench-stats");
-    widget(Stack::bar(16.0).align(AlignSpec::Start).justify(JustifySpec::SpaceBetween))
-        .children((title, stats))
-        .key("search-workbench-header")
-        .into_any()
+    let stats = widget(
+        Stack::row(10.0)
+            .align(AlignSpec::Center)
+            .wrap(true)
+            .grow(0.0)
+            .shrink(0.0),
+    )
+    .children((
+        widgets::stat(
+            move || head.with(|head| head.repositories.clone()),
+            "search-workbench-repositories",
+        ),
+        widgets::stat(
+            move || head.with(|head| head.hits.clone()),
+            "search-workbench-hits",
+        ),
+    ))
+    .key("search-workbench-stats");
+    widget(
+        Stack::bar(16.0)
+            .align(AlignSpec::Start)
+            .justify(JustifySpec::SpaceBetween),
+    )
+    .children((title, stats))
+    .key("search-workbench-header")
+    .into_any()
 }
 
 /// Vue `.asset-browser__state`：搜索进行中的一行提示。
 fn searching_state(status: Signal<SearchStatus>) -> AnyView {
-    widget(state_box().outline(SemanticColorRole::Border, 1.0).surface(SemanticColorRole::Background))
-        .visible(move || status.with(|status| status.searching))
-        .children((
-            widget(IconGlyph::new(LOADER_2).size(16.0)).key("search-workbench-spinner"),
-            widget(widgets::label("正在执行全局搜索", 14.0, 400, SemanticColorRole::Muted)).key("search-workbench-searching-text"),
+    widget(
+        state_box()
+            .outline(SemanticColorRole::Border, 1.0)
+            .surface(SemanticColorRole::Background),
+    )
+    .visible(move || status.with(|status| status.searching))
+    .children((
+        widget(IconGlyph::new(LOADER_2).size(16.0)).key("search-workbench-spinner"),
+        widget(widgets::label(
+            "正在执行全局搜索",
+            14.0,
+            400,
+            SemanticColorRole::Muted,
         ))
-        .key("search-workbench-searching")
-        .into_any()
+        .key("search-workbench-searching-text"),
+    ))
+    .key("search-workbench-searching")
+    .into_any()
 }
 
 /// 搜索失败。Vue 只把错误写进全局状态、面板里不显示；这里用 `.asset-browser__state--error`
@@ -113,9 +159,10 @@ fn searching_state(status: Signal<SearchStatus>) -> AnyView {
 fn error_state(status: Signal<SearchStatus>) -> AnyView {
     widget(state_box().outline(SemanticColorRole::Danger, 1.0))
         .visible(move || status.with(|status| !status.error.is_empty()))
-        .children((widgets::bound(widgets::wrapping_label(String::new(), 14.0, 400, SemanticColorRole::Danger), move || {
-            status.with(|status| status.error.clone())
-        })
+        .children((widgets::bound(
+            widgets::wrapping_label(String::new(), 14.0, 400, SemanticColorRole::Danger),
+            move || status.with(|status| status.error.clone()),
+        )
         .key("search-workbench-error-text"),))
         .key("search-workbench-error")
         .into_any()
@@ -138,7 +185,15 @@ fn state_box() -> Stack {
 /// Vue `.search-workbench__empty`：虚线框，`--bg-subtle` 底，标题 18px、说明 14px。
 fn empty_state(status: Signal<SearchStatus>) -> AnyView {
     let text = move |pick: fn(&(String, String)) -> &String| {
-        move || status.with(|status| status.empty.as_ref().map(|empty| pick(empty).clone()).unwrap_or_default())
+        move || {
+            status.with(|status| {
+                status
+                    .empty
+                    .as_ref()
+                    .map(|empty| pick(empty).clone())
+                    .unwrap_or_default()
+            })
+        }
     };
     widget(
         Stack::column(8.0)
@@ -156,9 +211,16 @@ fn empty_state(status: Signal<SearchStatus>) -> AnyView {
     )
     .visible(move || status.with(|status| status.empty.is_some()))
     .children((
-        widgets::bound(widgets::label(String::new(), 18.0, 700, SemanticColorRole::Text), text(|empty| &empty.0)).key("search-workbench-empty-title"),
-        widgets::bound(widgets::wrapping_label(String::new(), 14.0, 400, SemanticColorRole::Muted), text(|empty| &empty.1))
-            .key("search-workbench-empty-message"),
+        widgets::bound(
+            widgets::label(String::new(), 18.0, 700, SemanticColorRole::Text),
+            text(|empty| &empty.0),
+        )
+        .key("search-workbench-empty-title"),
+        widgets::bound(
+            widgets::wrapping_label(String::new(), 14.0, 400, SemanticColorRole::Muted),
+            text(|empty| &empty.1),
+        )
+        .key("search-workbench-empty-message"),
     ))
     .key("search-workbench-empty")
     .into_any()
@@ -208,25 +270,44 @@ fn result_row(item: HitItem) -> AnyView {
             .grow(0.0)
             .shrink(0.0)
             .radius(RadiusTier::Lg)
-            .with_layout(|layout| layout.paint.background_image = Some(paint::hit_tile_background()))
+            .with_layout(|layout| {
+                layout.paint.background_image = Some(paint::hit_tile_background())
+            })
             .painter(paint::HitIconPainter),
     )
     .key(format!("search-hit-icon-{key}"));
-    let body = widget(Stack::column(4.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)).grow(1.0).shrink(1.0))
-        .children((
-            widgets::bound(widgets::wrapping_label(String::new(), 14.0, 700, SemanticColorRole::Text), hit_text(item, |row| &row.filename))
-                .key(format!("search-hit-name-{key}")),
-            widgets::bound(widgets::wrapping_label(String::new(), 14.0, 500, SemanticColorRole::Muted), hit_text(item, |row| &row.detail))
-                .key(format!("search-hit-path-{key}")),
-        ))
-        .key(format!("search-hit-body-{key}"));
+    let body = widget(
+        Stack::column(4.0)
+            .width(LengthSpec::Fill)
+            .min_width(LengthSpec::Px(0.0))
+            .grow(1.0)
+            .shrink(1.0),
+    )
+    .children((
+        widgets::bound(
+            widgets::wrapping_label(String::new(), 14.0, 700, SemanticColorRole::Text),
+            hit_text(item, |row| &row.filename),
+        )
+        .key(format!("search-hit-name-{key}")),
+        widgets::bound(
+            widgets::wrapping_label(String::new(), 14.0, 500, SemanticColorRole::Muted),
+            hit_text(item, |row| &row.detail),
+        )
+        .key(format!("search-hit-path-{key}")),
+    ))
+    .key(format!("search-hit-body-{key}"));
     // 行删掉时芯片读成空表，不去读不存在的行。
     let chips = computed(move || item.try_with(|row| row.chips.clone()).unwrap_or_default());
     let chip_key = key.clone();
-    let tags = each(chips, HitChip::clone, move |chip: HitChip| widgets::hint_chip(&chip.text, format!("search-hit-chip-{chip_key}-{}", chip.index)))
-        .horizontal(6.0)
-        .css(chips_style())
-        .key(format!("search-hit-tags-{key}"));
+    let tags = each(chips, HitChip::clone, move |chip: HitChip| {
+        widgets::hint_chip(
+            &chip.text,
+            format!("search-hit-chip-{chip_key}-{}", chip.index),
+        )
+    })
+    .horizontal(6.0)
+    .css(chips_style())
+    .key(format!("search-hit-tags-{key}"));
     widget(list_item)
         .prop::<String, fields::list_item::label>(hit_text(item, |row| &row.filename))
         .key(format!("search-hit-{key}"))

@@ -119,7 +119,8 @@ pub(super) fn ensure_thumbnail_for_file(
         &repo.summary.repo_id,
         &repo.summary.path,
     ));
-    let existing = existing_thumbnail_path.filter(|path| thumbnail_path_is_valid(&expected_dir, path));
+    let existing =
+        existing_thumbnail_path.filter(|path| thumbnail_path_is_valid(&expected_dir, path));
     if !refresh {
         if existing.is_some() {
             return Ok(existing);

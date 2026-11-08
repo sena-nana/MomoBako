@@ -11,8 +11,8 @@
 //! 键路径变了就不恢复，只记日志。想在内容换了以后从头开始的滚动容器，用内容身份做键即可。
 
 use nana_ui::runtime::{
-    component_descriptors, AppContext, ComponentTypeId, DocumentId, Entity, ScrollOffset, ScrollView, StableNodeId,
-    TextSelection, UiWorld,
+    AppContext, ComponentTypeId, DocumentId, Entity, ScrollOffset, ScrollView, StableNodeId,
+    TextSelection, UiWorld, component_descriptors,
 };
 
 /// 卸载前记下的全部状态。
@@ -46,21 +46,39 @@ struct KeptScroll {
 }
 
 /// 卸载前记下焦点、选区和各滚动容器的偏移。只看 `roots` 下面的节点。
-pub(super) fn capture(context: &AppContext, document: DocumentId, roots: &[StableNodeId]) -> KeptState {
-    KeptState { focus: capture_focus(context, document, roots), scrolls: capture_scrolls(context, document, roots) }
+pub(super) fn capture(
+    context: &AppContext,
+    document: DocumentId,
+    roots: &[StableNodeId],
+) -> KeptState {
+    KeptState {
+        focus: capture_focus(context, document, roots),
+        scrolls: capture_scrolls(context, document, roots),
+    }
 }
 
 /// 焦点在这块内容里才记。焦点在别的内容或常驻骨架上时不归这次重挂管。
-fn capture_focus(context: &AppContext, document: DocumentId, roots: &[StableNodeId]) -> Option<KeptFocus> {
+fn capture_focus(
+    context: &AppContext,
+    document: DocumentId,
+    roots: &[StableNodeId],
+) -> Option<KeptFocus> {
     let world = context.world();
     let focused = world.focused(document)?;
     let position = world_position(world, roots, focused)?;
     let identity = identify(context, focused, position, "焦点")?;
-    Some(KeptFocus { identity, selection: world.text_input(focused).map(|view| view.selection) })
+    Some(KeptFocus {
+        identity,
+        selection: world.text_input(focused).map(|view| view.selection),
+    })
 }
 
 /// 这块内容里偏移不为零的滚动容器。
-fn capture_scrolls(context: &AppContext, document: DocumentId, roots: &[StableNodeId]) -> Vec<KeptScroll> {
+fn capture_scrolls(
+    context: &AppContext,
+    document: DocumentId,
+    roots: &[StableNodeId],
+) -> Vec<KeptScroll> {
     let world = context.world();
     world
         .nodes_of_component(document, component_descriptors::SCROLL_VIEW.type_id)
@@ -77,22 +95,39 @@ fn capture_scrolls(context: &AppContext, document: DocumentId, roots: &[StableNo
 }
 
 /// 节点的身份。没有键路径或没有组件类型时记日志并返回 `None`。
-fn identify(context: &AppContext, id: StableNodeId, position: Vec<usize>, what: &str) -> Option<NodeIdentity> {
+fn identify(
+    context: &AppContext,
+    id: StableNodeId,
+    position: Vec<usize>,
+    what: &str,
+) -> Option<NodeIdentity> {
     let world = context.world();
     let Some(path) = context.assembly_path(id) else {
-        eprintln!("Nana 重挂前的{what}没有键路径，重挂后不再恢复：{}", id.get());
+        eprintln!(
+            "Nana 重挂前的{what}没有键路径，重挂后不再恢复：{}",
+            id.get()
+        );
         return None;
     };
     let Some(component) = world.component_type(id).cloned() else {
         eprintln!("Nana 重挂前的{what}没有组件类型，重挂后不再恢复：{path}");
         return None;
     };
-    Some(NodeIdentity { component, path, position })
+    Some(NodeIdentity {
+        component,
+        path,
+        position,
+    })
 }
 
 impl KeptState {
     /// 新内容挂上后写回。先写滚动偏移，虚拟列表收到滚动变化后按新视口挂行；再恢复焦点和选区。
-    pub(super) fn restore(self, context: &mut AppContext, document: DocumentId, roots: &[StableNodeId]) {
+    pub(super) fn restore(
+        self,
+        context: &mut AppContext,
+        document: DocumentId,
+        roots: &[StableNodeId],
+    ) {
         for scroll in self.scrolls {
             scroll.restore(context, document, roots);
         }
@@ -109,8 +144,13 @@ impl KeptScroll {
         let Some(target) = self.identity.find(context, document, roots, "滚动容器") else {
             return;
         };
-        if let Err(error) = context.scroll_to(Entity::<ScrollView>::from_stable_id(target), self.offset) {
-            eprintln!("Nana 重挂后恢复滚动位置失败：{} {error}", self.identity.path);
+        if let Err(error) =
+            context.scroll_to(Entity::<ScrollView>::from_stable_id(target), self.offset)
+        {
+            eprintln!(
+                "Nana 重挂后恢复滚动位置失败：{} {error}",
+                self.identity.path
+            );
         }
     }
 }
@@ -127,21 +167,35 @@ impl KeptFocus {
             return;
         }
         if context.world().focused(document) != Some(target) {
-            eprintln!("Nana 重挂后原焦点节点不可聚焦（可能已禁用）：{}", self.identity.path);
+            eprintln!(
+                "Nana 重挂后原焦点节点不可聚焦（可能已禁用）：{}",
+                self.identity.path
+            );
             return;
         }
         let Some(selection) = self.selection else {
             return;
         };
-        if let Err(error) = context.select_focused_text_range(document, selection.anchor, selection.focus) {
-            eprintln!("Nana 重挂后恢复文本选区失败：{} {error}", self.identity.path);
+        if let Err(error) =
+            context.select_focused_text_range(document, selection.anchor, selection.focus)
+        {
+            eprintln!(
+                "Nana 重挂后恢复文本选区失败：{} {error}",
+                self.identity.path
+            );
         }
     }
 }
 
 impl NodeIdentity {
     /// 新树里同类型、同键路径的节点。只剩一个就是它，剩下多个再比树位置；找不到或分不清时记日志。
-    fn find(&self, context: &AppContext, document: DocumentId, roots: &[StableNodeId], what: &str) -> Option<StableNodeId> {
+    fn find(
+        &self,
+        context: &AppContext,
+        document: DocumentId,
+        roots: &[StableNodeId],
+        what: &str,
+    ) -> Option<StableNodeId> {
         let world = context.world();
         let candidates = world
             .nodes_of_component(document, self.component.as_str())
@@ -155,12 +209,15 @@ impl NodeIdentity {
             }
             [only] => Some(*only),
             several => {
-                let found = several
-                    .iter()
-                    .copied()
-                    .find(|id| world_position(world, roots, *id).as_deref() == Some(self.position.as_slice()));
+                let found = several.iter().copied().find(|id| {
+                    world_position(world, roots, *id).as_deref() == Some(self.position.as_slice())
+                });
                 if found.is_none() {
-                    eprintln!("Nana 重挂后有 {} 个{what}同键路径，分不清原节点，不再恢复：{}", several.len(), self.path);
+                    eprintln!(
+                        "Nana 重挂后有 {} 个{what}同键路径，分不清原节点，不再恢复：{}",
+                        several.len(),
+                        self.path
+                    );
                 }
                 found
             }
@@ -170,7 +227,11 @@ impl NodeIdentity {
 
 /// 节点在壳层树里的位置：从根往下每层的子节点序号，第一项是根的序号。
 /// 不在这些根下时返回 `None`。
-fn world_position(world: &UiWorld, roots: &[StableNodeId], node: StableNodeId) -> Option<Vec<usize>> {
+fn world_position(
+    world: &UiWorld,
+    roots: &[StableNodeId],
+    node: StableNodeId,
+) -> Option<Vec<usize>> {
     let mut steps = Vec::new();
     let mut cursor = node;
     loop {
@@ -180,7 +241,11 @@ fn world_position(world: &UiWorld, roots: &[StableNodeId], node: StableNodeId) -
             return Some(steps);
         }
         let parent = world.parent_id(cursor)?;
-        let index = world.node(parent)?.children.iter().position(|child| *child == cursor)?;
+        let index = world
+            .node(parent)?
+            .children
+            .iter()
+            .position(|child| *child == cursor)?;
         steps.push(index);
         cursor = parent;
     }

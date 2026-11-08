@@ -6,22 +6,39 @@ use serde_json::Value;
 
 use crate::backend::services::repository::{AssetDetail, PlaybackSessionState};
 
-use super::files::repository_is_writable;
 use super::ShellViewModel;
+use super::files::repository_is_writable;
 
-#[path = "native_preview.rs"]
-pub(super) mod native_preview;
 #[path = "preview_bridge.rs"]
 mod bridge;
+#[path = "native_preview.rs"]
+pub(super) mod native_preview;
+pub(super) use bridge::ArchiveEntryKind;
 pub use bridge::NativeLoad;
+pub(super) use bridge::PageFrame;
+pub(crate) use bridge::frame_at;
+pub(crate) use bridge::orbit_drag;
 pub(super) use bridge::rgba_png_data_url;
 
 /// 元数据编辑器自己画的通用字段，即 Vue `FileMetadataEditor.vue` 读的键，覆盖 `docs/api-design.md` 的
 /// Generic file metadata keys：评分、注释（含旧键 note）、链接和标签组四个输入，以及入库、创建、修改时间、
 /// 尺寸、原始大小、调色板、来源标题和来源链接的只读行。自定义行不再重复画这些键。
 const EDITOR_METADATA: &[&str] = &[
-    "rating", "comment", "note", "link", "tagGroups", "addedToLibraryAt", "fileCreatedAt", "fileModifiedAt", "width",
-    "height", "originalSizeBytes", "thumbnailPalette", "palette", "originTitle", "sourceUrl",
+    "rating",
+    "comment",
+    "note",
+    "link",
+    "tagGroups",
+    "addedToLibraryAt",
+    "fileCreatedAt",
+    "fileModifiedAt",
+    "width",
+    "height",
+    "originalSizeBytes",
+    "thumbnailPalette",
+    "palette",
+    "originTitle",
+    "sourceUrl",
 ];
 
 /// 编辑器的四个输入（评分、注释和旧键 note、链接、标签组）。草稿单独存它们；元数据补丁不写这几个键，
@@ -54,21 +71,29 @@ pub enum PreviewBody {
     Empty,
     Image,
     /// `truncated_at` 有值时只显示了文件开头这么多字节。
-    Document { markdown: bool, text: String, truncated_at: Option<u64> },
+    Document {
+        markdown: bool,
+        text: String,
+        truncated_at: Option<u64>,
+    },
     Media(PlaybackSessionState),
-    Native { view_id: String, label: String, content: String },
+    Native {
+        view_id: String,
+        label: String,
+        content: String,
+    },
     Failed(String),
 }
 
 #[path = "inspect_search.rs"]
 pub(super) mod search;
-pub use search::{
-    AdvancedField, DateBound, FilterList, MetadataInput, NumberBound, SearchFilters, SearchRequestDraft, SearchRow,
-    SortDirection,
-};
 /// 搜索候选只从仓库摘要算出，测试直接造候选时用它。
 #[cfg(test)]
 pub(crate) use search::AssetFacet;
+pub use search::{
+    AdvancedField, DateBound, FilterList, MetadataInput, NumberBound, SearchFilters,
+    SearchRequestDraft, SearchRow, SortDirection,
+};
 
 #[derive(Clone, Debug, Default, PartialEq)]
 struct MetadataDraft {
@@ -93,16 +118,68 @@ struct SaveInFlight {
 
 #[derive(Clone, Debug)]
 pub enum InspectEffect {
-    LoadImage { repo_id: String, path: String },
-    LoadText { repo_id: String, path: String, markdown: bool, generation: u64 },
-    LoadNative { repo_id: String, path: String, view_id: String, generation: u64 },
+    LoadImage {
+        repo_id: String,
+        path: String,
+    },
+    LoadText {
+        repo_id: String,
+        path: String,
+        markdown: bool,
+        generation: u64,
+    },
+    LoadNative {
+        repo_id: String,
+        path: String,
+        view_id: String,
+        generation: u64,
+    },
+    /// 从已经列出的压缩包里只取这一条的字节。`path` 是最外层压缩包，`through` 是先取出的嵌套 zip/7z，`entry` 是最内层里的路径。
+    LoadArchiveEntry {
+        repo_id: String,
+        path: String,
+        entry: String,
+        through: Vec<String>,
+        generation: u64,
+    },
     /// 读音视频。`virtual_entry` 是在线条目：先经 `momobako.playback.prepare` 准备播放源，再读准备好的本地文件。
-    LoadMedia { repo_id: String, path: String, generation: u64, virtual_entry: bool },
-    SaveMetadata { repo_id: String, asset_id: String, expected_version: i64, metadata: BTreeMap<String, Value> },
-    LoadAsset { repo_id: String, asset_id: String },
-    Search { generation: u64, request: SearchRequestDraft },
+    LoadMedia {
+        repo_id: String,
+        path: String,
+        generation: u64,
+        virtual_entry: bool,
+    },
+    /// 音频舞台出来以后再读歌词。`lyric_path` 为空时读同级 `.lrc`。
+    LoadLyrics {
+        repo_id: String,
+        audio_path: String,
+        generation: u64,
+        lyric_path: Option<String>,
+    },
+    SaveMetadata {
+        repo_id: String,
+        asset_id: String,
+        expected_version: i64,
+        metadata: BTreeMap<String, Value>,
+    },
+    LoadAsset {
+        repo_id: String,
+        asset_id: String,
+    },
+    /// 同一个仓库刷新以后重读素材详情。回来只更新详情卡叠层，不改选中路径。
+    ReloadAsset {
+        repo_id: String,
+        asset_id: String,
+    },
+    Search {
+        generation: u64,
+        request: SearchRequestDraft,
+    },
     /// 预览的音视频接管了播放条，宿主派发后开始播放（Vue 预览页挂载即播放）。
-    Autoplay { path: String, generation: u64 },
+    Autoplay {
+        path: String,
+        generation: u64,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -115,8 +192,17 @@ pub enum InspectMessage {
     SaveMetadata,
     AdoptConflict,
     MetadataSaved(Result<(String, AssetDetail), String>),
-    BodyLoaded { path: String, markdown: bool, generation: u64, result: Result<support::PreviewText, String> },
-    NativeLoaded { path: String, generation: u64, result: Result<bridge::NativeLoad, String> },
+    BodyLoaded {
+        path: String,
+        markdown: bool,
+        generation: u64,
+        result: Result<support::PreviewText, String>,
+    },
+    NativeLoaded {
+        path: String,
+        generation: u64,
+        result: Result<bridge::NativeLoad, String>,
+    },
     MediaLoaded {
         path: String,
         generation: u64,
@@ -126,27 +212,72 @@ pub enum InspectMessage {
         /// 在线条目准备播放源的结果：后端写下的访问、失败能不能重试。本地文件是默认值。
         prep: super::SourcePrep,
     },
+    /// 歌词文件读完。空正文是没有歌词，舞台从「读取歌词...」换成「暂无歌词」。
+    LyricsLoaded {
+        path: String,
+        generation: u64,
+        text: String,
+    },
     /// 在线条目的播放源准备失败以后，预览框里的「重试」。
     RetryMedia,
     TurnPage(i32),
-    Orbit { yaw: f32, zoom: f32 },
+    Orbit {
+        yaw: f32,
+        zoom: f32,
+    },
+    /// 选中压缩包当前层里已经列出的目录。不进入，也不再读压缩包。
+    SelectArchive(String),
+    /// 进入压缩包当前层里已经解出的目录。空路径回到根。不再读压缩包。
+    EnterArchive(String),
+    /// 打开 zip/7z 名单里的一个文件。取不出或不支持时停在名单上。
+    OpenArchiveFile(String),
+    /// 包内这一条的预览。取不出时仍停在当前名单上。
+    ArchiveEntryLoaded {
+        path: String,
+        entry: String,
+        through: Vec<String>,
+        generation: u64,
+        result: Result<bridge::ArchiveEntryPreview, String>,
+    },
     /// 宿主派发的自动播放。代次或文件对不上就不动。
-    Autoplay { path: String, generation: u64 },
+    Autoplay {
+        path: String,
+        generation: u64,
+    },
     SetQuery(String),
     ToggleFilterBar,
     CloseFilterBar,
-    ToggleFilter { key: FilterList, value: String },
+    ToggleFilter {
+        key: FilterList,
+        value: String,
+    },
     SetMinimumRating(Option<f64>),
-    SetMetadataInput { key: MetadataInput, value: String },
+    SetMetadataInput {
+        key: MetadataInput,
+        value: String,
+    },
     SubmitMetadataInput(MetadataInput),
-    SetAdvanced { field: AdvancedField, value: String },
+    SetAdvanced {
+        field: AdvancedField,
+        value: String,
+    },
     SetSortDirection(SortDirection),
     ApplyAdvanced,
     ClearFilters,
-    ApplyShortcut { metadata: String, sort_field: String, sort_direction: SortDirection },
+    ApplyShortcut {
+        metadata: String,
+        sort_field: String,
+        sort_direction: SortDirection,
+    },
     RunSearch,
-    SearchFinished { generation: u64, result: Result<Vec<SearchRow>, String> },
-    OpenHit { repo_id: String, asset_id: String },
+    SearchFinished {
+        generation: u64,
+        result: Result<Vec<SearchRow>, String>,
+    },
+    OpenHit {
+        repo_id: String,
+        asset_id: String,
+    },
     /// 打开元数据里的标签菜单。菜单铺在标签区里，跟着元数据卡片排版，不按坐标定位。
     OpenTagMenu,
     CloseTagMenu,
@@ -169,6 +300,15 @@ pub(super) struct FileFacts {
     pub original_size_bytes: Option<f64>,
 }
 
+/// 压缩包名单还在时，旁边那一块内部文件提示。照 Vue `renderInternalPreview`。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum ArchiveFileNotice {
+    /// 扩展名不能在名单旁画出来。里面是文件名。
+    Inline(String),
+    /// 取出或解码失败。里面是原因。
+    Failed(String),
+}
+
 #[derive(Clone, Debug)]
 pub struct InspectState {
     pub(super) kind: Option<PreviewKind>,
@@ -182,6 +322,8 @@ pub struct InspectState {
     repo_id: Option<String>,
     expected_version: i64,
     virtual_asset: bool,
+    /// 素材详情带来的本机绝对路径。预览页打开和定位在列表里找不到这条时用它。
+    local_absolute_path: Option<String>,
     /// 当前音视频预览失败在准备播放源上（在线条目），预览框给「重试」。
     pub(super) media_retry: bool,
     baseline: MetadataDraft,
@@ -208,6 +350,24 @@ pub struct InspectState {
     pub(super) shortcuts: Vec<super::inspect_shortcuts::SearchShortcut>,
     timers: tags::LiveTimers,
     deck: bridge::Deck,
+    /// zip/7z 已经读出的条目名。点进下一层只用它，不再打开压缩包。
+    pub(super) archive: Option<bridge::ArchiveCatalog>,
+    /// 压缩包预览当前停在的内部目录。空字符串是根。
+    pub(super) archive_directory: String,
+    /// 单击选中、还没进入的目录。路径从压缩包根算起，和进入时用的是同一套。
+    pub(super) archive_selected: Option<String>,
+    /// 从外到内已经点开的嵌套 zip/7z。最外层磁盘压缩包仍在 [`Self::archive`]。
+    pub(super) archive_nests: Vec<bridge::ArchiveNest>,
+    /// 正在看的包内文件。没有时画当前层名单。
+    pub(super) archive_entry: Option<bridge::ArchiveEntryPreview>,
+    /// 已经发出去、还没回来的包内路径。对不上的结果丢掉。
+    pub(super) archive_request: Option<String>,
+    /// 名单还在、没有在途读取时旁边写的提示。空的时候写「选择内部文件进行预览」。
+    pub(super) archive_notice: Option<ArchiveFileNotice>,
+    /// 音频预览的歌词行。空、且不在读取中时舞台写「暂无歌词」。
+    pub(super) lyrics: Vec<super::inspect_lyrics::LyricLine>,
+    /// 歌词文件还在读。舞台写「读取歌词...」，晚到的结果按代次丢掉。
+    pub(super) lyrics_pending: bool,
 }
 
 impl Default for InspectState {
@@ -224,6 +384,7 @@ impl Default for InspectState {
             repo_id: None,
             expected_version: 0,
             virtual_asset: false,
+            local_absolute_path: None,
             media_retry: false,
             baseline: MetadataDraft::default(),
             draft: MetadataDraft::default(),
@@ -247,6 +408,15 @@ impl Default for InspectState {
             shortcuts: Vec::new(),
             timers: tags::LiveTimers::default(),
             deck: bridge::Deck::default(),
+            archive: None,
+            archive_directory: String::new(),
+            archive_selected: None,
+            archive_nests: Vec::new(),
+            archive_entry: None,
+            archive_request: None,
+            archive_notice: None,
+            lyrics: Vec::new(),
+            lyrics_pending: false,
         }
     }
 }
@@ -279,12 +449,17 @@ impl InspectState {
     }
 
     /// 正在看的素材。
-    pub(super) fn current_asset_id(&self) -> Option<&str> {
+    pub(crate) fn current_asset_id(&self) -> Option<&str> {
         self.asset_id.as_deref()
     }
 
+    /// 正在看的路径。预览页打开时就是这一条。
+    pub(crate) fn open_path(&self) -> Option<&str> {
+        self.target_path.as_deref()
+    }
+
     /// 正在看的素材所在的仓库（素材详情读回时记下的）。
-    pub(super) fn current_repo_id(&self) -> Option<&str> {
+    pub(crate) fn current_repo_id(&self) -> Option<&str> {
         self.repo_id.as_deref()
     }
 
@@ -300,12 +475,22 @@ impl InspectState {
         &self.draft.link
     }
 
+    /// 已经读回或保存过的注释。编辑器里还没写回的草稿不在这里。
+    pub(super) fn saved_comment(&self) -> &str {
+        &self.baseline.comment
+    }
+
+    /// 已经读回或保存过的链接。编辑器里还没写回的草稿不在这里。
+    pub(super) fn saved_link(&self) -> &str {
+        &self.baseline.link
+    }
+
     pub(super) fn draft_tags(&self) -> &[String] {
         &self.draft.tags
     }
 
     /// 当前素材编辑器四个输入以外的元数据（含还没存完的补丁），原始 JSON 类型。素材详情读回之前是空的。
-    pub(super) fn draft_custom(&self) -> &BTreeMap<String, Value> {
+    pub(crate) fn draft_custom(&self) -> &BTreeMap<String, Value> {
         &self.draft.custom
     }
 
@@ -320,9 +505,19 @@ impl InspectState {
         self.body = PreviewBody::Empty;
         self.loading = true;
         self.error.clear();
+        self.archive = None;
+        self.archive_directory.clear();
+        self.archive_selected = None;
+        self.archive_nests.clear();
+        self.archive_entry = None;
+        self.archive_request = None;
+        self.archive_notice = None;
+        self.lyrics.clear();
+        self.lyrics_pending = false;
         bridge::clear_deck(self);
         self.asset_id = None;
         self.virtual_asset = false;
+        self.local_absolute_path = None;
         self.media_retry = false;
         self.facts = FileFacts::default();
     }
@@ -339,18 +534,43 @@ impl InspectState {
         self.media_retry = false;
         self.error.clear();
         self.asset_id = None;
+        self.virtual_asset = false;
+        self.local_absolute_path = None;
         self.palette.clear();
         self.facts = FileFacts::default();
+        self.archive = None;
+        self.archive_directory.clear();
+        self.archive_selected = None;
+        self.archive_nests.clear();
+        self.archive_entry = None;
+        self.archive_request = None;
+        self.archive_notice = None;
+        self.lyrics.clear();
+        self.lyrics_pending = false;
         self.timers.clear_metadata();
         bridge::clear_deck(self);
+    }
+
+    /// 素材详情已经对上 `path` 时，返回虚拟标记和本机绝对路径。详情还没回来时是 `None`。
+    pub(super) fn noted_host_facts(&self, path: &str) -> Option<(bool, Option<String>)> {
+        if self.asset_id.is_none() || self.target_path.as_deref() != Some(path) {
+            return None;
+        }
+        Some((self.virtual_asset, self.local_absolute_path.clone()))
     }
 
     /// 草稿和基线回到空白，冲突一起清掉：它们属于上一个素材，不能留到下一个素材的编辑器里。
     /// 先调 [`Self::flush_pending_metadata`]；还剩没写出的改动（上一次保存还没回来时补进来的）只能丢下，记日志。
     fn reset_draft(&mut self) {
-        let sent = self.in_flight.as_ref().filter(|flight| self.asset_id.as_deref() == Some(flight.asset_id.as_str()));
+        let sent = self
+            .in_flight
+            .as_ref()
+            .filter(|flight| self.asset_id.as_deref() == Some(flight.asset_id.as_str()));
         if self.dirty() && sent.is_none_or(|flight| flight.sent != self.draft) {
-            eprintln!("Nana 换选时丢下还没写出的元数据改动：{}", self.asset_id.as_deref().unwrap_or("没有素材"));
+            eprintln!(
+                "Nana 换选时丢下还没写出的元数据改动：{}",
+                self.asset_id.as_deref().unwrap_or("没有素材")
+            );
         }
         self.baseline = MetadataDraft::default();
         self.draft = MetadataDraft::default();
@@ -364,8 +584,8 @@ impl InspectState {
         self.note_selected_detail(detail, true);
     }
 
-    /// 用水合后的元数据草稿替换上一份；`preview` 时再按扩展名读预览内容。单击只选中时右侧详情只看元数据，
-    /// 和 Vue 一样不挂预览：不读内容、不接管播放条、不准备在线条目的播放源，也就不记访问。
+    /// 记下素材详情。预览页的四个输入随后按列表条目改写，单击详情卡按导语叠层改写。正在输入时都不覆盖。
+    /// `preview` 时再按扩展名读预览内容。单击不挂预览：不读内容、不接管播放条、不准备播放源，也不记访问。
     pub(super) fn note_selected_detail(&mut self, detail: &AssetDetail, preview: bool) {
         let extension = support::extension_of(&detail.summary.extension, &detail.summary.filename);
         let kind = support::classify(&extension);
@@ -375,14 +595,20 @@ impl InspectState {
         self.asset_id = Some(detail.summary.asset_id.clone());
         self.expected_version = detail.summary.version;
         self.virtual_asset = detail.summary.is_virtual;
+        self.local_absolute_path = detail.summary.local_absolute_path.clone();
         self.kind = Some(kind.clone());
         self.error.clear();
         self.conflict.clear();
         self.conflict_detail = None;
         // 上一个素材的保存还在路上时 `saving` 留着：同一时刻只发一次保存，结果按 `in_flight` 认素材。
-        let draft = MetadataDraft::from_detail(detail);
-        self.baseline = draft.clone();
-        self.draft = draft;
+        // 预览页四个输入随后按列表改写，单击详情卡按导语叠层改写。正在输入时不让这份详情冲掉草稿。
+        if self.dirty() {
+            eprintln!("Nana 还没保存的元数据草稿不随素材详情换掉");
+        } else {
+            let draft = MetadataDraft::from_detail(detail);
+            self.baseline = draft.clone();
+            self.draft = draft;
+        }
         self.palette = super::palette::from_metadata_entries(&detail.metadata);
         self.facts = FileFacts {
             extension: extension.clone(),
@@ -411,7 +637,11 @@ impl InspectState {
 
     /// 图片解码失败是错误态。路径与当前目标不一致时保留原预览。
     pub(super) fn note_pixels(&mut self, path: &str, pixels_ok: bool, error: Option<&str>) -> bool {
-        if self.target_path.as_ref().is_some_and(|target| target != path) {
+        if self
+            .target_path
+            .as_ref()
+            .is_some_and(|target| target != path)
+        {
             eprintln!("Nana 忽略过期的图片预览：{path}");
             return false;
         }
@@ -434,7 +664,10 @@ impl InspectState {
             PreviewKind::Image => {
                 self.loading = true;
                 self.body = PreviewBody::Empty;
-                self.effects.push(InspectEffect::LoadImage { repo_id: repo_id.to_string(), path: path.to_string() });
+                self.effects.push(InspectEffect::LoadImage {
+                    repo_id: repo_id.to_string(),
+                    path: path.to_string(),
+                });
             }
             PreviewKind::Markdown | PreviewKind::Text => {
                 let markdown = matches!(kind, PreviewKind::Markdown);
@@ -448,7 +681,9 @@ impl InspectState {
                 });
             }
             PreviewKind::Media => support::begin_media(self, repo_id, path),
-            PreviewKind::Native { view_id, label } => native_preview::begin(self, repo_id, path, view_id, label),
+            PreviewKind::Native { view_id, label } => {
+                native_preview::begin(self, repo_id, path, view_id, label)
+            }
             PreviewKind::Unsupported => {
                 let message = "无法预览此类型".to_string();
                 eprintln!("Nana 无法预览此类型：{path}");
@@ -458,14 +693,23 @@ impl InspectState {
         }
     }
 
-    pub(super) fn reduce(&mut self, writable: bool, active_repo: Option<&str>, message: InspectMessage) {
+    pub(super) fn reduce(
+        &mut self,
+        writable: bool,
+        active_repo: Option<&str>,
+        message: InspectMessage,
+    ) {
         let hint = tags::clock_hint(&message);
         match message {
             InspectMessage::SetComment(value) => self.draft.comment = value,
             InspectMessage::SetLink(value) => self.draft.link = value,
             InspectMessage::SetRating(rating) => {
                 let rating = rating.clamp(0, 5);
-                self.draft.rating = if self.draft.rating == rating { 0 } else { rating };
+                self.draft.rating = if self.draft.rating == rating {
+                    0
+                } else {
+                    rating
+                };
             }
             InspectMessage::AddTag(tag) => {
                 let tag = tag.trim().to_string();
@@ -488,16 +732,57 @@ impl InspectState {
                     Err(error) => self.note_metadata_error(error),
                 }
             }
-            InspectMessage::BodyLoaded { path, markdown, generation, result } => {
+            InspectMessage::BodyLoaded {
+                path,
+                markdown,
+                generation,
+                result,
+            } => {
                 self.note_body(path, markdown, generation, result);
             }
-            InspectMessage::NativeLoaded { path, generation, result } => native_preview::note_loaded(self, path, generation, result),
-            InspectMessage::MediaLoaded { path, generation, result, frames, prep, .. } => {
-                support::note_media(self, path, generation, result, frames, prep.retryable);
+            InspectMessage::NativeLoaded {
+                path,
+                generation,
+                result,
+            } => native_preview::note_loaded(self, path, generation, result),
+            InspectMessage::MediaLoaded {
+                path,
+                generation,
+                result,
+                frames,
+                prep,
+                ..
+            } => {
+                support::note_media(self, path, generation, result, frames, &prep);
             }
+            InspectMessage::LyricsLoaded {
+                path,
+                generation,
+                text,
+            } => support::note_lyrics(self, path, generation, text),
             InspectMessage::RetryMedia => support::retry_media(self),
-            InspectMessage::TurnPage(delta) => bridge::turn(self, delta),
-            InspectMessage::Orbit { yaw, zoom } => bridge::orbit(self, yaw, zoom),
+            InspectMessage::TurnPage(delta) => {
+                if !native_preview::turn_archive_pdf(self, delta) {
+                    bridge::turn(self, delta);
+                }
+            }
+            InspectMessage::Orbit { yaw, zoom } => {
+                if !native_preview::orbit_archive_model(self, yaw, zoom) {
+                    bridge::orbit(self, yaw, zoom);
+                }
+            }
+            InspectMessage::SelectArchive(path) => native_preview::select_directory(self, &path),
+            InspectMessage::EnterArchive(path) => native_preview::enter_directory(self, &path),
+            InspectMessage::OpenArchiveFile(path) => native_preview::open_archive_file(self, &path),
+            InspectMessage::ArchiveEntryLoaded {
+                path,
+                entry,
+                through,
+                generation,
+                result,
+            } => {
+                native_preview::note_archive_entry(self, path, entry, through, generation, result);
+            }
             // 播放归播放器管，由 `bridge::apply` 交过去；预览状态本身不变。
             InspectMessage::Autoplay { .. } => {}
             message @ (InspectMessage::SetQuery(_)
@@ -546,7 +831,12 @@ impl InspectState {
             sent: self.draft.clone(),
             tags_written: metadata.contains_key("tagGroups"),
         });
-        self.effects.push(InspectEffect::SaveMetadata { repo_id, asset_id, expected_version: self.expected_version, metadata });
+        self.effects.push(InspectEffect::SaveMetadata {
+            repo_id,
+            asset_id,
+            expected_version: self.expected_version,
+            metadata,
+        });
     }
 
     /// 按原始 JSON 类型给当前素材写一组元数据（ASMR 候选的应用、导入和抓取结果），并立刻保存，
@@ -555,7 +845,11 @@ impl InspectState {
     /// `asset_id` 必须还是正在看的素材，补丁不会落到别的文件上。编辑器四个输入的键不收（记日志跳过）。
     /// 上一次保存还在路上时补丁先进草稿，结果回来以后接着保存（见 [`MetadataDraft::rebase`]）。
     /// 拒绝写入时返回给用户看的原因。
-    pub(super) fn apply_metadata_patch(&mut self, asset_id: &str, patch: BTreeMap<String, Value>) -> Result<(), String> {
+    pub(crate) fn apply_metadata_patch(
+        &mut self,
+        asset_id: &str,
+        patch: BTreeMap<String, Value>,
+    ) -> Result<(), String> {
         if self.asset_id.as_deref() != Some(asset_id) {
             eprintln!("Nana 元数据补丁的素材已经不是当前文件：{asset_id}");
             return Err("当前文件已经换了，没有写入".into());
@@ -604,7 +898,10 @@ impl InspectState {
     fn note_metadata_result(&mut self, outcome: &str, detail: AssetDetail) {
         self.saving = false;
         let asset_id = detail.summary.asset_id.clone();
-        let flight = self.in_flight.take().filter(|flight| flight.asset_id == asset_id);
+        let flight = self
+            .in_flight
+            .take()
+            .filter(|flight| flight.asset_id == asset_id);
         if outcome != "success" && outcome != "conflict" {
             self.note_metadata_error(format!("元数据结果无法识别：{outcome}"));
             return;
@@ -631,6 +928,7 @@ impl InspectState {
         self.baseline = server;
         self.expected_version = detail.summary.version;
         self.virtual_asset = detail.summary.is_virtual;
+        self.local_absolute_path = detail.summary.local_absolute_path.clone();
         self.conflict.clear();
         self.conflict_detail = None;
         self.error.clear();
@@ -664,11 +962,19 @@ impl InspectState {
             return None;
         };
         let retagged = outcome == "success"
-            && self.in_flight.as_ref().is_some_and(|flight| flight.asset_id == detail.summary.asset_id && flight.tags_written);
+            && self.in_flight.as_ref().is_some_and(|flight| {
+                flight.asset_id == detail.summary.asset_id && flight.tags_written
+            });
         retagged.then(|| detail.summary.repo_id.clone())
     }
 
-    fn note_body(&mut self, path: String, markdown: bool, generation: u64, result: Result<support::PreviewText, String>) {
+    fn note_body(
+        &mut self,
+        path: String,
+        markdown: bool,
+        generation: u64,
+        result: Result<support::PreviewText, String>,
+    ) {
         if generation != self.generation || self.target_path.as_deref() != Some(path.as_str()) {
             eprintln!("Nana 忽略过期的文本预览：{path}");
             return;
@@ -676,7 +982,11 @@ impl InspectState {
         self.loading = false;
         match result {
             Ok(read) => {
-                self.body = PreviewBody::Document { markdown, text: read.text, truncated_at: read.truncated_at };
+                self.body = PreviewBody::Document {
+                    markdown,
+                    text: read.text,
+                    truncated_at: read.truncated_at,
+                };
                 self.error.clear();
             }
             Err(error) => {
@@ -713,7 +1023,10 @@ impl InspectState {
         self.begin_selection(path);
         self.repo_id = Some(repo_id.to_string());
         if !asset_id.is_empty() {
-            self.effects.push(InspectEffect::LoadAsset { repo_id: repo_id.to_string(), asset_id: asset_id.to_string() });
+            self.effects.push(InspectEffect::LoadAsset {
+                repo_id: repo_id.to_string(),
+                asset_id: asset_id.to_string(),
+            });
         }
     }
 }
@@ -723,7 +1036,9 @@ impl MetadataDraft {
         let metadata = &detail.metadata;
         Self {
             rating: support::metadata_rating(metadata),
-            comment: support::metadata_string(metadata, "comment").or_else(|| support::metadata_string(metadata, "note")).unwrap_or_default(),
+            comment: support::metadata_string(metadata, "comment")
+                .or_else(|| support::metadata_string(metadata, "note"))
+                .unwrap_or_default(),
             link: support::metadata_string(metadata, "link").unwrap_or_default(),
             tags: support::metadata_tags(metadata).unwrap_or_else(|| detail.summary.tags.clone()),
             custom: metadata
@@ -743,13 +1058,19 @@ impl MetadataDraft {
             metadata.insert("rating".into(), Value::from(self.rating));
         }
         if self.comment != baseline.comment {
-            metadata.insert("comment".into(), Value::String(self.comment.trim().to_string()));
+            metadata.insert(
+                "comment".into(),
+                Value::String(self.comment.trim().to_string()),
+            );
         }
         if self.link != baseline.link {
             metadata.insert("link".into(), Value::String(self.link.trim().to_string()));
         }
         if self.tags != baseline.tags {
-            metadata.insert("tagGroups".into(), Value::Array(self.tags.iter().cloned().map(Value::String).collect()));
+            metadata.insert(
+                "tagGroups".into(),
+                Value::Array(self.tags.iter().cloned().map(Value::String).collect()),
+            );
         }
         for (key, value) in &self.custom {
             if baseline.custom.get(key) != Some(value) {
@@ -766,7 +1087,11 @@ impl MetadataDraft {
     /// （例如去掉首尾空白的注释）换回旧的。
     fn rebase(&self, sent: &MetadataDraft, server: &MetadataDraft) -> MetadataDraft {
         fn pick<T: Clone + PartialEq>(now: &T, sent: &T, server: &T) -> T {
-            if now != sent { now.clone() } else { server.clone() }
+            if now != sent {
+                now.clone()
+            } else {
+                server.clone()
+            }
         }
         let mut custom = server.custom.clone();
         for (key, value) in &self.custom {
@@ -789,76 +1114,86 @@ pub(crate) fn sync_preview_frame(model: &mut ShellViewModel) {
     bridge::show_video_frame(model);
 }
 
-pub(super) fn reduce_message(model: &mut ShellViewModel, message: super::ShellMessage) -> Option<super::ShellMessage> {
+#[path = "inspect_refresh_asset.rs"]
+mod refresh_asset;
+
+pub(super) fn reduce_message(
+    model: &mut ShellViewModel,
+    message: super::ShellMessage,
+) -> Option<super::ShellMessage> {
     search::observe(model, &message);
     let super::ShellMessage::Inspect(message) = message else {
         return Some(message);
     };
-    let writable = model.workspace.active_repository().is_some_and(|repository| {
-        repository_is_writable(&repository.status, &repository.capabilities)
-    });
+    let writable = model
+        .workspace
+        .active_repository()
+        .is_some_and(|repository| {
+            repository_is_writable(&repository.status, &repository.capabilities)
+        });
     let repo_id = model.workspace.active_repo_id.clone();
     let follow = bridge::follow(&message);
-    let access = preview_access(&model.inspect, &message);
+    let access = support::preview_access(&model.inspect, &message);
     // 元数据保存的失败没有就近显示，交给状态区。
     let saving = matches!(message, InspectMessage::MetadataSaved(_));
     let retagged = model.inspect.retagged_repository(&message);
     model.inspect.reduce(writable, repo_id.as_deref(), message);
     if saving && !model.inspect.error.is_empty() {
         let failure = format!("保存元数据失败：{}", model.inspect.error);
-        model.status.fail(super::status::FailureSource::Metadata, failure);
+        model
+            .status
+            .fail(super::status::FailureSource::Metadata, failure);
     }
     match access {
-        PreviewAccess::None => {}
-        PreviewAccess::Recorded { repo_id, path, at } => model.note_entry_access(&repo_id, &path, &at),
-        PreviewAccess::Record { path } => {
-            let repo = model.inspect.repo_id.clone().or(repo_id).unwrap_or_default();
+        support::PreviewAccess::None => {}
+        support::PreviewAccess::Recorded { repo_id, path, at } => {
+            model.note_entry_access(&repo_id, &path, &at)
+        }
+        support::PreviewAccess::Record { path } => {
+            let repo = model
+                .inspect
+                .repo_id
+                .clone()
+                .or(repo_id)
+                .unwrap_or_default();
             model.request_entry_access(&repo, &path);
         }
     }
     // 标签变了：静默重读仓库摘要，侧栏计数、筛选栏和标签菜单的候选跟着换（Vue `applyAssetResponse` 换掉摘要里这项素材）。
     // 文件行上的元数据和索引标签由文件表面就地换（`files_reduce.rs`）。
-    if let Some(repo_id) = retagged.filter(|repo_id| model.workspace.active_repo_id.as_deref() == Some(repo_id.as_str())) {
-        model.workspace.effects.push(super::WorkspaceEffect::LoadSnapshotSilent { repo_id });
+    if let Some(repo_id) = retagged
+        .filter(|repo_id| model.workspace.active_repo_id.as_deref() == Some(repo_id.as_str()))
+    {
+        model
+            .workspace
+            .effects
+            .push(super::WorkspaceEffect::LoadSnapshotSilent { repo_id });
     }
     bridge::apply(model, follow);
     search::settle(model);
     None
 }
 
-/// 预览内容读好以后要记的访问（Vue 的预览插件都先 `preparePreviewFileSource` / 准备播放源，再发
-/// `emitRepositoryEntryAccess`）。
-enum PreviewAccess {
-    None,
-    /// 在线条目的播放源准备好了，后端已经写下访问时间：当场改「最近使用」。结果过期了也改。
-    Recorded { repo_id: String, path: String, at: String },
-    /// 当前预览的本地文件读好了字节，后端没有经手：排一次访问记录。
-    Record { path: String },
-}
-
-/// 在归约消费消息之前看出这次读取要记的访问。只有读的正是当前预览（代次和文件都对得上）、读成功了才记本地文件；
-/// 图片的预览源由 `PreviewPixelsLoaded` 在壳层记。
-fn preview_access(state: &InspectState, message: &InspectMessage) -> PreviewAccess {
-    let current = |path: &str, generation: u64| generation == state.generation && state.target_path.as_deref() == Some(path);
-    match message {
-        InspectMessage::MediaLoaded { prep: super::SourcePrep { accessed: Some(access), .. }, .. } => {
-            PreviewAccess::Recorded { repo_id: access.repo_id.clone(), path: access.path.clone(), at: access.at.clone() }
-        }
-        InspectMessage::MediaLoaded { path, generation, result: Ok(_), .. } if current(path, *generation) && !state.virtual_asset => {
-            PreviewAccess::Record { path: path.clone() }
-        }
-        InspectMessage::BodyLoaded { path, generation, result: Ok(_), .. } | InspectMessage::NativeLoaded { path, generation, result: Ok(_) }
-            if current(path, *generation) =>
-        {
-            PreviewAccess::Record { path: path.clone() }
-        }
-        _ => PreviewAccess::None,
-    }
-}
-
 #[path = "inspect_support.rs"]
 pub(super) mod support;
 pub use support::prepare_text;
+
+/// 包内文件读完以后的消息。类型留在这个模块里，派发侧不用单独点开预览结构。
+pub(crate) fn archive_entry_loaded(
+    path: String,
+    entry: String,
+    through: Vec<String>,
+    generation: u64,
+    result: Result<bridge::ArchiveEntryPreview, String>,
+) -> InspectMessage {
+    InspectMessage::ArchiveEntryLoaded {
+        path,
+        entry,
+        through,
+        generation,
+        result,
+    }
+}
 
 #[cfg(test)]
 #[path = "inspect_tests.rs"]

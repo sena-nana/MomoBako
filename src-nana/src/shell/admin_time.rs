@@ -9,7 +9,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// 日志卡片右上角的时间：`MM/DD HH:mm:ss`，本机时区。
 pub fn log_time_label(timestamp: &str) -> String {
     match local_parts(timestamp) {
-        Some(parts) => format!("{:02}/{:02} {:02}:{:02}:{:02}", parts.month, parts.day, parts.hour, parts.minute, parts.second),
+        Some(parts) => format!(
+            "{:02}/{:02} {:02}:{:02}:{:02}",
+            parts.month, parts.day, parts.hour, parts.minute, parts.second
+        ),
         None => timestamp.to_string(),
     }
 }
@@ -17,14 +20,35 @@ pub fn log_time_label(timestamp: &str) -> String {
 /// 插件执行记录的时间：`MM/DD HH:mm`，本机时区。
 pub fn hook_time_label(timestamp: &str) -> String {
     match local_parts(timestamp) {
-        Some(parts) => format!("{:02}/{:02} {:02}:{:02}", parts.month, parts.day, parts.hour, parts.minute),
+        Some(parts) => format!(
+            "{:02}/{:02} {:02}:{:02}",
+            parts.month, parts.day, parts.hour, parts.minute
+        ),
         None => timestamp.to_string(),
     }
 }
 
+/// Unix 毫秒换成 `Date.toISOString()`：UTC，毫秒三位。
+pub(crate) fn iso8601_from_unix_ms(ms: u64) -> String {
+    let seconds = i64::try_from(ms / 1000).unwrap_or(i64::MAX);
+    let parts = civil_from_epoch(seconds);
+    format!(
+        "{:04}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        parts.year,
+        parts.month,
+        parts.day,
+        parts.hour,
+        parts.minute,
+        parts.second,
+        ms % 1000
+    )
+}
+
 /// 当前 UTC 时间，`toISOString()` 的格式（毫秒精度）。
 pub fn now_iso8601() -> String {
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
     let seconds = now.as_secs() as i64;
     let parts = civil_from_epoch(seconds);
     format!(
@@ -75,19 +99,31 @@ fn parse_rfc3339_parts(text: &str) -> Option<(i64, i64)> {
         return None;
     }
     let bytes = text.as_bytes();
-    if bytes[4] != b'-' || bytes[7] != b'-' || !(bytes[10] == b'T' || bytes[10] == b't' || bytes[10] == b' ') || bytes[13] != b':' || bytes[16] != b':' {
+    if bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || !(bytes[10] == b'T' || bytes[10] == b't' || bytes[10] == b' ')
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+    {
         return None;
     }
     let number = |range: std::ops::Range<usize>| text.get(range)?.parse::<i64>().ok();
     let (year, month, day) = (number(0..4)?, number(5..7)?, number(8..10)?);
     let (hour, minute, second) = (number(11..13)?, number(14..16)?, number(17..19)?);
-    if !(1..=12).contains(&month) || !(1..=31).contains(&day) || hour > 23 || minute > 59 || second > 60 {
+    if !(1..=12).contains(&month)
+        || !(1..=31).contains(&day)
+        || hour > 23
+        || minute > 59
+        || second > 60
+    {
         return None;
     }
     let mut rest = &text[19..];
     let mut millis = 0;
     if let Some(stripped) = rest.strip_prefix('.') {
-        let digits = stripped.find(|ch: char| !ch.is_ascii_digit()).unwrap_or(stripped.len());
+        let digits = stripped
+            .find(|ch: char| !ch.is_ascii_digit())
+            .unwrap_or(stripped.len());
         // 「.25」是 250 毫秒：补足三位再取整数。
         let fraction = format!("{:0<3}", &stripped[..digits.min(3)]);
         millis = fraction.parse::<i64>().ok()?;
@@ -102,11 +138,20 @@ fn parse_rfc3339_parts(text: &str) -> Option<(i64, i64)> {
                 _ => return None,
             };
             let body = &rest[1..];
-            let (hours, minutes) = body.split_once(':').unwrap_or((body.get(0..2)?, body.get(2..4).unwrap_or("0")));
+            let (hours, minutes) = body
+                .split_once(':')
+                .unwrap_or((body.get(0..2)?, body.get(2..4).unwrap_or("0")));
             sign * (hours.parse::<i64>().ok()? * 3600 + minutes.parse::<i64>().ok()? * 60)
         }
     };
-    Some((days_from_civil(year, month as u32, day as u32) * 86_400 + hour * 3600 + minute * 60 + second - offset, millis))
+    Some((
+        days_from_civil(year, month as u32, day as u32) * 86_400
+            + hour * 3600
+            + minute * 60
+            + second
+            - offset,
+        millis,
+    ))
 }
 
 /// 公历日期到 1970-01-01 起的天数（Howard Hinnant 的算法）。
@@ -133,7 +178,14 @@ fn civil_from_epoch(seconds: i64) -> Parts {
     let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
     let month = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
     let year = yoe + era * 400 + i64::from(month <= 2);
-    Parts { year, month, day, hour: (secs / 3600) as u32, minute: ((secs % 3600) / 60) as u32, second: (secs % 60) as u32 }
+    Parts {
+        year,
+        month,
+        day,
+        hour: (secs / 3600) as u32,
+        minute: ((secs % 3600) / 60) as u32,
+        second: (secs % 60) as u32,
+    }
 }
 
 /// C 运行库 `struct tm`。只读前六个字段。
@@ -178,7 +230,11 @@ fn local_offset_seconds(utc: i64) -> Option<i64> {
     if !ok {
         return None;
     }
-    let local = days_from_civil(i64::from(tm.tm_year) + 1900, (tm.tm_mon + 1) as u32, tm.tm_mday as u32) * 86_400
+    let local = days_from_civil(
+        i64::from(tm.tm_year) + 1900,
+        (tm.tm_mon + 1) as u32,
+        tm.tm_mday as u32,
+    ) * 86_400
         + i64::from(tm.tm_hour) * 3600
         + i64::from(tm.tm_min) * 60
         + i64::from(tm.tm_sec);
@@ -193,24 +249,42 @@ mod tests {
     fn parses_utc_and_offsets() {
         assert_eq!(parse_rfc3339("1970-01-01T00:00:00Z"), Some(0));
         assert_eq!(parse_rfc3339("2026-10-08T07:51:00Z"), Some(1_791_445_860));
-        assert_eq!(parse_rfc3339("2026-10-08T15:51:00+08:00"), Some(1_791_445_860));
-        assert_eq!(parse_rfc3339("2026-10-08T07:51:00.250Z"), Some(1_791_445_860));
+        assert_eq!(
+            parse_rfc3339("2026-10-08T15:51:00+08:00"),
+            Some(1_791_445_860)
+        );
+        assert_eq!(
+            parse_rfc3339("2026-10-08T07:51:00.250Z"),
+            Some(1_791_445_860)
+        );
         assert_eq!(parse_rfc3339("昨天"), None);
     }
 
     /// 任务快照的更新时间带纳秒小数：取到毫秒，缺位补零。
     #[test]
     fn parses_milliseconds() {
-        assert_eq!(parse_rfc3339_millis("2026-10-08T07:51:00Z"), Some(1_791_445_860_000));
-        assert_eq!(parse_rfc3339_millis("2026-10-08T07:51:00.25Z"), Some(1_791_445_860_250));
-        assert_eq!(parse_rfc3339_millis("2026-10-08T07:51:00.123456789Z"), Some(1_791_445_860_123));
+        assert_eq!(
+            parse_rfc3339_millis("2026-10-08T07:51:00Z"),
+            Some(1_791_445_860_000)
+        );
+        assert_eq!(
+            parse_rfc3339_millis("2026-10-08T07:51:00.25Z"),
+            Some(1_791_445_860_250)
+        );
+        assert_eq!(
+            parse_rfc3339_millis("2026-10-08T07:51:00.123456789Z"),
+            Some(1_791_445_860_123)
+        );
         assert_eq!(parse_rfc3339_millis("7"), None);
     }
 
     #[test]
     fn civil_round_trips() {
         let parts = civil_from_epoch(1_791_445_860);
-        assert_eq!((parts.year, parts.month, parts.day, parts.hour, parts.minute), (2026, 10, 8, 7, 51));
+        assert_eq!(
+            (parts.year, parts.month, parts.day, parts.hour, parts.minute),
+            (2026, 10, 8, 7, 51)
+        );
     }
 
     #[test]

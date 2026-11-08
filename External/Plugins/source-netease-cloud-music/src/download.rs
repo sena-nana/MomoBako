@@ -58,7 +58,15 @@ pub(crate) fn download_track_package(
     )?;
     fs::create_dir_all(&target.root).map_err(io_error)?;
     let base = render_filename(&runtime.filename_template, &artist_label(&song), &song.name);
-    let saved = download_song(runtime, &cookie, &song, &level, &target.root, target.policy, &base)?;
+    let saved = download_song(
+        runtime,
+        &cookie,
+        &song,
+        &level,
+        &target.root,
+        target.policy,
+        &base,
+    )?;
     let mut result = track_result(&song, &saved);
     result["destination"] = serde_json::json!(payload.destination.kind);
     Ok(result)
@@ -123,7 +131,15 @@ pub(crate) fn download_playlist_package(
             let rendered =
                 render_filename(&runtime.filename_template, &artist_label(&song), &song.name);
             let base = claim_file_name(&rendered, song.id, &mut claimed);
-            match download_song(runtime, &cookie, &song, &level, &playlist_dir, target.policy, &base) {
+            match download_song(
+                runtime,
+                &cookie,
+                &song,
+                &level,
+                &playlist_dir,
+                target.policy,
+                &base,
+            ) {
                 Ok(saved) => Ok((song, saved)),
                 Err(error) => Err((Some(song.name), error)),
             }
@@ -265,7 +281,11 @@ pub(crate) fn save_track(
 ) -> Result<SavedTrack, String> {
     let audio_path = root.join(format!("{base}.mp3"));
     let keep_audio = policy == WritePolicy::KeepExisting && audio_path.exists();
-    let audio = if keep_audio { None } else { Some(fetch_audio()?) };
+    let audio = if keep_audio {
+        None
+    } else {
+        Some(fetch_audio()?)
+    };
     let (lrc, yrc) = fetch_lyrics()?;
     let mut saved = SavedTrack::default();
     let mut files = Vec::new();

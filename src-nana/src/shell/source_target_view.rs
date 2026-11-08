@@ -7,15 +7,18 @@
 
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
-use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, ListItem, NodeStyle, RadiusTier, SemanticColorRole, SemanticPaint, Stack, Text};
 use nana_ui::ButtonKind;
+use nana_ui::runtime::view::{AnyView, IntoView, widget};
+use nana_ui::runtime::{
+    Activate, AlignSpec, LengthSpec, ListItem, NodeStyle, RadiusTier, SemanticColorRole,
+    SemanticPaint, Stack, Text,
+};
 use nana_ui_core::DialogSize;
 
-use super::super::view_part_overlay::dialog::{action, footer, DialogFrame};
+use super::super::view_part_overlay::dialog::{DialogFrame, action, footer};
 use super::super::{ShellMessage, ShellViewModel};
-use super::source_target::TargetCandidate;
 use super::AdminMessage;
+use super::source_target::TargetCandidate;
 
 /// `.repository-picker-dialog { width: min(560px, 92vw) }`。
 const PICKER_DIALOG: DialogSize = DialogSize::capped(560.0, 92.0);
@@ -27,13 +30,29 @@ fn cancel() -> ShellMessage {
 /// 选择目标资源库。没有等着选目标的下载时不占位。候选在打开时定下，打开期间不变（浮层身份带着候选，变了整块换）。
 pub(crate) fn target_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let pick = model.admin.download_target.as_ref()?;
-    let cards = pick.candidates.iter().map(candidate_card).collect::<Vec<_>>();
-    let body = widget(Stack::column(10.0).width(LengthSpec::Fill)).children(cards).key("download-target-list");
-    let buttons = vec![action("取消", ButtonKind::Ghost, false, "download-target-cancel", cancel)];
+    let cards = pick
+        .candidates
+        .iter()
+        .map(candidate_card)
+        .collect::<Vec<_>>();
+    let body = widget(Stack::column(10.0).width(LengthSpec::Fill))
+        .children(cards)
+        .key("download-target-list");
+    let buttons = vec![action(
+        "取消",
+        ButtonKind::Ghost,
+        false,
+        "download-target-cancel",
+        cancel,
+    )];
     Some(
-        DialogFrame::new("download-target-dialog", || "选择目标资源库".to_string(), cancel)
-            .size(PICKER_DIALOG)
-            .dialog(body, footer(None, buttons)),
+        DialogFrame::new(
+            "download-target-dialog",
+            || "选择目标资源库".to_string(),
+            cancel,
+        )
+        .size(PICKER_DIALOG)
+        .dialog(body, footer(None, buttons)),
     )
 }
 
@@ -64,23 +83,37 @@ fn candidate_card(candidate: &TargetCandidate) -> AnyView {
         ..SemanticPaint::default()
     };
     style.interaction.pressed = style.interaction.hovered;
-    let content = widget(Stack::column(4.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0))).children((
+    let content = widget(
+        Stack::column(4.0)
+            .width(LengthSpec::Fill)
+            .min_width(LengthSpec::Px(0.0)),
+    )
+    .children((
         widget(line(&candidate.name, 14.0, 600, SemanticColorRole::Text)),
         widget(line(&candidate.path, 12.0, 400, SemanticColorRole::Muted)),
     ));
     let repo_id = candidate.repo_id.clone();
     widget(ListItem::new(format!("下载到 {}", candidate.name)).style(style))
         .content(content)
-        .key(format!("download-target-{}", super::style::key_part(&candidate.repo_id)))
+        .key(format!(
+            "download-target-{}",
+            super::style::key_part(&candidate.repo_id)
+        ))
         .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ChooseDownloadRepository(repo_id.clone())));
+            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ChooseDownloadRepository(
+                repo_id.clone(),
+            )));
         })
         .into_any()
 }
 
 /// 单行、超出按省略号收尾的一段字。
 fn line(value: &str, size: f32, weight: u16, color: SemanticColorRole) -> Text {
-    let mut node = Text::new(value.to_string()).font_size(size).font_weight(weight).color(color).truncating();
+    let mut node = Text::new(value.to_string())
+        .font_size(size)
+        .font_weight(weight)
+        .color(color)
+        .truncating();
     let layout = Arc::make_mut(&mut node.style.layout);
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));

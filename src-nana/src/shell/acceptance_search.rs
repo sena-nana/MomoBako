@@ -4,14 +4,16 @@
 //! 仓库「默认资源库」，根目录有 `assets/`、`cover.png` 和 `notes/page.pdf`（`acceptance_base.rs` 的底子）。
 //! 带标签的夹具里 cover.png 是「封面、参考」、红色横版，page.pdf 是「文档」、#3fa796 竖版，标签和扩展名
 //! 候选经仓库摘要进来；搜索固定命中 cover.png，元数据带 4 星评分。
+//! `search-no-library` 不从这份底子起步：资源库列表是空的，只切到搜索面板。
+//! `search-failed` 仍从这份底子起步：有资源库，搜索在领域服务没起来时失败，只显示交回的原因。
 
 use std::collections::BTreeMap;
 
 use serde_json::Value;
 
 use super::super::inspect::{InspectMessage, SearchRow};
-use super::super::{InspectEffect, ShellMessage, ShellViewModel, WorkspacePanel};
-use super::base_scene::{dir, tagged_file, Base, REPO_ID};
+use super::super::{InspectEffect, ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
+use super::base_scene::{Base, REPO_ID, dir, tagged_file};
 
 /// 本面板的离屏对照场景。
 pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
@@ -20,6 +22,8 @@ pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
         ("filter-bar-active", filter_bar_active_scene()),
         ("search-results", search_results_scene()),
         ("search-empty", search_empty_scene()),
+        ("search-failed", search_failed_scene()),
+        ("search-no-library", search_no_library_scene()),
     ]
 }
 
@@ -53,17 +57,83 @@ fn search_results_scene() -> ShellViewModel {
     model
 }
 
+/// 没有资源库时的搜索页。
+///
+/// 空库启动走完以后资源库列表是空的，再切到搜索面板。不写入仓库、查询、命中或时间。
+/// 空状态照 Vue `SearchPanel.vue`：没有仓库时标题是「还没有可搜索的资源库」，
+/// 说明是「先在资源库页面添加一个仓库，再执行跨仓库搜索。」，优先于「等待搜索条件」。
+fn search_no_library_scene() -> ShellViewModel {
+    let mut model = ShellViewModel::for_page(ShellPage::EmptyRepository);
+    model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Search));
+    if !model.workspace.repositories.is_empty()
+        || model.workspace.panel != WorkspacePanel::Search
+        || !model.inspect.query.is_empty()
+        || !model.inspect.results.is_empty()
+    {
+        eprintln!(
+            "Nana 无资源库搜索场景状态不对：仓库 {} 个，面板 {:?}，查询 {:?}，结果 {} 条",
+            model.workspace.repositories.len(),
+            model.workspace.panel,
+            model.inspect.query,
+            model.inspect.results.len(),
+        );
+    }
+    model
+}
+
+/// 有资源库，但搜索派发出去时领域服务没起来。
+///
+/// 查询照搜索框输入「封面」，等过 250ms 的搜索延时。失败原因来自服务没起来时交回的那一句，
+/// 不写入命中，也不把失败说成没有匹配。没有失败结果时不编错误句子。
+fn search_failed_scene() -> ShellViewModel {
+    let mut model = search_page(false);
+    model.reduce(ShellMessage::Inspect(InspectMessage::SetQuery(
+        "封面".into(),
+    )));
+    let request = super::await_inspect_effect(&mut model, |effect| match effect {
+        InspectEffect::Search { generation, .. } => Some(generation),
+        _ => None,
+    });
+    let Some(generation) = request else {
+        eprintln!("Nana 搜索失败场景没有等到搜索请求：{}", model.inspect.query);
+        return model;
+    };
+    let Some(error) = crate::task_guard::failure_when_services_missing("搜索") else {
+        eprintln!("Nana 搜索失败场景没有拿到服务未启动时的失败原因");
+        return model;
+    };
+    model.reduce(ShellMessage::Inspect(InspectMessage::SearchFinished {
+        generation,
+        result: Err(error),
+    }));
+    if !model.inspect.results.is_empty() {
+        eprintln!(
+            "Nana 搜索失败场景出现了命中：{}",
+            model.inspect.results.len()
+        );
+    }
+    if model.inspect.search_error.is_empty() {
+        eprintln!("Nana 搜索失败场景没有留下失败原因");
+    }
+    model
+}
+
 /// 查询没有命中：在标题栏搜索框输入，等过 250ms 的搜索延时，搜索应答是空结果。
 /// 筛选栏关闭，结果区写明全部资源库里没有匹配的文件。
 fn search_empty_scene() -> ShellViewModel {
     let mut model = search_page(false);
-    model.reduce(ShellMessage::Inspect(InspectMessage::SetQuery("不存在的文件".into())));
+    model.reduce(ShellMessage::Inspect(InspectMessage::SetQuery(
+        "不存在的文件".into(),
+    )));
     let request = super::await_inspect_effect(&mut model, |effect| match effect {
         InspectEffect::Search { generation, .. } => Some(generation),
         _ => None,
     });
     match request {
-        Some(generation) => model.reduce(ShellMessage::Inspect(InspectMessage::SearchFinished { generation, result: Ok(Vec::new()) })),
+        Some(generation) => model.reduce(ShellMessage::Inspect(InspectMessage::SearchFinished {
+            generation,
+            result: Ok(Vec::new()),
+        })),
         None => eprintln!("Nana 搜索场景没有等到搜索请求：{}", model.inspect.query),
     }
     model
@@ -76,8 +146,18 @@ fn search_page(tagged: bool) -> ShellViewModel {
         Base {
             entries: vec![
                 dir("assets"),
-                tagged_file("cover.png", 2_400_000, &["封面", "参考"], meta(&[("color", "红色"), ("shape", "横版")])),
-                tagged_file("notes/page.pdf", 1_820, &["文档"], meta(&[("color", "#3fa796"), ("shape", "竖版")])),
+                tagged_file(
+                    "cover.png",
+                    2_400_000,
+                    &["封面", "参考"],
+                    meta(&[("color", "红色"), ("shape", "横版")]),
+                ),
+                tagged_file(
+                    "notes/page.pdf",
+                    1_820,
+                    &["文档"],
+                    meta(&[("color", "#3fa796"), ("shape", "竖版")]),
+                ),
             ],
             ..Base::default()
         }
@@ -105,5 +185,8 @@ fn cover_hit(model: &ShellViewModel) -> SearchRow {
 }
 
 fn meta(pairs: &[(&str, &str)]) -> BTreeMap<String, Value> {
-    pairs.iter().map(|(key, value)| (key.to_string(), Value::String(value.to_string()))).collect()
+    pairs
+        .iter()
+        .map(|(key, value)| (key.to_string(), Value::String(value.to_string())))
+        .collect()
 }

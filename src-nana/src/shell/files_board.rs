@@ -12,11 +12,11 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{signal, store, Signal, StoreList, StorePath};
+use nana_ui::runtime::view::{Signal, StoreList, StorePath, signal, store};
 
-use super::super::files::{DisplayMode, FileContext, FileRow, FilesState};
 use super::super::ShellViewModel;
-use super::cards::{card_key, CardFace, CardView, Cards};
+use super::super::files::{DisplayMode, FileContext, FileRow, FilesState};
+use super::cards::{CardFace, CardView, Cards, card_key};
 use super::virtual_rows::{self, GroupLines, GroupShape};
 
 /// 一组卡片的排法和行。
@@ -61,8 +61,15 @@ pub(super) struct GroupPresence {
 impl BoardSignals {
     /// 在常驻作用域里建空的卡片仓和两组的信号；第一次 [`Self::write`] 写入内容。
     pub(super) fn new() -> Self {
-        let group = || GroupSignals { shape: signal(GroupShape::default()), lines: signal(GroupLines::default()) };
-        Self { cards: store(Vec::new()), groups: [group(), group()], cache: signal(BoardCache::default()) }
+        let group = || GroupSignals {
+            shape: signal(GroupShape::default()),
+            lines: signal(GroupLines::default()),
+        };
+        Self {
+            cards: store(Vec::new()),
+            groups: [group(), group()],
+            cache: signal(BoardCache::default()),
+        }
     }
 
     /// 投影可见的文件行，只写变了的卡片和行。返回两组各有没有卡片。
@@ -79,16 +86,22 @@ impl BoardSignals {
 
     fn project(&self, model: &ShellViewModel, cache: &mut BoardCache) -> GroupPresence {
         let ctx = FileContext::from_model(model);
-        let rows = visible_rows(&model.files, &ctx);
+        let rows = model.files.listed_rows(&ctx);
         let picked = picked_paths(&model.files);
-        let drop_folder = (model.input.internal_active || model.input.dragging_files).then(|| model.input.hover_folder.as_deref()).flatten();
+        let drop_folder = (model.input.internal_active || model.input.dragging_files)
+            .then(|| model.input.hover_folder.as_deref())
+            .flatten();
         // ASMR 资源库插件开着时，ASMR 文件的卡片多一行摘要；它跟着元数据变，算进卡片指纹。
         let asmr = super::super::inspect_library::asmr_enabled(&model.admin.plugins);
         let mut faces = HashMap::with_capacity(rows.len());
         let cards = rows
             .iter()
             .map(|row| {
-                let library = if asmr { super::super::inspect_library::file_summary(row) } else { String::new() };
+                let library = if asmr {
+                    super::super::inspect_library::file_summary(row)
+                } else {
+                    String::new()
+                };
                 let print = fingerprint(row, &library);
                 let key = row.key();
                 let face = match cache.faces.get(key.as_str()) {
@@ -107,16 +120,32 @@ impl BoardSignals {
         self.write_cards(cache, cards);
         let virtual_view = ctx.is_virtual();
         let (directories, files): (Vec<_>, Vec<_>) = if virtual_view {
-            (Vec::new(), cache.cards.iter().map(|card| card.face.clone()).collect())
+            (
+                Vec::new(),
+                cache.cards.iter().map(|card| card.face.clone()).collect(),
+            )
         } else {
-            cache.cards.iter().map(|card| card.face.clone()).partition(|face| &*face.kind == "directory")
+            cache
+                .cards
+                .iter()
+                .map(|card| card.face.clone())
+                .partition(|face| &*face.kind == "directory")
         };
-        let presence = GroupPresence { directories: !directories.is_empty(), files: !files.is_empty() };
+        let presence = GroupPresence {
+            directories: !directories.is_empty(),
+            files: !files.is_empty(),
+        };
         let mode = model.files.display_mode;
-        let width = model.files.list_width.unwrap_or_else(|| estimated_list_width(model));
+        let width = model
+            .files
+            .list_width
+            .unwrap_or_else(|| estimated_list_width(model));
         for (index, faces) in [directories, files].into_iter().enumerate() {
             let input = PackInput {
-                cards: faces.iter().map(|face| (face.key.clone(), face.aspect().to_bits(), face.body_lines())).collect(),
+                cards: faces
+                    .iter()
+                    .map(|face| (face.key.clone(), face.aspect().to_bits(), face.body_lines()))
+                    .collect(),
                 mode,
                 width: width.to_bits(),
             };
@@ -133,7 +162,12 @@ impl BoardSignals {
 
     /// 写卡片仓：键的顺序没变时只写变了的那几张；增删或换序时整体写一次。
     fn write_cards(&self, cache: &mut BoardCache, cards: Vec<CardView>) {
-        let same_keys = cache.cards.len() == cards.len() && cache.cards.iter().zip(&cards).all(|(old, new)| old.face.key == new.face.key);
+        let same_keys = cache.cards.len() == cards.len()
+            && cache
+                .cards
+                .iter()
+                .zip(&cards)
+                .all(|(old, new)| old.face.key == new.face.key);
         if same_keys {
             let keyed = self.cards.keyed(card_key as fn(&CardView) -> Arc<str>);
             for (old, new) in cache.cards.iter().zip(&cards) {
@@ -148,20 +182,14 @@ impl BoardSignals {
     }
 }
 
-/// 可见的文件行，不复制：智能文件夹用查询结果；分类视图隐藏文件夹。和 `FilesState::visible_rows` 同一规则。
-fn visible_rows<'a>(files: &'a FilesState, ctx: &FileContext) -> Vec<&'a FileRow> {
-    if ctx.smart_folder {
-        return files.virtual_rows.iter().collect();
-    }
-    if ctx.category_virtual {
-        return files.rows.iter().filter(|row| row.kind != "directory").collect();
-    }
-    files.rows.iter().collect()
-}
-
 /// 多选路径加主选。主选不在多选里时也算选中。
 fn picked_paths(files: &FilesState) -> HashSet<&str> {
-    files.selected.iter().map(String::as_str).chain(files.primary.as_deref()).collect()
+    files
+        .selected
+        .iter()
+        .map(String::as_str)
+        .chain(files.primary.as_deref())
+        .collect()
 }
 
 /// 卡片读到的字段的指纹。像素按缓冲区地址和长度认：缩略图像素整份替换，不原地改。
@@ -184,8 +212,13 @@ fn fingerprint(row: &FileRow, library: &str) -> u64 {
 
 /// 还没有布局回报时，按窗口宽估算列表内容宽：减去侧栏、主区左右 24、详情 300 和间距 18、
 /// 卡片描边和列表左右内边距。窗口不超过 900 时详情排到下面，不再减详情宽。
-pub(super) fn estimated_list_width(model: &ShellViewModel) -> f32 {
+pub(crate) fn estimated_list_width(model: &ShellViewModel) -> f32 {
     let sidebar = model.motion.sidebar_presented_width();
-    let detail = if model.viewport_width <= 900.0 { 0.0 } else { 300.0 + 18.0 };
-    (model.viewport_width - sidebar - 48.0 - detail - 2.0 - super::grid::LIST_PADDING_X * 2.0).max(virtual_rows::MASONRY_COLUMN)
+    let detail = if model.viewport_width <= 900.0 {
+        0.0
+    } else {
+        300.0 + 18.0
+    };
+    (model.viewport_width - sidebar - 48.0 - detail - 2.0 - super::grid::LIST_PADDING_X * 2.0)
+        .max(virtual_rows::MASONRY_COLUMN)
 }

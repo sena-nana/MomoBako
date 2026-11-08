@@ -15,12 +15,12 @@ use std::borrow::Cow;
 use std::sync::OnceLock;
 
 use nana_ui::{
-    ApplicationWindow, GpuTextureDescriptor, GpuTextureFormat, GpuTextureRegion, GpuTextureUsages, HostTexture,
-    HostTextureAlphaMode, HostTextureRegistry, RuntimeProgramContext,
+    ApplicationWindow, GpuTextureDescriptor, GpuTextureFormat, GpuTextureRegion, GpuTextureUsages,
+    HostTexture, HostTextureAlphaMode, HostTextureRegistry, RuntimeProgramContext,
 };
 
-use crate::shell::{thumbnail_slot, ShellMessage, ShellViewModel, ThumbnailFrame};
-use crate::thumbnail_cache::{ThumbnailCache, THUMBNAIL_CAPACITY};
+use crate::shell::{ShellMessage, ShellViewModel, ThumbnailFrame, thumbnail_slot};
+use crate::thumbnail_cache::{THUMBNAIL_CAPACITY, ThumbnailCache};
 use crate::{MomoBakoApplication, NativePreviewGpu};
 
 /// 等下一帧上传的缩略图像素。
@@ -39,7 +39,14 @@ pub(crate) trait TextureTable<T> {
 
 impl TextureTable<HostTexture> for HostTextureRegistry {
     fn register(&mut self, slot: &str, texture: &HostTexture, width: u32, height: u32) {
-        HostTextureRegistry::register(self, slot, texture.clone(), width, height, HostTextureAlphaMode::Premultiplied);
+        HostTextureRegistry::register(
+            self,
+            slot,
+            texture.clone(),
+            width,
+            height,
+            HostTextureAlphaMode::Premultiplied,
+        );
     }
 
     fn remove(&mut self, slot: &str) {
@@ -65,19 +72,33 @@ impl<T> Default for ThumbnailHost<T> {
 impl<T> ThumbnailHost<T> {
     /// 缓存上限为 `capacity` 张的宿主端。产品用 [`THUMBNAIL_CAPACITY`]。
     pub(crate) fn with_capacity(capacity: usize) -> Self {
-        Self { pending: Vec::new(), cache: ThumbnailCache::default(), capacity, swept: None }
+        Self {
+            pending: Vec::new(),
+            cache: ThumbnailCache::default(),
+            capacity,
+            swept: None,
+        }
     }
 
     /// 从解码结果里拿走像素，预乘 alpha 以后留给下一帧上传。宽高仍留在消息里给布局用。
     pub(crate) fn queue(&mut self, frames: &mut [ThumbnailFrame]) {
         for frame in frames {
             let mut rgba = std::mem::take(&mut frame.rgba);
-            if rgba.len() != (frame.width as usize).saturating_mul(frame.height as usize).saturating_mul(4) {
+            if rgba.len()
+                != (frame.width as usize)
+                    .saturating_mul(frame.height as usize)
+                    .saturating_mul(4)
+            {
                 eprintln!("Nana 缩略图像素长度不对：{}", frame.path);
                 continue;
             }
             premultiply_srgb(&mut rgba);
-            self.pending.push(PendingThumb { path: frame.path.clone(), width: frame.width, height: frame.height, rgba });
+            self.pending.push(PendingThumb {
+                path: frame.path.clone(),
+                width: frame.width,
+                height: frame.height,
+                rgba,
+            });
         }
     }
 
@@ -106,13 +127,21 @@ impl<T> ThumbnailHost<T> {
             let listed = shell.files.listed_thumbnails();
             let mut failed = Vec::new();
             for thumb in pending {
-                let mounted = shell.files.mounted_thumbnails().is_some_and(|mounted| mounted.contains(&thumb.path));
+                let mounted = shell
+                    .files
+                    .mounted_thumbnails()
+                    .is_some_and(|mounted| mounted.contains(&thumb.path));
                 if !mounted && !listed.contains(&thumb.path) {
                     continue;
                 }
                 match upload(&thumb) {
                     Ok(texture) => {
-                        table.register(&thumbnail_slot(&thumb.path), &texture, thumb.width, thumb.height);
+                        table.register(
+                            &thumbnail_slot(&thumb.path),
+                            &texture,
+                            thumb.width,
+                            thumb.height,
+                        );
                         self.cache.insert(thumb.path, texture);
                     }
                     Err(error) => {
@@ -130,7 +159,10 @@ impl<T> ThumbnailHost<T> {
             return;
         }
         let evicted = match shell.files.mounted_thumbnails() {
-            Some(in_use) => self.cache.sweep(in_use, &shell.files.listed_thumbnails(), self.capacity),
+            Some(in_use) => {
+                self.cache
+                    .sweep(in_use, &shell.files.listed_thumbnails(), self.capacity)
+            }
             None => Vec::new(),
         };
         for path in &evicted {
@@ -150,13 +182,23 @@ impl MomoBakoApplication {
     }
 
     /// 准备帧：上传新缩略图、回收不用的纹理。空闲帧不登记，不叫窗口重画。
-    pub(crate) fn publish_thumbnails(&mut self, window: &mut ApplicationWindow, context: &RuntimeProgramContext<ShellMessage>) {
-        self.thumbnails.publish(&mut self.shell, &mut window.textures, |thumb| upload_texture(context, thumb));
+    pub(crate) fn publish_thumbnails(
+        &mut self,
+        window: &mut ApplicationWindow,
+        context: &RuntimeProgramContext<ShellMessage>,
+    ) {
+        self.thumbnails
+            .publish(&mut self.shell, &mut window.textures, |thumb| {
+                upload_texture(context, thumb)
+            });
     }
 }
 
 /// 建一张可采样的纹理并写入像素。
-fn upload_texture(context: &RuntimeProgramContext<ShellMessage>, thumb: &PendingThumb) -> Result<HostTexture, String> {
+fn upload_texture(
+    context: &RuntimeProgramContext<ShellMessage>,
+    thumb: &PendingThumb,
+) -> Result<HostTexture, String> {
     let texture = context
         .gpu()
         .create_texture(&GpuTextureDescriptor {
@@ -169,7 +211,12 @@ fn upload_texture(context: &RuntimeProgramContext<ShellMessage>, thumb: &Pending
         .map_err(|error| format!("纹理创建失败（{}x{}）：{error}", thumb.width, thumb.height))?;
     context
         .gpu()
-        .write_texture(&texture, GpuTextureRegion::full(thumb.width, thumb.height), &thumb.rgba, thumb.width.saturating_mul(4))
+        .write_texture(
+            &texture,
+            GpuTextureRegion::full(thumb.width, thumb.height),
+            &thumb.rgba,
+            thumb.width.saturating_mul(4),
+        )
         .map_err(|error| format!("像素写入失败：{error}"))?;
     Ok(HostTexture::new(1, 1, &texture))
 }
@@ -183,7 +230,11 @@ pub(crate) fn publish_preview(
     context: &RuntimeProgramContext<ShellMessage>,
 ) {
     let wanted = crate::shell::wants_preview_texture(&app.shell);
-    let (true, Some(token), Some(pixels)) = (wanted, app.shell.preview_token.clone(), app.shell.preview_pixels.as_ref()) else {
+    let (true, Some(token), Some(pixels)) = (
+        wanted,
+        app.shell.preview_token.clone(),
+        app.shell.preview_pixels.as_ref(),
+    ) else {
         app.preview_gpu = None;
         window.textures.remove("file-preview");
         return;
@@ -201,7 +252,10 @@ pub(crate) fn publish_preview(
         format: GpuTextureFormat::RGBA8_UNORM_SRGB,
         usage: GpuTextureUsages::SAMPLED | GpuTextureUsages::COPY_DST,
     }) else {
-        eprintln!("Nana 文件预览纹理创建失败：{}x{}", pixels.width, pixels.height);
+        eprintln!(
+            "Nana 文件预览纹理创建失败：{}x{}",
+            pixels.width, pixels.height
+        );
         return;
     };
     let rgba = premultiplied(&pixels.rgba);
@@ -221,7 +275,11 @@ pub(crate) fn publish_preview(
         pixels.height,
         HostTextureAlphaMode::Premultiplied,
     );
-    app.preview_gpu = Some(NativePreviewGpu { token, width: pixels.width, height: pixels.height });
+    app.preview_gpu = Some(NativePreviewGpu {
+        token,
+        width: pixels.width,
+        height: pixels.height,
+    });
 }
 
 /// 要上传的预览像素：全不透明（照片、视频帧）原样上传，有半透明的复制一份预乘过的。
@@ -261,7 +319,11 @@ fn srgb_to_linear() -> &'static [f32; 256] {
     TABLE.get_or_init(|| {
         std::array::from_fn(|value| {
             let encoded = value as f32 / 255.0;
-            if encoded <= 0.04045 { encoded / 12.92 } else { ((encoded + 0.055) / 1.055).powf(2.4) }
+            if encoded <= 0.04045 {
+                encoded / 12.92
+            } else {
+                ((encoded + 0.055) / 1.055).powf(2.4)
+            }
         })
     })
 }
@@ -269,7 +331,11 @@ fn srgb_to_linear() -> &'static [f32; 256] {
 /// 线性值编回 sRGB 的 0–255。
 fn linear_to_srgb(linear: f32) -> u8 {
     let linear = linear.clamp(0.0, 1.0);
-    let encoded = if linear <= 0.003_130_8 { linear * 12.92 } else { 1.055 * linear.powf(1.0 / 2.4) - 0.055 };
+    let encoded = if linear <= 0.003_130_8 {
+        linear * 12.92
+    } else {
+        1.055 * linear.powf(1.0 / 2.4) - 0.055
+    };
     (encoded * 255.0).round() as u8
 }
 
@@ -299,16 +365,29 @@ mod tests {
         }];
         host.queue(&mut frames);
         let red = linear_to_srgb(64.0 / 255.0);
-        assert_eq!(host.pending[0].rgba, vec![red, 0, 0, 64], "半透明的红按预乘上传");
+        assert_eq!(
+            host.pending[0].rgba,
+            vec![red, 0, 0, 64],
+            "半透明的红按预乘上传"
+        );
     }
 
     /// 预览像素全不透明时原样上传，不复制；有半透明时上传预乘过的副本，状态里的像素不动。
     #[test]
     fn preview_pixels_are_premultiplied_only_when_translucent() {
         let opaque = vec![1, 2, 3, 255, 4, 5, 6, 255];
-        assert!(matches!(premultiplied(&opaque), Cow::Borrowed(_)), "照片和视频帧不复制");
+        assert!(
+            matches!(premultiplied(&opaque), Cow::Borrowed(_)),
+            "照片和视频帧不复制"
+        );
         let translucent = vec![255, 255, 255, 128, 1, 2, 3, 255];
-        assert_eq!(premultiplied(&translucent).as_ref(), &[188, 188, 188, 128, 1, 2, 3, 255]);
-        assert_eq!(translucent[0], 255, "原像素还是直通 alpha，内容图那条路照样用");
+        assert_eq!(
+            premultiplied(&translucent).as_ref(),
+            &[188, 188, 188, 128, 1, 2, 3, 255]
+        );
+        assert_eq!(
+            translucent[0], 255,
+            "原像素还是直通 alpha，内容图那条路照样用"
+        );
     }
 }

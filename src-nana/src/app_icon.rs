@@ -25,10 +25,12 @@ pub fn with_window_icon(descriptor: WindowDescriptor) -> WindowDescriptor {
 }
 
 fn window_icon() -> Result<WindowIcon, String> {
-    let image = image::load_from_memory(WINDOW_PNG).map_err(|error| format!("图标解码失败：{error}"))?;
+    let image =
+        image::load_from_memory(WINDOW_PNG).map_err(|error| format!("图标解码失败：{error}"))?;
     let rgba = image.to_rgba8();
     let (width, height) = rgba.dimensions();
-    WindowIcon::from_rgba(rgba.into_raw(), width, height).map_err(|error| format!("图标像素无效：{error}"))
+    WindowIcon::from_rgba(rgba.into_raw(), width, height)
+        .map_err(|error| format!("图标像素无效：{error}"))
 }
 
 #[cfg(test)]
@@ -40,7 +42,13 @@ mod tests {
         let icon = window_icon().expect("图标能解开");
         assert_eq!((icon.width, icon.height), (256, 256));
         let descriptor = with_window_icon(WindowDescriptor::new("MomoBako"));
-        assert_eq!(descriptor.icon.as_ref().map(|icon| (icon.width, icon.height)), Some((256, 256)));
+        assert_eq!(
+            descriptor
+                .icon
+                .as_ref()
+                .map(|icon| (icon.width, icon.height)),
+            Some((256, 256))
+        );
     }
 
     #[test]

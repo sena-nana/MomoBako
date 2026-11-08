@@ -1,8 +1,8 @@
 //! 仓库操作槽位的爬升、收起和编号规则，对照 Vue `tasks.ts`。
 
 use super::{
-    OperationPatch, OperationRequests, OperationStart, RepositoryOperation, CLIMB_CEILING, CLIMB_INTERVAL_MS,
-    FINISH_LINGER_MS,
+    CLIMB_CEILING, CLIMB_INTERVAL_MS, FINISH_LINGER_MS, OperationPatch, OperationRequests,
+    OperationStart, RepositoryOperation,
 };
 
 fn value(slot: &RepositoryOperation) -> Option<f64> {
@@ -21,7 +21,11 @@ fn waiting_operations_climb_every_220ms_up_to_the_ceiling() {
     for _ in 0..4 {
         slot.tick(CLIMB_INTERVAL_MS);
     }
-    assert_eq!(value(&slot), Some(37.0), "17 → 22 → 27 → 32 → 37，过了 35 以后改加 3");
+    assert_eq!(
+        value(&slot),
+        Some(37.0),
+        "17 → 22 → 27 → 32 → 37，过了 35 以后改加 3"
+    );
     slot.tick(CLIMB_INTERVAL_MS);
     assert_eq!(value(&slot), Some(40.0));
     for _ in 0..200 {
@@ -29,14 +33,22 @@ fn waiting_operations_climb_every_220ms_up_to_the_ceiling() {
     }
     assert_eq!(value(&slot), Some(CLIMB_CEILING), "最多爬到 88");
     assert!(!slot.pending(), "停在上限以后不再要帧");
-    assert_eq!(slot.shown().map(|progress| progress.indeterminate), Some(true), "不确定进度一样爬");
+    assert_eq!(
+        slot.shown().map(|progress| progress.indeterminate),
+        Some(true),
+        "不确定进度一样爬"
+    );
 }
 
 /// 完成停在 100%，180 ms 以后收起；取消立刻收起。
 #[test]
 fn finished_operations_linger_at_100_then_hide() {
     let mut slot = RepositoryOperation::default();
-    let id = slot.start(OperationStart::new("刷新文件树", "同步并读取目录结构", 12.0));
+    let id = slot.start(OperationStart::new(
+        "刷新文件树",
+        "同步并读取目录结构",
+        12.0,
+    ));
     assert!(slot.update(id, OperationPatch::step("已扫描 3 个文件", 58.0)));
     assert!(slot.finish(id));
     assert_eq!(value(&slot), Some(100.0));
@@ -46,7 +58,11 @@ fn finished_operations_linger_at_100_then_hide() {
     assert!(slot.tick(16));
     assert!(slot.shown().is_none(), "180 ms 以后收起");
 
-    let id = slot.start(OperationStart::new("复制文件", "创建硬链接或复制文件", 32.0));
+    let id = slot.start(OperationStart::new(
+        "复制文件",
+        "创建硬链接或复制文件",
+        32.0,
+    ));
     assert!(slot.cancel(id));
     assert!(slot.shown().is_none(), "取消立刻收起");
 }
@@ -55,12 +71,16 @@ fn finished_operations_linger_at_100_then_hide() {
 #[test]
 fn a_newer_operation_owns_the_slot() {
     let mut slot = RepositoryOperation::default();
-    let refresh = slot.start(OperationStart::new("加载资源库", "读取已注册资源库", 12.0).indeterminate());
+    let refresh =
+        slot.start(OperationStart::new("加载资源库", "读取已注册资源库", 12.0).indeterminate());
     let read = slot.start(OperationStart::new("读取目录", "正在读取根目录", 14.0).indeterminate());
     assert!(!slot.update(refresh, OperationPatch::step("加载资源库摘要", 38.0)));
     assert!(!slot.finish(refresh));
     assert!(!slot.cancel(refresh));
-    assert_eq!(slot.shown().map(|progress| progress.label.as_str()), Some("读取目录"));
+    assert_eq!(
+        slot.shown().map(|progress| progress.label.as_str()),
+        Some("读取目录")
+    );
     assert!(slot.is_current(read));
     assert!(!slot.is_current(refresh));
 }
@@ -88,7 +108,11 @@ fn queued_requests_apply_in_order() {
     requests.finish();
     assert!(!requests.active());
     slot.apply(&mut requests);
-    assert_eq!(slot.shown().map(|progress| (progress.detail.as_str(), progress.value)), Some(("刷新文件索引", 100.0)));
+    assert_eq!(
+        slot.shown()
+            .map(|progress| (progress.detail.as_str(), progress.value)),
+        Some(("刷新文件索引", 100.0))
+    );
 
     // 别处开始的操作顶掉以后，这里的取消不碰它。
     requests.start(OperationStart::new("读取目录", "正在读取 assets", 14.0));
@@ -96,5 +120,8 @@ fn queued_requests_apply_in_order() {
     slot.start(OperationStart::new("加载资源库", "读取资源库快照", 10.0).indeterminate());
     requests.cancel();
     slot.apply(&mut requests);
-    assert_eq!(slot.shown().map(|progress| progress.label.as_str()), Some("加载资源库"));
+    assert_eq!(
+        slot.shown().map(|progress| progress.label.as_str()),
+        Some("加载资源库")
+    );
 }

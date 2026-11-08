@@ -3,11 +3,13 @@
 //! 滚动区 18px 内边距，底部一层 bg-subtle 渐变；上面一行翻页（上一页、页码、下一页），
 //! 下面是一张白纸：border-soft 细边、大投影，宽度铺满滚动区，高度按页面比例。一次只显示一页。
 
-use nana_ui::runtime::view::{widget, AnyView, IntoView};
-use nana_ui::runtime::{Activate, AlignSpec, Button, LengthSpec, ScrollAxes, ScrollView, SemanticColorRole, Stack};
+use nana_ui::runtime::view::{AnyView, IntoView, widget};
+use nana_ui::runtime::{
+    Activate, AlignSpec, Button, LengthSpec, ScrollAxes, ScrollView, SemanticColorRole, Stack,
+};
 
-use super::super::inspect::InspectMessage;
 use super::super::ShellMessage;
+use super::super::inspect::InspectMessage;
 use super::body::Pixels;
 use super::frame::text;
 
@@ -16,7 +18,9 @@ pub(super) fn page_bitmap(raster: &Pixels) -> AnyView {
     let (width, height) = raster.size();
     let Some(url) = super::super::inspect::rgba_png_data_url(width, height, raster.rgba()) else {
         eprintln!("Nana 页位图编码失败：{width}x{height}");
-        return widget(Stack::column(0.0)).key("inspect-native-page").into_any();
+        return widget(Stack::column(0.0))
+            .key("inspect-native-page")
+            .into_any();
     };
     let image = nana_ui_core::BackgroundImage::Url {
         url,
@@ -60,9 +64,14 @@ pub(super) fn page_scroller(page: AnyView, nav: Option<(usize, usize)>, key: Str
         children.push(page_nav(index, total));
     }
     children.push(page);
-    let sheet = widget(Stack::column(0.0).padding(18.0).width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0)))
-        .key("inspect-page-sheet")
-        .children(children);
+    let sheet = widget(
+        Stack::column(0.0)
+            .padding(18.0)
+            .width(LengthSpec::Fill)
+            .min_width(LengthSpec::Px(0.0)),
+    )
+    .key("inspect-page-sheet")
+    .children(children);
     let scroll = widget(ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
         layout.flex_grow = Some(1.0);
         layout.flex_shrink = Some(1.0);
@@ -90,20 +99,33 @@ pub(super) fn page_nav(index: usize, total: usize) -> AnyView {
     widget(Stack::row(0.0).align(AlignSpec::Center))
         .key("inspect-page-nav")
         .children((
-            widget(page_button("上一页", index == 0)).key("inspect-page-prev").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::TurnPage(-1)));
-            }),
-            widget(text(&format!("{} / {total}", index + 1), 14.0, 400, SemanticColorRole::Text, 21.7)).key("inspect-page-label"),
-            widget(page_button("下一页", index + 1 >= total)).key("inspect-page-next").on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::TurnPage(1)));
-            }),
+            widget(page_button("上一页", index == 0))
+                .key("inspect-page-prev")
+                .on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::TurnPage(-1)));
+                }),
+            widget(text(
+                &format!("{} / {total}", index + 1),
+                14.0,
+                400,
+                SemanticColorRole::Text,
+                21.7,
+            ))
+            .key("inspect-page-label"),
+            widget(page_button("下一页", index + 1 >= total))
+                .key("inspect-page-next")
+                .on_cx(|_, _: &Activate, cx| {
+                    cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::TurnPage(1)));
+                }),
         ))
         .into_any()
 }
 
 /// 翻页按钮是基础按钮：32px 高、透明底、正文色。禁用时在页纸底色上淡化。
 fn page_button(label: &str, disabled: bool) -> Button {
-    let mut button = Button::new(label).kind(nana_ui::ButtonKind::Ghost).disabled(disabled);
+    let mut button = Button::new(label)
+        .kind(nana_ui::ButtonKind::Ghost)
+        .disabled(disabled);
     button.style.interaction.disabled = nana_ui::runtime::SemanticPaint::default();
     if disabled {
         button.style.interaction.base.foreground_mix = Some(nana_ui_core::SemanticColorMix::new(

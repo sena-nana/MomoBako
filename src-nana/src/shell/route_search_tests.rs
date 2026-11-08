@@ -19,7 +19,14 @@ fn scene(name: &str) -> ShellViewModel {
 /// 和搜索面板、筛选栏无关的消息：缩略图像素、播放音量、任务进度。
 fn unrelated_messages() -> Vec<ShellMessage> {
     vec![
-        ShellMessage::ThumbnailPixels(vec![ThumbnailFrame { path: "a.png".into(), natural_width: 1, natural_height: 1, width: 1, height: 1, rgba: vec![0; 4] }]),
+        ShellMessage::ThumbnailPixels(vec![ThumbnailFrame {
+            path: "a.png".into(),
+            natural_width: 1,
+            natural_height: 1,
+            width: 1,
+            height: 1,
+            rgba: vec![0; 4],
+        }]),
         ShellMessage::Player(crate::shell::player::PlayerMessage::SetVolume(0.3)),
         ShellMessage::TaskProgressLoaded(Vec::new()),
     ]
@@ -32,12 +39,20 @@ fn finish_search(harness: &mut ShellHarness, rows: Vec<SearchRow>) {
         Some(InspectEffect::Search { generation, .. }) => generation,
         other => panic!("没有搜索请求：{other:?}"),
     };
-    harness.apply(ShellMessage::Inspect(InspectMessage::SearchFinished { generation, result: Ok(rows) }));
+    harness.apply(ShellMessage::Inspect(InspectMessage::SearchFinished {
+        generation,
+        result: Ok(rows),
+    }));
     harness.flush();
 }
 
 fn chip_foreground(harness: &ShellHarness, chip: StableNodeId) -> Option<SemanticColorRole> {
-    harness.document().context().world().node_style(chip).and_then(|style| style.foreground)
+    harness
+        .document()
+        .context()
+        .world()
+        .node_style(chip)
+        .and_then(|style| style.foreground)
 }
 
 /// 筛选栏颜色输入框正在组合输入：无关消息和改了筛选条件的消息都不换输入框节点、不断预编辑，
@@ -50,15 +65,26 @@ fn filter_input_keeps_its_preedit_through_updates() {
     harness.compose("hong");
     let remounts = harness.view_stats().remounts;
     let mut messages = unrelated_messages();
-    messages.push(ShellMessage::Inspect(InspectMessage::ToggleFilter { key: FilterList::Formats, value: "pdf".into() }));
+    messages.push(ShellMessage::Inspect(InspectMessage::ToggleFilter {
+        key: FilterList::Formats,
+        value: "pdf".into(),
+    }));
     for message in messages {
         harness.apply(message);
         harness.flush();
         assert_eq!(harness.input("输入文件颜色"), input, "更新换掉了颜色输入框");
-        assert_eq!(harness.preedit(input).as_deref(), Some("hong"), "更新打断了预编辑");
+        assert_eq!(
+            harness.preedit(input).as_deref(),
+            Some("hong"),
+            "更新打断了预编辑"
+        );
         assert_eq!(harness.focused(), Some(input), "更新以后焦点离开了输入框");
     }
-    assert_eq!(harness.view_stats().remounts, remounts, "常驻搜索路由不该重挂");
+    assert_eq!(
+        harness.view_stats().remounts,
+        remounts,
+        "常驻搜索路由不该重挂"
+    );
     harness.commit("红");
     for message in harness.take_messages() {
         harness.apply(message);
@@ -110,7 +136,11 @@ fn unrelated_updates_keep_every_search_node() {
         "workspace-filter-color-input",
         "workspace-filter-sort-direction",
     ];
-    let nodes = keys.map(|key| harness.keyed(key).unwrap_or_else(|| panic!("搜索页缺少 {key}")));
+    let nodes = keys.map(|key| {
+        harness
+            .keyed(key)
+            .unwrap_or_else(|| panic!("搜索页缺少 {key}"))
+    });
     let branch = harness.route_branch();
     let remounts = harness.view_stats().remounts;
     for message in unrelated_messages() {
@@ -130,7 +160,9 @@ fn unrelated_updates_keep_every_search_node() {
 fn a_new_search_keeps_the_rows_it_still_has() {
     let mut harness = ShellHarness::mount(scene("search-results"));
     let cover = harness.model.inspect.results[0].clone();
-    let row = harness.keyed("search-hit-acceptance-repo:cover.png").expect("结果行");
+    let row = harness
+        .keyed("search-hit-acceptance-repo:cover.png")
+        .expect("结果行");
     let mut retagged = cover.clone();
     retagged.tags = vec!["参考".into()];
     let mut page = cover.clone();
@@ -138,13 +170,20 @@ fn a_new_search_keeps_the_rows_it_still_has() {
     page.path = "notes/page.pdf".into();
     page.filename = "page.pdf".into();
     finish_search(&mut harness, vec![retagged, page]);
-    assert_eq!(harness.keyed("search-hit-acceptance-repo:cover.png"), Some(row), "留下的结果行被重建了");
+    assert_eq!(
+        harness.keyed("search-hit-acceptance-repo:cover.png"),
+        Some(row),
+        "留下的结果行被重建了"
+    );
     assert!(harness.find("page.pdf").is_some(), "新结果没有出现");
     assert!(harness.find("2 条结果").is_some(), "结果数没有跟上");
     harness.assert_same_as_fresh_mount();
 
     finish_search(&mut harness, Vec::new());
-    assert!(harness.find("没有匹配的文件").is_some(), "结果清空后没有空状态");
+    assert!(
+        harness.find("没有匹配的文件").is_some(),
+        "结果清空后没有空状态"
+    );
     harness.assert_same_as_fresh_mount();
 }
 
@@ -152,12 +191,29 @@ fn a_new_search_keeps_the_rows_it_still_has() {
 #[test]
 fn toggling_a_chip_restyles_it_in_place() {
     let mut harness = ShellHarness::mount(scene("filter-bar-active"));
-    let chip = harness.keyed("workspace-filter-format-pdf").expect("pdf 芯片");
-    assert_eq!(chip_foreground(&harness, chip), Some(SemanticColorRole::Muted), "没选时是次要字色");
-    harness.apply(ShellMessage::Inspect(InspectMessage::ToggleFilter { key: FilterList::Formats, value: "pdf".into() }));
+    let chip = harness
+        .keyed("workspace-filter-format-pdf")
+        .expect("pdf 芯片");
+    assert_eq!(
+        chip_foreground(&harness, chip),
+        Some(SemanticColorRole::Muted),
+        "没选时是次要字色"
+    );
+    harness.apply(ShellMessage::Inspect(InspectMessage::ToggleFilter {
+        key: FilterList::Formats,
+        value: "pdf".into(),
+    }));
     harness.flush();
-    assert_eq!(harness.keyed("workspace-filter-format-pdf"), Some(chip), "芯片被重建了");
-    assert_eq!(chip_foreground(&harness, chip), Some(SemanticColorRole::Accent), "选中以后没有换成强调色");
+    assert_eq!(
+        harness.keyed("workspace-filter-format-pdf"),
+        Some(chip),
+        "芯片被重建了"
+    );
+    assert_eq!(
+        chip_foreground(&harness, chip),
+        Some(SemanticColorRole::Accent),
+        "选中以后没有换成强调色"
+    );
     assert!(harness.find("4 个条件").is_some());
     harness.assert_same_as_fresh_mount();
 }
@@ -169,11 +225,18 @@ fn closing_and_reopening_the_filter_bar_keeps_its_nodes() {
     let bar = harness.keyed("workspace-filter-bar").expect("筛选栏");
     harness.apply(ShellMessage::Inspect(InspectMessage::CloseFilterBar));
     harness.flush();
-    assert!(harness.find("当前资源库筛选").is_none(), "关上以后筛选栏还在无障碍树里");
+    assert!(
+        harness.find("当前资源库筛选").is_none(),
+        "关上以后筛选栏还在无障碍树里"
+    );
     harness.assert_same_as_fresh_mount();
     harness.apply(ShellMessage::Inspect(InspectMessage::ToggleFilterBar));
     harness.flush();
-    assert_eq!(harness.keyed("workspace-filter-bar"), Some(bar), "重新打开换了筛选栏节点");
+    assert_eq!(
+        harness.keyed("workspace-filter-bar"),
+        Some(bar),
+        "重新打开换了筛选栏节点"
+    );
     assert!(harness.find("当前资源库筛选").is_some());
     harness.assert_same_as_fresh_mount();
 }

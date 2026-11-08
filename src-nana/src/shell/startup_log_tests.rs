@@ -62,7 +62,12 @@ fn sync_record(message: &str, context: serde_json::Value) -> ShellMessage {
         category: "repository.sync".into(),
         action: "scanStart".into(),
         message: message.into(),
-        source: SystemLogSource { kind: "repository".into(), label: None, plugin_id: None, repo_id: Some(REPO.into()) },
+        source: SystemLogSource {
+            kind: "repository".into(),
+            label: None,
+            plugin_id: None,
+            repo_id: Some(REPO.into()),
+        },
         location: SystemLogLocation::default(),
         context,
     }))
@@ -75,7 +80,13 @@ fn logs(model: &ShellViewModel) -> Vec<(&'static str, String, String)> {
         .startup
         .logs
         .iter()
-        .map(|log| (log.level, log.message.clone(), log.detail.clone().unwrap_or_default()))
+        .map(|log| {
+            (
+                log.level,
+                log.message.clone(),
+                log.detail.clone().unwrap_or_default(),
+            )
+        })
         .collect()
 }
 
@@ -89,51 +100,115 @@ fn a_launch_logs_every_vue_startup_entry_with_its_detail() {
     let mut model = ShellViewModel::default();
     model.workspace.last_active_repo_id = Some(REPO.into());
     let generation = model.workspace.prepare_initial_list();
-    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(REPO, "ready"), summary("repo-b", "missing")]) });
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(vec![summary(REPO, "ready"), summary("repo-b", "missing")]),
+    });
     model.reduce(sync_record("开始扫描资源库文件。", serde_json::json!({ "repoPath": "C:/repo-a", "hintPathCount": 0, "samplePaths": ["a.png"], "backendPluginId": null })));
-    let counts = SyncCounts { scanned_files: 3, created_assets: 2, updated_assets: 1, deleted_assets: 0, created_events: 4, hardlink_candidates: 1 };
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(counts) });
+    let counts = SyncCounts {
+        scanned_files: 3,
+        created_assets: 2,
+        updated_assets: 1,
+        deleted_assets: 0,
+        created_events: 4,
+        hardlink_candidates: 1,
+    };
+    model.reduce(ShellMessage::RepositorySynced {
+        generation,
+        result: Ok(counts),
+    });
     let mut index = snapshot(REPO);
     index.assets = vec![asset("a.png"), asset("b.png")];
     index.playlists = vec![playlist()];
-    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(index) });
+    model.reduce(ShellMessage::RepositorySnapshotLoaded {
+        generation,
+        result: Ok(index),
+    });
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser(REPO))));
-    assert_eq!(model.workspace.startup.status, StartupStatus::Loading, "读完首屏目录还在等设置包");
-    assert_eq!(model.workspace.startup.logs.len(), 12, "设置包回来之前只记到「开始加载应用配置与插件设置」");
+    assert_eq!(
+        model.workspace.startup.status,
+        StartupStatus::Loading,
+        "读完首屏目录还在等设置包"
+    );
+    assert_eq!(
+        model.workspace.startup.logs.len(),
+        12,
+        "设置包回来之前只记到「开始加载应用配置与插件设置」"
+    );
     model.reduce(bundle(Vec::new()));
-    assert_eq!(model.workspace.startup.logs.len(), 12, "插件列表到了还等播放器类型");
+    assert_eq!(
+        model.workspace.startup.logs.len(),
+        12,
+        "插件列表到了还等播放器类型"
+    );
     model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(Vec::new())));
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
     assert_eq!(
         logs(&model),
         vec![
-            entry("info", "首屏启动流程开始。", "totalSteps: 4 · rememberedRepoId: repo-a"),
+            entry(
+                "info",
+                "首屏启动流程开始。",
+                "totalSteps: 4 · rememberedRepoId: repo-a"
+            ),
             entry("info", "首屏启动开始读取资源库列表。", "step: 1"),
-            entry("info", "首屏启动资源库列表读取完成。", "step: 1 · repositoryCount: 2 · readyRepositoryCount: 1 · missingRepositoryCount: 1"),
+            entry(
+                "info",
+                "首屏启动资源库列表读取完成。",
+                "step: 1 · repositoryCount: 2 · readyRepositoryCount: 1 · missingRepositoryCount: 1"
+            ),
             entry(
                 "info",
                 "首屏启动已选定资源库。",
                 "repositoryCount: 2 · rememberedRepoId: repo-a · repositoryStatus: ready · repositoryName: 仓库 repo-a · repositoryPath: C:/repo-a",
             ),
             entry("info", "首屏启动开始同步文件变化。", "step: 2"),
-            entry("info", "开始扫描资源库文件。", "hintPathCount: 0 · repoPath: C:/repo-a · samplePaths: [\"a.png\"]"),
+            entry(
+                "info",
+                "开始扫描资源库文件。",
+                "hintPathCount: 0 · repoPath: C:/repo-a · samplePaths: [\"a.png\"]"
+            ),
             entry(
                 "info",
                 "首屏启动文件变化同步完成。",
                 "step: 2 · scannedFiles: 3 · createdAssets: 2 · updatedAssets: 1 · deletedAssets: 0 · createdEvents: 4 · hardlinkCandidates: 1",
             ),
             entry("info", "首屏启动开始读取资源库摘要。", "step: 3"),
-            entry("info", "首屏启动资源库摘要读取完成。", "step: 3 · assetCount: 2 · playlistCount: 1 · defaultAssetId: asset-a.png"),
+            entry(
+                "info",
+                "首屏启动资源库摘要读取完成。",
+                "step: 3 · assetCount: 2 · playlistCount: 1 · defaultAssetId: asset-a.png"
+            ),
             entry("info", "首屏启动开始加载首屏目录与关联数据。", "step: 4"),
-            entry("info", "首屏启动首屏目录与关联数据加载完成。", "step: 4 · playlistCount: 1"),
-            entry("info", "首屏启动开始加载应用配置与插件设置。", "step: 4 · repoId: repo-a"),
-            entry("info", "首屏启动应用配置与插件设置加载完成。", "step: 4 · repoId: repo-a"),
-            entry("info", "首屏启动流程完成。", "activeRepoId: repo-a · assetCount: 2 · playlistCount: 1"),
+            entry(
+                "info",
+                "首屏启动首屏目录与关联数据加载完成。",
+                "step: 4 · playlistCount: 1"
+            ),
+            entry(
+                "info",
+                "首屏启动开始加载应用配置与插件设置。",
+                "step: 4 · repoId: repo-a"
+            ),
+            entry(
+                "info",
+                "首屏启动应用配置与插件设置加载完成。",
+                "step: 4 · repoId: repo-a"
+            ),
+            entry(
+                "info",
+                "首屏启动流程完成。",
+                "activeRepoId: repo-a · assetCount: 2 · playlistCount: 1"
+            ),
         ]
     );
     let before = model.workspace.startup.logs.len();
     model.reduce(bundle(Vec::new()));
-    assert_eq!(model.workspace.startup.logs.len(), before, "之后再读设置包（设置页、刷新）不再记");
+    assert_eq!(
+        model.workspace.startup.logs.len(),
+        before,
+        "之后再读设置包（设置页、刷新）不再记"
+    );
 }
 
 /// 没有资源库和资源库缺失的启动也读设置包：设置包读失败也照 Vue 记完两条（不再等播放器类型），流程完成的素材数和
@@ -151,31 +226,61 @@ fn empty_and_missing_launches_close_the_log_after_the_settings_bundle() {
     };
     let mut empty = ShellViewModel::default();
     let generation = empty.workspace.prepare_initial_list();
-    empty.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(Vec::new()) });
+    empty.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(Vec::new()),
+    });
     empty.reduce(failed());
     assert_eq!(
         logs(&empty)[3..],
         [
-            entry("warn", "首屏启动未找到可加载的资源库。", "repositoryCount: 0"),
+            entry(
+                "warn",
+                "首屏启动未找到可加载的资源库。",
+                "repositoryCount: 0"
+            ),
             entry("info", "首屏启动开始加载应用配置与插件设置。", "step: 4"),
             entry("info", "首屏启动应用配置与插件设置加载完成。", "step: 4"),
-            entry("info", "首屏启动流程完成。", "assetCount: 0 · playlistCount: 0"),
+            entry(
+                "info",
+                "首屏启动流程完成。",
+                "assetCount: 0 · playlistCount: 0"
+            ),
         ]
     );
 
     let mut missing = ShellViewModel::default();
     let generation = missing.workspace.prepare_initial_list();
-    missing.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary("gone", "missing")]) });
+    missing.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(vec![summary("gone", "missing")]),
+    });
     missing.reduce(bundle(Vec::new()));
     missing.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(Vec::new())));
     let tail = &logs(&missing)[4..];
     assert_eq!(
         tail,
         [
-            entry("warn", "首屏启动遇到缺失资源库。", "repositoryName: 仓库 gone · repositoryPath: C:/gone"),
-            entry("info", "首屏启动开始加载应用配置与插件设置。", "step: 4 · repoId: gone"),
-            entry("info", "首屏启动应用配置与插件设置加载完成。", "step: 4 · repoId: gone"),
-            entry("info", "首屏启动流程完成。", "activeRepoId: gone · assetCount: 0 · playlistCount: 0"),
+            entry(
+                "warn",
+                "首屏启动遇到缺失资源库。",
+                "repositoryName: 仓库 gone · repositoryPath: C:/gone"
+            ),
+            entry(
+                "info",
+                "首屏启动开始加载应用配置与插件设置。",
+                "step: 4 · repoId: gone"
+            ),
+            entry(
+                "info",
+                "首屏启动应用配置与插件设置加载完成。",
+                "step: 4 · repoId: gone"
+            ),
+            entry(
+                "info",
+                "首屏启动流程完成。",
+                "activeRepoId: gone · assetCount: 0 · playlistCount: 0"
+            ),
         ]
     );
 }
@@ -191,30 +296,77 @@ fn a_failed_launch_logs_the_active_repository_once_the_summary_is_read() {
     };
     let mut model = ShellViewModel::default();
     let generation = model.workspace.prepare_initial_list();
-    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(REPO, "ready")]) });
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Err("磁盘不可读".into()) });
-    assert_eq!(last(&model), entry("error", "首屏启动流程失败。", "step: 2 · stepLabel: 加载失败 · error: 磁盘不可读 · targetRepoId: repo-a"));
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(vec![summary(REPO, "ready")]),
+    });
+    model.reduce(ShellMessage::RepositorySynced {
+        generation,
+        result: Err("磁盘不可读".into()),
+    });
+    assert_eq!(
+        last(&model),
+        entry(
+            "error",
+            "首屏启动流程失败。",
+            "step: 2 · stepLabel: 加载失败 · error: 磁盘不可读 · targetRepoId: repo-a"
+        )
+    );
 
     let generation = retry(&mut model);
-    assert_eq!(logs(&model)[0], entry("info", "首屏启动流程开始。", "totalSteps: 4"), "上一轮没读到摘要，还没有活动仓库");
-    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(REPO, "ready")]) });
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(SyncCounts::default()) });
-    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(REPO)) });
+    assert_eq!(
+        logs(&model)[0],
+        entry("info", "首屏启动流程开始。", "totalSteps: 4"),
+        "上一轮没读到摘要，还没有活动仓库"
+    );
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(vec![summary(REPO, "ready")]),
+    });
+    model.reduce(ShellMessage::RepositorySynced {
+        generation,
+        result: Ok(SyncCounts::default()),
+    });
+    model.reduce(ShellMessage::RepositorySnapshotLoaded {
+        generation,
+        result: Ok(snapshot(REPO)),
+    });
     model.reduce(ShellMessage::FileBrowserLoaded(Err("拒绝访问".into())));
     assert_eq!(model.workspace.startup.status, StartupStatus::Error);
     assert_eq!(
         last(&model),
-        entry("error", "首屏启动流程失败。", "step: 4 · stepLabel: 加载失败 · error: 拒绝访问 · activeRepoId: repo-a · targetRepoId: repo-a"),
+        entry(
+            "error",
+            "首屏启动流程失败。",
+            "step: 4 · stepLabel: 加载失败 · error: 拒绝访问 · activeRepoId: repo-a · targetRepoId: repo-a"
+        ),
         "读完摘要以后带上活动仓库"
     );
 
     let generation = retry(&mut model);
-    assert_eq!(logs(&model)[0], entry("info", "首屏启动流程开始。", "totalSteps: 4 · activeRepoId: repo-a · rememberedRepoId: repo-a"));
-    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(REPO, "ready")]) });
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Err("磁盘不可读".into()) });
+    assert_eq!(
+        logs(&model)[0],
+        entry(
+            "info",
+            "首屏启动流程开始。",
+            "totalSteps: 4 · activeRepoId: repo-a · rememberedRepoId: repo-a"
+        )
+    );
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(vec![summary(REPO, "ready")]),
+    });
+    model.reduce(ShellMessage::RepositorySynced {
+        generation,
+        result: Err("磁盘不可读".into()),
+    });
     assert_eq!(
         last(&model),
-        entry("error", "首屏启动流程失败。", "step: 2 · stepLabel: 加载失败 · error: 磁盘不可读 · activeRepoId: repo-a · targetRepoId: repo-a"),
+        entry(
+            "error",
+            "首屏启动流程失败。",
+            "step: 2 · stepLabel: 加载失败 · error: 磁盘不可读 · activeRepoId: repo-a · targetRepoId: repo-a"
+        ),
         "Vue 的 activeRepoId 还是上一轮换上的仓库"
     );
 }

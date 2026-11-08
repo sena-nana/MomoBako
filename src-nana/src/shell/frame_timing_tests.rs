@@ -10,7 +10,9 @@ use nana_ui::ApplicationWindow;
 
 use crate::frame_clock::FrameClock;
 
-use super::{InspectEffect, InspectMessage, ShellMessage, ShellPage, ShellViewModel, SidebarMessage};
+use super::{
+    InspectEffect, InspectMessage, ShellMessage, ShellPage, ShellViewModel, SidebarMessage,
+};
 
 /// 某一刻的计时状态。
 #[derive(Debug, PartialEq)]
@@ -26,7 +28,9 @@ struct Sample {
 fn run(fps: u64, checkpoints_ms: &[u64]) -> Vec<Sample> {
     let mut model = ShellViewModel::for_page(ShellPage::FileList);
     model.reduce(ShellMessage::ToggleSidebar);
-    model.reduce(ShellMessage::Inspect(InspectMessage::SetQuery("cover".into())));
+    model.reduce(ShellMessage::Inspect(InspectMessage::SetQuery(
+        "cover".into(),
+    )));
     model.reduce(ShellMessage::Sidebar(SidebarMessage::RefreshFolderTree));
     let _ = model.inspect.take_effects();
     let mut window = ApplicationWindow::new();
@@ -41,7 +45,11 @@ fn run(fps: u64, checkpoints_ms: &[u64]) -> Vec<Sample> {
         super::poll_timers(&mut model, step);
         crate::window_host::prepare_motion(&mut model, None, &mut window, step);
         clock.note_demand(window.demand);
-        searched |= model.inspect.take_effects().iter().any(|effect| matches!(effect, InspectEffect::Search { .. }));
+        searched |= model
+            .inspect
+            .take_effects()
+            .iter()
+            .any(|effect| matches!(effect, InspectEffect::Search { .. }));
         if at_us % 1000 == 0 && checkpoints_ms.contains(&(at_us / 1000)) {
             samples.push(Sample {
                 at_ms: at_us / 1000,
@@ -65,11 +73,18 @@ fn thirty_and_one_hundred_twenty_fps_reach_the_same_state_in_the_same_real_time(
     let [at_200, at_300, at_1000] = &slow[..] else {
         panic!("每个时刻都该有一帧：{slow:?}");
     };
-    assert!(at_200.sidebar_width > 0.0, "240ms 的收起动效到 200ms 还没走完");
+    assert!(
+        at_200.sidebar_width > 0.0,
+        "240ms 的收起动效到 200ms 还没走完"
+    );
     assert!(!at_200.searched, "250ms 的搜索延时到 200ms 还没到");
     assert_eq!(at_200.operation, Some(12.0), "第一次爬升在 220ms");
     assert_eq!(at_300.sidebar_width, 0.0);
     assert!(at_300.searched);
     assert_eq!(at_300.operation, Some(17.0));
-    assert_eq!(at_1000.operation, Some(32.0), "220、440、660、880ms 各爬一级：12 → 17 → 22 → 27 → 32");
+    assert_eq!(
+        at_1000.operation,
+        Some(32.0),
+        "220、440、660、880ms 各爬一级：12 → 17 → 22 → 27 → 32"
+    );
 }

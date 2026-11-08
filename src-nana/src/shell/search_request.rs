@@ -7,15 +7,34 @@
 use super::{DateBound, FilterList, NumberBound, SearchFilters, SearchRequestDraft, SortDirection};
 
 /// 按当前查询和筛选组装请求。只有筛选生效时才把搜索收进当前资源库。
-pub(crate) fn build_search_request(query: &str, filters: &SearchFilters, active_repo: Option<&str>) -> SearchRequestDraft {
+pub(crate) fn build_search_request(
+    query: &str,
+    filters: &SearchFilters,
+    active_repo: Option<&str>,
+) -> SearchRequestDraft {
     let mut metadata_filters = Vec::new();
-    metadata_filters.extend(filters.colors.iter().cloned().map(|value| ("color".into(), value)));
-    metadata_filters.extend(filters.shapes.iter().cloned().map(|value| ("shape".into(), value)));
+    metadata_filters.extend(
+        filters
+            .colors
+            .iter()
+            .cloned()
+            .map(|value| ("color".into(), value)),
+    );
+    metadata_filters.extend(
+        filters
+            .shapes
+            .iter()
+            .cloned()
+            .map(|value| ("shape".into(), value)),
+    );
     metadata_filters.extend(parse_metadata(&filters.metadata_filters));
     let sort_field = filters.sort_field.trim();
     SearchRequestDraft {
         query: query.to_string(),
-        repo_id: filters.has_active_filters().then(|| active_repo.map(str::to_string)).flatten(),
+        repo_id: filters
+            .has_active_filters()
+            .then(|| active_repo.map(str::to_string))
+            .flatten(),
         exclude_query: nonempty(&filters.exclude_query),
         tags: normalize_values(&filters.tags),
         formats: normalize_values(&filters.formats),
@@ -130,7 +149,11 @@ fn parse_numbers(value: &str) -> Vec<NumberBound> {
             if key.trim().is_empty() || (min.is_none() && max.is_none()) {
                 None
             } else {
-                Some(NumberBound { key: key.trim().to_string(), min, max })
+                Some(NumberBound {
+                    key: key.trim().to_string(),
+                    min,
+                    max,
+                })
             }
         })
         .collect()
@@ -141,7 +164,11 @@ fn bound_number(value: &str) -> Option<String> {
     if value.is_empty() {
         return None;
     }
-    value.parse::<f64>().ok().filter(|number| number.is_finite()).map(|number| number.to_string())
+    value
+        .parse::<f64>()
+        .ok()
+        .filter(|number| number.is_finite())
+        .map(|number| number.to_string())
 }
 
 fn parse_dates(value: &str) -> Vec<DateBound> {
@@ -156,7 +183,11 @@ fn parse_dates(value: &str) -> Vec<DateBound> {
             if key.trim().is_empty() || (from.is_none() && to.is_none()) {
                 None
             } else {
-                Some(DateBound { key: key.trim().to_string(), from, to })
+                Some(DateBound {
+                    key: key.trim().to_string(),
+                    from,
+                    to,
+                })
             }
         })
         .collect()
@@ -205,7 +236,10 @@ impl SearchRequestDraft {
             || !self.metadata_filters.is_empty()
             || !self.exclude_tags.is_empty()
             || !self.exclude_formats.is_empty()
-            || self.exclude_query.as_ref().is_some_and(|value| !value.trim().is_empty())
+            || self
+                .exclude_query
+                .as_ref()
+                .is_some_and(|value| !value.trim().is_empty())
             || !self.exclude_path_prefixes.is_empty()
             || !self.exclude_metadata_filters.is_empty()
             || !self.exclude_number_filters.is_empty()

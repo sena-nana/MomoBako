@@ -1,16 +1,21 @@
 //! 文件页画面状态的测试：去扩展名标题、单击只选中、右键菜单的选中和二次确认、
 //! Escape 关闭顺序、标签组展开、列表宽度回报，以及标签草稿和导出保存位置的转发；
-//! 还有别处（搜索结果、外部打开）读回详情时照样进入预览。
+//! 还有别处（搜索结果、外部打开）读回详情时照样进入预览，预览页返回不重读目录，
+//! 以及回收站里双击文件不打开预览。
 
 use std::collections::BTreeMap;
 
-use nana_ui_platform::host::WindowCommand;
 use nana_ui_platform::WindowId;
+use nana_ui_platform::host::WindowCommand;
 
 use crate::backend::services::repository::{AssetDetail, AssetSummary, FileBrowserEntry};
-use crate::shell::{ShellMessage, ShellPage, ShellViewModel, WorkspaceRepository};
+use crate::shell::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel, WorkspaceRepository};
 
-use super::{BranchSource, FileContext, FileDialog, FileRow, FilesEffect, FilesMessage, FilesState};
+use super::super::files_view::previewing;
+use super::super::inspect::InspectMessage;
+use super::{
+    BranchSource, FileContext, FileDialog, FileRow, FilesEffect, FilesMessage, FilesState,
+};
 
 fn row(path: &str, kind: &str, extension: Option<&str>) -> FileRow {
     FileRow::from_entry(&FileBrowserEntry {
@@ -52,18 +57,37 @@ fn writable() -> FileContext {
 
 fn listed() -> FilesState {
     let mut state = FilesState::default();
-    state.rows = vec![row("assets", "directory", None), row("cover.png", "file", Some("png")), row("notes/page.pdf", "file", Some("pdf"))];
+    state.rows = vec![
+        row("assets", "directory", None),
+        row("cover.png", "file", Some("png")),
+        row("notes/page.pdf", "file", Some("pdf")),
+    ];
     state
 }
 
 #[test]
 fn display_title_drops_only_the_matching_extension() {
-    assert_eq!(row("cover.png", "file", Some("png")).display_title(), "cover");
-    assert_eq!(row("Cover.PNG", "file", Some("png")).display_title(), "Cover");
-    assert_eq!(row("archive.tar.gz", "file", Some("gz")).display_title(), "archive.tar");
-    assert_eq!(row("notes.md", "file", Some("txt")).display_title(), "notes.md");
+    assert_eq!(
+        row("cover.png", "file", Some("png")).display_title(),
+        "cover"
+    );
+    assert_eq!(
+        row("Cover.PNG", "file", Some("png")).display_title(),
+        "Cover"
+    );
+    assert_eq!(
+        row("archive.tar.gz", "file", Some("gz")).display_title(),
+        "archive.tar"
+    );
+    assert_eq!(
+        row("notes.md", "file", Some("txt")).display_title(),
+        "notes.md"
+    );
     assert_eq!(row("README", "file", None).display_title(), "README");
-    assert_eq!(row("photos.v2", "directory", Some("v2")).display_title(), "photos.v2");
+    assert_eq!(
+        row("photos.v2", "directory", Some("v2")).display_title(),
+        "photos.v2"
+    );
 }
 
 #[test]
@@ -71,15 +95,88 @@ fn single_click_keeps_the_list_and_double_click_opens_the_preview() {
     let mut state = listed();
     state.reduce(&writable(), FilesMessage::ActivateRow("cover.png".into()));
     assert_eq!(state.selected, vec!["cover.png".to_string()]);
-    assert!(!state.preview_open(Some("cover.png")), "单击文件只在右侧详情里看");
-    assert!(matches!(state.take_effects().as_slice(), [FilesEffect::LoadAsset { asset_id, .. }] if asset_id == "cover.png"));
+    assert!(
+        !state.preview_open(Some("cover.png")),
+        "单击文件只在右侧详情里看"
+    );
+    assert!(
+        matches!(state.take_effects().as_slice(), [FilesEffect::LoadAsset { asset_id, .. }] if asset_id == "cover.png")
+    );
 
     state.reduce(&writable(), FilesMessage::OpenRow("cover.png".into()));
-    assert!(state.preview_open(Some("cover.png")), "双击或「预览」进入预览页");
+    assert!(
+        state.preview_open(Some("cover.png")),
+        "双击或「预览」进入预览页"
+    );
 
     state.reduce(&writable(), FilesMessage::ActivateRow("assets".into()));
     assert_eq!(state.select_only, None, "目录没有预览，不记单击选中的文件");
     assert!(!state.preview_open(None));
+}
+
+/// 预览页「返回」照 Vue `exitPreview`：收起预览，目录、选择和详情留在原地，不排目录读取。
+#[test]
+fn preview_back_keeps_the_directory_and_the_selected_file() {
+    let mut model = ShellViewModel::default();
+    model.workspace.repositories.push(WorkspaceRepository {
+        repo_id: "repo".into(),
+        name: "库".into(),
+        path: "C:/repo".into(),
+        status: "ready".into(),
+        backend_plugin_id: "filesystem".into(),
+        capabilities: vec!["write".into()],
+        cache_required: false,
+        cache_status: String::new(),
+        cache_path: None,
+        login_expired: false,
+        logged_out: false,
+    });
+    model.workspace.active_repo_id = Some("repo".into());
+    model.files.current_path = "photos".into();
+    model.files.rows = vec![row("cover.png", "file", Some("png"))];
+    model.reduce(ShellMessage::Files(FilesMessage::OpenRow(
+        "cover.png".into(),
+    )));
+    let _ = model.files.take_effects();
+    model.reduce(ShellMessage::SelectFile {
+        path: "cover.png".into(),
+        asset_id: Some("cover.png".into()),
+    });
+    model.reduce(ShellMessage::Inspect(InspectMessage::SetComment(
+        "留下".into(),
+    )));
+    assert!(previewing(&model), "双击以后是预览页");
+    assert_eq!(model.files.selected, vec!["cover.png".to_string()]);
+
+    model.reduce(ShellMessage::Files(FilesMessage::ExitPreview));
+
+    assert!(!previewing(&model), "返回后回到文件列表");
+    assert_eq!(model.page, ShellPage::SelectedFile, "右侧详情还在看这一条");
+    assert_eq!(model.files.current_path, "photos");
+    assert!(!model.files.loading, "返回不把列表标成正在读取");
+    assert!(
+        model
+            .files
+            .take_effects()
+            .iter()
+            .all(|effect| !matches!(effect, FilesEffect::Browse { .. })),
+        "返回不重读目录"
+    );
+    assert_eq!(model.files.rows.len(), 1, "列表还是原来那一份");
+    assert_eq!(model.files.selected, vec!["cover.png".to_string()]);
+    assert_eq!(model.inspect.target_path.as_deref(), Some("cover.png"));
+    assert_eq!(model.inspect.draft_comment(), "留下");
+
+    let mut bare = ShellViewModel::default();
+    bare.files.selected = vec!["cover.png".into()];
+    bare.reduce(ShellMessage::Files(FilesMessage::ExitPreview));
+    assert_eq!(
+        bare.files.selected,
+        vec!["cover.png".to_string()],
+        "没有正在看的文件时不改选择"
+    );
+    assert!(bare.files.select_only.is_none());
+    assert!(bare.files.take_effects().is_empty());
 }
 
 #[test]
@@ -87,42 +184,112 @@ fn context_menu_selects_like_a_click_and_confirms_permanent_delete_twice() {
     let mut state = listed();
     state.reduce(&writable(), FilesMessage::ActivateRow("assets".into()));
     let _ = state.take_effects();
-    state.reduce(&writable(), FilesMessage::OpenEntryMenu { path: "notes/page.pdf".into(), x: 400.0, y: 470.0 });
-    assert_eq!(state.selected, vec!["notes/page.pdf".to_string()], "右键没选中的条目时先替换成它");
+    state.reduce(
+        &writable(),
+        FilesMessage::OpenEntryMenu {
+            path: "notes/page.pdf".into(),
+            x: 400.0,
+            y: 470.0,
+        },
+    );
+    assert_eq!(
+        state.selected,
+        vec!["notes/page.pdf".to_string()],
+        "右键没选中的条目时先替换成它"
+    );
     assert_eq!(state.select_only.as_deref(), Some("notes/page.pdf"));
     assert!(state.entry_menu.is_some());
-    assert!(matches!(state.take_effects().as_slice(), [FilesEffect::LoadAsset { .. }]));
+    assert!(matches!(
+        state.take_effects().as_slice(),
+        [FilesEffect::LoadAsset { .. }]
+    ));
 
-    let branch = |branch: &str, source, inside| FilesMessage::MenuBranchChanged { branch: branch.into(), source, inside };
-    state.reduce(&writable(), branch("thumbnail", BranchSource::Pointer, true));
-    assert_eq!(state.menu_branch.open(), Some("thumbnail"), "指针进来就展开");
+    let branch = |branch: &str, source, inside| FilesMessage::MenuBranchChanged {
+        branch: branch.into(),
+        source,
+        inside,
+    };
+    state.reduce(
+        &writable(),
+        branch("thumbnail", BranchSource::Pointer, true),
+    );
+    assert_eq!(
+        state.menu_branch.open(),
+        Some("thumbnail"),
+        "指针进来就展开"
+    );
     state.reduce(&writable(), branch("thumbnail", BranchSource::Focus, true));
-    state.reduce(&writable(), branch("playlist-membership", BranchSource::Pointer, true));
-    state.reduce(&writable(), branch("thumbnail", BranchSource::Pointer, false));
-    assert_eq!(state.menu_branch.open(), Some("playlist-membership"), "先进下一个分组、后离开上一个，展开指针所在的那个");
-    state.reduce(&writable(), branch("playlist-membership", BranchSource::Pointer, false));
-    assert_eq!(state.menu_branch.open(), Some("thumbnail"), "指针离开以后，焦点还在的分组照 :focus-within 留着");
+    state.reduce(
+        &writable(),
+        branch("playlist-membership", BranchSource::Pointer, true),
+    );
+    state.reduce(
+        &writable(),
+        branch("thumbnail", BranchSource::Pointer, false),
+    );
+    assert_eq!(
+        state.menu_branch.open(),
+        Some("playlist-membership"),
+        "先进下一个分组、后离开上一个，展开指针所在的那个"
+    );
+    state.reduce(
+        &writable(),
+        branch("playlist-membership", BranchSource::Pointer, false),
+    );
+    assert_eq!(
+        state.menu_branch.open(),
+        Some("thumbnail"),
+        "指针离开以后，焦点还在的分组照 :focus-within 留着"
+    );
     state.reduce(&writable(), branch("thumbnail", BranchSource::Focus, false));
     assert_eq!(state.menu_branch.open(), None);
 
     state.reduce(&writable(), FilesMessage::ArmMenuConfirm("delete".into()));
-    assert_eq!(state.menu_pending.as_deref(), Some("delete"), "第一次只进入待确认");
+    assert_eq!(
+        state.menu_pending.as_deref(),
+        Some("delete"),
+        "第一次只进入待确认"
+    );
     assert!(state.entry_menu.is_some(), "待确认时菜单不关");
-    state.reduce(&writable(), branch("thumbnail", BranchSource::Pointer, true));
+    state.reduce(
+        &writable(),
+        branch("thumbnail", BranchSource::Pointer, true),
+    );
     state.reduce(&writable(), FilesMessage::CloseEntryMenu);
-    assert!(state.entry_menu.is_none() && state.menu_pending.is_none() && state.menu_branch.open().is_none());
-    state.reduce(&writable(), branch("thumbnail", BranchSource::Pointer, true));
-    assert_eq!(state.menu_branch.open(), None, "菜单关掉以后才到的进出不再记");
+    assert!(
+        state.entry_menu.is_none()
+            && state.menu_pending.is_none()
+            && state.menu_branch.open().is_none()
+    );
+    state.reduce(
+        &writable(),
+        branch("thumbnail", BranchSource::Pointer, true),
+    );
+    assert_eq!(
+        state.menu_branch.open(),
+        None,
+        "菜单关掉以后才到的进出不再记"
+    );
 }
 
 #[test]
 fn escape_closes_menus_before_dialogs_and_keeps_busy_dialogs() {
     let mut state = listed();
     state.reduce(&writable(), FilesMessage::ActivateRow("cover.png".into()));
-    state.reduce(&writable(), FilesMessage::OpenEntryMenu { path: "cover.png".into(), x: 0.0, y: 0.0 });
+    state.reduce(
+        &writable(),
+        FilesMessage::OpenEntryMenu {
+            path: "cover.png".into(),
+            x: 0.0,
+            y: 0.0,
+        },
+    );
     state.import_open = true;
     assert!(state.dismiss_overlay());
-    assert!(state.entry_menu.is_none() && state.import_open, "先关右键菜单");
+    assert!(
+        state.entry_menu.is_none() && state.import_open,
+        "先关右键菜单"
+    );
     assert!(state.dismiss_overlay());
     assert!(!state.import_open);
     assert!(!state.dismiss_overlay(), "没有浮层时交给壳层");
@@ -139,9 +306,18 @@ fn escape_closes_menus_before_dialogs_and_keeps_busy_dialogs() {
 #[test]
 fn tag_group_follows_vue_default_until_toggled_for_that_file() {
     let mut state = FilesState::default();
-    assert!(!state.tags_expanded("cover.png", false), "没有标签时默认收起");
+    assert!(
+        !state.tags_expanded("cover.png", false),
+        "没有标签时默认收起"
+    );
     assert!(state.tags_expanded("cover.png", true), "有标签时默认展开");
-    state.reduce(&writable(), FilesMessage::ToggleTags { path: "cover.png".into(), expanded: false });
+    state.reduce(
+        &writable(),
+        FilesMessage::ToggleTags {
+            path: "cover.png".into(),
+            expanded: false,
+        },
+    );
     assert!(state.tags_expanded("cover.png", false));
     assert!(!state.tags_expanded("page.pdf", false), "别的文件仍按默认");
 }
@@ -182,10 +358,14 @@ fn library() -> ShellViewModel {
 fn tag_draft_submits_through_the_inspect_draft() {
     let mut model = library();
     model.files.tag_draft = "参考".into();
-    model.reduce(ShellMessage::Files(FilesMessage::SubmitTagDraft("  参考 ".into())));
+    model.reduce(ShellMessage::Files(FilesMessage::SubmitTagDraft(
+        "  参考 ".into(),
+    )));
     assert_eq!(model.inspect.draft_tags(), ["参考".to_string()]);
     assert!(model.files.tag_draft.is_empty(), "加进草稿后清空输入");
-    model.reduce(ShellMessage::Files(FilesMessage::SubmitTagDraft("   ".into())));
+    model.reduce(ShellMessage::Files(FilesMessage::SubmitTagDraft(
+        "   ".into(),
+    )));
     assert_eq!(model.inspect.draft_tags().len(), 1, "空标签不加");
 }
 
@@ -194,13 +374,75 @@ fn archive_export_without_a_path_asks_for_one_first() {
     let mut model = library();
     model.files.present_export();
     model.reduce(ShellMessage::Files(FilesMessage::SubmitExport));
-    assert!(model.files.take_effects().iter().all(|effect| !matches!(effect, FilesEffect::ExportArchive { .. })));
+    assert!(
+        model
+            .files
+            .take_effects()
+            .iter()
+            .all(|effect| !matches!(effect, FilesEffect::ExportArchive { .. }))
+    );
     let commands = model.input.take_platform_commands(WindowId(1), false);
     assert!(
-        commands.iter().any(|command| matches!(command, WindowCommand::OpenFileDialog { .. })),
+        commands
+            .iter()
+            .any(|command| matches!(command, WindowCommand::OpenFileDialog { .. })),
         "没有保存位置时先弹系统保存对话框：{commands:?}"
     );
     assert!(model.files.export.error.is_empty());
+}
+
+/// 回收站里双击文件照 Vue `previewFileEntryByDoubleClick` 留在列表：预览页不换上，
+/// 已经单击选中的那一条不再读一次详情。双击文件夹仍按回收站位置进入目录。
+#[test]
+fn double_clicking_a_trash_file_stays_on_the_list() {
+    let mut model = library();
+    model.workspace.panel = WorkspacePanel::Trash;
+    model.files.rows = vec![
+        row("assets", "directory", None),
+        row("cover.png", "file", Some("png")),
+    ];
+    model.reduce(ShellMessage::Files(FilesMessage::ActivateRow(
+        "cover.png".into(),
+    )));
+    model.reduce(ShellMessage::SelectFile {
+        path: "cover.png".into(),
+        asset_id: Some("cover.png".into()),
+    });
+    assert!(!previewing(&model), "单击回收站文件只在右侧详情里看");
+    let _ = model.files.take_effects();
+
+    model.reduce(ShellMessage::Files(FilesMessage::OpenRow(
+        "cover.png".into(),
+    )));
+    assert!(!previewing(&model), "回收站里双击文件不打开预览");
+    assert_eq!(model.files.selected, vec!["cover.png".to_string()]);
+    assert_eq!(
+        model.files.take_effects().len(),
+        0,
+        "已经选中的文件再双击不再读详情"
+    );
+
+    model.reduce(ShellMessage::Files(FilesMessage::OpenRow("assets".into())));
+    assert!(
+        model.files.take_effects().iter().any(|effect| matches!(effect, FilesEffect::Browse { path, trash: true, .. } if path == "assets")),
+        "回收站里双击文件夹仍进入这个目录"
+    );
+
+    let mut fresh = library();
+    fresh.workspace.panel = WorkspacePanel::Trash;
+    fresh.files.rows = vec![row("cover.png", "file", Some("png"))];
+    fresh.reduce(ShellMessage::Files(FilesMessage::OpenRow(
+        "cover.png".into(),
+    )));
+    fresh.reduce(ShellMessage::SelectFile {
+        path: "cover.png".into(),
+        asset_id: Some("cover.png".into()),
+    });
+    assert!(
+        !previewing(&fresh),
+        "没先单击、直接双击回收站文件也不进预览"
+    );
+    assert_eq!(fresh.files.select_only.as_deref(), Some("cover.png"));
 }
 
 #[test]
@@ -208,14 +450,26 @@ fn only_the_detail_a_single_click_asked_for_stays_out_of_the_preview() {
     let mut state = listed();
     state.reduce(&writable(), FilesMessage::ActivateRow("cover.png".into()));
     state.note_detail_arrived("cover.png");
-    assert!(!state.preview_open(Some("cover.png")), "单击读回来的详情只在右侧看");
+    assert!(
+        !state.preview_open(Some("cover.png")),
+        "单击读回来的详情只在右侧看"
+    );
     state.note_detail_arrived("cover.png");
-    assert!(state.preview_open(Some("cover.png")), "别处再读同一个文件就进入预览");
+    assert!(
+        state.preview_open(Some("cover.png")),
+        "别处再读同一个文件就进入预览"
+    );
 
-    state.reduce(&writable(), FilesMessage::ActivateRow("notes/page.pdf".into()));
+    state.reduce(
+        &writable(),
+        FilesMessage::ActivateRow("notes/page.pdf".into()),
+    );
     state.reduce(&writable(), FilesMessage::OpenRow("notes/page.pdf".into()));
     state.note_detail_arrived("notes/page.pdf");
-    assert!(state.preview_open(Some("notes/page.pdf")), "双击盖过还没回来的单击读取");
+    assert!(
+        state.preview_open(Some("notes/page.pdf")),
+        "双击盖过还没回来的单击读取"
+    );
 }
 
 /// 只有摘要的素材详情，模拟搜索结果读回来的应答。
@@ -255,9 +509,21 @@ fn a_search_hit_on_the_clicked_file_still_opens_the_preview() {
         .find(|(name, _)| *name == "live-files-selected")
         .expect("单击选中 notes/page.pdf 的场景");
     assert_eq!(model.page, ShellPage::SelectedFile);
-    assert!(!model.files.preview_open(model.inspect.target_path.as_deref()), "单击只在右侧详情里看");
-    model.reduce(ShellMessage::AssetDetailLoaded(Ok(bare_detail("notes/page.pdf"))));
-    assert!(model.files.preview_open(model.inspect.target_path.as_deref()), "搜索结果读回同一个文件后进入预览");
+    assert!(
+        !model
+            .files
+            .preview_open(model.inspect.target_path.as_deref()),
+        "单击只在右侧详情里看"
+    );
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(bare_detail(
+        "notes/page.pdf",
+    ))));
+    assert!(
+        model
+            .files
+            .preview_open(model.inspect.target_path.as_deref()),
+        "搜索结果读回同一个文件后进入预览"
+    );
 }
 
 /// 单击文件以后再单击文件夹，列表不换成那个文件的预览页；文件的详情还没读回来时点文件夹也一样。
@@ -267,12 +533,26 @@ fn clicking_a_folder_after_a_file_keeps_the_list() {
         .into_iter()
         .find(|(name, _)| *name == "live-files-selected")
         .expect("单击选中 notes/page.pdf 的场景");
-    model.reduce(ShellMessage::Files(FilesMessage::ActivateRow("assets".into())));
+    model.reduce(ShellMessage::Files(FilesMessage::ActivateRow(
+        "assets".into(),
+    )));
     assert_eq!(model.files.selected_paths(), ["assets".to_string()]);
-    assert!(!super::super::files_view::previewing(&model), "单击文件夹不打开上一个文件的预览");
+    assert!(
+        !super::super::files_view::previewing(&model),
+        "单击文件夹不打开上一个文件的预览"
+    );
 
-    model.reduce(ShellMessage::Files(FilesMessage::ActivateRow("cover.png".into())));
-    model.reduce(ShellMessage::Files(FilesMessage::ActivateRow("assets".into())));
-    model.reduce(ShellMessage::AssetDetailLoaded(Ok(bare_detail("cover.png"))));
-    assert!(!super::super::files_view::previewing(&model), "单击读取晚到也只在右侧详情里看");
+    model.reduce(ShellMessage::Files(FilesMessage::ActivateRow(
+        "cover.png".into(),
+    )));
+    model.reduce(ShellMessage::Files(FilesMessage::ActivateRow(
+        "assets".into(),
+    )));
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(bare_detail(
+        "cover.png",
+    ))));
+    assert!(
+        !super::super::files_view::previewing(&model),
+        "单击读取晚到也只在右侧详情里看"
+    );
 }

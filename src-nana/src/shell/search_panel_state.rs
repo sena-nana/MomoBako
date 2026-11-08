@@ -5,12 +5,12 @@
 //! 结果行放进 Store，按「仓库 + 素材 id」做键（没有素材 id 的按路径），行内字段各自绑定：
 //! 再搜一次只换变了的行，留下的行节点不动。
 
-use nana_ui::runtime::view::{signal, store, Signal, Store};
+use nana_ui::runtime::view::{Signal, Store, signal, store};
 
-use super::super::row_sync::sync_rows;
+use super::super::ShellViewModel;
 use super::super::admin::style::key_part;
 use super::super::inspect::SearchRow;
-use super::super::ShellViewModel;
+use super::super::row_sync::sync_rows;
 use super::presenter;
 
 /// 搜索面板要显示的东西。
@@ -70,7 +70,10 @@ impl SearchPanelView {
         let inspect = &model.inspect;
         let no_repository = model.workspace.repositories.is_empty();
         let empty = if no_repository {
-            Some(("还没有可搜索的资源库".to_string(), "先在资源库页面添加一个仓库，再执行跨仓库搜索。".to_string()))
+            Some((
+                "还没有可搜索的资源库".to_string(),
+                "先在资源库页面添加一个仓库，再执行跨仓库搜索。".to_string(),
+            ))
         } else if !inspect.searching && inspect.results.is_empty() {
             presenter::empty_result(model).map(|(title, message)| (title.to_string(), message))
         } else {
@@ -84,8 +87,17 @@ impl SearchPanelView {
                 repositories: format!("{} 个仓库", model.workspace.repositories.len()),
                 hits: format!("{} 条结果", inspect.results.len()),
             },
-            status: SearchStatus { error: inspect.search_error.clone(), searching: inspect.searching, empty, listed },
-            hits: if listed { inspect.results.iter().map(HitRow::from_row).collect() } else { Vec::new() },
+            status: SearchStatus {
+                error: inspect.search_error.clone(),
+                searching: inspect.searching,
+                empty,
+                listed,
+            },
+            hits: if listed {
+                inspect.results.iter().map(HitRow::from_row).collect()
+            } else {
+                Vec::new()
+            },
         }
     }
 }
@@ -93,14 +105,22 @@ impl SearchPanelView {
 impl HitRow {
     fn from_row(row: &SearchRow) -> Self {
         // 没有素材 id 的结果按路径区分，免得同仓库的几条撞成一个键。
-        let identity = if row.asset_id.is_empty() { row.path.as_str() } else { row.asset_id.as_str() };
+        let identity = if row.asset_id.is_empty() {
+            row.path.as_str()
+        } else {
+            row.asset_id.as_str()
+        };
         Self {
             node_key: key_part(&format!("{}:{identity}", row.repo_id)),
             repo_id: row.repo_id.clone(),
             asset_id: row.asset_id.clone(),
             filename: row.filename.clone(),
             detail: format!("{} / {}", row.repo_name, row.path),
-            chips: presenter::result_context(row).into_iter().enumerate().map(|(index, text)| HitChip { index, text }).collect(),
+            chips: presenter::result_context(row)
+                .into_iter()
+                .enumerate()
+                .map(|(index, text)| HitChip { index, text })
+                .collect(),
         }
     }
 
@@ -121,7 +141,11 @@ pub(crate) struct SearchPanelSignals {
 impl SearchPanelSignals {
     /// 空的信号，进路由之前由同步写入第一份投影。
     pub(crate) fn new() -> Self {
-        Self { head: signal(SearchHead::default()), status: signal(SearchStatus::default()), hits: store(Vec::new()) }
+        Self {
+            head: signal(SearchHead::default()),
+            status: signal(SearchStatus::default()),
+            hits: store(Vec::new()),
+        }
     }
 
     /// 写入投影，只写变了的。结果行按键写差异：留下的行节点不动，只有内容变了的行字段重写。
@@ -138,7 +162,11 @@ mod tests {
     use crate::shell::acceptance_gap_models;
 
     fn scene(name: &str) -> crate::shell::ShellViewModel {
-        acceptance_gap_models().into_iter().find(|(scene, _)| *scene == name).map(|(_, model)| model).expect("场景")
+        acceptance_gap_models()
+            .into_iter()
+            .find(|(scene, _)| *scene == name)
+            .map(|(_, model)| model)
+            .expect("场景")
     }
 
     #[test]
@@ -147,18 +175,61 @@ mod tests {
         let view = SearchPanelView::project(&model);
         assert_eq!(view.head.scope, "默认资源库内筛选");
         assert_eq!(view.head.summary, "当前资源库筛选: 封面");
-        assert_eq!((view.head.repositories.as_str(), view.head.hits.as_str()), ("1 个仓库", "1 条结果"));
+        assert_eq!(
+            (view.head.repositories.as_str(), view.head.hits.as_str()),
+            ("1 个仓库", "1 条结果")
+        );
         assert!(view.status.listed && view.status.empty.is_none() && view.status.error.is_empty());
         assert_eq!(view.hits.len(), 1);
         let hit = &view.hits[0];
         assert_eq!(hit.detail, "默认资源库 / cover.png");
-        let chips = hit.chips.iter().map(|chip| chip.text.as_str()).collect::<Vec<_>>();
+        let chips = hit
+            .chips
+            .iter()
+            .map(|chip| chip.text.as_str())
+            .collect::<Vec<_>>();
         assert_eq!(chips, ["png", "封面", "参考", "红色", "横版", "4 星"]);
         assert_eq!(SearchPanelView::project(&model), view, "同一状态的投影相等");
 
         let empty = SearchPanelView::project(&scene("search-empty"));
         assert!(!empty.status.listed && empty.hits.is_empty());
-        assert_eq!(empty.status.empty.as_ref().map(|(title, _)| title.as_str()), Some("没有匹配的文件"));
+        assert_eq!(
+            empty.status.empty.as_ref().map(|(title, _)| title.as_str()),
+            Some("没有匹配的文件")
+        );
+    }
+
+    /// 没有资源库：空状态用 Vue `SearchPanel.vue` 的标题和说明，不写出仓库、命中或查询。
+    #[test]
+    fn search_no_library_uses_the_vue_empty_copy() {
+        let model = scene("search-no-library");
+        assert!(
+            model.workspace.repositories.is_empty(),
+            "场景里不该有资源库"
+        );
+        assert!(model.inspect.query.is_empty() && model.inspect.results.is_empty());
+        assert!(!model.inspect.searched && !model.inspect.searching);
+        let view = SearchPanelView::project(&model);
+        assert_eq!(view.head.scope, "全局搜索");
+        assert_eq!(
+            view.head.summary,
+            "输入关键词、标签或评分条件后，这里会展示跨仓库结果。"
+        );
+        assert_eq!(
+            (view.head.repositories.as_str(), view.head.hits.as_str()),
+            ("0 个仓库", "0 条结果")
+        );
+        assert!(!view.status.listed && view.hits.is_empty() && view.status.error.is_empty());
+        assert_eq!(
+            view.status
+                .empty
+                .as_ref()
+                .map(|(title, message)| (title.as_str(), message.as_str())),
+            Some((
+                "还没有可搜索的资源库",
+                "先在资源库页面添加一个仓库，再执行跨仓库搜索。"
+            ))
+        );
     }
 
     /// 没有素材 id 的结果按路径做键，同一仓库的几条不会撞键。
@@ -172,6 +243,9 @@ mod tests {
         model.inspect.results = vec![first, second];
         let view = SearchPanelView::project(&model);
         assert_ne!(view.hits[0].node_key, view.hits[1].node_key);
-        assert!(view.hits.iter().all(|hit| !hit.node_key.contains('/')), "键里不能有路径分隔符");
+        assert!(
+            view.hits.iter().all(|hit| !hit.node_key.contains('/')),
+            "键里不能有路径分隔符"
+        );
     }
 }

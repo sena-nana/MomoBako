@@ -5,11 +5,13 @@
 //! [`PluginPanelSignals`] 建在主区块的常驻作用域里：分组和卡片放进 Store，按分类、插件 id 做键，
 //! 卡片里的文字和按钮状态各自绑定；筛选框的草稿走 `ModelField`。
 
-use nana_ui::runtime::view::{signal, store, Signal, Store};
+use nana_ui::runtime::view::{Signal, Store, signal, store};
 
+use super::super::ShellViewModel;
 use super::super::admin_fields::FieldRowView;
 use super::super::hot::ModelField;
-use super::super::ShellViewModel;
+use super::downloader::DownloaderStatusView;
+use super::office::OfficeConvertView;
 use super::source_page::{SourceAuthView, SourceRepoRow};
 use super::style::PillTone;
 use super::support;
@@ -111,13 +113,18 @@ pub(crate) struct PluginPanelView {
     pub source_repos: Vec<SourceRepoRow>,
     /// 展开的插件声明的设置字段。
     pub fields: Vec<FieldRowView>,
+    /// 展开的是下载服务时，它的 aria2 运行状态。没有状态也占一份，用来画空说明。
+    pub downloader: Option<DownloaderStatusView>,
+    /// 展开的是 Office 转换时，它的运行状态和缓存清理。没有状态也占一份，用来画空说明。
+    pub office: Option<OfficeConvertView>,
 }
 
 impl PluginPanelView {
     /// 从 ViewModel 取插件管理面板的投影，取舍和旧视图 `manager_panel` 一致。
     pub(crate) fn project(model: &ShellViewModel) -> Self {
         let admin = &model.admin;
-        let filtered = support::filtered_plugins(&admin.plugins, &admin.keyword, &admin.hook_executions);
+        let filtered =
+            support::filtered_plugins(&admin.plugins, &admin.keyword, &admin.hook_executions);
         let notice = if !admin.action_error.is_empty() {
             Some((admin.action_error.clone(), true))
         } else if !admin.action_message.is_empty() {
@@ -134,20 +141,33 @@ impl PluginPanelView {
         } else {
             PanelState::Groups
         };
-        let groups = if state == PanelState::Groups { project_groups(model) } else { Vec::new() };
+        let groups = if state == PanelState::Groups {
+            project_groups(model)
+        } else {
+            Vec::new()
+        };
         let open = admin
             .active_settings_plugin_id
             .as_deref()
-            .and_then(|plugin_id| admin.plugins.iter().find(|plugin| plugin.plugin_id == plugin_id));
-        let (source, source_repos) = match open.filter(|plugin| support::has_source_authentication(plugin)) {
-            Some(plugin) => {
-                let (view, rows) = SourceAuthView::project(model, plugin);
-                (Some(view), rows)
-            }
-            None => (None, Vec::new()),
-        };
+            .and_then(|plugin_id| {
+                admin
+                    .plugins
+                    .iter()
+                    .find(|plugin| plugin.plugin_id == plugin_id)
+            });
+        let (source, source_repos) =
+            match open.filter(|plugin| support::has_source_authentication(plugin)) {
+                Some(plugin) => {
+                    let (view, rows) = SourceAuthView::project(model, plugin);
+                    (Some(view), rows)
+                }
+                None => (None, Vec::new()),
+            };
         Self {
-            head: PanelHead { count: format!("{} 个插件", filtered.len()), managing: admin.managing },
+            head: PanelHead {
+                count: format!("{} 个插件", filtered.len()),
+                managing: admin.managing,
+            },
             notice,
             keyword: admin.keyword.clone(),
             state,
@@ -160,7 +180,15 @@ impl PluginPanelView {
                 .unwrap_or_default(),
             source,
             source_repos,
-            fields: open.map(|plugin| FieldRowView::project_all(model, plugin)).unwrap_or_default(),
+            fields: open
+                .map(|plugin| FieldRowView::project_all(model, plugin))
+                .unwrap_or_default(),
+            downloader: open
+                .filter(|plugin| plugin.plugin_id == super::downloader::PLUGIN_ID)
+                .map(|_| DownloaderStatusView::project(&admin.downloader)),
+            office: open
+                .filter(|plugin| plugin.plugin_id == super::office::PLUGIN_ID)
+                .map(|_| OfficeConvertView::project(model)),
         }
     }
 }
@@ -176,7 +204,12 @@ fn project_groups(model: &ShellViewModel) -> Vec<PluginGroupView> {
             count: format!("{} 个插件", ids.len()),
             cards: ids
                 .iter()
-                .filter_map(|plugin_id| admin.plugins.iter().find(|plugin| &plugin.plugin_id == plugin_id))
+                .filter_map(|plugin_id| {
+                    admin
+                        .plugins
+                        .iter()
+                        .find(|plugin| &plugin.plugin_id == plugin_id)
+                })
                 .map(|plugin| PluginCardView::project(model, plugin))
                 .collect(),
             category,
@@ -202,11 +235,25 @@ impl PluginCardView {
         ];
         chips.extend(plugin.capabilities.iter().cloned());
         let deps = &plugin.dependency_status;
-        let dependency = |prefix: &str, state: &crate::backend::services::repository::PluginDependencyState| {
-            let name = state.name.clone().unwrap_or_else(|| state.plugin_id.clone());
-            (format!("{prefix} {name} · {}", support::dependency_status_label(&state.status)), dependency_tone(&state.status))
-        };
-        let mut dependencies = deps.required.iter().map(|state| dependency("必需", state)).collect::<Vec<_>>();
+        let dependency =
+            |prefix: &str, state: &crate::backend::services::repository::PluginDependencyState| {
+                let name = state
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| state.plugin_id.clone());
+                (
+                    format!(
+                        "{prefix} {name} · {}",
+                        support::dependency_status_label(&state.status)
+                    ),
+                    dependency_tone(&state.status),
+                )
+            };
+        let mut dependencies = deps
+            .required
+            .iter()
+            .map(|state| dependency("必需", state))
+            .collect::<Vec<_>>();
         dependencies.extend(deps.optional.iter().map(|state| dependency("可选", state)));
         Self {
             plugin_id: plugin.plugin_id.clone(),
@@ -222,12 +269,19 @@ impl PluginCardView {
             hooks: plugin
                 .hooks
                 .iter()
-                .map(|hook| format!("{} · {}", hook.label.clone().unwrap_or_else(|| hook.action.clone()), hook.slot))
+                .map(|hook| {
+                    format!(
+                        "{} · {}",
+                        hook.label.clone().unwrap_or_else(|| hook.action.clone()),
+                        hook.slot
+                    )
+                })
                 .collect(),
             executions: project_executions(model, &plugin.plugin_id),
             enabled: plugin.enabled,
             can_delete: support::can_delete_plugin(plugin),
-            settings_open: model.admin.active_settings_plugin_id.as_deref() == Some(plugin.plugin_id.as_str()),
+            settings_open: model.admin.active_settings_plugin_id.as_deref()
+                == Some(plugin.plugin_id.as_str()),
         }
     }
 
@@ -246,7 +300,13 @@ impl PluginGroupView {
 
 /// 最近三条执行记录。
 fn project_executions(model: &ShellViewModel, plugin_id: &str) -> Vec<ExecutionView> {
-    let records = model.admin.hook_executions.iter().filter(|record| record.plugin_id == plugin_id).take(3).collect::<Vec<_>>();
+    let records = model
+        .admin
+        .hook_executions
+        .iter()
+        .filter(|record| record.plugin_id == plugin_id)
+        .take(3)
+        .collect::<Vec<_>>();
     let keys = super::style::unique_keys(records.iter().map(|record| record.execution_id.as_str()));
     records
         .into_iter()
@@ -259,7 +319,10 @@ fn project_executions(model: &ShellViewModel, plugin_id: &str) -> Vec<ExecutionV
                 "blocked" => ChipTone::Muted,
                 _ => ChipTone::Plain,
             },
-            title: record.hook_label.clone().unwrap_or_else(|| record.hook_action.clone()),
+            title: record
+                .hook_label
+                .clone()
+                .unwrap_or_else(|| record.hook_action.clone()),
             slot: record.hook_slot.clone(),
             message: record.message.clone(),
             time: support::hook_time_label(&record.started_at),
@@ -300,6 +363,8 @@ pub(crate) struct PluginPanelSignals {
     pub(crate) source: Signal<Option<SourceAuthView>>,
     pub(crate) source_repos: Store<Vec<SourceRepoRow>>,
     pub(crate) fields: Store<Vec<FieldRowView>>,
+    pub(crate) downloader: Signal<Option<DownloaderStatusView>>,
+    pub(crate) office: Signal<Option<OfficeConvertView>>,
 }
 
 impl PluginPanelSignals {
@@ -315,6 +380,8 @@ impl PluginPanelSignals {
             source: signal(None),
             source_repos: store(Vec::new()),
             fields: store(Vec::new()),
+            downloader: signal(None),
+            office: signal(None),
         }
     }
 
@@ -329,5 +396,7 @@ impl PluginPanelSignals {
         self.source.try_set_if_changed(view.source);
         super::super::row_sync::sync_rows(self.source_repos, SourceRepoRow::key, view.source_repos);
         super::super::row_sync::sync_rows(self.fields, FieldRowView::key, view.fields);
+        self.downloader.try_set_if_changed(view.downloader);
+        self.office.try_set_if_changed(view.office);
     }
 }

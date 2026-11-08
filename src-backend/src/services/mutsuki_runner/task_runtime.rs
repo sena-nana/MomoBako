@@ -16,9 +16,9 @@ use mutsuki_runtime_contracts::{
 };
 use serde::Serialize;
 use serde_json::Value;
+use tokio::runtime::Handle;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{mpsc, oneshot, Mutex as AsyncMutex};
-use tokio::runtime::Handle;
 
 use super::operations::RepositoryTaskExecutor;
 use super::protocols::{
@@ -304,18 +304,21 @@ impl MomoTaskRuntime {
             .progress
             .lock()
             .map_err(|_| "Momo task progress state poisoned".to_string())?
-            .insert(task_id.clone(), TaskProgressSnapshot {
-                task_id: task_id.clone(),
-                protocol_id: protocol_id.clone(),
-                status: "queued".into(),
-                phase: None,
-                label: None,
-                current: None,
-                total: None,
-                percent: None,
-                error: None,
-                updated_at: progress_timestamp(),
-            });
+            .insert(
+                task_id.clone(),
+                TaskProgressSnapshot {
+                    task_id: task_id.clone(),
+                    protocol_id: protocol_id.clone(),
+                    status: "queued".into(),
+                    phase: None,
+                    label: None,
+                    current: None,
+                    total: None,
+                    percent: None,
+                    error: None,
+                    updated_at: progress_timestamp(),
+                },
+            );
         self.state
             .cancellations
             .lock()
@@ -381,7 +384,9 @@ impl MomoTaskRuntime {
                         .filter_map(|event| event.payload.get("progress").cloned())
                         .collect::<Vec<_>>();
                     if let Some(progress) = events.last() {
-                        self.update_progress(&task_id, |snapshot| apply_progress(snapshot, progress));
+                        self.update_progress(&task_id, |snapshot| {
+                            apply_progress(snapshot, progress)
+                        });
                     }
                     self.update_progress(&task_id, |snapshot| {
                         snapshot.status = "completed".into();
@@ -556,10 +561,17 @@ fn apply_progress(snapshot: &mut TaskProgressSnapshot, value: &Value) {
     if let Some(value) = value.get("phase").and_then(Value::as_str) {
         snapshot.phase = Some(value.to_owned());
     }
-    if let Some(value) = value.get("label").or_else(|| value.get("message")).and_then(Value::as_str) {
+    if let Some(value) = value
+        .get("label")
+        .or_else(|| value.get("message"))
+        .and_then(Value::as_str)
+    {
         snapshot.label = Some(value.to_owned());
     }
-    snapshot.current = value.get("current").or_else(|| value.get("completed")).and_then(Value::as_u64);
+    snapshot.current = value
+        .get("current")
+        .or_else(|| value.get("completed"))
+        .and_then(Value::as_u64);
     snapshot.total = value.get("total").and_then(Value::as_u64);
     snapshot.percent = value
         .get("percent")

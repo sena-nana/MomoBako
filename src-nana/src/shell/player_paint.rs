@@ -5,8 +5,8 @@
 
 use std::hash::{DefaultHasher, Hash, Hasher};
 
-use nana_ui::runtime::{BoxPaint, LayoutBox, PaintContext, PaintPath, Painter, SemanticColorRole};
 use nana_ui::Icon;
+use nana_ui::runtime::{BoxPaint, LayoutBox, PaintContext, PaintPath, Painter, SemanticColorRole};
 use nana_ui_core::SemanticColorMix;
 
 /// 进度轨：bg-subtle 胶囊，accent 填充从左边按比例铺开，被胶囊裁出圆头。
@@ -17,7 +17,12 @@ pub(crate) struct ProgressTrack {
 impl Painter for ProgressTrack {
     fn paint(&self, cx: &mut PaintContext<'_>) {
         let [width, height] = cx.size();
-        let rect = LayoutBox { x: 0.0, y: 0.0, width, height };
+        let rect = LayoutBox {
+            x: 0.0,
+            y: 0.0,
+            width,
+            height,
+        };
         let radius = height / 2.0;
         cx.rounded_rect(rect, radius, BoxPaint::fill(SemanticColorRole::Subtle));
         let filled = self.ratio.clamp(0.0, 1.0) * width;
@@ -27,7 +32,16 @@ impl Painter for ProgressTrack {
         let mut clip = PaintPath::new();
         clip.rounded_rect(rect, [radius; 4]);
         cx.push_clip(&clip);
-        cx.rounded_rect(LayoutBox { x: 0.0, y: 0.0, width: filled, height }, 0.0, BoxPaint::fill(SemanticColorRole::Accent));
+        cx.rounded_rect(
+            LayoutBox {
+                x: 0.0,
+                y: 0.0,
+                width: filled,
+                height,
+            },
+            0.0,
+            BoxPaint::fill(SemanticColorRole::Accent),
+        );
         cx.pop_clip();
     }
 
@@ -53,8 +67,17 @@ const RING: f32 = 2.0;
 impl Painter for SliderTrack {
     fn paint(&self, cx: &mut PaintContext<'_>) {
         let [width, height] = cx.size();
-        let track = LayoutBox { x: 0.0, y: (height - TRACK) / 2.0, width, height: TRACK };
-        let track_color = cx.color(SemanticColorMix::new(SemanticColorRole::Accent, SemanticColorRole::BorderSoft, 0.24));
+        let track = LayoutBox {
+            x: 0.0,
+            y: (height - TRACK) / 2.0,
+            width,
+            height: TRACK,
+        };
+        let track_color = cx.color(SemanticColorMix::new(
+            SemanticColorRole::Accent,
+            SemanticColorRole::BorderSoft,
+            0.24,
+        ));
         let track_color = dim_on_surface(cx, track_color, self.dim);
         cx.rounded_rect(track, TRACK / 2.0, BoxPaint::fill(track_color));
         // 圆钮中心按比例落在两端各留半个圆钮的行程上。圆钮是正圆，不跟随平滑圆角。
@@ -79,10 +102,22 @@ fn dim_on_surface(cx: &PaintContext<'_>, color: [f32; 4], dim: bool) -> [f32; 4]
     }
     let base = cx.color(SemanticColorRole::Surface);
     let ratio = crate::theme_map::DISABLED_OPACITY;
-    std::array::from_fn(|index| if index == 3 { color[3] } else { color[index] * ratio + base[index] * (1.0 - ratio) })
+    std::array::from_fn(|index| {
+        if index == 3 {
+            color[3]
+        } else {
+            color[index] * ratio + base[index] * (1.0 - ratio)
+        }
+    })
 }
 
-fn fill_circle(cx: &mut PaintContext<'_>, center_x: f32, center_y: f32, radius: f32, color: [f32; 4]) {
+fn fill_circle(
+    cx: &mut PaintContext<'_>,
+    center_x: f32,
+    center_y: f32,
+    radius: f32,
+    color: [f32; 4],
+) {
     let mut path = PaintPath::new();
     path.ellipse(circle(center_x, center_y, radius));
     cx.fill_path(&path, color);
@@ -102,7 +137,12 @@ impl Painter for GlyphButton {
         state_fill(cx, BUTTON_RADIUS);
         let [width, height] = cx.size();
         let size = self.size.min(width).min(height);
-        let rect = LayoutBox { x: (width - size) / 2.0, y: (height - size) / 2.0, width: size, height: size };
+        let rect = LayoutBox {
+            x: (width - size) / 2.0,
+            y: (height - size) / 2.0,
+            width: size,
+            height: size,
+        };
         let color = dim_on_surface(cx, cx.color(self.color), cx.state().disabled);
         cx.icon(rect, self.icon, color);
     }
@@ -148,7 +188,16 @@ fn state_fill(cx: &mut PaintContext<'_>, radius: f32) {
     };
     if let Some(role) = role {
         let [width, height] = cx.size();
-        cx.rounded_rect(LayoutBox { x: 0.0, y: 0.0, width, height }, radius, BoxPaint::fill(role));
+        cx.rounded_rect(
+            LayoutBox {
+                x: 0.0,
+                y: 0.0,
+                width,
+                height,
+            },
+            radius,
+            BoxPaint::fill(role),
+        );
     }
 }
 
@@ -164,5 +213,10 @@ impl Painter for Invisible {
 }
 
 fn circle(center_x: f32, center_y: f32, radius: f32) -> LayoutBox {
-    LayoutBox { x: center_x - radius, y: center_y - radius, width: radius * 2.0, height: radius * 2.0 }
+    LayoutBox {
+        x: center_x - radius,
+        y: center_y - radius,
+        width: radius * 2.0,
+        height: radius * 2.0,
+    }
 }

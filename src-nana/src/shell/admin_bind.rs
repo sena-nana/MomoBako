@@ -5,7 +5,7 @@
 //! - [`ActionDisabled`]、[`ReadOnly`]、[`FollowEnd`]：控件表里没有的可绑定字段；按钮图标和整份样式用各页共用的
 //!   [`ButtonIcon`]、[`StyleField`]（`field_bind.rs`）。
 
-use nana_ui::runtime::view::{untrack, watch_effect, FieldWrite, StorePath};
+use nana_ui::runtime::view::{FieldWrite, StorePath, untrack, watch_effect};
 use nana_ui::runtime::{Button, ScrollView, TextInput};
 
 pub(crate) use super::super::field_bind::{ButtonIcon, StyleField};
@@ -13,12 +13,18 @@ use super::super::hot::ModelField;
 use crate::theme_map::DISABLED_OPACITY;
 
 /// 行里的一段文字。行已经删掉时读空串，不去读不存在的行。
-pub(crate) fn row_text<P: StorePath>(item: P, pick: fn(&P::Value) -> &String) -> impl Fn() -> String + Send + 'static {
+pub(crate) fn row_text<P: StorePath>(
+    item: P,
+    pick: fn(&P::Value) -> &String,
+) -> impl Fn() -> String + Send + 'static {
     move || item.try_with(|row| pick(row).clone()).unwrap_or_default()
 }
 
 /// 行里按字段算出的值。行已经删掉时读默认值。
-pub(crate) fn row_flag<P: StorePath, R: Default + 'static>(item: P, pick: fn(&P::Value) -> R) -> impl Fn() -> R + Send + 'static {
+pub(crate) fn row_flag<P: StorePath, R: Default + 'static>(
+    item: P,
+    pick: fn(&P::Value) -> R,
+) -> impl Fn() -> R + Send + 'static {
     move || item.try_with(pick).unwrap_or_default()
 }
 
@@ -49,7 +55,8 @@ impl FieldWrite<Button, bool> for ActionDisabled {
     }
 
     fn differs(target: &Button, disabled: &bool) -> bool {
-        target.disabled != *disabled || target.style.layout.opacity != disabled.then_some(DISABLED_OPACITY)
+        target.disabled != *disabled
+            || target.style.layout.opacity != disabled.then_some(DISABLED_OPACITY)
     }
 }
 

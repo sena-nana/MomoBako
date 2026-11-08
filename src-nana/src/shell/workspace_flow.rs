@@ -1,12 +1,16 @@
 //! 工作台流程落到壳层上的那一层：资源库列表、同步、摘要和目录的结果写进壳层，换了活动仓库时清掉上一个
 //! 仓库的内容，同一个仓库刷新时重读当前目录。状态机本身在 `workspace.rs` 和 `workspace_switch.rs`。
 
-use crate::backend::services::repository::{FileBrowserSnapshot, RepositorySnapshot, RepositorySummary};
+use crate::backend::services::repository::{
+    FileBrowserSnapshot, RepositorySnapshot, RepositorySummary,
+};
 
 use super::files::FileContext;
 use super::status::FailureSource;
 use super::workspace::{IndexCounts, RefreshStage, StartupMode, SyncCounts};
-use super::{MainRegion, ShellPage, ShellViewModel, StartupStatus, WorkspaceEffect, WorkspaceRepository};
+use super::{
+    MainRegion, ShellPage, ShellViewModel, StartupStatus, WorkspaceEffect, WorkspaceRepository,
+};
 
 impl ShellViewModel {
     /// 变更以后刷新工作区（Vue `refreshWorkspaceAfterMutation`，仓库动作执行完、确认硬链接以后）：静默重读
@@ -24,19 +28,39 @@ impl ShellViewModel {
                 eprintln!("Nana 变更完成后没能重读目录：{path}");
             }
         }
-        self.workspace.effects.push(WorkspaceEffect::LoadSnapshotSilent { repo_id: repo_id.to_string() });
+        self.workspace
+            .effects
+            .push(WorkspaceEffect::LoadSnapshotSilent {
+                repo_id: repo_id.to_string(),
+            });
     }
 
     /// 把仓库列表结果写进工作台，再同步壳层上的仓库名称和页面。启动以后读失败时进状态区（缺失页自己显示）。
-    pub(super) fn apply_loaded_repositories(&mut self, generation: Option<u64>, result: Result<Vec<RepositorySummary>, String>) {
+    pub(super) fn apply_loaded_repositories(
+        &mut self,
+        generation: Option<u64>,
+        result: Result<Vec<RepositorySummary>, String>,
+    ) {
         let mapped = match result {
-            Ok(items) => Ok(items.iter().map(WorkspaceRepository::from_summary).collect()),
+            Ok(items) => Ok(items
+                .iter()
+                .map(WorkspaceRepository::from_summary)
+                .collect()),
             Err(error) => Err(error),
         };
-        let failed = mapped.as_ref().err().filter(|_| self.workspace.startup.status == StartupStatus::Ready).cloned();
+        let failed = mapped
+            .as_ref()
+            .err()
+            .filter(|_| self.workspace.startup.status == StartupStatus::Ready)
+            .cloned();
         let applied = self.workspace.apply_repository_list(generation, mapped);
-        if let Some(error) = failed.filter(|_| applied && self.workspace.main_region() != MainRegion::MissingRepository) {
-            self.status.fail(FailureSource::Repository, format!("无法读取资源库列表：{error}"));
+        if let Some(error) = failed
+            .filter(|_| applied && self.workspace.main_region() != MainRegion::MissingRepository)
+        {
+            self.status.fail(
+                FailureSource::Repository,
+                format!("无法读取资源库列表：{error}"),
+            );
         }
         if !applied {
             return;
@@ -49,7 +73,8 @@ impl ShellViewModel {
         }
         // 启动以后列表让当前仓库变成缺失或可用（不在刷新里，例如缺失仓库刷新后仍缺失），侧栏跟着换。
         // 还在同步、读摘要的刷新等摘要到了再绑定，免得目录树读到同步以前的结构。
-        if self.workspace.startup.status == StartupStatus::Ready && self.workspace.refresh.is_none() {
+        if self.workspace.startup.status == StartupStatus::Ready && self.workspace.refresh.is_none()
+        {
             self.bind_sidebar_repository();
         }
     }
@@ -72,7 +97,11 @@ impl ShellViewModel {
     }
 
     /// 同步的结果。同仓库刷新失败写进状态区；启动和换仓库失败停在启动页。
-    pub(super) fn note_repository_synced(&mut self, generation: u64, result: Result<SyncCounts, String>) {
+    pub(super) fn note_repository_synced(
+        &mut self,
+        generation: u64,
+        result: Result<SyncCounts, String>,
+    ) {
         if let Some(failure) = self.workspace.note_sync_finished(generation, result) {
             self.status.fail(FailureSource::Repository, failure);
         }
@@ -83,7 +112,11 @@ impl ShellViewModel {
 
     /// 仓库摘要的结果：写进仓库名称和侧栏（同步以后才绑定侧栏），启动和换仓库接着读首屏目录，
     /// 同一个仓库的刷新接着重读当前目录和侧栏。过期的结果不算。
-    pub(super) fn apply_repository_snapshot(&mut self, generation: u64, result: Result<RepositorySnapshot, String>) {
+    pub(super) fn apply_repository_snapshot(
+        &mut self,
+        generation: u64,
+        result: Result<RepositorySnapshot, String>,
+    ) {
         if !self.workspace.awaits_snapshot(generation) {
             eprintln!("Nana 忽略过期的资源库摘要：代次 {generation}");
             return;
@@ -102,6 +135,8 @@ impl ShellViewModel {
                 if refreshing {
                     // Vue `selectRepository` 同一个仓库读完摘要也 `rememberLastActiveRepository`。
                     self.workspace.remember_repository(Some(repo_id.clone()));
+                    // Vue `selectRepository` 同一个仓库：摘要一到就重读素材详情，选中路径先不动。
+                    self.reload_asset_after_refresh(&snapshot);
                     self.reload_repository_side_data(&repo_id);
                     self.begin_refresh_directory();
                 } else {
@@ -113,7 +148,10 @@ impl ShellViewModel {
                 eprintln!("Nana 读取资源库摘要失败：{error}");
                 if refreshing {
                     self.workspace.finish_refresh();
-                    self.status.fail(FailureSource::Repository, format!("无法读取资源库摘要：{error}"));
+                    self.status.fail(
+                        FailureSource::Repository,
+                        format!("无法读取资源库摘要：{error}"),
+                    );
                 } else {
                     self.workspace.note_index_finished(Err(error));
                     self.page = ShellPage::Error;
@@ -133,37 +171,122 @@ impl ShellViewModel {
         IndexCounts {
             asset_count: snapshot.assets.len(),
             playlist_count: snapshot.playlists.len(),
-            default_asset_id: selected.or_else(|| snapshot.assets.first().map(|asset| asset.asset_id.clone())),
+            default_asset_id: selected
+                .or_else(|| snapshot.assets.first().map(|asset| asset.asset_id.clone())),
         }
     }
 
     /// 目录快照到了：别的仓库的结果丢掉；文件表面认下以后，启动和换仓库的首屏目录到这里结束。
+    /// 搜索命中是这份快照里的文件时，落地后立刻留在预览页，不等素材详情把页再换回来。
     pub(super) fn apply_file_browser(&mut self, browser: FileBrowserSnapshot) {
+        // 先取走标记：对不上或过期的快照也清掉，免得下一份目录误开预览。
+        let open_preview = self.inspect.search_ui.take_preview_after_browse();
         if self.workspace.active_repo_id.as_deref() != Some(browser.repo_id.as_str()) {
+            if open_preview {
+                eprintln!(
+                    "Nana 搜索预览等的目录来自别的仓库，不打开预览：{}",
+                    browser.repo_id
+                );
+            }
             eprintln!("Nana 忽略别的仓库的目录：{}", browser.repo_id);
             return;
         }
         let virtual_view = FileContext::from_model(self).is_virtual();
         if !self.files.apply_browser(&browser, virtual_view) {
+            if open_preview {
+                eprintln!(
+                    "Nana 搜索预览等的目录快照过期，不打开预览：{}",
+                    browser.current_path
+                );
+            }
             return;
         }
         self.workspace.note_first_screen_finished(Ok(()));
         if !matches!(self.page, ShellPage::Settings | ShellPage::SettingsError) {
-            self.page = ShellPage::FileList;
+            self.page = if open_preview {
+                ShellPage::SelectedFile
+            } else {
+                ShellPage::FileList
+            };
+        } else if open_preview {
+            eprintln!("Nana 还在设置页，搜索命中的预览先不开");
         }
         self.browser_entries = browser.entries;
         self.current_directory = browser.current_path.clone();
-        self.sidebar.note_directory(&browser.current_path, browser.special_location.as_deref() == Some("trash"));
+        // Vue `applyFileBrowserSnapshot`：快照带着树才换侧栏，没有树时不动。过期快照在上面已经返回。
+        if let Some(tree) = browser.tree.as_deref() {
+            self.sidebar
+                .apply_tree(&browser.repo_id, Ok(super::SidebarTree::from_nodes(tree)));
+        }
+        self.sidebar.note_directory(
+            &browser.current_path,
+            browser.special_location.as_deref() == Some("trash"),
+        );
+        self.land_quick_file();
+        // 搜索命中先清掉事实再等这份目录落地。落地以后、详情回来以前，用新列表里的这一条。
+        if open_preview {
+            if let Some(path) = self.inspect.target_path.clone() {
+                super::inspect_view::seed_preview_facts(self, &path);
+            }
+        }
+    }
+
+    /// 快捷访问点的文件：父目录快照已经写进列表以后，才把这一行选成当前项。
+    ///
+    /// Vue `openQuickAccess` 先等 `loadFileBrowserForDirectory` 读完父目录，再 `selectWorkspaceEntry`。
+    /// 和单击同一条一样只选中、读素材详情，不打开预览。这一页没有该文件时不选，记一条日志。
+    fn land_quick_file(&mut self) {
+        let Some(path) = self
+            .sidebar
+            .take_quick_file_for_directory(&self.files.current_path)
+        else {
+            return;
+        };
+        if !self.files.rows.iter().any(|row| row.path == path) {
+            eprintln!("Nana 快捷访问的文件不在读回的这一页目录里：{path}");
+            return;
+        }
+        let context = FileContext::from_model(self);
+        let Some(follow) =
+            self.files
+                .activate_row(&context, &path, super::files::SelectionMode::Replace)
+        else {
+            eprintln!("Nana 快捷访问没能选中文件：{path}");
+            return;
+        };
+        self.selected_path = Some(follow.clone());
+        let file = self
+            .files
+            .rows
+            .iter()
+            .any(|row| row.path == follow && row.kind != "directory");
+        if file && self.inspect.target_path.as_deref() != Some(follow.as_str()) {
+            self.inspect.begin_selection(&follow);
+        }
     }
 
     /// 读目录失败：文件表面自己发起的读取写在文件列；启动和换仓库的首屏失败停在启动页。
     pub(super) fn note_file_browser_failed(&mut self, error: String) {
+        if self.files.loading || self.files.loading_more {
+            let directory = self.files.current_path.clone();
+            if self
+                .sidebar
+                .pending_quick_file()
+                .is_some_and(|path| super::sidebar::parent_path(path) == directory)
+            {
+                eprintln!("Nana 快捷访问的父目录没有读回来，不选中文件：{directory}");
+                self.sidebar.drop_quick_file_for_directory(&directory);
+            }
+        }
         if self.files.note_load_failed(&error) {
             return;
         }
         eprintln!("Nana 读取首屏目录失败：{error}");
         if self.workspace.startup.status == StartupStatus::Ready {
-            self.status.fail(FailureSource::Directory, format!("无法读取文件列表：{error}"));
+            self.status.fail(
+                FailureSource::Directory,
+                format!("无法读取文件列表：{error}"),
+            );
         }
         self.workspace.note_first_screen_finished(Err(error));
         self.page = ShellPage::Error;
@@ -171,7 +294,11 @@ impl ShellViewModel {
 
     /// 归约结束时：活动仓库换了，清掉上一个仓库的内容；换仓库的启动页走完（或失败）时接着做等着的事；
     /// 同仓库刷新记下当前目录、等目录读完收尾。
-    pub(super) fn settle_workspace(&mut self, active_before: &Option<String>, startup_before: StartupStatus) {
+    pub(super) fn settle_workspace(
+        &mut self,
+        active_before: &Option<String>,
+        startup_before: StartupStatus,
+    ) {
         if &self.workspace.active_repo_id != active_before {
             self.reset_repository_content();
         }

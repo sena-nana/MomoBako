@@ -14,23 +14,31 @@
 
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{css, fields, node_ref, widget, AnyView, IntoView, Item, Signal, Store, StoreList, StorePath};
+use nana_ui::runtime::view::{
+    AnyView, IntoView, Item, Signal, Store, StoreList, StorePath, css, fields, node_ref, widget,
+};
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, JustifySpec, LengthSpec, NodeStyle, ScrollAxes, ScrollView, Select, SelectChanged, SelectOption,
-    Stack, Text, TextChanged, TextInput,
+    Activate, AlignSpec, Button, JustifySpec, LengthSpec, NodeStyle, ScrollAxes, ScrollView,
+    Select, SelectChanged, SelectOption, Stack, Text, TextChanged, TextInput,
 };
 use nana_ui_core::{RadiusTier, SemanticColorMix, SemanticColorRole as Role};
 
 use super::super::ShellMessage;
-use super::bind::{row_flag, row_text, ActionDisabled, ButtonIcon, FollowEnd, StyleField};
+use super::AdminMessage;
+use super::bind::{ActionDisabled, ButtonIcon, FollowEnd, StyleField, row_flag, row_text};
 use super::icons;
 use super::logs_state::{LogRowView, LogsSignals, LogsToolbar};
-use super::style::{self, action, column, label, mono, pad, row, wrapping, Soft, SoftFill, Tone};
+use super::style::{self, Soft, SoftFill, Tone, action, column, label, mono, pad, row, wrapping};
 use super::support;
-use super::AdminMessage;
 
 const LEVELS: [&str; 4] = ["debug", "info", "warn", "error"];
-const KINDS: [&str; 5] = ["host", "frontend-host", "frontend-plugin", "backend-plugin", "helper"];
+const KINDS: [&str; 5] = [
+    "host",
+    "frontend-host",
+    "frontend-plugin",
+    "backend-plugin",
+    "helper",
+];
 
 /// 日志行在 Store 里的句柄。
 type LogItem = Item<Store<Vec<LogRowView>>, String, LogRowView>;
@@ -42,24 +50,49 @@ pub(crate) fn logs_panel(signals: LogsSignals) -> AnyView {
     let loading = signals.loading;
     let rows = signals.rows;
     let follow = signals.follow_end;
-    let list = rows.keyed(LogRowView::key).each(log_item).gap(10.0).css(css! { padding-right: 4px; }).key("admin-log-list");
+    let list = rows
+        .keyed(LogRowView::key)
+        .each(log_item)
+        .gap(10.0)
+        .css(css! { padding-right: 4px; })
+        .key("admin-log-list");
     let body = vec![
         style::workbench_header(
             "Logs",
             "系统日志",
             "统一查看宿主、插件与辅助进程的实时日志流。",
             vec![
-                style::stat(move || head.with(|head| head.cached.clone()), "admin-log-cached"),
-                style::stat(move || head.with(|head| head.hits.clone()), "admin-log-hits"),
+                style::stat(
+                    move || head.with(|head| head.cached.clone()),
+                    "admin-log-cached",
+                ),
+                style::stat(
+                    move || head.with(|head| head.hits.clone()),
+                    "admin-log-hits",
+                ),
             ],
             "admin-log",
         ),
         toolbar(signals),
         filters(signals.filters),
-        style::state_notice("正在加载系统日志", false, "admin-log-loading").visible(move || loading.get()).into_any(),
+        style::state_notice("正在加载系统日志", false, "admin-log-loading")
+            .visible(move || loading.get())
+            .into_any(),
         style::dashed_empty(
-            move || empty.with(|empty| empty.map(|(title, _)| title.to_string()).unwrap_or_default()),
-            move || empty.with(|empty| empty.map(|(_, detail)| detail.to_string()).unwrap_or_default()),
+            move || {
+                empty.with(|empty| {
+                    empty
+                        .map(|(title, _)| title.to_string())
+                        .unwrap_or_default()
+                })
+            },
+            move || {
+                empty.with(|empty| {
+                    empty
+                        .map(|(_, detail)| detail.to_string())
+                        .unwrap_or_default()
+                })
+            },
             "admin-log-empty",
         )
         .visible(move || empty.with(Option::is_some))
@@ -106,21 +139,50 @@ fn toolbar(signals: LogsSignals) -> AnyView {
     }))
     .children((
         widget(style::glyph(icons::SEARCH, 15.0, Role::Muted)),
-        widget(style::bare_input(TextInput::new(search_value.get_untracked()).label("搜索日志").placeholder("搜索消息、动作、位置或上下文")))
-            .model(search_value)
-            .key("admin-log-search")
-            .on_cx(|_, event: &TextChanged, cx| {
-                cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SetLogSearch(event.value.to_string())));
-            }),
+        widget(style::bare_input(
+            TextInput::new(search_value.get_untracked())
+                .label("搜索日志")
+                .placeholder("搜索消息、动作、位置或上下文"),
+        ))
+        .model(search_value)
+        .key("admin-log-search")
+        .on_cx(|_, event: &TextChanged, cx| {
+            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SetLogSearch(
+                event.value.to_string(),
+            )));
+        }),
     ))
     .key("admin-log-search-field")
     .into_any();
-    let plugin_select = select_field("插件", "全部插件", toolbar, |toolbar| (&toolbar.plugins, &toolbar.plugin), AdminMessage::SetLogPlugin, "admin-log-plugin");
-    let repo_select = select_field("仓库", "全部仓库", toolbar, |toolbar| (&toolbar.repos, &toolbar.repo), AdminMessage::SetLogRepo, "admin-log-repo");
+    let plugin_select = select_field(
+        "插件",
+        "全部插件",
+        toolbar,
+        |toolbar| (&toolbar.plugins, &toolbar.plugin),
+        AdminMessage::SetLogPlugin,
+        "admin-log-plugin",
+    );
+    let repo_select = select_field(
+        "仓库",
+        "全部仓库",
+        toolbar,
+        |toolbar| (&toolbar.repos, &toolbar.repo),
+        AdminMessage::SetLogRepo,
+        "admin-log-repo",
+    );
     let paused = move || toolbar.with(|toolbar| toolbar.paused);
     let pause = widget(action("暂停追踪", Some(icons::PAUSE), Tone::Plain, false))
-        .prop::<String, fields::button::label>(move || if paused() { "恢复追踪" } else { "暂停追踪" }.to_string())
-        .prop::<Option<nana_ui_core::Icon>, ButtonIcon>(move || Some(if paused() { icons::PLAY } else { icons::PAUSE }))
+        .prop::<String, fields::button::label>(move || {
+            if paused() {
+                "恢复追踪"
+            } else {
+                "暂停追踪"
+            }
+            .to_string()
+        })
+        .prop::<Option<nana_ui_core::Icon>, ButtonIcon>(move || {
+            Some(if paused() { icons::PLAY } else { icons::PAUSE })
+        })
         .key("admin-log-pause")
         .on_cx(move |_, _: &Activate, cx| {
             // 追踪状态随归约变，点下去时现读。
@@ -131,19 +193,39 @@ fn toolbar(signals: LogsSignals) -> AnyView {
     let reset = widget(action("重置筛选", Some(icons::ERASER), Tone::Plain, false))
         .prop::<bool, ActionDisabled>(move || toolbar.with(|toolbar| toolbar.no_filters))
         .key("admin-log-reset")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ResetLogFilters)))
+        .on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ResetLogFilters))
+        })
         .into_any();
     let clearing = move || toolbar.with(|toolbar| toolbar.clearing);
     let clear = widget(action("清空日志", Some(icons::TRASH2), Tone::Plain, false))
         .prop::<bool, ActionDisabled>(move || toolbar.with(|toolbar| toolbar.clear_disabled))
-        .prop::<Option<nana_ui_core::Icon>, ButtonIcon>(move || Some(if clearing() { icons::LOADER_CIRCLE } else { icons::TRASH2 }))
+        .prop::<Option<nana_ui_core::Icon>, ButtonIcon>(move || {
+            Some(if clearing() {
+                icons::LOADER_CIRCLE
+            } else {
+                icons::TRASH2
+            })
+        })
         .key("clear-logs")
         .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::ClearLogs))
         .into_any();
-    widget(Stack::fill_row(10.0).wrap(true).grow(0.0).align(AlignSpec::Start))
-        .children(vec![search, plugin_select, repo_select, pause, reset, clear])
-        .key("admin-log-toolbar")
-        .into_any()
+    widget(
+        Stack::fill_row(10.0)
+            .wrap(true)
+            .grow(0.0)
+            .align(AlignSpec::Start),
+    )
+    .children(vec![
+        search,
+        plugin_select,
+        repo_select,
+        pause,
+        reset,
+        clear,
+    ])
+    .key("admin-log-toolbar")
+    .into_any()
 }
 
 /// `.logs-workbench__select`：框里左边 12/700 弱色标题，右边透明下拉框，最小宽 180。
@@ -158,16 +240,23 @@ fn select_field(
 ) -> AnyView {
     let options = move |values: &[String]| {
         let mut options = vec![SelectOption::new("", all.to_string())];
-        options.extend(values.iter().map(|value| SelectOption::new(value.clone(), value.clone())));
+        options.extend(
+            values
+                .iter()
+                .map(|value| SelectOption::new(value.clone(), value.clone())),
+        );
         options
     };
     let initial = toolbar.get_untracked();
     let (values, current) = pick(&initial);
     // 照原生 `<select>` 按最长的选项定宽：选哪一项外框都不动，和 Vue 一样撑到选项需要的宽度。
-    let mut select = Select::new(Some(current.clone())).options(options(values)).fit_options(true);
+    let mut select = Select::new(Some(current.clone()))
+        .options(options(values))
+        .fit_options(true);
     {
         let style = &mut select.style;
-        style.interaction.base.background_mix = Some(SemanticColorMix::alpha(Role::Background, 0.0));
+        style.interaction.base.background_mix =
+            Some(SemanticColorMix::alpha(Role::Background, 0.0));
         style.interaction.base.border_mix = Some(SemanticColorMix::alpha(Role::Border, 0.0));
         let layout = Arc::make_mut(&mut style.layout);
         // 宽度按内容（最长的选项加箭头）；Vue 的下拉框是 `width: 100%`，在最小 180 宽的框里扣掉标题和间距后
@@ -191,8 +280,12 @@ fn select_field(
         .children((
             widget(label(title, 12.0, 700, Role::Muted)).node_ref(caption),
             widget(select)
-                .prop::<Vec<SelectOption>, fields::select::options>(move || toolbar.with(|toolbar| options(pick(toolbar).0)))
-                .prop::<Option<Arc<str>>, fields::select::value>(move || toolbar.with(|toolbar| Some(Arc::from(pick(toolbar).1.as_str()))))
+                .prop::<Vec<SelectOption>, fields::select::options>(move || {
+                    toolbar.with(|toolbar| options(pick(toolbar).0))
+                })
+                .prop::<Option<Arc<str>>, fields::select::value>(move || {
+                    toolbar.with(|toolbar| Some(Arc::from(pick(toolbar).1.as_str())))
+                })
                 .labelled_by(caption)
                 .key(key)
                 .on_cx(move |_, event: &SelectChanged, cx| {
@@ -208,15 +301,26 @@ fn filters(selected: Signal<(Vec<String>, Vec<String>)>) -> AnyView {
     let levels = LEVELS
         .into_iter()
         .map(|value| {
-            let active = move || selected.with(|(levels, _)| levels.iter().any(|level| level == value));
-            filter_chip(&support::level_label(value), active, AdminMessage::ToggleLogLevel(value.into()), format!("admin-log-level-{value}"))
+            let active =
+                move || selected.with(|(levels, _)| levels.iter().any(|level| level == value));
+            filter_chip(
+                &support::level_label(value),
+                active,
+                AdminMessage::ToggleLogLevel(value.into()),
+                format!("admin-log-level-{value}"),
+            )
         })
         .collect::<Vec<_>>();
     let kinds = KINDS
         .into_iter()
         .map(|value| {
             let active = move || selected.with(|(_, kinds)| kinds.iter().any(|kind| kind == value));
-            filter_chip(&support::source_kind_label(value), active, AdminMessage::ToggleLogKind(value.into()), format!("admin-log-kind-{value}"))
+            filter_chip(
+                &support::source_kind_label(value),
+                active,
+                AdminMessage::ToggleLogKind(value.into()),
+                format!("admin-log-kind-{value}"),
+            )
         })
         .collect::<Vec<_>>();
     widget(column(10.0))
@@ -228,21 +332,45 @@ fn filters(selected: Signal<(Vec<String>, Vec<String>)>) -> AnyView {
 fn filter_group(title: &str, chips: Vec<AnyView>) -> AnyView {
     widget(Stack::bar(10.0).align(AlignSpec::Start))
         .children((
-            widget(pad(style::fixed(column(0.0), Some(42.0), None), 5.0, 0.0, 0.0, 0.0)).children((widget(label(title, 12.0, 700, Role::Muted)),)),
-            widget(Stack::row(8.0).wrap(true).width(LengthSpec::Shrink).grow(1.0).shrink(1.0).min_width(LengthSpec::Px(0.0))).children(chips),
+            widget(pad(
+                style::fixed(column(0.0), Some(42.0), None),
+                5.0,
+                0.0,
+                0.0,
+                0.0,
+            ))
+            .children((widget(label(title, 12.0, 700, Role::Muted)),)),
+            widget(
+                Stack::row(8.0)
+                    .wrap(true)
+                    .width(LengthSpec::Shrink)
+                    .grow(1.0)
+                    .shrink(1.0)
+                    .min_width(LengthSpec::Px(0.0)),
+            )
+            .children(chips),
         ))
         .into_any()
 }
 
 /// 芯片常态的字色、底色和描边：选中是强调色，未选是主背景、弱色字。
 fn chip_roles(active: bool) -> (Role, Role, Role) {
-    if active { (Role::Accent, Role::AccentSoft, Role::Accent) } else { (Role::Muted, Role::Background, Role::Border) }
+    if active {
+        (Role::Accent, Role::AccentSoft, Role::Accent)
+    } else {
+        (Role::Muted, Role::Background, Role::Border)
+    }
 }
 
 /// `.workspace-filter-chip`：高 26、左右 9、药丸、1px 边线、主背景、12/500 弱色；
 /// 选中时强调色边线、`accent-soft` 底和强调色字。Vue 里全局 `button { height: 32px }` 把它
 /// 顶成 32，和左侧标题的 5px 顶距对不齐；这里按组件声明的 26 画。
-fn filter_chip(text: &str, active: impl Fn() -> bool + Send + Copy + 'static, message: AdminMessage, key: String) -> AnyView {
+fn filter_chip(
+    text: &str,
+    active: impl Fn() -> bool + Send + Copy + 'static,
+    message: AdminMessage,
+    key: String,
+) -> AnyView {
     let (foreground, background, border) = chip_roles(active());
     let mut node = nana_ui::runtime::NodeStyle {
         foreground: Some(foreground),
@@ -280,7 +408,9 @@ fn filter_chip(text: &str, active: impl Fn() -> bool + Send + Copy + 'static, me
         .background(move || Some(chip_roles(active()).1))
         .border(move || Some(chip_roles(active()).2))
         .key(key)
-        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Admin(message.clone())))
+        .on_cx(move |_, _: &Activate, cx| {
+            cx.dispatch_program_all(ShellMessage::Admin(message.clone()))
+        })
         .into_any()
 }
 
@@ -288,18 +418,29 @@ fn filter_chip(text: &str, active: impl Fn() -> bool + Send + Copy + 'static, me
 fn log_item(item: LogItem) -> AnyView {
     let id = item.get_untracked().id;
     let key = style::key_part(&id);
-    let source = style::hint_chip(row_text(item, |row| &row.source), format!("admin-log-source-{key}"))
-        .visible(row_flag(item, |row| !row.source.is_empty()))
-        .into_any();
+    let source = style::hint_chip(
+        row_text(item, |row| &row.source),
+        format!("admin-log-source-{key}"),
+    )
+    .visible(row_flag(item, |row| !row.source.is_empty()))
+    .into_any();
     let badges = vec![
         level_badge(item, &key),
-        style::hint_chip(row_text(item, |row| &row.kind), format!("admin-log-kind-chip-{key}")).into_any(),
+        style::hint_chip(
+            row_text(item, |row| &row.kind),
+            format!("admin-log-kind-chip-{key}"),
+        )
+        .into_any(),
         source,
     ];
     let head = widget(style::spread(12.0, AlignSpec::Center))
         .children((
             widget(row(8.0).wrap(true).shrink(1.0)).children(badges),
-            style::bound(mono(String::new(), 12.0, 400, Role::Faint), row_text(item, |row| &row.time)).key(format!("admin-log-time-{key}")),
+            style::bound(
+                mono(String::new(), 12.0, 400, Role::Faint),
+                row_text(item, |row| &row.time),
+            )
+            .key(format!("admin-log-time-{key}")),
         ))
         .into_any();
     let meta = widget(row(8.0).wrap(true).width(LengthSpec::Fill)).children((
@@ -311,31 +452,86 @@ fn log_item(item: LogItem) -> AnyView {
     let body = widget(column(8.0))
         .children((
             widget(column(6.0)).children((
-                style::bound(label(String::new(), 14.0, 700, Role::Text), row_text(item, |row| &row.action)).key(format!("admin-log-action-{key}")),
-                style::bound(wrapping(style::label_lh(String::new(), 14.0, 400, Role::Text, 1.6)), row_text(item, |row| &row.message))
-                    .key(format!("admin-log-message-{key}")),
+                style::bound(
+                    label(String::new(), 14.0, 700, Role::Text),
+                    row_text(item, |row| &row.action),
+                )
+                .key(format!("admin-log-action-{key}")),
+                style::bound(
+                    wrapping(style::label_lh(String::new(), 14.0, 400, Role::Text, 1.6)),
+                    row_text(item, |row| &row.message),
+                )
+                .key(format!("admin-log-message-{key}")),
             )),
             meta,
         ))
         .into_any();
-    let card = pad(column(12.0), 14.0, 16.0, 14.0, 16.0).surface(Role::Background).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Xl);
-    widget(card).children((head, body, context_block(item, &id))).key(format!("admin-log-row-{key}")).into_any()
+    let card = pad(column(12.0), 14.0, 16.0, 14.0, 16.0)
+        .surface(Role::Background)
+        .outline(Role::BorderSoft, 1.0)
+        .radius(RadiusTier::Xl);
+    widget(card)
+        .children((head, body, context_block(item, &id)))
+        .key(format!("admin-log-row-{key}"))
+        .into_any()
 }
 
 /// 级别徽章的外框和字样：底色按级别和主背景混色，警告和调试用 Vue 写死的颜色。
 fn level_look(level: &str) -> (NodeStyle, Text) {
     let (soft, color): (Soft, Option<[u8; 3]>) = match level {
-        "debug" => (Soft::RgbMix { rgb: [0x5c, 0x70, 0x88], ratio: 0.18, base: Role::Background }, Some([0x5c, 0x70, 0x88])),
-        "info" => (Soft::RoleMix { role: Role::Accent, ratio: 0.18, base: Role::Background }, None),
-        "warn" => (Soft::RgbMix { rgb: [0xdc, 0xa3, 0x3a], ratio: 0.22, base: Role::Background }, Some([0xb6, 0x7a, 0x09])),
-        _ => (Soft::RoleMix { role: Role::Danger, ratio: 0.18, base: Role::Background }, None),
+        "debug" => (
+            Soft::RgbMix {
+                rgb: [0x5c, 0x70, 0x88],
+                ratio: 0.18,
+                base: Role::Background,
+            },
+            Some([0x5c, 0x70, 0x88]),
+        ),
+        "info" => (
+            Soft::RoleMix {
+                role: Role::Accent,
+                ratio: 0.18,
+                base: Role::Background,
+            },
+            None,
+        ),
+        "warn" => (
+            Soft::RgbMix {
+                rgb: [0xdc, 0xa3, 0x3a],
+                ratio: 0.22,
+                base: Role::Background,
+            },
+            Some([0xb6, 0x7a, 0x09]),
+        ),
+        _ => (
+            Soft::RoleMix {
+                role: Role::Danger,
+                ratio: 0.18,
+                base: Role::Background,
+            },
+            None,
+        ),
     };
-    let role = if level == "info" { Role::Accent } else { Role::Danger };
+    let role = if level == "info" {
+        Role::Accent
+    } else {
+        Role::Danger
+    };
     let mut text = label(String::new(), 12.0, 700, role);
     if let Some(rgb) = color {
         text = style::fixed_color(text, rgb);
     }
-    let body = style::rounded(pad(style::fixed(row(0.0), None, Some(28.0)), 0.0, 12.0, 0.0, 12.0), None).painter(SoftFill::new(soft, None));
+    let body = style::rounded(
+        pad(
+            style::fixed(row(0.0), None, Some(28.0)),
+            0.0,
+            12.0,
+            0.0,
+            12.0,
+        ),
+        None,
+    )
+    .painter(SoftFill::new(soft, None));
     (body.node_style(), text)
 }
 
@@ -354,12 +550,17 @@ fn level_badge(item: LogItem, key: &str) -> AnyView {
 /// `.logs-workbench__meta span`：最小高 24、内边距 3/9、药丸、`bg-subtle`、等宽 11 号弱色。
 /// 分类总在；插件、仓库和位置是 `optional`，值为空时不显示。
 fn meta_chip(item: LogItem, pick: fn(&LogRowView) -> &String, optional: bool) -> AnyView {
-    let body = style::rounded(pad(row(0.0), 3.0, 9.0, 3.0, 9.0), None).surface(Role::Subtle).with_layout(|layout| {
-        layout.min_height = Some(LengthSpec::Px(24.0));
-    });
+    let body = style::rounded(pad(row(0.0), 3.0, 9.0, 3.0, 9.0), None)
+        .surface(Role::Subtle)
+        .with_layout(|layout| {
+            layout.min_height = Some(LengthSpec::Px(24.0));
+        });
     widget(body)
         .visible(move || !optional || item.try_with(|row| !pick(row).is_empty()).unwrap_or(false))
-        .children((style::bound(mono(String::new(), 11.0, 400, Role::Muted), row_text(item, pick)),))
+        .children((style::bound(
+            mono(String::new(), 11.0, 400, Role::Muted),
+            row_text(item, pick),
+        ),))
         .into_any()
 }
 
@@ -368,10 +569,21 @@ fn context_block(item: LogItem, id: &str) -> AnyView {
     let toggle_id = id.to_string();
     let summary = widget(Button::new("上下文").style(summary_style()))
         .key(format!("admin-log-context-{}", style::key_part(id)))
-        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ToggleLogContext(toggle_id.clone()))));
-    let json = widget(pad(column(0.0), 12.0, 12.0, 12.0, 12.0).surface(Role::Subtle).radius(RadiusTier::Lg))
-        .visible(row_flag(item, |row| row.context_open))
-        .children((style::bound(wrapping(style::mono_lh(String::new(), 12.0, 400, Role::Text, 1.6)), row_text(item, |row| &row.context)),));
+        .on_cx(move |_, _: &Activate, cx| {
+            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ToggleLogContext(
+                toggle_id.clone(),
+            )))
+        });
+    let json = widget(
+        pad(column(0.0), 12.0, 12.0, 12.0, 12.0)
+            .surface(Role::Subtle)
+            .radius(RadiusTier::Lg),
+    )
+    .visible(row_flag(item, |row| row.context_open))
+    .children((style::bound(
+        wrapping(style::mono_lh(String::new(), 12.0, 400, Role::Text, 1.6)),
+        row_text(item, |row| &row.context),
+    ),));
     widget(style::top_rule(pad(column(10.0), 10.0, 0.0, 0.0, 0.0)))
         .visible(row_flag(item, |row| row.has_context))
         .children((summary, json))

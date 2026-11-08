@@ -10,7 +10,7 @@ use nana_ui_core::SemanticColorMix;
 
 use crate::shell::sidebar::PopoverMode;
 use crate::shell::view_harness::ShellHarness;
-use crate::shell::{ShellPage, ShellViewModel};
+use crate::shell::{ShellPage, ShellViewModel, SidebarPlaylist, WorkspacePanel};
 use crate::theme_map::DISABLED_OPACITY;
 
 fn scene(name: &str) -> ShellViewModel {
@@ -22,21 +22,40 @@ fn scene(name: &str) -> ShellViewModel {
 }
 
 fn opacity(harness: &ShellHarness, id: StableNodeId) -> Option<f32> {
-    harness.document().context().world().node_style(id).and_then(|style| style.layout.opacity)
+    harness
+        .document()
+        .context()
+        .world()
+        .node_style(id)
+        .and_then(|style| style.layout.opacity)
 }
 
 fn disabled(harness: &ShellHarness, id: StableNodeId) -> bool {
-    harness.document().context().world().accessibility(id).is_some_and(|state| state.disabled)
+    harness
+        .document()
+        .context()
+        .world()
+        .accessibility(id)
+        .is_some_and(|state| state.disabled)
 }
 
 /// 节点停用时的字色混合。
 fn disabled_mix(harness: &ShellHarness, id: StableNodeId) -> Option<SemanticColorMix> {
-    harness.document().context().world().node_style(id).and_then(|style| style.interaction.disabled.foreground_mix)
+    harness
+        .document()
+        .context()
+        .world()
+        .node_style(id)
+        .and_then(|style| style.interaction.disabled.foreground_mix)
 }
 
 /// 弱色叉号或图标盖在 `--bg-elev` 上按 0.45 混。
 fn faint_over_surface() -> Option<SemanticColorMix> {
-    Some(SemanticColorMix::new(SemanticColorRole::Faint, SemanticColorRole::Surface, DISABLED_OPACITY))
+    Some(SemanticColorMix::new(
+        SemanticColorRole::Faint,
+        SemanticColorRole::Surface,
+        DISABLED_OPACITY,
+    ))
 }
 
 /// 对话框卡片里的关闭位（标题栏也有一个窗口的「关闭」）。
@@ -46,7 +65,9 @@ fn dialog_close(harness: &ShellHarness) -> StableNodeId {
     harness
         .nodes()
         .into_iter()
-        .find(|node| node.label.as_deref() == Some("关闭") && world.is_descendant_or_self(node.id, surface))
+        .find(|node| {
+            node.label.as_deref() == Some("关闭") && world.is_descendant_or_self(node.id, surface)
+        })
         .expect("导出对话框的关闭位")
         .id
 }
@@ -54,8 +75,16 @@ fn dialog_close(harness: &ShellHarness) -> StableNodeId {
 /// 停用的图标按钮：不透明度为空（NanaUI 没有再淡一层），停用色是在侧栏或卡片底色上混好的弱色。
 fn assert_mixed_over_surface(harness: &ShellHarness, id: StableNodeId, label: &str) {
     assert!(disabled(harness, id), "「{label}」应该停用");
-    assert_eq!(opacity(harness, id), None, "「{label}」只淡一次，节点不再整体淡化");
-    assert_eq!(disabled_mix(harness, id), faint_over_surface(), "「{label}」的停用色按 0.45 和底色在 sRGB 里混");
+    assert_eq!(
+        opacity(harness, id),
+        None,
+        "「{label}」只淡一次，节点不再整体淡化"
+    );
+    assert_eq!(
+        disabled_mix(harness, id),
+        faint_over_surface(),
+        "「{label}」的停用色按 0.45 和底色在 sRGB 里混"
+    );
 }
 
 /// 传输按钮是 `IconButton`，自绘按停用状态混好颜色；提示照 Vue 只有循环模式有。
@@ -66,22 +95,38 @@ fn disabled_player_buttons_are_dimmed_only_by_their_painter() {
     for label in ["列表循环", "上一首", "播放", "下一首", "当前队列"] {
         let id = harness.node(label);
         assert!(disabled(&harness, id), "没有条目时「{label}」停用");
-        assert_eq!(opacity(&harness, id), None, "「{label}」的停用色由自绘混好，节点不再整体淡化");
+        assert_eq!(
+            opacity(&harness, id),
+            None,
+            "「{label}」的停用色由自绘混好，节点不再整体淡化"
+        );
         let (own_colors, painted, tooltip) = context
             .read(Entity::<IconButton>::from_stable_id(id), |button| {
-                (button.colors_from_style, button.style.painter.is_some(), button.tooltip.as_ref().map(|tip| tip.label.to_string()))
+                (
+                    button.colors_from_style,
+                    button.style.painter.is_some(),
+                    button.tooltip.as_ref().map(|tip| tip.label.to_string()),
+                )
             })
             .unwrap_or_else(|_| panic!("「{label}」应该是 IconButton"));
         assert!(own_colors && painted, "「{label}」颜色照写的来、由自绘画");
         let expected = (label == "列表循环").then(|| label.to_string());
-        assert_eq!(tooltip, expected, "「{label}」的提示照 Vue：只有循环模式写了 title");
+        assert_eq!(
+            tooltip, expected,
+            "「{label}」的提示照 Vue：只有循环模式写了 title"
+        );
     }
 }
 
 #[test]
 fn disabled_sidebar_tools_mix_their_ink_over_the_sidebar() {
     let harness = ShellHarness::mount(ShellViewModel::for_page(ShellPage::EmptyRepository));
-    for label in ["新建播放集", "在当前目录新建文件夹", "刷新文件夹树", "新建智能文件夹"] {
+    for label in [
+        "新建播放集",
+        "在当前目录新建文件夹",
+        "刷新文件夹树",
+        "新建智能文件夹",
+    ] {
         assert_mixed_over_surface(&harness, harness.node(label), label);
     }
 }
@@ -98,11 +143,116 @@ fn busy_close_buttons_mix_their_ink_over_their_card() {
     let mut harness = ShellHarness::mount(scene("export-dialog"));
     let close = dialog_close(&harness);
     assert!(!disabled(&harness, close), "没在导出时关闭位能点");
-    let resting = harness.document().context().world().node_style(close).and_then(|style| style.foreground);
-    assert_eq!(resting, Some(SemanticColorRole::Faint), "关闭位平时是弱色叉号，不被种类配色换成次要文字色");
+    let resting = harness
+        .document()
+        .context()
+        .world()
+        .node_style(close)
+        .and_then(|style| style.foreground);
+    assert_eq!(
+        resting,
+        Some(SemanticColorRole::Faint),
+        "关闭位平时是弱色叉号，不被种类配色换成次要文字色"
+    );
     harness.model.files.export.busy = true;
     harness.model.mark_surface_dirty();
     harness.sync();
     harness.flush();
     assert_mixed_over_surface(&harness, close, "关闭");
+}
+
+/// 播放集行的「播放」：没选中时弱色仍和侧栏底混；选中行底下是 `--accent-soft`，停用色改和这层底混。
+#[test]
+fn disabled_playlist_play_mixes_with_the_row_fill() {
+    let mut model = scene("live-files");
+    model.workspace.panel = WorkspacePanel::Playlist;
+    model.sidebar.playlists_expanded = true;
+    model.sidebar.active_playlist_id = Some("selected".into());
+    model.sidebar.playlists = vec![
+        playlist_row("selected", "当前"),
+        playlist_row("rest", "其余"),
+    ];
+    let harness = ShellHarness::mount(model);
+    let selected_row = harness
+        .keyed("playlist-item-selected")
+        .expect("选中的播放集行");
+    let resting_row = harness
+        .keyed("playlist-item-rest")
+        .expect("未选中的播放集行");
+    assert_eq!(
+        harness
+            .document()
+            .context()
+            .world()
+            .node_style(selected_row)
+            .and_then(|style| style.background),
+        Some(SemanticColorRole::AccentSoft),
+        "选中行应铺 accent-soft"
+    );
+    assert_eq!(
+        harness
+            .document()
+            .context()
+            .world()
+            .node_style(resting_row)
+            .and_then(|style| style.background),
+        None,
+        "未选中行没有这层底"
+    );
+    assert_play_mix(
+        &harness,
+        selected_row,
+        SemanticColorRole::AccentSoft,
+        "选中行",
+    );
+    assert_play_mix(
+        &harness,
+        resting_row,
+        SemanticColorRole::Surface,
+        "未选中行",
+    );
+}
+
+/// 没有对应播放插件的播放集，行上的「播放」停用。
+fn playlist_row(id: &str, name: &str) -> SidebarPlaylist {
+    SidebarPlaylist {
+        id: id.into(),
+        name: name.into(),
+        player_label: "音频".into(),
+        player_type_id: "missing.player".into(),
+        item_count: 1,
+    }
+}
+
+/// 某一播放集行里停用的「播放」：节点不再整体淡化，停用色按 0.45 和这一行的底混。
+fn assert_play_mix(
+    harness: &ShellHarness,
+    row: StableNodeId,
+    base: SemanticColorRole,
+    label: &str,
+) {
+    let world = harness.document().context().world();
+    let id = harness
+        .nodes()
+        .into_iter()
+        .find(|node| {
+            node.label.as_deref() == Some("播放播放集") && world.is_descendant_or_self(node.id, row)
+        })
+        .unwrap_or_else(|| panic!("{label}没有「播放」"))
+        .id;
+    assert!(disabled(harness, id), "{label}的「播放」应该停用");
+    assert_eq!(
+        opacity(harness, id),
+        None,
+        "{label}的「播放」只淡一次，节点不再整体淡化"
+    );
+    assert_eq!(
+        disabled_mix(harness, id),
+        Some(SemanticColorMix::new(
+            SemanticColorRole::Faint,
+            base,
+            DISABLED_OPACITY
+        )),
+        "{label}的停用色应按 0.45 和所在底色混"
+    );
 }

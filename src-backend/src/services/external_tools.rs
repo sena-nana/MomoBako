@@ -66,7 +66,10 @@ fn prepare_ffmpeg() -> Result<(), String> {
     if runs(&ffmpeg_path()) {
         return Ok(());
     }
-    let Some(downloads) = LOCATIONS.get().and_then(|locations| locations.downloads.clone()) else {
+    let Some(downloads) = LOCATIONS
+        .get()
+        .and_then(|locations| locations.downloads.clone())
+    else {
         return ffmpeg_sidecar::download::auto_download()
             .map_err(|error| format!("ffmpeg setup error: {error}"));
     };
@@ -87,9 +90,8 @@ fn prepare_ffmpeg() -> Result<(), String> {
 }
 
 fn download_ffmpeg_into(downloads: &Path) -> Result<(), String> {
-    std::fs::create_dir_all(downloads).map_err(|error| {
-        format!("建不了外部程序下载目录 {}：{error}", downloads.display())
-    })?;
+    std::fs::create_dir_all(downloads)
+        .map_err(|error| format!("建不了外部程序下载目录 {}：{error}", downloads.display()))?;
     let url = ffmpeg_sidecar::download::ffmpeg_download_url()
         .map_err(|error| format!("ffmpeg setup error: {error}"))?;
     let archive = ffmpeg_sidecar::download::download_ffmpeg_package(url, downloads)

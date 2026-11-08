@@ -2,18 +2,26 @@
 //! 删除、来源动作完成以后的刷新和重定向这些入口走，送回服务结果，看启动页、侧栏、任务弹层、状态区和
 //! 最后的工作区。搜索命中在别的仓库见 `search_tests.rs`。
 
-use crate::backend::services::repository::{FileBrowserEntry, FileBrowserSnapshot};
+use std::collections::BTreeMap;
+
+use serde_json::json;
+
+use crate::backend::services::repository::{
+    AssetDetail, AssetSummary, FileBrowserEntry, FileBrowserSnapshot, MetadataEntry,
+    RepositorySnapshot,
+};
 
 use super::admin::{AdminEffect, AdminMessage};
 use super::data_load_tests::{answer_settings, browser, snapshot, summary};
 use super::repo_operation::FINISH_LINGER_MS;
 use super::route_startup::StartupView;
 use super::status::StatusLine;
-use super::view_part::{body_mode, BodyMode};
+use super::view_part::{BodyMode, body_mode};
 use super::view_part_primary::RouteKey;
 use super::workspace::{DeleteMode, StartupMode, StartupStepState};
 use super::{
-    FilesMessage, MainRegion, ShellMessage, ShellViewModel, SidebarEffect, SidebarMessage, StartupStatus, WorkspaceEffect,
+    FilesMessage, InspectEffect, InspectMessage, MainRegion, ShellMessage, ShellPage,
+    ShellViewModel, SidebarEffect, SidebarMessage, StartupStatus, WorkspaceEffect,
 };
 
 const ALPHA: &str = "alpha";
@@ -25,9 +33,18 @@ fn ready_on_alpha() -> ShellViewModel {
     model.workspace.last_active_repo_id = Some(ALPHA.into());
     let generation = model.workspace.prepare_initial_list();
     for message in [
-        ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(ALPHA, "ready"), summary(BETA, "ready")]) },
-        ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) },
-        ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(ALPHA)) },
+        ShellMessage::WorkspaceListLoaded {
+            generation,
+            result: Ok(vec![summary(ALPHA, "ready"), summary(BETA, "ready")]),
+        },
+        ShellMessage::RepositorySynced {
+            generation,
+            result: Ok(crate::shell::SyncCounts::default()),
+        },
+        ShellMessage::RepositorySnapshotLoaded {
+            generation,
+            result: Ok(snapshot(ALPHA)),
+        },
         ShellMessage::FileBrowserLoaded(Ok(browser(ALPHA))),
     ] {
         model.reduce(message);
@@ -45,7 +62,10 @@ fn ready_on_alpha() -> ShellViewModel {
 
 /// 任务弹层的仓库操作行：(种类, 阶段, 百分比)。
 fn operation_row(model: &ShellViewModel) -> Option<(String, String, f64)> {
-    model.operation.shown().map(|row| (row.label.clone(), row.detail.clone(), row.value))
+    model
+        .operation
+        .shown()
+        .map(|row| (row.label.clone(), row.detail.clone(), row.value))
 }
 
 fn sync_requested(model: &mut ShellViewModel, repo_id: &str) -> bool {
@@ -91,9 +111,19 @@ fn directory(repo_id: &str, path: &str, files: &[&str]) -> FileBrowserSnapshot {
 /// 把换仓库的三步答完：同步、摘要、首屏目录。
 fn finish_switch(model: &mut ShellViewModel, repo_id: &str) {
     let generation = model.workspace.list_generation;
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) });
-    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(repo_id)) });
-    model.reduce(ShellMessage::FileBrowserLoaded(Ok(directory(repo_id, "", &["cover.png"]))));
+    model.reduce(ShellMessage::RepositorySynced {
+        generation,
+        result: Ok(crate::shell::SyncCounts::default()),
+    });
+    model.reduce(ShellMessage::RepositorySnapshotLoaded {
+        generation,
+        result: Ok(snapshot(repo_id)),
+    });
+    model.reduce(ShellMessage::FileBrowserLoaded(Ok(directory(
+        repo_id,
+        "",
+        &["cover.png"],
+    ))));
 }
 
 /// 换仓库以后，上一个仓库后台查的硬链接候选晚到：读取是换仓库以前发出的，不认，新仓库里不弹别的仓库的确认。
@@ -101,7 +131,9 @@ fn finish_switch(model: &mut ShellViewModel, repo_id: &str) {
 fn hardlink_candidates_of_the_previous_repository_are_dropped() {
     let mut model = ready_on_alpha();
     let epoch = model.files.hardlink_epoch();
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::SelectRepositoryFromSwitcher(BETA.into())));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::SelectRepositoryFromSwitcher(BETA.into()),
+    ));
     finish_switch(&mut model, BETA);
     let prompt = crate::shell::HardlinkPrompt {
         id: "alpha-link".into(),
@@ -109,8 +141,15 @@ fn hardlink_candidates_of_the_previous_repository_are_dropped() {
         existing_path: "a.png".into(),
         size_label: "1 KB".into(),
     };
-    model.reduce(ShellMessage::Files(FilesMessage::HardlinksChecked { epoch, result: Ok(vec![prompt]) }));
-    assert_eq!(model.files.dialog, crate::shell::files::FileDialog::Closed, "别的仓库的候选不弹确认");
+    model.reduce(ShellMessage::Files(FilesMessage::HardlinksChecked {
+        epoch,
+        result: Ok(vec![prompt]),
+    }));
+    assert_eq!(
+        model.files.dialog,
+        crate::shell::files::FileDialog::Closed,
+        "别的仓库的候选不弹确认"
+    );
     assert!(model.files.current_hardlink().is_none());
 }
 
@@ -121,48 +160,108 @@ fn switching_from_the_list_walks_the_startup_page_and_brings_the_sidebar_back() 
     let mut model = ready_on_alpha();
     assert_eq!(body_mode(&model), BodyMode::Workbench);
     let logs = model.workspace.startup.logs.len();
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::OpenRepositorySwitcher));
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::SelectRepositoryFromSwitcher(BETA.into())));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::OpenRepositorySwitcher,
+    ));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::SelectRepositoryFromSwitcher(BETA.into()),
+    ));
 
     assert_eq!(model.sidebar.popover, super::sidebar::PopoverMode::Closed);
     assert_eq!(model.workspace.active_repo_id.as_deref(), Some(BETA));
-    assert_eq!((model.workspace.startup.status, model.workspace.startup.mode), (StartupStatus::Loading, StartupMode::Switch));
+    assert_eq!(
+        (model.workspace.startup.status, model.workspace.startup.mode),
+        (StartupStatus::Loading, StartupMode::Switch)
+    );
     assert_eq!(RouteKey::of(&model), RouteKey::Startup, "回到启动页");
     assert_eq!(body_mode(&model), BodyMode::Solo, "侧栏收起");
     let view = StartupView::project(&model);
-    assert_eq!((view.text.title.as_str(), view.text.meta.as_str()), ("扫描资源库文件", "第 2 / 4 步"));
+    assert_eq!(
+        (view.text.title.as_str(), view.text.meta.as_str()),
+        ("扫描资源库文件", "第 2 / 4 步")
+    );
     assert_eq!(view.steps[0].state, StartupStepState::Done);
     assert_eq!(view.steps[1].state, StartupStepState::Current);
-    assert_eq!(model.workspace.startup.logs.len(), logs, "换仓库不写首屏启动日志");
-    assert_eq!(operation_row(&model), Some(("加载资源库".into(), "扫描资源库文件".into(), 28.0)));
+    assert_eq!(
+        model.workspace.startup.logs.len(),
+        logs,
+        "换仓库不写首屏启动日志"
+    );
+    assert_eq!(
+        operation_row(&model),
+        Some(("加载资源库".into(), "扫描资源库文件".into(), 28.0))
+    );
     let effects = model.workspace.take_effects();
     assert!(effects.iter().any(|effect| matches!(effect, WorkspaceEffect::StopPlayback { previous_repo_id } if previous_repo_id == ALPHA)));
     assert!(effects.iter().any(|effect| matches!(effect, WorkspaceEffect::SyncRepository { repo_id, .. } if repo_id == BETA)));
     assert!(model.files.rows.is_empty(), "上一个仓库的条目清掉");
-    assert!(model.sidebar.bound_repo_id().is_none(), "同步以前不读新仓库的侧栏");
+    assert!(
+        model.sidebar.bound_repo_id().is_none(),
+        "同步以前不读新仓库的侧栏"
+    );
 
     let generation = model.workspace.list_generation;
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) });
+    model.reduce(ShellMessage::RepositorySynced {
+        generation,
+        result: Ok(crate::shell::SyncCounts::default()),
+    });
     assert_eq!(model.workspace.startup.step_label, "读取仓库摘要");
-    assert!(model.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::LoadSnapshot { repo_id, .. } if repo_id == BETA)));
+    assert!(model.workspace.take_effects().iter().any(
+        |effect| matches!(effect, WorkspaceEffect::LoadSnapshot { repo_id, .. } if repo_id == BETA)
+    ));
 
-    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(BETA)) });
+    model.reduce(ShellMessage::RepositorySnapshotLoaded {
+        generation,
+        result: Ok(snapshot(BETA)),
+    });
     assert_eq!(model.workspace.startup.step_label, "读取首屏目录");
-    assert_eq!(model.workspace.startup.step_detail, "加载根目录文件、侧栏结构和首屏内容。");
-    assert!(model.workspace.take_effects().contains(&WorkspaceEffect::LoadFirstScreen { repo_id: BETA.into() }));
-    assert_eq!(operation_row(&model), Some(("加载资源库".into(), "加载资源索引".into(), 46.0)));
+    assert_eq!(
+        model.workspace.startup.step_detail,
+        "加载根目录文件、侧栏结构和首屏内容。"
+    );
     assert!(
-        model.sidebar.take_effects().iter().any(|effect| matches!(effect, SidebarEffect::LoadTree { repo_id } if repo_id == BETA)),
+        model
+            .workspace
+            .take_effects()
+            .contains(&WorkspaceEffect::LoadFirstScreen {
+                repo_id: BETA.into()
+            })
+    );
+    assert_eq!(
+        operation_row(&model),
+        Some(("加载资源库".into(), "加载资源索引".into(), 46.0))
+    );
+    assert!(
+        model
+            .sidebar
+            .take_effects()
+            .iter()
+            .any(|effect| matches!(effect, SidebarEffect::LoadTree { repo_id } if repo_id == BETA)),
         "同步以后才读新仓库的目录树"
     );
 
-    model.reduce(ShellMessage::FileBrowserLoaded(Ok(directory(BETA, "", &["cover.png"]))));
+    model.reduce(ShellMessage::FileBrowserLoaded(Ok(directory(
+        BETA,
+        "",
+        &["cover.png"],
+    ))));
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
     assert_eq!(RouteKey::of(&model), RouteKey::Files);
     assert_eq!(body_mode(&model), BodyMode::Workbench, "侧栏回来");
     assert_eq!(model.files.rows.len(), 1);
-    assert!(!model.admin.take_effects().iter().any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)), "换仓库不重读设置包");
-    assert_eq!(operation_row(&model).map(|row| row.2), Some(100.0), "首屏读完这一行完成");
+    assert!(
+        !model
+            .admin
+            .take_effects()
+            .iter()
+            .any(|effect| matches!(effect, AdminEffect::LoadSettingsBundle)),
+        "换仓库不重读设置包"
+    );
+    assert_eq!(
+        operation_row(&model).map(|row| row.2),
+        Some(100.0),
+        "首屏读完这一行完成"
+    );
     model.operation.tick(FINISH_LINGER_MS);
     assert!(operation_row(&model).is_none());
 }
@@ -173,10 +272,18 @@ fn switching_from_the_list_walks_the_startup_page_and_brings_the_sidebar_back() 
 fn a_failed_switch_stays_on_the_startup_page_until_retry_succeeds() {
     let mut model = ready_on_alpha();
     let logs = model.workspace.startup.logs.len();
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::SelectRepositoryFromSwitcher(BETA.into())));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::SelectRepositoryFromSwitcher(BETA.into()),
+    ));
     let generation = model.workspace.list_generation;
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) });
-    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Err("索引损坏".into()) });
+    model.reduce(ShellMessage::RepositorySynced {
+        generation,
+        result: Ok(crate::shell::SyncCounts::default()),
+    });
+    model.reduce(ShellMessage::RepositorySnapshotLoaded {
+        generation,
+        result: Err("索引损坏".into()),
+    });
 
     assert_eq!(model.workspace.startup.status, StartupStatus::Error);
     assert_eq!(model.workspace.main_region(), MainRegion::LoadError);
@@ -186,19 +293,46 @@ fn a_failed_switch_stays_on_the_startup_page_until_retry_succeeds() {
     assert!(view.text.retry, "失败给「重试」");
     assert_eq!(view.text.error.as_deref(), Some("索引损坏"));
     assert_eq!(view.steps[2].state, StartupStepState::Error, "停在第 3 步");
-    assert_eq!(model.workspace.startup.logs.len(), logs, "换仓库失败也不写首屏启动日志");
+    assert_eq!(
+        model.workspace.startup.logs.len(),
+        logs,
+        "换仓库失败也不写首屏启动日志"
+    );
     assert!(operation_row(&model).is_none(), "失败时任务弹层这一行取消");
 
     model.workspace.take_effects();
     model.reduce(ShellMessage::StartupRetry);
-    assert_eq!((model.workspace.startup.status, model.workspace.startup.mode), (StartupStatus::Loading, StartupMode::Launch));
-    assert_eq!(model.workspace.startup.logs.first().map(|log| log.message.as_str()), Some("首屏启动流程开始。"));
+    assert_eq!(
+        (model.workspace.startup.status, model.workspace.startup.mode),
+        (StartupStatus::Loading, StartupMode::Launch)
+    );
+    assert_eq!(
+        model
+            .workspace
+            .startup
+            .logs
+            .first()
+            .map(|log| log.message.as_str()),
+        Some("首屏启动流程开始。")
+    );
     let generation = model.workspace.list_generation;
-    assert!(model.workspace.take_effects().contains(&WorkspaceEffect::RefreshRepositories { generation }));
-    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(ALPHA, "ready"), summary(BETA, "ready")]) });
+    assert!(
+        model
+            .workspace
+            .take_effects()
+            .contains(&WorkspaceEffect::RefreshRepositories { generation })
+    );
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(vec![summary(ALPHA, "ready"), summary(BETA, "ready")]),
+    });
     assert!(sync_requested(&mut model, BETA), "重试接着加载换过去的仓库");
     finish_switch(&mut model, BETA);
-    assert_eq!(model.workspace.startup.status, StartupStatus::Loading, "重试是完整启动，读完首屏目录等设置包");
+    assert_eq!(
+        model.workspace.startup.status,
+        StartupStatus::Loading,
+        "重试是完整启动，读完首屏目录等设置包"
+    );
     answer_settings(&mut model);
     assert_eq!(model.workspace.startup.status, StartupStatus::Ready);
     assert_eq!(model.workspace.active_repo_id.as_deref(), Some(BETA));
@@ -210,25 +344,55 @@ fn a_failed_switch_stays_on_the_startup_page_until_retry_succeeds() {
 #[test]
 fn attaching_a_folder_switches_to_the_new_repository() {
     let mut model = ready_on_alpha();
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::RepositoryAttachPathChanged("D:/新素材".into())));
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::SubmitRepositoryAttach));
-    assert!(model.sidebar.take_effects().iter().any(|effect| matches!(effect, SidebarEffect::AttachRepository { path } if path == "D:/新素材")));
-    assert_eq!(operation_row(&model), Some(("挂载资源库".into(), "检查文件夹并读取索引".into(), 8.0)));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::RepositoryAttachPathChanged("D:/新素材".into()),
+    ));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::SubmitRepositoryAttach,
+    ));
+    assert!(model.sidebar.take_effects().iter().any(
+        |effect| matches!(effect, SidebarEffect::AttachRepository { path } if path == "D:/新素材")
+    ));
+    assert_eq!(
+        operation_row(&model),
+        Some(("挂载资源库".into(), "检查文件夹并读取索引".into(), 8.0))
+    );
 
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::RepositoryAttachFinished(Ok(summary("gamma", "ready")))));
-    assert!(model.workspace.repositories.iter().any(|item| item.repo_id == "gamma"));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::RepositoryAttachFinished(Ok(summary("gamma", "ready"))),
+    ));
+    assert!(
+        model
+            .workspace
+            .repositories
+            .iter()
+            .any(|item| item.repo_id == "gamma")
+    );
     assert_eq!(model.workspace.active_repo_id.as_deref(), Some("gamma"));
     assert_eq!(model.workspace.startup.mode, StartupMode::Switch);
     assert!(sync_requested(&mut model, "gamma"));
-    assert_eq!(operation_row(&model).map(|row| row.0), Some("加载资源库".into()));
+    assert_eq!(
+        operation_row(&model).map(|row| row.0),
+        Some("加载资源库".into())
+    );
     finish_switch(&mut model, "gamma");
     assert_eq!(model.workspace.main_region(), MainRegion::HasRepository);
     assert_eq!(model.repository_name, "仓库 gamma");
 
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::RepositoryAttachPathChanged("D:/坏目录".into())));
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::SubmitRepositoryAttach));
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::RepositoryAttachFinished(Err("不是文件夹".into()))));
-    assert_eq!(model.workspace.active_repo_id.as_deref(), Some("gamma"), "失败不换仓库");
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::RepositoryAttachPathChanged("D:/坏目录".into()),
+    ));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::SubmitRepositoryAttach,
+    ));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::RepositoryAttachFinished(Err("不是文件夹".into())),
+    ));
+    assert_eq!(
+        model.workspace.active_repo_id.as_deref(),
+        Some("gamma"),
+        "失败不换仓库"
+    );
     assert_eq!(model.sidebar.popover_error, "不是文件夹");
     assert!(operation_row(&model).is_none());
 }
@@ -239,11 +403,20 @@ fn attaching_a_folder_switches_to_the_new_repository() {
 fn creating_a_repository_switches_to_it() {
     let mut model = ready_on_alpha();
     model.sidebar.attach_eagle = true;
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::RepositoryAttachPathChanged("D:/Pics.library".into())));
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::SubmitRepositoryAttach));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::RepositoryAttachPathChanged("D:/Pics.library".into()),
+    ));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::SubmitRepositoryAttach,
+    ));
     assert!(model.sidebar.take_effects().iter().any(|effect| matches!(effect, SidebarEffect::CreateBackendRepository { name, .. } if name == "Pics")));
-    assert_eq!(operation_row(&model), Some(("创建资源库".into(), "初始化资源库并扫描文件".into(), 8.0)));
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::RepositoryAttachFinished(Ok(summary("eagle", "ready")))));
+    assert_eq!(
+        operation_row(&model),
+        Some(("创建资源库".into(), "初始化资源库并扫描文件".into(), 8.0))
+    );
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::RepositoryAttachFinished(Ok(summary("eagle", "ready"))),
+    ));
     assert_eq!(model.workspace.active_repo_id.as_deref(), Some("eagle"));
     assert_eq!(model.workspace.startup.step_label, "扫描资源库文件");
     assert!(sync_requested(&mut model, "eagle"));
@@ -253,17 +426,25 @@ fn creating_a_repository_switches_to_it() {
 #[test]
 fn deleting_the_current_repository_switches_to_the_next_one() {
     let mut model = ready_on_alpha();
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::DeleteRepositoryFromSwitcher));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::DeleteRepositoryFromSwitcher,
+    ));
     model.reduce(ShellMessage::MissingConfirmDelete(DeleteMode::RecordOnly));
     assert!(model.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::DeleteRepository { repo_id, .. } if repo_id == ALPHA)));
     model.reduce(ShellMessage::MissingDeleteFinished(Ok(())));
     assert_eq!(model.workspace.active_repo_id.as_deref(), Some(BETA));
-    assert_eq!(RouteKey::of(&model), RouteKey::Startup, "换到下一个仓库也走启动页");
+    assert_eq!(
+        RouteKey::of(&model),
+        RouteKey::Startup,
+        "换到下一个仓库也走启动页"
+    );
     assert!(sync_requested(&mut model, BETA));
     finish_switch(&mut model, BETA);
     assert_eq!(model.workspace.main_region(), MainRegion::HasRepository);
 
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::DeleteRepositoryFromSwitcher));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::DeleteRepositoryFromSwitcher,
+    ));
     model.reduce(ShellMessage::MissingConfirmDelete(DeleteMode::RecordOnly));
     model.reduce(ShellMessage::MissingDeleteFinished(Ok(())));
     assert_eq!(model.workspace.main_region(), MainRegion::EmptyRepository);
@@ -278,41 +459,109 @@ fn refreshing_the_same_repository_syncs_then_rereads_the_current_directory() {
     let mut model = ready_on_alpha();
     model.reduce(ShellMessage::Files(FilesMessage::OpenPath("pics".into())));
     model.files.take_effects();
-    model.reduce(ShellMessage::FileBrowserLoaded(Ok(directory(ALPHA, "pics", &["pics/a.png"]))));
+    model.reduce(ShellMessage::FileBrowserLoaded(Ok(directory(
+        ALPHA,
+        "pics",
+        &["pics/a.png"],
+    ))));
     model.operation.tick(FINISH_LINGER_MS);
 
-    model.reduce(ShellMessage::Admin(AdminMessage::FilePluginFinished { method: "source.clearCache".into(), result: Ok(serde_json::Value::Null) }));
-    assert_eq!(StatusLine::project(&model), StatusLine::Busy, "状态区写「正在同步仓库状态」");
+    model.reduce(ShellMessage::Admin(AdminMessage::FilePluginFinished {
+        method: "source.clearCache".into(),
+        result: Ok(serde_json::Value::Null),
+    }));
+    assert_eq!(
+        StatusLine::project(&model),
+        StatusLine::Busy,
+        "状态区写「正在同步仓库状态」"
+    );
     let row = model.operation.shown().cloned().expect("加载资源库");
-    assert_eq!((row.label.as_str(), row.detail.as_str(), row.indeterminate), ("加载资源库", "读取已注册资源库", true));
+    assert_eq!(
+        (row.label.as_str(), row.detail.as_str(), row.indeterminate),
+        ("加载资源库", "读取已注册资源库", true)
+    );
     let generation = model.workspace.list_generation;
-    assert!(model.workspace.take_effects().contains(&WorkspaceEffect::RefreshRepositories { generation }));
+    assert!(
+        model
+            .workspace
+            .take_effects()
+            .contains(&WorkspaceEffect::RefreshRepositories { generation })
+    );
 
-    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(ALPHA, "ready"), summary(BETA, "ready")]) });
-    assert_eq!(operation_row(&model), Some(("加载资源库".into(), "加载资源库摘要".into(), 38.0)));
-    assert_eq!(model.workspace.startup.status, StartupStatus::Ready, "同一个仓库不回启动页");
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(vec![summary(ALPHA, "ready"), summary(BETA, "ready")]),
+    });
+    assert_eq!(
+        operation_row(&model),
+        Some(("加载资源库".into(), "加载资源库摘要".into(), 38.0))
+    );
+    assert_eq!(
+        model.workspace.startup.status,
+        StartupStatus::Ready,
+        "同一个仓库不回启动页"
+    );
     assert_eq!(body_mode(&model), BodyMode::Workbench);
     let generation = model.workspace.list_generation;
     assert!(sync_requested(&mut model, ALPHA), "先同步资源库");
     assert_eq!(StatusLine::project(&model), StatusLine::Busy);
 
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) });
-    assert!(model.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::LoadSnapshot { repo_id, .. } if repo_id == ALPHA)));
-    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(ALPHA)) });
-    let browse = model.files.take_effects().into_iter().find_map(|effect| match effect {
-        super::FilesEffect::Browse { repo_id, path, .. } => Some((repo_id, path)),
-        _ => None,
+    model.reduce(ShellMessage::RepositorySynced {
+        generation,
+        result: Ok(crate::shell::SyncCounts::default()),
     });
-    assert_eq!(browse, Some((ALPHA.into(), "pics".into())), "重读刷新开始时所在的目录");
-    assert!(model.sidebar.take_effects().iter().any(|effect| matches!(effect, SidebarEffect::LoadTree { repo_id } if repo_id == ALPHA)), "侧栏在后台重读");
-    assert_eq!(operation_row(&model), Some(("读取目录".into(), "正在读取 pics".into(), 14.0)));
-    assert_eq!(StatusLine::project(&model), StatusLine::Busy, "读目录时还在同步仓库状态");
+    assert!(model.workspace.take_effects().iter().any(
+        |effect| matches!(effect, WorkspaceEffect::LoadSnapshot { repo_id, .. } if repo_id == ALPHA)
+    ));
+    model.reduce(ShellMessage::RepositorySnapshotLoaded {
+        generation,
+        result: Ok(snapshot(ALPHA)),
+    });
+    let browse = model
+        .files
+        .take_effects()
+        .into_iter()
+        .find_map(|effect| match effect {
+            super::FilesEffect::Browse { repo_id, path, .. } => Some((repo_id, path)),
+            _ => None,
+        });
+    assert_eq!(
+        browse,
+        Some((ALPHA.into(), "pics".into())),
+        "重读刷新开始时所在的目录"
+    );
+    assert!(
+        model.sidebar.take_effects().iter().any(
+            |effect| matches!(effect, SidebarEffect::LoadTree { repo_id } if repo_id == ALPHA)
+        ),
+        "侧栏在后台重读"
+    );
+    assert_eq!(
+        operation_row(&model),
+        Some(("读取目录".into(), "正在读取 pics".into(), 14.0))
+    );
+    assert_eq!(
+        StatusLine::project(&model),
+        StatusLine::Busy,
+        "读目录时还在同步仓库状态"
+    );
 
-    model.reduce(ShellMessage::FileBrowserLoaded(Ok(directory(ALPHA, "pics", &["pics/a.png", "pics/b.png"]))));
-    assert_eq!(StatusLine::project(&model), StatusLine::Hidden, "整轮结束放下忙碌");
+    model.reduce(ShellMessage::FileBrowserLoaded(Ok(directory(
+        ALPHA,
+        "pics",
+        &["pics/a.png", "pics/b.png"],
+    ))));
+    assert_eq!(
+        StatusLine::project(&model),
+        StatusLine::Hidden,
+        "整轮结束放下忙碌"
+    );
     assert!(model.workspace.refresh.is_none());
     assert_eq!(model.files.rows.len(), 2);
-    assert_eq!(operation_row(&model), Some(("读取目录".into(), "整理目录条目".into(), 100.0)));
+    assert_eq!(
+        operation_row(&model),
+        Some(("读取目录".into(), "整理目录条目".into(), 100.0))
+    );
 }
 
 /// 重读当前目录失败时照 Vue 退回根目录再读一次，读完收尾。
@@ -320,23 +569,47 @@ fn refreshing_the_same_repository_syncs_then_rereads_the_current_directory() {
 fn a_failed_reread_falls_back_to_the_root_directory() {
     let mut model = ready_on_alpha();
     model.reduce(ShellMessage::Files(FilesMessage::OpenPath("pics".into())));
-    model.reduce(ShellMessage::FileBrowserLoaded(Ok(directory(ALPHA, "pics", &["pics/a.png"]))));
+    model.reduce(ShellMessage::FileBrowserLoaded(Ok(directory(
+        ALPHA,
+        "pics",
+        &["pics/a.png"],
+    ))));
     model.files.take_effects();
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::SelectRepositoryFromSwitcher(ALPHA.into())));
-    assert_eq!(model.workspace.startup.status, StartupStatus::Ready, "切换列表选当前仓库：原地同步");
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::SelectRepositoryFromSwitcher(ALPHA.into()),
+    ));
+    assert_eq!(
+        model.workspace.startup.status,
+        StartupStatus::Ready,
+        "切换列表选当前仓库：原地同步"
+    );
     let generation = model.workspace.list_generation;
     assert!(sync_requested(&mut model, ALPHA));
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) });
-    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(ALPHA)) });
+    model.reduce(ShellMessage::RepositorySynced {
+        generation,
+        result: Ok(crate::shell::SyncCounts::default()),
+    });
+    model.reduce(ShellMessage::RepositorySnapshotLoaded {
+        generation,
+        result: Ok(snapshot(ALPHA)),
+    });
     model.files.take_effects();
     model.reduce(ShellMessage::FileBrowserLoaded(Err("目录已删除".into())));
-    let browse = model.files.take_effects().into_iter().find_map(|effect| match effect {
-        super::FilesEffect::Browse { path, .. } => Some(path),
-        _ => None,
-    });
+    let browse = model
+        .files
+        .take_effects()
+        .into_iter()
+        .find_map(|effect| match effect {
+            super::FilesEffect::Browse { path, .. } => Some(path),
+            _ => None,
+        });
     assert_eq!(browse.as_deref(), Some(""), "退回根目录");
     assert_eq!(StatusLine::project(&model), StatusLine::Busy);
-    model.reduce(ShellMessage::FileBrowserLoaded(Ok(directory(ALPHA, "", &["cover.png"]))));
+    model.reduce(ShellMessage::FileBrowserLoaded(Ok(directory(
+        ALPHA,
+        "",
+        &["cover.png"],
+    ))));
     assert!(model.workspace.refresh.is_none());
     assert_eq!(model.files.current_path, "");
     assert!(model.files.error.is_empty());
@@ -347,28 +620,53 @@ fn a_failed_reread_falls_back_to_the_root_directory() {
 #[test]
 fn a_failed_refresh_sync_lands_in_the_status_area() {
     let mut model = ready_on_alpha();
-    model.reduce(ShellMessage::Admin(AdminMessage::FilePluginFinished { method: "source.clearCache".into(), result: Ok(serde_json::Value::Null) }));
+    model.reduce(ShellMessage::Admin(AdminMessage::FilePluginFinished {
+        method: "source.clearCache".into(),
+        result: Ok(serde_json::Value::Null),
+    }));
     let generation = model.workspace.list_generation;
-    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(ALPHA, "ready")]) });
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(vec![summary(ALPHA, "ready")]),
+    });
     let generation = model.workspace.list_generation;
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Err("拒绝访问。".into()) });
-    assert_eq!(StatusLine::project(&model), StatusLine::Failure("同步资源库失败：拒绝访问。".into()));
+    model.reduce(ShellMessage::RepositorySynced {
+        generation,
+        result: Err("拒绝访问。".into()),
+    });
+    assert_eq!(
+        StatusLine::project(&model),
+        StatusLine::Failure("同步资源库失败：拒绝访问。".into())
+    );
     assert!(!super::status::busy(&model));
     assert_eq!(operation_row(&model).map(|row| row.2), Some(100.0));
-    assert_eq!(model.workspace.main_region(), MainRegion::HasRepository, "失败不离开文件页");
+    assert_eq!(
+        model.workspace.main_region(),
+        MainRegion::HasRepository,
+        "失败不离开文件页"
+    );
 }
 
 /// 刷新以后当前仓库已经不在列表里：照 Vue 选第一项，是一次换仓库。
 #[test]
 fn a_refresh_without_the_current_repository_switches_to_the_first() {
     let mut model = ready_on_alpha();
-    model.reduce(ShellMessage::Admin(AdminMessage::FilePluginFinished { method: "source.clearCache".into(), result: Ok(serde_json::Value::Null) }));
+    model.reduce(ShellMessage::Admin(AdminMessage::FilePluginFinished {
+        method: "source.clearCache".into(),
+        result: Ok(serde_json::Value::Null),
+    }));
     let generation = model.workspace.list_generation;
-    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(BETA, "ready")]) });
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(vec![summary(BETA, "ready")]),
+    });
     assert_eq!(model.workspace.active_repo_id.as_deref(), Some(BETA));
     assert_eq!(model.workspace.startup.mode, StartupMode::Switch);
     assert_eq!(RouteKey::of(&model), RouteKey::Startup);
-    assert!(model.workspace.refresh.is_none() && !model.workspace.list_loading, "换仓库接手以后不再是刷新");
+    assert!(
+        model.workspace.refresh.is_none() && !model.workspace.list_loading,
+        "换仓库接手以后不再是刷新"
+    );
     assert!(sync_requested(&mut model, BETA));
 }
 
@@ -378,23 +676,272 @@ fn a_refresh_without_the_current_repository_switches_to_the_first() {
 fn relocating_a_missing_repository_resyncs_it_in_place() {
     let mut model = ShellViewModel::default();
     let generation = model.workspace.prepare_initial_list();
-    model.reduce(ShellMessage::WorkspaceListLoaded { generation, result: Ok(vec![summary(ALPHA, "missing")]) });
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(vec![summary(ALPHA, "missing")]),
+    });
     answer_settings(&mut model);
     assert_eq!(model.workspace.main_region(), MainRegion::MissingRepository);
     model.reduce(ShellMessage::MissingPathChanged("D:/找回的素材".into()));
     model.reduce(ShellMessage::MissingSubmitPath);
-    assert_eq!(operation_row(&model), Some(("重定向资源库".into(), "校验资源库位置".into(), 12.0)));
+    assert_eq!(
+        operation_row(&model),
+        Some(("重定向资源库".into(), "校验资源库位置".into(), 12.0))
+    );
     assert!(model.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::RelocateRepository { path, .. } if path == "D:/找回的素材")));
 
-    model.reduce(ShellMessage::MissingRelocateFinished(Ok(summary(ALPHA, "ready"))));
-    assert_eq!(operation_row(&model), Some(("重定向资源库".into(), "更新资源库状态".into(), 64.0)));
-    assert_eq!(model.workspace.main_region(), MainRegion::HasRepository, "缺失页换成文件页");
+    model.reduce(ShellMessage::MissingRelocateFinished(Ok(summary(
+        ALPHA, "ready",
+    ))));
+    assert_eq!(
+        operation_row(&model),
+        Some(("重定向资源库".into(), "更新资源库状态".into(), 64.0))
+    );
+    assert_eq!(
+        model.workspace.main_region(),
+        MainRegion::HasRepository,
+        "缺失页换成文件页"
+    );
     let generation = model.workspace.list_generation;
     assert!(sync_requested(&mut model, ALPHA));
-    model.reduce(ShellMessage::RepositorySynced { generation, result: Ok(crate::shell::SyncCounts::default()) });
-    model.reduce(ShellMessage::RepositorySnapshotLoaded { generation, result: Ok(snapshot(ALPHA)) });
-    assert!(model.sidebar.take_effects().iter().any(|effect| matches!(effect, SidebarEffect::LoadTree { repo_id } if repo_id == ALPHA)), "侧栏重新绑定");
-    model.reduce(ShellMessage::FileBrowserLoaded(Ok(directory(ALPHA, "", &["cover.png"]))));
+    model.reduce(ShellMessage::RepositorySynced {
+        generation,
+        result: Ok(crate::shell::SyncCounts::default()),
+    });
+    model.reduce(ShellMessage::RepositorySnapshotLoaded {
+        generation,
+        result: Ok(snapshot(ALPHA)),
+    });
+    assert!(
+        model.sidebar.take_effects().iter().any(
+            |effect| matches!(effect, SidebarEffect::LoadTree { repo_id } if repo_id == ALPHA)
+        ),
+        "侧栏重新绑定"
+    );
+    model.reduce(ShellMessage::FileBrowserLoaded(Ok(directory(
+        ALPHA,
+        "",
+        &["cover.png"],
+    ))));
     assert!(model.workspace.refresh.is_none());
     assert_eq!(model.files.rows.len(), 1);
+}
+
+/// 同一个仓库刷新读完摘要（Vue `selectRepository` 原地分支）：当前素材还在就重读它，详情卡叠层先清掉，
+/// 选中路径和预览页不动。编辑器没有未保存改动时换成服务器上的注释；改过的草稿留着。当前素材不在摘要里时
+/// 改记第一个，但不把编辑器换到那一条。重读失败只记日志，不把整页改成错误。
+#[test]
+fn refreshing_the_same_repository_reloads_the_open_asset_detail() {
+    let path = "pics/a.png";
+
+    let mut model = ready_on_alpha();
+    seed_open_file(&mut model, path, "旧注释");
+    assert_eq!(overlay_comment(&model, "asset").as_deref(), Some("旧注释"));
+    refresh_until_snapshot(&mut model, snapshot_with(vec![asset_of("asset", path, 2)]));
+    assert!(
+        model.files.detail_metadata(Some("asset")).is_none(),
+        "摘要一到就清掉详情卡叠层"
+    );
+    let effects = model.inspect.take_effects();
+    assert!(
+        effects.iter().any(|effect| matches!(effect, InspectEffect::ReloadAsset { repo_id, asset_id } if repo_id == ALPHA && asset_id == "asset")),
+        "重读的是还在摘要里的当前素材：{effects:?}"
+    );
+    assert!(
+        !effects
+            .iter()
+            .any(|effect| matches!(effect, InspectEffect::LoadAsset { .. })),
+        "不走单击那条读取"
+    );
+    assert_eq!(model.files.primary.as_deref(), Some(path));
+    assert_eq!(model.page, ShellPage::FileList);
+    assert_eq!(model.inspect.open_path(), Some(path));
+    model.reduce(ShellMessage::RefreshAssetLoaded(Ok(detail_with_comment(
+        path,
+        "asset",
+        "新注释",
+        4,
+    ))));
+    assert_eq!(
+        overlay_comment(&model, "asset").as_deref(),
+        Some("新注释"),
+        "详情卡换成服务器上的注释"
+    );
+    assert_eq!(
+        model.inspect.draft_comment(),
+        "新注释",
+        "没有未保存改动时编辑器跟着换"
+    );
+    assert_eq!(model.files.primary.as_deref(), Some(path));
+    assert_eq!(model.page, ShellPage::FileList);
+    assert_eq!(model.inspect.open_path(), Some(path));
+
+    let mut dirty = ready_on_alpha();
+    seed_open_file(&mut dirty, path, "旧注释");
+    dirty.reduce(ShellMessage::Inspect(InspectMessage::SetComment(
+        "手打的".into(),
+    )));
+    refresh_until_snapshot(&mut dirty, snapshot_with(vec![asset_of("asset", path, 2)]));
+    dirty.inspect.take_effects();
+    dirty.reduce(ShellMessage::RefreshAssetLoaded(Ok(detail_with_comment(
+        path,
+        "asset",
+        "新注释",
+        4,
+    ))));
+    assert_eq!(dirty.inspect.draft_comment(), "手打的", "未保存的编辑留着");
+    assert_eq!(
+        overlay_comment(&dirty, "asset").as_deref(),
+        Some("新注释"),
+        "详情卡叠层仍换成服务器的"
+    );
+    assert_eq!(dirty.files.primary.as_deref(), Some(path));
+    assert_eq!(dirty.page, ShellPage::FileList);
+
+    let mut gone = ready_on_alpha();
+    seed_open_file(&mut gone, path, "旧注释");
+    refresh_until_snapshot(
+        &mut gone,
+        snapshot_with(vec![asset_of("other", "pics/b.png", 1)]),
+    );
+    let effects = gone.inspect.take_effects();
+    assert!(
+        effects.iter().any(|effect| matches!(effect, InspectEffect::ReloadAsset { asset_id, .. } if asset_id == "other")),
+        "当前素材不在了，改记摘要里的第一个：{effects:?}"
+    );
+    assert!(
+        gone.files.detail_metadata(Some("asset")).is_none(),
+        "选中文件的旧叠层清掉"
+    );
+    gone.reduce(ShellMessage::RefreshAssetLoaded(Ok(detail_with_comment(
+        "pics/b.png",
+        "other",
+        "别人的",
+        1,
+    ))));
+    assert!(
+        gone.files.detail_metadata(Some("asset")).is_none(),
+        "对不上的素材不叠到选中的文件上"
+    );
+    assert_eq!(overlay_comment(&gone, "other").as_deref(), Some("别人的"));
+    assert_eq!(
+        gone.inspect.draft_comment(),
+        "旧注释",
+        "编辑器还停在选中的这一条"
+    );
+    assert_eq!(gone.files.primary.as_deref(), Some(path));
+    assert_eq!(gone.page, ShellPage::FileList);
+    assert_eq!(gone.inspect.open_path(), Some(path));
+
+    let mut failed = ready_on_alpha();
+    seed_open_file(&mut failed, path, "旧注释");
+    refresh_until_snapshot(&mut failed, snapshot_with(vec![asset_of("asset", path, 2)]));
+    failed.inspect.take_effects();
+    failed.reduce(ShellMessage::RefreshAssetLoaded(Err("素材不存在".into())));
+    assert_eq!(failed.page, ShellPage::FileList, "失败不把整页改成错误");
+    assert!(failed.files.detail_metadata(Some("asset")).is_none());
+    assert_eq!(failed.files.primary.as_deref(), Some(path));
+    assert_eq!(failed.inspect.open_path(), Some(path));
+}
+
+/// 把文件放进当前目录并记下已经读回的素材详情。
+fn seed_open_file(model: &mut ShellViewModel, path: &str, comment: &str) {
+    let mut browser = browser(ALPHA);
+    browser.current_path = "pics".into();
+    browser.total_entries = 1;
+    browser.loaded_count = 1;
+    browser.entries = vec![file_with_comment(path, "asset", "列表注释")];
+    model.reduce(ShellMessage::FileBrowserLoaded(Ok(browser)));
+    model.files.primary = Some(path.into());
+    model.files.selected = vec![path.into()];
+    let detail = detail_with_comment(path, "asset", comment, 2);
+    model.inspect.note_selected_detail(&detail, false);
+    model.files.note_detail_metadata(&detail);
+    model.inspect.take_effects();
+}
+
+/// 从来源动作完成走到摘要回来。摘要用调用方给的那一份。
+fn refresh_until_snapshot(model: &mut ShellViewModel, snap: RepositorySnapshot) {
+    model.reduce(ShellMessage::Admin(AdminMessage::FilePluginFinished {
+        method: "source.clearCache".into(),
+        result: Ok(serde_json::Value::Null),
+    }));
+    let generation = model.workspace.list_generation;
+    model.reduce(ShellMessage::WorkspaceListLoaded {
+        generation,
+        result: Ok(vec![summary(ALPHA, "ready"), summary(BETA, "ready")]),
+    });
+    let generation = model.workspace.list_generation;
+    assert!(sync_requested(model, ALPHA), "刷新要先同步");
+    model.reduce(ShellMessage::RepositorySynced {
+        generation,
+        result: Ok(crate::shell::SyncCounts::default()),
+    });
+    model.reduce(ShellMessage::RepositorySnapshotLoaded {
+        generation,
+        result: Ok(snap),
+    });
+}
+
+fn snapshot_with(assets: Vec<AssetSummary>) -> RepositorySnapshot {
+    let mut snap = snapshot(ALPHA);
+    snap.assets = assets;
+    snap
+}
+
+fn asset_of(asset_id: &str, path: &str, version: i64) -> AssetSummary {
+    AssetSummary {
+        asset_id: asset_id.into(),
+        repo_id: ALPHA.into(),
+        path: path.into(),
+        filename: "a.png".into(),
+        extension: "png".into(),
+        size_bytes: 4,
+        size_label: "4 B".into(),
+        status: "ready".into(),
+        modified_at: String::new(),
+        last_accessed_at: None,
+        version,
+        tags: Vec::new(),
+        thumbnail_path: None,
+        hardlink_group_id: None,
+        hardlink_state: None,
+        is_virtual: false,
+        provider_id: None,
+        provider_item_id: None,
+        source_payload: None,
+        local_absolute_path: None,
+    }
+}
+
+fn file_with_comment(path: &str, asset_id: &str, comment: &str) -> FileBrowserEntry {
+    let mut entry = directory(ALPHA, "pics", &[path])
+        .entries
+        .pop()
+        .expect("一条");
+    entry.asset_id = Some(asset_id.into());
+    entry.metadata = BTreeMap::from([("comment".into(), json!(comment))]);
+    entry
+}
+
+fn detail_with_comment(path: &str, asset_id: &str, comment: &str, version: i64) -> AssetDetail {
+    AssetDetail {
+        summary: asset_of(asset_id, path, version),
+        metadata: vec![MetadataEntry {
+            key: "comment".into(),
+            value_type: "string".into(),
+            value: json!(comment),
+            version: 1,
+            updated_at: String::new(),
+        }],
+        revisions: Vec::new(),
+    }
+}
+
+fn overlay_comment(model: &ShellViewModel, asset_id: &str) -> Option<String> {
+    model
+        .files
+        .detail_metadata(Some(asset_id))
+        .and_then(|map| map.get("comment"))
+        .and_then(|value| value.as_str().map(str::to_string))
 }

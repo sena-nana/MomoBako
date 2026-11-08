@@ -5,9 +5,13 @@
 
 use nana_ui::runtime::StableNodeId;
 
-use crate::backend::services::repository::{FileBrowserEntry, FileBrowserSnapshot, FileTreeNode, RepositoryStructureCacheState};
+use crate::backend::services::repository::{
+    FileBrowserEntry, FileBrowserSnapshot, FileTreeNode, RepositoryStructureCacheState,
+};
 use crate::shell::files::{FileDialog, FilesMessage};
-use crate::shell::sidebar::{PopoverMode, SidebarSmartFolder, SidebarTree, SmartFolderChange, SmartFolderOutcome};
+use crate::shell::sidebar::{
+    PopoverMode, SidebarSmartFolder, SidebarTree, SmartFolderChange, SmartFolderOutcome,
+};
 use crate::shell::sidebar_view::folder_row_key;
 use crate::shell::view_harness::ShellHarness;
 use crate::shell::{AdminMessage, ShellMessage, ShellViewModel, SidebarMessage};
@@ -58,16 +62,23 @@ fn in_dialog(harness: &ShellHarness, label: &str) -> StableNodeId {
     harness
         .nodes()
         .into_iter()
-        .find(|node| node.label.as_deref() == Some(label) && world.is_descendant_or_self(node.id, surface))
+        .find(|node| {
+            node.label.as_deref() == Some(label) && world.is_descendant_or_self(node.id, surface)
+        })
         .unwrap_or_else(|| panic!("对话框里没有 {label}"))
         .id
 }
 
 /// 焦点在文件条目卡片上。
 fn on_card(harness: &ShellHarness) -> bool {
-    harness.focused().and_then(|id| harness.document().context().assembly_path(id)).is_some_and(|path| {
-        path.rsplit('/').next().is_some_and(|key| key.starts_with("file-row-"))
-    })
+    harness
+        .focused()
+        .and_then(|id| harness.document().context().assembly_path(id))
+        .is_some_and(|path| {
+            path.rsplit('/')
+                .next()
+                .is_some_and(|key| key.starts_with("file-row-"))
+        })
 }
 
 /// 菜单里的项打开对话框：键盘和指针打开的右键菜单都一样，对话框关掉以后焦点回到这个文件条目。
@@ -80,7 +91,11 @@ fn a_dialog_from_the_entry_menu_returns_focus_to_the_entry() {
     harness.press_key("Enter");
     assert_eq!(harness.model.files.dialog, FileDialog::Copy);
     harness.finish_motion();
-    assert_eq!(harness.focused_label().as_deref(), Some("复制到文件夹"), "焦点进了对话框");
+    assert_eq!(
+        harness.focused_label().as_deref(),
+        Some("复制到文件夹"),
+        "焦点进了对话框"
+    );
     escape(&mut harness);
     assert_eq!(harness.model.files.dialog, FileDialog::Closed);
     assert_eq!(harness.focused(), Some(card), "键盘：关掉以后回到文件条目");
@@ -95,7 +110,11 @@ fn a_dialog_from_the_entry_menu_returns_focus_to_the_entry() {
     harness.click_label("取消");
     harness.finish_motion();
     assert_eq!(harness.model.files.dialog, FileDialog::Closed);
-    assert_eq!(harness.focused(), Some(card), "指针：关掉以后回到右键的那个文件条目");
+    assert_eq!(
+        harness.focused(),
+        Some(card),
+        "指针：关掉以后回到右键的那个文件条目"
+    );
 }
 
 /// 右键菜单换到另一个条目上重新打开（焦点从菜单回到页面、在另一张卡片上按菜单键）：关掉以后回到
@@ -106,8 +125,19 @@ fn a_reopened_entry_menu_returns_focus_to_its_own_entry() {
     press_on(&mut harness, "cover.png", "ContextMenu");
     let pdf = harness.node("page.pdf");
     press_on(&mut harness, "page.pdf", "ContextMenu");
-    assert!(harness.model.files.entry_menu.as_ref().is_some_and(|menu| menu.path == "notes/page.pdf"));
-    assert_eq!(harness.focused_label().as_deref(), Some("预览"), "焦点进了新的菜单");
+    assert!(
+        harness
+            .model
+            .files
+            .entry_menu
+            .as_ref()
+            .is_some_and(|menu| menu.path == "notes/page.pdf")
+    );
+    assert_eq!(
+        harness.focused_label().as_deref(),
+        Some("预览"),
+        "焦点进了新的菜单"
+    );
     escape(&mut harness);
     assert!(harness.model.files.entry_menu.is_none());
     assert_eq!(harness.focused(), Some(pdf));
@@ -123,7 +153,11 @@ fn an_import_dialog_returns_focus_to_the_import_button() {
     harness.finish_motion();
     assert_eq!(harness.model.files.dialog, FileDialog::Import);
     escape(&mut harness);
-    assert_eq!(harness.focused(), Some(import), "指针：关掉以后回到「导入」");
+    assert_eq!(
+        harness.focused(),
+        Some(import),
+        "指针：关掉以后回到「导入」"
+    );
 
     press_on(&mut harness, "导入", "ArrowDown");
     assert_eq!(harness.focused_label().as_deref(), Some("从文件夹导入"));
@@ -131,7 +165,11 @@ fn an_import_dialog_returns_focus_to_the_import_button() {
     harness.finish_motion();
     assert_eq!(harness.model.files.dialog, FileDialog::Import);
     escape(&mut harness);
-    assert_eq!(harness.focused(), Some(import), "键盘：关掉以后回到「导入」");
+    assert_eq!(
+        harness.focused(),
+        Some(import),
+        "键盘：关掉以后回到「导入」"
+    );
 }
 
 /// 插件列表里多一个既不选目录、也不登录的来源：添加菜单里选它进后端表单。
@@ -163,13 +201,25 @@ fn the_backend_form_takes_focus_and_gives_it_back_to_the_repository_header() {
     harness.press_key("Enter");
     assert_eq!(harness.model.sidebar.popover, PopoverMode::AddMenu);
     harness.press_key("ArrowUp");
-    assert_eq!(harness.focused_label().as_deref(), Some(FORM_BACKEND), "越过首项到末项");
+    assert_eq!(
+        harness.focused_label().as_deref(),
+        Some(FORM_BACKEND),
+        "越过首项到末项"
+    );
     harness.press_key("Enter");
     assert_eq!(harness.model.sidebar.popover, PopoverMode::BackendForm);
-    assert_eq!(harness.focused(), Some(harness.input("资源库名称")), "换到表单，焦点落在第一个输入框");
+    assert_eq!(
+        harness.focused(),
+        Some(harness.input("资源库名称")),
+        "换到表单，焦点落在第一个输入框"
+    );
     escape(&mut harness);
     assert_eq!(harness.model.sidebar.popover, PopoverMode::Closed);
-    assert_eq!(harness.focused(), Some(header), "键盘：表单关掉以后回到仓库头");
+    assert_eq!(
+        harness.focused(),
+        Some(header),
+        "键盘：表单关掉以后回到仓库头"
+    );
 
     let mut harness = ShellHarness::mount(with_form_backend());
     let header = harness.node(HEADER);
@@ -191,7 +241,10 @@ fn the_repository_delete_dialog_returns_focus_to_the_repository_header() {
     harness.click_label(HEADER);
     harness.click_label("删除当前资源库");
     harness.finish_motion();
-    assert!(!harness.model.workspace.dialogs.is_empty(), "删除资源库的对话框打开");
+    assert!(
+        !harness.model.workspace.dialogs.is_empty(),
+        "删除资源库的对话框打开"
+    );
     escape(&mut harness);
     assert!(harness.model.workspace.dialogs.is_empty());
     assert_eq!(harness.focused(), Some(header));
@@ -226,22 +279,44 @@ fn a_deleted_folder_hands_focus_to_its_tree() {
     assert_eq!(harness.focused_label().as_deref(), Some("删除"));
     harness.press_key("Enter");
     harness.finish_motion();
-    assert!(harness.model.sidebar.folder_delete_open(), "处理文件夹的对话框打开");
+    assert!(
+        harness.model.sidebar.folder_delete_open(),
+        "处理文件夹的对话框打开"
+    );
     harness.click_label("移入回收站");
     assert!(harness.model.files.mutating, "交给文件服务删除");
-    harness.apply(ShellMessage::Files(FilesMessage::MutationSnapshot { result: Ok(root_snapshot()), created_name: None }));
+    harness.apply(ShellMessage::Files(FilesMessage::MutationSnapshot {
+        result: Ok(root_snapshot()),
+        created_name: None,
+    }));
     harness.finish_motion();
-    assert!(!harness.model.sidebar.folder_delete_open(), "删完关掉对话框");
-    assert_eq!(harness.focused(), Some(covers), "目录树还没重读，焦点先回到这一行");
+    assert!(
+        !harness.model.sidebar.folder_delete_open(),
+        "删完关掉对话框"
+    );
+    assert_eq!(
+        harness.focused(),
+        Some(covers),
+        "目录树还没重读，焦点先回到这一行"
+    );
 
-    let assets = FileTreeNode { path: "assets".into(), label: "assets".into(), file_count: 0, children: Vec::new() };
+    let assets = FileTreeNode {
+        path: "assets".into(),
+        label: "assets".into(),
+        file_count: 0,
+        children: Vec::new(),
+    };
     harness.apply(ShellMessage::Sidebar(SidebarMessage::SidebarTreeLoaded {
         repo_id: REPO.into(),
         result: Ok(SidebarTree::from_nodes(&[assets])),
     }));
     harness.frame();
     assert!(harness.keyed(&covers_key).is_none(), "covers 已经不在树里");
-    assert_eq!(harness.focused(), harness.keyed(&folder_row_key("assets")), "焦点落在同一棵树里还在的文件夹行上");
+    assert_eq!(
+        harness.focused(),
+        harness.keyed(&folder_row_key("assets")),
+        "焦点落在同一棵树里还在的文件夹行上"
+    );
 }
 
 /// 文件条目的重命名：保存以后这张卡片换成新名字的一张，焦点落在文件列表里的条目上。
@@ -253,18 +328,31 @@ fn a_renamed_entry_hands_focus_to_the_file_list() {
     harness.press_key("Enter");
     harness.finish_motion();
     assert_eq!(harness.model.files.dialog, FileDialog::Rename);
-    harness.apply(ShellMessage::Files(FilesMessage::DraftChanged("poster.png".into())));
+    harness.apply(ShellMessage::Files(FilesMessage::DraftChanged(
+        "poster.png".into(),
+    )));
     harness.click_label("保存");
     assert!(harness.model.files.mutating, "交给文件服务改名");
     let mut renamed = root_snapshot();
-    renamed.entries = vec![entry("assets", "directory"), entry("poster.png", "file"), entry("notes/page.pdf", "file")];
+    renamed.entries = vec![
+        entry("assets", "directory"),
+        entry("poster.png", "file"),
+        entry("notes/page.pdf", "file"),
+    ];
     renamed.total_entries = renamed.entries.len();
     renamed.loaded_count = renamed.entries.len();
-    harness.apply(ShellMessage::Files(FilesMessage::MutationSnapshot { result: Ok(renamed), created_name: None }));
+    harness.apply(ShellMessage::Files(FilesMessage::MutationSnapshot {
+        result: Ok(renamed),
+        created_name: None,
+    }));
     harness.finish_motion();
     assert_eq!(harness.model.files.dialog, FileDialog::Closed);
     assert!(harness.find("cover.png").is_none(), "原来那张卡片已经没了");
-    assert!(on_card(&harness), "焦点落在文件条目上，实际是 {:?}", harness.focused_label());
+    assert!(
+        on_card(&harness),
+        "焦点落在文件条目上，实际是 {:?}",
+        harness.focused_label()
+    );
 }
 
 /// 根目录里的一条。
@@ -273,7 +361,12 @@ fn entry(path: &str, kind: &str) -> FileBrowserEntry {
     let file = kind == "file";
     FileBrowserEntry {
         path: path.into(),
-        extension: file.then(|| name.rsplit_once('.').map(|(_, extension)| extension.to_string())).flatten(),
+        extension: file
+            .then(|| {
+                name.rsplit_once('.')
+                    .map(|(_, extension)| extension.to_string())
+            })
+            .flatten(),
         name,
         kind: kind.into(),
         size_bytes: None,
@@ -321,7 +414,13 @@ fn root_snapshot() -> FileBrowserSnapshot {
 fn smart(names: &[&str]) -> Vec<SidebarSmartFolder> {
     names
         .iter()
-        .map(|name| SidebarSmartFolder { id: name.to_string(), parent_id: None, name: name.to_string(), filter: Default::default(), children: Vec::new() })
+        .map(|name| SidebarSmartFolder {
+            id: name.to_string(),
+            parent_id: None,
+            name: name.to_string(),
+            filter: Default::default(),
+            children: Vec::new(),
+        })
         .collect()
 }
 
@@ -329,26 +428,50 @@ fn smart(names: &[&str]) -> Vec<SidebarSmartFolder> {
 #[test]
 fn a_deleted_smart_folder_hands_focus_to_its_tree() {
     let mut model = scene("live-files-plain");
-    model.reduce(ShellMessage::Sidebar(SidebarMessage::SidebarSmartFoldersLoaded { repo_id: REPO.into(), result: Ok(smart(&["高评分", "待整理"])) }));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::SidebarSmartFoldersLoaded {
+            repo_id: REPO.into(),
+            result: Ok(smart(&["高评分", "待整理"])),
+        },
+    ));
     let mut harness = ShellHarness::mount(model);
     press_on(&mut harness, "删除智能文件夹", "Enter");
     harness.finish_motion();
-    assert!(harness.model.sidebar.smart_delete_open(), "删除智能文件夹的确认打开");
+    assert!(
+        harness.model.sidebar.smart_delete_open(),
+        "删除智能文件夹的确认打开"
+    );
     let confirm = harness.keyed("smart-delete-confirm").expect("确认删除");
     harness.focus(confirm);
     harness.press_key("Enter");
-    let outcome = SmartFolderOutcome { folders: smart(&["待整理"]), change: SmartFolderChange::Deleted("高评分".into()) };
-    harness.apply(ShellMessage::Sidebar(SidebarMessage::SmartFolderSaved { repo_id: REPO.into(), result: Ok(outcome) }));
+    let outcome = SmartFolderOutcome {
+        folders: smart(&["待整理"]),
+        change: SmartFolderChange::Deleted("高评分".into()),
+    };
+    harness.apply(ShellMessage::Sidebar(SidebarMessage::SmartFolderSaved {
+        repo_id: REPO.into(),
+        result: Ok(outcome),
+    }));
     harness.finish_motion();
     assert!(!harness.model.sidebar.smart_delete_open(), "删完关掉确认");
-    assert_eq!(harness.focused(), harness.keyed(&format!("smart-row-{}", "待整理")), "焦点落在还在的智能文件夹上");
+    assert_eq!(
+        harness.focused(),
+        harness.keyed(&format!("smart-row-{}", "待整理")),
+        "焦点落在还在的智能文件夹上"
+    );
 }
 
 /// 删除插件：确认以后插件列表换新、这张卡片没了，焦点落在同一组里还在的插件上，不回到页首。
 #[test]
 fn a_deleted_plugin_hands_focus_to_its_group() {
     let mut model = scene("live-files-plain");
-    let template = model.admin.plugins.iter().find(|plugin| plugin.plugin_id == "momobako.local-filesystem").cloned().expect("内置插件");
+    let template = model
+        .admin
+        .plugins
+        .iter()
+        .find(|plugin| plugin.plugin_id == "momobako.local-filesystem")
+        .cloned()
+        .expect("内置插件");
     for id in ["user.one", "user.two"] {
         let mut plugin = template.clone();
         plugin.plugin_id = id.into();
@@ -356,7 +479,13 @@ fn a_deleted_plugin_hands_focus_to_its_group() {
         plugin.source = "user".into();
         model.admin.plugins.push(plugin);
     }
-    let remaining = model.admin.plugins.iter().filter(|plugin| plugin.plugin_id != "user.one").cloned().collect::<Vec<_>>();
+    let remaining = model
+        .admin
+        .plugins
+        .iter()
+        .filter(|plugin| plugin.plugin_id != "user.one")
+        .cloned()
+        .collect::<Vec<_>>();
     let mut harness = ShellHarness::mount(model);
     harness.apply(ShellMessage::OpenSettings);
     // 设置包已经读回来（插件列表就是上面这份）。
@@ -364,20 +493,36 @@ fn a_deleted_plugin_hands_focus_to_its_group() {
     harness.model.mark_surface_dirty();
     harness.sync();
     harness.flush();
-    let delete = harness.keyed("admin-plugin-delete-user.one").expect("user.one 的删除");
+    let delete = harness
+        .keyed("admin-plugin-delete-user.one")
+        .expect("user.one 的删除");
     harness.focus(delete);
     harness.press_key("Enter");
     harness.finish_motion();
-    assert_eq!(harness.model.admin.pending_delete.as_deref(), Some("user.one"));
+    assert_eq!(
+        harness.model.admin.pending_delete.as_deref(),
+        Some("user.one")
+    );
     let confirm = in_dialog(&harness, "删除");
     harness.focus(confirm);
     harness.press_key("Enter");
-    harness.apply(ShellMessage::Admin(AdminMessage::PluginsReplaced(Ok(remaining))));
+    harness.apply(ShellMessage::Admin(AdminMessage::PluginsReplaced(Ok(
+        remaining,
+    ))));
     harness.finish_motion();
     assert!(harness.model.admin.pending_delete.is_none(), "删完关掉确认");
-    assert!(harness.keyed("admin-plugin-card-user.one").is_none(), "卡片已经没了");
-    let path = harness.focused().and_then(|id| harness.document().context().assembly_path(id)).unwrap_or_default();
-    assert!(path.contains("admin-plugin-section-"), "焦点落在插件分组里，实际是 {path}");
+    assert!(
+        harness.keyed("admin-plugin-card-user.one").is_none(),
+        "卡片已经没了"
+    );
+    let path = harness
+        .focused()
+        .and_then(|id| harness.document().context().assembly_path(id))
+        .unwrap_or_default();
+    assert!(
+        path.contains("admin-plugin-section-"),
+        "焦点落在插件分组里，实际是 {path}"
+    );
 }
 
 /// 任务弹层：从「任务」打开，点弹层里的关闭以后回到「任务」。
@@ -397,8 +542,14 @@ fn the_task_popover_returns_focus_to_its_button() {
 fn sidebar_create_dialogs_return_focus_to_their_buttons() {
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
     for (button, open) in [
-        ("在当前目录新建文件夹", (|model: &ShellViewModel| model.sidebar.folder_dialog.open) as fn(&ShellViewModel) -> bool),
-        ("新建智能文件夹", |model| model.sidebar.smart_draft.open),
+        (
+            "在当前目录新建文件夹",
+            (|model: &ShellViewModel| model.sidebar.folder_dialog.open)
+                as fn(&ShellViewModel) -> bool,
+        ),
+        ("新建智能文件夹", |model| {
+            model.sidebar.smart_draft.open
+        }),
         ("新建播放集", |model| model.playlist_dialog_open),
     ] {
         let id = harness.node(button);
@@ -419,7 +570,11 @@ fn dialogs_without_an_opener_hand_focus_to_their_area() {
         harness.finish_motion();
         assert!(harness.focused().is_some(), "{name}：焦点进了对话框");
         escape(&mut harness);
-        assert!(on_card(&harness), "{name}：关掉以后焦点在文件条目上，实际是 {:?}", harness.focused_label());
+        assert!(
+            on_card(&harness),
+            "{name}：关掉以后焦点在文件条目上，实际是 {:?}",
+            harness.focused_label()
+        );
     }
 }
 
@@ -430,12 +585,21 @@ fn stacked_dialogs_still_hand_focus_back_in_order() {
     harness.model.settings.close_behavior = "confirm".into();
     press_on(&mut harness, "在当前目录新建文件夹", "Enter");
     harness.finish_motion();
-    harness.apply(ShellMessage::WindowAction(crate::shell::WindowAction::Close));
+    harness.apply(ShellMessage::WindowAction(
+        crate::shell::WindowAction::Close,
+    ));
     harness.finish_motion();
     assert!(harness.model.input.pending_close, "关闭确认压在上面");
     escape(&mut harness);
-    assert!(!harness.model.input.pending_close && harness.model.sidebar.folder_dialog.open, "新建文件夹回来");
+    assert!(
+        !harness.model.input.pending_close && harness.model.sidebar.folder_dialog.open,
+        "新建文件夹回来"
+    );
     escape(&mut harness);
     assert!(!harness.model.sidebar.folder_dialog.open);
-    assert_eq!(harness.focused(), Some(harness.node("在当前目录新建文件夹")), "回到打开新建文件夹的按钮");
+    assert_eq!(
+        harness.focused(),
+        Some(harness.node("在当前目录新建文件夹")),
+        "回到打开新建文件夹的按钮"
+    );
 }

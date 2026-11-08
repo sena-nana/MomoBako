@@ -42,7 +42,9 @@ pub(crate) fn call_local_filesystem(
             fs::create_dir_all(&repo_root).map_err(io_error)?;
             Ok(serde_json::json!({}))
         }
-        "filesystem.listFiles" => serde_json::to_value(collect_files(&repo_root)?).map_err(json_error),
+        "filesystem.listFiles" => {
+            serde_json::to_value(collect_files(&repo_root)?).map_err(json_error)
+        }
         "filesystem.listTree" => serde_json::to_value(build_tree(&repo_root)?).map_err(json_error),
         "filesystem.listDirectory" => {
             let path = payload_str(&payload, "directoryPath");
@@ -60,7 +62,8 @@ pub(crate) fn call_local_filesystem(
             }))
         }
         "filesystem.createDirectory" => {
-            let parent = resolve_repository_relative_path(&repo_root, payload_str(&payload, "parentPath"))?;
+            let parent =
+                resolve_repository_relative_path(&repo_root, payload_str(&payload, "parentPath"))?;
             let name = required_payload_str(&payload, "name")?;
             let target = parent.join(name);
             if target.exists() {
@@ -70,13 +73,18 @@ pub(crate) fn call_local_filesystem(
             Ok(serde_json::json!({}))
         }
         "filesystem.createFile" => {
-            let parent = resolve_repository_relative_path(&repo_root, payload_str(&payload, "parentPath"))?;
+            let parent =
+                resolve_repository_relative_path(&repo_root, payload_str(&payload, "parentPath"))?;
             let name = required_payload_str(&payload, "name")?;
             let target = parent.join(name);
             if target.exists() {
                 return Err(format!("entry already exists: {name}"));
             }
-            OpenOptions::new().create_new(true).write(true).open(target).map_err(io_error)?;
+            OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(target)
+                .map_err(io_error)?;
             Ok(serde_json::json!({}))
         }
         "filesystem.statEntry" => {
@@ -121,7 +129,11 @@ pub(crate) fn call_local_filesystem(
             if !target.exists() {
                 return Err(format!("entry not found: {path}"));
             }
-            if payload.get("recursive").and_then(serde_json::Value::as_bool).unwrap_or(false) {
+            if payload
+                .get("recursive")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+            {
                 fs::remove_dir_all(target).map_err(io_error)?;
             } else {
                 fs::remove_file(target).map_err(io_error)?;
@@ -133,7 +145,10 @@ pub(crate) fn call_local_filesystem(
 }
 
 fn payload_str<'a>(payload: &'a serde_json::Value, key: &str) -> &'a str {
-    payload.get(key).and_then(serde_json::Value::as_str).unwrap_or_default()
+    payload
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
 }
 
 fn required_payload_str<'a>(payload: &'a serde_json::Value, key: &str) -> Result<&'a str, String> {
@@ -159,7 +174,11 @@ fn collect_files(repo_root: &Path) -> Result<Vec<DiscoveredFile>, String> {
     Ok(files)
 }
 
-fn collect_files_recursive(root: &Path, current: &Path, files: &mut Vec<DiscoveredFile>) -> Result<(), String> {
+fn collect_files_recursive(
+    root: &Path,
+    current: &Path,
+    files: &mut Vec<DiscoveredFile>,
+) -> Result<(), String> {
     for entry in fs::read_dir(current).map_err(io_error)? {
         let entry = entry.map_err(io_error)?;
         let name = entry.file_name().to_string_lossy().to_string();
@@ -171,15 +190,28 @@ fn collect_files_recursive(root: &Path, current: &Path, files: &mut Vec<Discover
             collect_files_recursive(root, &path, files)?;
         } else if path.is_file() {
             let metadata = fs::metadata(&path).map_err(io_error)?;
-            let relative = path.strip_prefix(root).map_err(path_error)?.to_string_lossy().replace('\\', "/");
+            let relative = path
+                .strip_prefix(root)
+                .map_err(path_error)?
+                .to_string_lossy()
+                .replace('\\', "/");
             files.push(DiscoveredFile {
                 absolute_path: Some(path.clone()),
                 filename: name,
-                extension: path.extension().map(|value| value.to_string_lossy().to_string()).unwrap_or_default(),
+                extension: path
+                    .extension()
+                    .map(|value| value.to_string_lossy().to_string())
+                    .unwrap_or_default(),
                 relative_path: relative,
                 size_bytes: metadata.len() as i64,
                 created_at: None,
-                modified_at: metadata.modified().ok().map(system_time_to_rfc3339).transpose().map_err(time_error)?.unwrap_or_else(now_rfc3339),
+                modified_at: metadata
+                    .modified()
+                    .ok()
+                    .map(system_time_to_rfc3339)
+                    .transpose()
+                    .map_err(time_error)?
+                    .unwrap_or_else(now_rfc3339),
                 is_virtual: false,
                 provider_id: None,
                 provider_item_id: None,
@@ -215,13 +247,19 @@ fn build_tree_node(repo_root: &Path, relative: &str) -> Result<FileTreeNode, Str
         let entry = entry.map_err(io_error)?;
         let name = entry.file_name().to_string_lossy().to_string();
         if entry.path().is_dir() && !is_internal_repository_dir(&name) {
-            children.push(build_tree_node(repo_root, &join_relative_path(relative, &name))?);
+            children.push(build_tree_node(
+                repo_root,
+                &join_relative_path(relative, &name),
+            )?);
         }
     }
     children.sort_by(|left, right| left.label.to_lowercase().cmp(&right.label.to_lowercase()));
     Ok(FileTreeNode {
         path: relative.to_string(),
-        label: Path::new(relative).file_name().map(|value| value.to_string_lossy().to_string()).unwrap_or_else(|| relative.to_string()),
+        label: Path::new(relative)
+            .file_name()
+            .map(|value| value.to_string_lossy().to_string())
+            .unwrap_or_else(|| relative.to_string()),
         file_count: count_files(repo_root, relative)?,
         children,
     })
@@ -273,15 +311,37 @@ fn stat_entry(repo_root: &Path, relative: &str) -> Result<FileSystemEntry, Strin
 
 fn entry_to_file_system_entry(repo_root: &Path, path: &Path) -> Result<FileSystemEntry, String> {
     let metadata = fs::metadata(path).map_err(io_error)?;
-    let relative = path.strip_prefix(repo_root).map_err(path_error)?.to_string_lossy().replace('\\', "/");
-    let name = path.file_name().map(|value| value.to_string_lossy().to_string()).unwrap_or_else(|| relative.clone());
+    let relative = path
+        .strip_prefix(repo_root)
+        .map_err(path_error)?
+        .to_string_lossy()
+        .replace('\\', "/");
+    let name = path
+        .file_name()
+        .map(|value| value.to_string_lossy().to_string())
+        .unwrap_or_else(|| relative.clone());
     Ok(FileSystemEntry {
         path: relative,
         name,
-        kind: if metadata.is_dir() { FileSystemEntryKind::Directory } else { FileSystemEntryKind::File },
-        extension: metadata.is_file().then(|| path.extension().map(|value| value.to_string_lossy().to_string())).flatten(),
+        kind: if metadata.is_dir() {
+            FileSystemEntryKind::Directory
+        } else {
+            FileSystemEntryKind::File
+        },
+        extension: metadata
+            .is_file()
+            .then(|| {
+                path.extension()
+                    .map(|value| value.to_string_lossy().to_string())
+            })
+            .flatten(),
         size_bytes: metadata.is_file().then_some(metadata.len() as i64),
-        modified_at: metadata.modified().ok().map(system_time_to_rfc3339).transpose().map_err(time_error)?,
+        modified_at: metadata
+            .modified()
+            .ok()
+            .map(system_time_to_rfc3339)
+            .transpose()
+            .map_err(time_error)?,
         is_virtual: false,
         provider_id: None,
         provider_item_id: None,

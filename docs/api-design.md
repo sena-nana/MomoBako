@@ -210,11 +210,11 @@
 - `POST /repositories/{repoId}/thumbnails:ensure`
   - Request body includes repository-relative `path`
   - Reuse an existing valid thumbnail cache entry or generate one for supported local image/video files
-  - The desktop calls `ensure` while browsing for listed local files that have no thumbnail yet, one request at a time (thumbnail work runs behind the runtime write lock, so parallel requests would only queue there); entries in the trash and virtual source entries are skipped
+  - The desktop calls `ensure` while browsing for listed local files that have no thumbnail yet, one request at a time (thumbnail work runs behind the runtime write lock, so parallel requests would only queue there); entries in the trash are skipped; a virtual source entry is skipped unless its payload or metadata has a real http(s) cover URL (`coverUrl` or `playlistCoverUrl`), in which case the desktop calls `save`
   - Optional `action`: `ensure`, `refresh`, `save`, `clear`
   - `refresh` regenerates the cached thumbnail from the source file for types that have a generator (local images, video frames and embedded audio covers) and replaces the cache file only after the new one is written. A type without a generator keeps its existing thumbnail, a failed regeneration keeps the old thumbnail and returns the error, and an entry with a custom thumbnail (file or folder) keeps reporting the custom one
   - `save` accepts local `sourcePath`, remote HTTP(S) `sourceUrl`, or `imageBytes` for custom file/folder thumbnails; `sourceUrl` is downloaded by the backend
-  - `save + sourceUrl` 也能预取来源封面，例如网易云歌曲条目的 `sourcePayload.coverUrl`。删掉的 Vue 宿主这样预取过（当前页优先，下一页在空闲时预热），Nana 宿主现在不预取
+  - `save + sourceUrl` 也能预取来源封面，例如网易云歌曲条目的 `sourcePayload.coverUrl`。删掉的 Vue 宿主这样预取过（当前页优先，下一页在空闲时预热）。Nana 浏览队列在没有本地文件、或本地 `ensure` 交回空时，对这条真实的 http(s) 地址发 `save`，存成自定义缩略图；回收站、空白和不是 http(s) 的地址不预取
   - Image formats are recognized by content, and photos are turned upright by their EXIF orientation before generated or saved thumbnails are scaled
   - Thumbnail cache files live under repository `.momo/thumbnails/` and use sha256 hex filenames
   - File thumbnails also backfill derived metadata such as `thumbnailPalette`

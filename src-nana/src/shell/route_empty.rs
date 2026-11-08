@@ -8,13 +8,16 @@
 
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{fields, node_ref, signal, widget, AnyView, FieldWrite, IntoView, Signal, StyledComponent};
+use nana_ui::runtime::view::{
+    AnyView, FieldWrite, IntoView, Signal, StyledComponent, fields, node_ref, signal, widget,
+};
 use nana_ui::runtime::{
-    AlignSpec, FileDropEvent, JustifySpec, LengthSpec, RadiusTier, SemanticColorRole, Stack, Text, TextHorizontalAlignment,
+    AlignSpec, FileDropEvent, JustifySpec, LengthSpec, RadiusTier, SemanticColorRole, Stack, Text,
+    TextHorizontalAlignment,
 };
 
-use super::input::{accept_file_drops, file_drop_flags, file_drop_message, FileDropFlags};
 use super::ShellViewModel;
+use super::input::{FileDropFlags, accept_file_drops, file_drop_flags, file_drop_message};
 
 /// 空库页要显示的东西，以及拖放消息要带的仓库条件。
 #[derive(Clone, Debug, PartialEq)]
@@ -46,7 +49,9 @@ pub(crate) struct EmptySignals {
 impl EmptySignals {
     /// 在常驻作用域里建信号，初值是这一刻的投影。
     pub(crate) fn new(model: &ShellViewModel) -> Self {
-        Self { view: signal(EmptyView::project(model)) }
+        Self {
+            view: signal(EmptyView::project(model)),
+        }
     }
 
     /// 写入投影，值没变不写；信号已随文档回收时不写。
@@ -57,13 +62,22 @@ impl EmptySignals {
 
 /// 空库页：首页外框里纵向滚动的一节，内容在可见高度里居中。
 pub(super) fn view(signals: EmptySignals) -> AnyView {
-    super::route_home::home_page(None, super::route_home::home_scroll("workspace-empty-scroll", panel(signals.view)))
+    super::route_home::home_page(
+        None,
+        super::route_home::home_scroll("workspace-empty-scroll", panel(signals.view)),
+    )
 }
 
 /// 拖入引导：标题、说明和错误条。整节都是拖放目标，悬停和放下走同一条宿主拖放消息。
 fn panel(view: Signal<EmptyView>) -> AnyView {
     let initial = view.get_untracked();
-    let mut copy = centered_text(initial.error.clone(), 13.0, 400, SemanticColorRole::Danger, 13.0 * 1.45);
+    let mut copy = centered_text(
+        initial.error.clone(),
+        13.0,
+        400,
+        SemanticColorRole::Danger,
+        13.0 * 1.45,
+    );
     Arc::make_mut(&mut copy.style.layout).width = Some(LengthSpec::Fill);
     let error = widget(
         Stack::column(0.0)
@@ -73,7 +87,9 @@ fn panel(view: Signal<EmptyView>) -> AnyView {
             .with_layout(|layout| layout.max_width = Some(LengthSpec::Px(420.0))),
     )
     .visible(move || view.with(|view| !view.error.is_empty()))
-    .children((widget(copy).prop::<String, fields::text::value>(move || view.with(|view| view.error.clone())).key("empty-error"),));
+    .children((widget(copy)
+        .prop::<String, fields::text::value>(move || view.with(|view| view.error.clone()))
+        .key("empty-error"),));
     let panel = Stack::column(10.0)
         .width(LengthSpec::Fill)
         .min_height(LengthSpec::Px(220.0))
@@ -83,8 +99,22 @@ fn panel(view: Signal<EmptyView>) -> AnyView {
         .justify(JustifySpec::Center)
         .with_layout(|layout| layout.max_width = Some(LengthSpec::Px(520.0)));
     let rows = (
-        widget(centered_text("还没有可用资源库", 18.0, 600, SemanticColorRole::Text, 18.0 * 1.55)).key("empty-title"),
-        widget(centered_text("拖入一个本地文件夹创建资源库。", 13.0, 400, SemanticColorRole::Muted, 13.0 * 1.55)).key("empty-detail"),
+        widget(centered_text(
+            "还没有可用资源库",
+            18.0,
+            600,
+            SemanticColorRole::Text,
+            18.0 * 1.55,
+        ))
+        .key("empty-title"),
+        widget(centered_text(
+            "拖入一个本地文件夹创建资源库。",
+            13.0,
+            400,
+            SemanticColorRole::Muted,
+            13.0 * 1.55,
+        ))
+        .key("empty-detail"),
         error,
     );
     let drop = node_ref();
@@ -95,14 +125,27 @@ fn panel(view: Signal<EmptyView>) -> AnyView {
             let flags = view.with_untracked(|view| view.drop.clone());
             cx.dispatch_program_all(file_drop_message(&flags, event));
         })
-        .children((widget(panel).prop::<bool, DropHighlight>(move || view.with(|view| view.dragging)).children(rows).key("empty-panel"),))
+        .children((widget(panel)
+            .prop::<bool, DropHighlight>(move || view.with(|view| view.dragging))
+            .children(rows)
+            .key("empty-panel"),))
         .key("empty-repository-page")
         .into_any()
 }
 
 /// 居中的一段字，行高写成像素。对应 `.empty-state-page` 的 `text-align: center`。
-fn centered_text(value: impl Into<String>, size: f32, weight: u16, color: SemanticColorRole, line_height: f32) -> Text {
-    let mut node = Text::new(value).font_size(size).font_weight(weight).color(color).line_height(line_height);
+fn centered_text(
+    value: impl Into<String>,
+    size: f32,
+    weight: u16,
+    color: SemanticColorRole,
+    line_height: f32,
+) -> Text {
+    let mut node = Text::new(value)
+        .font_size(size)
+        .font_weight(weight)
+        .color(color)
+        .line_height(line_height);
     node.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
     node
 }
@@ -132,11 +175,17 @@ impl FieldWrite<Stack, bool> for DropHighlight {
     fn differs(target: &Stack, dragging: &bool) -> bool {
         let style = <Stack as StyledComponent>::node_style(target);
         let (background, border, width) = if *dragging {
-            (Some(SemanticColorRole::AccentSoft), Some(SemanticColorRole::Accent), Some(1.0))
+            (
+                Some(SemanticColorRole::AccentSoft),
+                Some(SemanticColorRole::Accent),
+                Some(1.0),
+            )
         } else {
             (None, None, None)
         };
-        style.background != background || style.border != border || style.layout.border_width != width
+        style.background != background
+            || style.border != border
+            || style.layout.border_width != width
     }
 }
 

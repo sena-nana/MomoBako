@@ -9,5 +9,8 @@ use super::route_admin::AdminSignals;
 
 /// 设置页只有一张整页，滚动容器用固定键。
 pub(super) fn view(signals: AdminSignals) -> AnyView {
-    super::route_home::scroll_route(super::admin::settings_page(signals.settings, signals.plugins), "settings-scroll")
+    super::route_home::scroll_route(
+        super::admin::settings_page(signals.settings, signals.plugins),
+        "settings-scroll",
+    )
 }

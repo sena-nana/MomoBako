@@ -9,20 +9,31 @@
 //! 菜单和每个子菜单各是一个方向键焦点组：上下键在本层的项之间走、首尾相接，Tab 从分组走进子菜单；
 //! 带子菜单的分组照 Vue 报成菜单按钮（`aria-haspopup="menu"`）。菜单键和 Shift+F10 打开的菜单，
 //! 焦点落在首项（`menu_focus.rs`），Enter 执行，Escape 由全局 Escape 关掉。
-//! 要点两次的项第一次只把这一行变成待确认。点菜单外关闭。
+//! 要点两次的项第一次只把这一行变成待确认，文案换成确认句，菜单按这句变宽，靠右时夹回窗口内。点菜单外关闭。
+//! 在菜单上再按右键或菜单键也关闭：菜单自己没有提供者（Vue `installContextMenu` 的 `contextmenu`）。
+//! 方向键在会弹出的分组上也会变成同一种按键，那是走进子菜单，不关。
+//! 任意滚动区的偏移变了也关闭（Vue `installContextMenu` 在捕获阶段听 `scroll`），
+//! 窗口失焦也关闭（同一处的 `blur`），窗口逻辑尺寸变了也关闭（同一处的 `resize`）。
+//! 文件菜单和文件夹菜单一起收。尺寸没变不关，菜单项仍能点。
+//! 菜单关掉或换了一份锚点，再滚才算下一次。
 //! 不能用的项禁用，后面可以跟一行弱色小字写原因（不是菜单项，不能点、不能聚焦）。
 //!
 //! 菜单常驻：同一个目标、同一个落点的菜单打开期间，条目按内容做键，变了的那一行才重建；
 //! 展开哪个子菜单只切换子菜单的显隐。点条目发的消息是条目数据的一部分（[`MenuAction`]），
 //! 条目变了行就重建，处理器不会拿着过期的值。
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use nana_ui::InputPayload;
 use nana_ui::icons_tabler::CHECK;
-use nana_ui::runtime::view::{computed, each, widget, AnyView, FieldWrite, IntoView, Signal, StyledComponent};
+use nana_ui::runtime::view::{
+    AnyView, FieldWrite, IntoView, Signal, StyledComponent, computed, each, widget,
+};
 use nana_ui::runtime::{
-    Activate, AlignSpec, FocusWithinChanged, IconGlyph, LengthSpec, ListItem, NodeStyle, PointerHoverChanged, PositionSpec,
-    RadiusTier, SecondaryPress, SemanticColorRole, SemanticPaint, Stack,
+    Activate, AlignSpec, FocusWithinChanged, IconGlyph, LengthSpec, ListItem, NodeStyle,
+    PointerHoverChanged, PositionSpec, RadiusTier, SecondaryPress, SemanticColorRole,
+    SemanticPaint, Stack,
 };
 use nana_ui_core::{Icon, LengthAtom, SemanticColorMix};
 
@@ -33,7 +44,15 @@ use super::input::InputMessage;
 use super::menu_focus::MENU_KEYS;
 use super::player::PlayerMessage;
 use super::sidebar::GapMessage;
-use super::{ShellMessage, SidebarMessage};
+use super::{ShellMessage, ShellViewModel, SidebarMessage};
+
+/// 一份打开着的右键菜单，以及当时各滚动区的像素偏移。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct MenuScrollSnapshot {
+    /// 文件菜单和文件夹菜单的锚点。换菜单就整份重记。
+    key: String,
+    offsets: BTreeMap<String, (i32, i32)>,
+}
 
 /// `.ctx-menu` 的最小宽度、内边距、行高和行间距。
 const MENU_MIN_WIDTH: f32 = 180.0;
@@ -53,7 +72,14 @@ pub(crate) enum MenuAction {
     Input(InputMessage),
     Admin(AdminMessage),
     /// 切换播放列表成员。
-    Membership { playlist_id: String, kind: String, extension: String, asset_id: String, is_virtual: bool, path: String },
+    Membership {
+        playlist_id: String,
+        kind: String,
+        extension: String,
+        asset_id: String,
+        is_virtual: bool,
+        path: String,
+    },
     /// 打开侧栏里的文件夹。
     OpenFolder(String),
     /// 侧栏文件夹的新建、重命名和删除。
@@ -67,9 +93,21 @@ impl MenuAction {
             Self::Files(message) => ShellMessage::Files(message),
             Self::Input(message) => ShellMessage::Input(message),
             Self::Admin(message) => ShellMessage::Admin(message),
-            Self::Membership { playlist_id, kind, extension, asset_id, is_virtual, path } => {
-                ShellMessage::Player(PlayerMessage::ToggleMembership { playlist_id, kind, extension, asset_id, is_virtual, path })
-            }
+            Self::Membership {
+                playlist_id,
+                kind,
+                extension,
+                asset_id,
+                is_virtual,
+                path,
+            } => ShellMessage::Player(PlayerMessage::ToggleMembership {
+                playlist_id,
+                kind,
+                extension,
+                asset_id,
+                is_virtual,
+                path,
+            }),
             Self::OpenFolder(path) => ShellMessage::Sidebar(SidebarMessage::OpenFolder(path)),
             Self::Gap(message) => ShellMessage::Sidebar(SidebarMessage::Gap(message)),
         }
@@ -120,7 +158,10 @@ impl MenuEntry {
 
     /// 写在禁用项后面的一行原因。
     pub(crate) fn note(id: &str, text: &str) -> Self {
-        Self { note: true, ..Self::new(id, text, None) }
+        Self {
+            note: true,
+            ..Self::new(id, text, None)
+        }
     }
 
     pub(crate) fn disabled(mut self, disabled: bool) -> Self {
@@ -153,7 +194,12 @@ pub(crate) struct MenuView {
 impl MenuView {
     /// 按条目算出菜单尺寸。
     pub(crate) fn new(entries: Vec<MenuEntry>, branch: Option<String>) -> Self {
-        Self { width: menu_width(&entries), height: menu_height(entries.len()), branch, entries }
+        Self {
+            width: menu_width(&entries),
+            height: menu_height(entries.len()),
+            branch,
+            entries,
+        }
     }
 }
 
@@ -171,10 +217,171 @@ pub(crate) struct MenuChrome {
     pub arm: Option<fn(String) -> ShellMessage>,
 }
 
+/// 右键菜单开着时，任一滚动区的偏移相对这份菜单记下的位置变了，就关掉文件菜单和文件夹菜单。
+///
+/// 和 Vue `installContextMenu` 一样：听的是滚动，不是点在菜单上。第一次见到这份菜单只记下偏移；
+/// 菜单关掉或锚点换了就重新记，避免菜单关着时滚过的距离在重新打开时被当成这次的滚动。
+/// 滚动区还没排出来、或者偏移不是有限数时跳过，不当成已经滚动。
+pub(crate) fn dismiss_context_menus_on_scroll(
+    model: &mut ShellViewModel,
+    document: &nana_ui::runtime::RuntimeDocument,
+) -> Vec<ShellMessage> {
+    let Some(key) = open_menu_key(model) else {
+        model.context_menu_scroll = None;
+        return Vec::new();
+    };
+    let offsets = scroll_offsets(document);
+    if model
+        .context_menu_scroll
+        .as_ref()
+        .is_some_and(|seen| seen.key == key && !offsets_moved(&seen.offsets, &offsets))
+    {
+        model.context_menu_scroll = Some(MenuScrollSnapshot { key, offsets });
+        return Vec::new();
+    }
+    let moved = model
+        .context_menu_scroll
+        .as_ref()
+        .is_some_and(|seen| seen.key == key);
+    model.context_menu_scroll = Some(MenuScrollSnapshot { key, offsets });
+    if !moved {
+        return Vec::new();
+    }
+    close_context_menus(model)
+}
+
+/// 窗口失焦时要发的消息。
+///
+/// Vue `installContextMenu` 在 `blur` 时关掉右键菜单；`useWorkspaceDragDrop` 的 `handleWindowBlur`
+/// 在内部拖动已经离开够远时交给系统拖放（`WindowBlur`）。焦点还在窗口里时什么都不发。
+/// 点菜单项走的是点击，不经过这里。没有拖动会话时不发 `WindowBlur`，那条归约什么都不做。
+pub(crate) fn focus_loss_messages(
+    model: &ShellViewModel,
+    payload: &InputPayload,
+) -> Vec<ShellMessage> {
+    let InputPayload::Focus { focused: false } = payload else {
+        return Vec::new();
+    };
+    let mut messages = close_context_menus(model);
+    if model.input.internal_active {
+        messages.push(ShellMessage::Input(InputMessage::WindowBlur));
+    }
+    messages
+}
+
+/// 窗口逻辑尺寸变了时要发的消息。
+///
+/// Vue `installContextMenu` 在 `resize` 时关掉右键菜单。第一次见到有限尺寸只记下像素，
+/// 不当成缩放；之后宽或高差了至少 1px 才收起文件菜单和文件夹菜单。同一像素（含不到 1px 的抖动）
+/// 和无效尺寸不关，菜单留着，点菜单项仍走点击。不发 `WindowBlur`：内部拖动交给系统只在失焦时发生。
+pub(crate) fn window_resize_messages(
+    model: &mut ShellViewModel,
+    width: f32,
+    height: f32,
+) -> Vec<ShellMessage> {
+    let Some(next) = logical_window_px(width, height) else {
+        eprintln!("Nana 窗口尺寸无效，右键菜单不据此关闭：{width}×{height}");
+        return Vec::new();
+    };
+    // 按四舍五入后的逻辑像素比。浏览器的 resize 看的是整数视口，差不到 1px 不算尺寸变了。
+    let changed = model.context_menu_window.is_some_and(|seen| seen != next);
+    model.context_menu_window = Some(next);
+    if !changed {
+        return Vec::new();
+    }
+    close_context_menus(model)
+}
+
+/// 收起还开着的文件菜单和文件夹菜单。哪份没开就不发那一条。
+fn close_context_menus(model: &ShellViewModel) -> Vec<ShellMessage> {
+    let mut messages = Vec::new();
+    if model.files.entry_menu.is_some() {
+        messages.push(ShellMessage::Files(FilesMessage::CloseEntryMenu));
+    }
+    if model.sidebar.folder_menu.is_some() {
+        messages.push(ShellMessage::Sidebar(SidebarMessage::Gap(
+            GapMessage::CloseFolderMenu,
+        )));
+    }
+    messages
+}
+
+/// 窗口逻辑宽高换成像素。非有限数或小于 1px 的尺寸不能拿来比较。
+fn logical_window_px(width: f32, height: f32) -> Option<(i32, i32)> {
+    if !width.is_finite() || !height.is_finite() || width < 1.0 || height < 1.0 {
+        return None;
+    }
+    Some((width.round() as i32, height.round() as i32))
+}
+
+/// 当前打开的右键菜单锚点。两份都关着时没有。
+fn open_menu_key(model: &ShellViewModel) -> Option<String> {
+    let file = model
+        .files
+        .entry_menu
+        .as_ref()
+        .map(|menu| format!("file:{}@{:.0},{:.0}", menu.path, menu.x, menu.y));
+    let folder = model
+        .sidebar
+        .folder_menu
+        .as_ref()
+        .map(|menu| format!("folder:{}@{:.0},{:.0}", menu.path, menu.x, menu.y));
+    match (file, folder) {
+        (None, None) => None,
+        (file, folder) => Some(format!(
+            "{}|{}",
+            file.unwrap_or_default(),
+            folder.unwrap_or_default()
+        )),
+    }
+}
+
+/// 已经记下的滚动区，像素偏移变了才算滚过。新出现的滚动区只补进基线，不当成滚动。
+fn offsets_moved(
+    previous: &BTreeMap<String, (i32, i32)>,
+    current: &BTreeMap<String, (i32, i32)>,
+) -> bool {
+    current
+        .iter()
+        .any(|(path, offset)| previous.get(path).is_some_and(|before| before != offset))
+}
+
+/// 文档里每个滚动区的路径和像素偏移。无效偏移记一笔并跳过，不拿它去关菜单。
+fn scroll_offsets(document: &nana_ui::runtime::RuntimeDocument) -> BTreeMap<String, (i32, i32)> {
+    use nana_ui::runtime::component_descriptors;
+    let document_id = document.document();
+    let ids = document
+        .context()
+        .world()
+        .nodes_of_component(document_id, component_descriptors::SCROLL_VIEW.type_id)
+        .collect::<Vec<_>>();
+    let context = document.context();
+    let mut offsets = BTreeMap::new();
+    for id in ids {
+        let Some(path) = context.assembly_path(id) else {
+            continue;
+        };
+        let Some(offset) = context.world().scroll_offset(id) else {
+            continue;
+        };
+        if !offset.x.is_finite() || !offset.y.is_finite() {
+            eprintln!("Nana 滚动区偏移无效，右键菜单不据此关闭：{path}");
+            continue;
+        }
+        offsets.insert(path, (offset.x.round() as i32, offset.y.round() as i32));
+    }
+    offsets
+}
+
 /// 落点 `(x, y)` 的右键菜单。`view` 由调用方在浮层的挂载作用域里建好并登记投影。
 pub(crate) fn context_menu(view: Signal<MenuView>, x: f32, y: f32, chrome: MenuChrome) -> AnyView {
     let entries = computed(move || view.with(|view| view.entries.clone()));
-    let rows = each(entries, |entry: &MenuEntry| format!("{entry:?}"), move |entry: MenuEntry| slot(view, entry, chrome)).gap(ITEM_GAP);
+    let rows = each(
+        entries,
+        |entry: &MenuEntry| format!("{entry:?}"),
+        move |entry: MenuEntry| slot(view, entry, chrome),
+    )
+    .gap(ITEM_GAP);
     // 菜单这一层铺满浮层层（浮层层铺满窗口），透明底和菜单都相对它绝对定位，画在浮层层之上、
     // 按先后叠放，不用给层级。叠层默认不接指针（给弹幕、HUD 用），这里清掉，让透明底和菜单接点击。
     let surface = Stack::column(0.0)
@@ -184,14 +391,25 @@ pub(crate) fn context_menu(view: Signal<MenuView>, x: f32, y: f32, chrome: MenuC
         .radius(RadiusTier::Md)
         .with_layout(move |layout| layout.position = PositionSpec::Absolute);
     let surface = style::with_shadows(surface, vec![style::shadow(10.0, 28.0, -10.0, 0.55)]);
+    // 右键和菜单键从命中的那一行往上找处理函数。菜单自己没有提供者，落在菜单上就收起。
+    // 方向键在会弹出的分组上也会变成这种按键，但带了要聚焦的一端，那不是右键，不收起。
+    let close_on_menu = chrome.close;
     widget(Stack::overlay_layer().with_layout(|layout| layout.pointer_events = None))
         .children((
             backdrop(chrome),
             widget(surface)
-                .prop::<(f32, f32, f32, f32), MenuPlacement>(move || view.with(|view| (x, y, view.width, view.height)))
+                .prop::<(f32, f32, f32, f32), MenuPlacement>(move || {
+                    view.with(|view| (x, y, view.width, view.height))
+                })
                 .children((rows,))
                 .key(format!("{}-context-menu", chrome.prefix))
-                .roving_focus(MENU_KEYS),
+                .roving_focus(MENU_KEYS)
+                .on_cx(move |_, press: &SecondaryPress, cx| {
+                    if press.focus.is_some() {
+                        return;
+                    }
+                    cx.dispatch_program_all(close_on_menu());
+                }),
         ))
         .key(format!("{}-context-layer", chrome.prefix))
         .into_any()
@@ -203,7 +421,13 @@ struct MenuPlacement;
 
 impl MenuPlacement {
     fn clamped(anchor: f32, extent: f32) -> LengthSpec {
-        LengthSpec::Min2(LengthAtom::Px(anchor.max(EDGE)), LengthAtom::CalcPercent { percent: 100.0, offset_px: -(extent + EDGE) })
+        LengthSpec::Min2(
+            LengthAtom::Px(anchor.max(EDGE)),
+            LengthAtom::CalcPercent {
+                percent: 100.0,
+                offset_px: -(extent + EDGE),
+            },
+        )
     }
 }
 
@@ -246,7 +470,9 @@ fn backdrop(chrome: MenuChrome) -> AnyView {
 /// 一行和它的子菜单（`.ctx-menu__slot`）。可用的分组挂上指针和焦点的进出：子树里包括子菜单，
 /// 在分组和子菜单之间移动不算离开。展开哪个分组只切换子菜单的显隐。
 fn slot(view: Signal<MenuView>, entry: MenuEntry, chrome: MenuChrome) -> AnyView {
-    let frame = Stack::column(0.0).width(LengthSpec::Fill).with_layout(|layout| layout.position = PositionSpec::Relative);
+    let frame = Stack::column(0.0)
+        .width(LengthSpec::Fill)
+        .with_layout(|layout| layout.position = PositionSpec::Relative);
     if entry.note {
         return widget(frame).children((note(&entry, chrome),)).into_any();
     }
@@ -254,14 +480,21 @@ fn slot(view: Signal<MenuView>, entry: MenuEntry, chrome: MenuChrome) -> AnyView
         return widget(frame).children((item(&entry, chrome),)).into_any();
     }
     let Some(branch) = chrome.branch else {
-        eprintln!("Nana {} 右键菜单没有分组的进出消息，子菜单展不开：{}", chrome.prefix, entry.id);
+        eprintln!(
+            "Nana {} 右键菜单没有分组的进出消息，子菜单展不开：{}",
+            chrome.prefix, entry.id
+        );
         return widget(frame).children((item(&entry, chrome),)).into_any();
     };
     let (pointer, focus) = (entry.id.clone(), entry.id.clone());
     widget(frame)
         .children((item(&entry, chrome), submenu(view, &entry, chrome)))
         .on_cx(move |_, event: &PointerHoverChanged, cx| {
-            cx.dispatch_program_all(branch(pointer.clone(), BranchSource::Pointer, event.hovered));
+            cx.dispatch_program_all(branch(
+                pointer.clone(),
+                BranchSource::Pointer,
+                event.hovered,
+            ));
         })
         .on_cx(move |_, event: &FocusWithinChanged, cx| {
             cx.dispatch_program_all(branch(focus.clone(), BranchSource::Focus, event.focused));
@@ -276,7 +509,11 @@ fn slot(view: Signal<MenuView>, entry: MenuEntry, chrome: MenuChrome) -> AnyView
 /// 但中间是父菜单的内边距，不属于 `.ctx-menu__slot`，指针慢慢移过去时 `:hover` 先断一下。
 fn submenu(view: Signal<MenuView>, entry: &MenuEntry, chrome: MenuChrome) -> AnyView {
     let id = entry.id.clone();
-    let rows = entry.children.iter().map(|child| item(child, chrome)).collect::<Vec<_>>();
+    let rows = entry
+        .children
+        .iter()
+        .map(|child| item(child, chrome))
+        .collect::<Vec<_>>();
     let panel = Stack::column(ITEM_GAP)
         .width(LengthSpec::Px(menu_width(&entry.children)))
         .padding(MENU_PADDING)
@@ -293,7 +530,12 @@ fn submenu(view: Signal<MenuView>, entry: &MenuEntry, chrome: MenuChrome) -> Any
     });
     widget(bridge)
         .visible(move || view.with(|view| view.branch.as_deref() == Some(id.as_str())))
-        .children((widget(style::with_shadows(panel, vec![style::shadow(10.0, 28.0, -10.0, 0.55)])).children(rows).roving_focus(MENU_KEYS),))
+        .children((widget(style::with_shadows(
+            panel,
+            vec![style::shadow(10.0, 28.0, -10.0, 0.55)],
+        ))
+        .children(rows)
+        .roving_focus(MENU_KEYS),))
         .key(format!("{}-menu-sub-{}", chrome.prefix, entry.id))
         .into_any()
 }
@@ -307,20 +549,33 @@ enum Click {
 /// `.ctx-menu__item`：图标、文字、分组的 ›。危险项是错误色，待确认时浅红底、600 字重。
 fn item(entry: &MenuEntry, chrome: MenuChrome) -> AnyView {
     let pending = entry.pending;
-    let foreground = if entry.danger || pending { SemanticColorRole::Danger } else { SemanticColorRole::Text };
+    let foreground = if entry.danger || pending {
+        SemanticColorRole::Danger
+    } else {
+        SemanticColorRole::Text
+    };
     let mut style = NodeStyle::default();
     style.radius = Some(RadiusTier::Sm);
     style.foreground = Some(foreground);
     let danger_soft = SemanticColorMix::alpha(SemanticColorRole::Danger, 0.1);
     style.interaction.hovered = if entry.danger || pending {
-        SemanticPaint { background_mix: Some(danger_soft), ..SemanticPaint::default() }
+        SemanticPaint {
+            background_mix: Some(danger_soft),
+            ..SemanticPaint::default()
+        }
     } else {
-        SemanticPaint { background: Some(SemanticColorRole::Hover), ..SemanticPaint::default() }
+        SemanticPaint {
+            background: Some(SemanticColorRole::Hover),
+            ..SemanticPaint::default()
+        }
     };
     style.interaction.pressed = style.interaction.hovered;
     style.interaction.disabled = SemanticPaint::default();
     if pending {
-        style.interaction.base = SemanticPaint { background_mix: Some(danger_soft), ..SemanticPaint::default() };
+        style.interaction.base = SemanticPaint {
+            background_mix: Some(danger_soft),
+            ..SemanticPaint::default()
+        };
     }
     let layout = Arc::make_mut(&mut style.layout);
     layout.direction = Some(nana_ui_core::FlexDirection::Row);
@@ -332,7 +587,7 @@ fn item(entry: &MenuEntry, chrome: MenuChrome) -> AnyView {
     layout.align_items = AlignSpec::Center;
     layout.opacity = entry.disabled.then_some(crate::theme_map::DISABLED_OPACITY);
     let weight = if pending { 600 } else { 500 };
-    let label = if pending { entry.confirm_label.unwrap_or_default().to_string() } else { entry.label.clone() };
+    let label = shown_label(entry);
     let mut parts = Vec::new();
     if entry.checked {
         parts.push(widget(IconGlyph::new(CHECK).size(13.0).role(foreground)).into_any());
@@ -340,18 +595,27 @@ fn item(entry: &MenuEntry, chrome: MenuChrome) -> AnyView {
     if let Some(icon) = entry.icon {
         parts.push(widget(IconGlyph::new(icon).size(13.0).role(foreground)).into_any());
     }
-    parts.push(widget(style::text(label, 13.0, weight, foreground, 20.0).nowrap(true)).into_any());
+    parts.push(
+        widget(style::text(label.clone(), 13.0, weight, foreground, 20.0).nowrap(true)).into_any(),
+    );
     if !entry.children.is_empty() {
         parts.push(widget(style::text("›", 13.0, 500, SemanticColorRole::Faint, 20.0)).into_any());
     }
     let content = widget(Stack::row(10.0).align(AlignSpec::Center)).children(parts);
-    let mut node = widget(ListItem::new(entry.label.clone()).disabled(entry.disabled).has_popup(!entry.children.is_empty()).style(style))
-        .content(content)
-        .key(format!("{}-menu-{}", chrome.prefix, entry.id));
+    let mut node = widget(
+        ListItem::new(label)
+            .disabled(entry.disabled)
+            .has_popup(!entry.children.is_empty())
+            .style(style),
+    )
+    .content(content)
+    .key(format!("{}-menu-{}", chrome.prefix, entry.id));
     // 分组没有自己的动作（Vue `selectContextMenuItem` 遇到 `children` 直接返回），子菜单由所在的那一行管。
     if !entry.disabled && entry.children.is_empty() {
         let click = match chrome.arm {
-            Some(arm) if entry.confirm_label.is_some() && !pending => Click::Arm(arm, entry.id.clone()),
+            Some(arm) if entry.confirm_label.is_some() && !pending => {
+                Click::Arm(arm, entry.id.clone())
+            }
             _ => Click::Act(entry.action.clone()),
         };
         let close_after = matches!(click, Click::Act(_));
@@ -372,26 +636,59 @@ fn item(entry: &MenuEntry, chrome: MenuChrome) -> AnyView {
 
 /// 禁用项后面写原因的一行：和菜单项一样高（菜单高按行数算），左边和菜单项的文字对齐，弱色 12px。
 fn note(entry: &MenuEntry, chrome: MenuChrome) -> AnyView {
-    let row = Stack::row(0.0).align(AlignSpec::Center).with_layout(|layout| {
-        layout.height = Some(LengthSpec::Px(ITEM_HEIGHT));
-        layout.min_height = Some(LengthSpec::Px(ITEM_HEIGHT));
-        layout.width = Some(LengthSpec::Fill);
-        layout.padding_left = Some(LengthSpec::Px(10.0));
-        layout.padding_right = Some(LengthSpec::Px(10.0));
-    });
+    let row = Stack::row(0.0)
+        .align(AlignSpec::Center)
+        .with_layout(|layout| {
+            layout.height = Some(LengthSpec::Px(ITEM_HEIGHT));
+            layout.min_height = Some(LengthSpec::Px(ITEM_HEIGHT));
+            layout.width = Some(LengthSpec::Fill);
+            layout.padding_left = Some(LengthSpec::Px(10.0));
+            layout.padding_right = Some(LengthSpec::Px(10.0));
+        });
     widget(row)
-        .children((widget(style::text(entry.label.clone(), 12.0, 400, SemanticColorRole::Faint, 18.0).nowrap(true)),))
+        .children((widget(
+            style::text(
+                entry.label.clone(),
+                12.0,
+                400,
+                SemanticColorRole::Faint,
+                18.0,
+            )
+            .nowrap(true),
+        ),))
         .key(format!("{}-menu-{}", chrome.prefix, entry.id))
         .into_any()
 }
 
-/// 菜单宽：至少 180，长文案按字宽撑开（中文按字号算，其余按半个字号；写原因的小字按 12px 算）。
+/// 这一行现在写出来的文字。待确认时换成确认句，和 Vue `displayLabel` 一样。
+fn shown_label(entry: &MenuEntry) -> String {
+    if !entry.pending {
+        return entry.label.clone();
+    }
+    match entry
+        .confirm_label
+        .map(str::trim)
+        .filter(|label| !label.is_empty())
+    {
+        Some(label) => label.to_string(),
+        None => {
+            eprintln!("Nana 右键菜单「{}」在待确认时没有确认文案", entry.id);
+            entry.label.clone()
+        }
+    }
+}
+
+/// 菜单宽：至少 180，按现在看得见的文案撑开（待确认时用确认句，不用原来的短标签）。
+/// 中文按字号算，其余按半个字号；写原因的小字按 12px 算。
 fn menu_width(entries: &[MenuEntry]) -> f32 {
     let widest = entries
         .iter()
         .map(|entry| {
             let (wide, narrow) = if entry.note { (12.0, 6.0) } else { (13.0, 7.0) };
-            let text: f32 = entry.label.chars().map(|ch| if ch.is_ascii() { narrow } else { wide }).sum();
+            let text: f32 = shown_label(entry)
+                .chars()
+                .map(|ch| if ch.is_ascii() { narrow } else { wide })
+                .sum();
             let icons = 23.0 * (u8::from(entry.icon.is_some()) + u8::from(entry.checked)) as f32;
             let chevron = if entry.children.is_empty() { 0.0 } else { 14.0 };
             20.0 + icons + text + chevron
@@ -402,5 +699,8 @@ fn menu_width(entries: &[MenuEntry]) -> f32 {
 
 /// 菜单高：行高、行间距、内边距和描边。
 fn menu_height(count: usize) -> f32 {
-    count as f32 * ITEM_HEIGHT + count.saturating_sub(1) as f32 * ITEM_GAP + MENU_PADDING * 2.0 + 2.0
+    count as f32 * ITEM_HEIGHT
+        + count.saturating_sub(1) as f32 * ITEM_GAP
+        + MENU_PADDING * 2.0
+        + 2.0
 }

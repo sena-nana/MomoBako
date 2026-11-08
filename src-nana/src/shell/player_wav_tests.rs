@@ -3,9 +3,11 @@
 //! 只解内存里的 PCM，测试构建不打开声卡。辅助构造沿用上层 `tests` 模块。
 
 use super::super::super::{InspectEffect, InspectMessage, ShellMessage};
-use super::super::support::{builtin_audio_formats, find_player_for_extension};
-use super::super::wav_player::{builtin_candidates, candidates_for, SYSTEM_PLAYER_TYPE_ID};
 use super::super::support::StoredSession;
+use super::super::support::{builtin_audio_formats, find_player_for_extension};
+use super::super::wav_player::{
+    PLAYER_TYPE_ID, SYSTEM_PLAYER_TYPE_ID, builtin_candidates, candidates_for,
+};
 use super::super::{PlaybackMode, PlayerEffect, PlayerMessage, QueueItem};
 use super::{asset, detail, item, load_list, queue_item, send, shell, summary, temp_dir};
 
@@ -53,7 +55,11 @@ fn wav_session_loads_and_plays_then_pauses_seeks_and_sets_volume() {
     let expected_ms = (samples.len() as u64) * 1000 / 8_000;
 
     let mut model = shell(true);
-    assert_eq!(model.player.candidates, candidates_for(cfg!(windows)), "生产列表是本平台的内置候选");
+    assert_eq!(
+        model.player.candidates,
+        candidates_for(cfg!(windows)),
+        "生产列表是本平台的内置候选"
+    );
     let builtin = &model.player.candidates[0];
     assert_eq!(builtin.plugin_id, "momobako.player.wav");
     assert_eq!(builtin.player_type_id, "momobako.playlist.wav");
@@ -64,8 +70,13 @@ fn wav_session_loads_and_plays_then_pauses_seeks_and_sets_volume() {
 
     model.player.repo_id = Some("repo".into());
     model.player.queue = vec![wav_queue_item("tone", &path)];
-    model.reduce(ShellMessage::Player(PlayerMessage::PlayItem { item_id: "tone".into() }));
-    assert_eq!(model.player.session.status, "loading", "条目字节经仓库服务读取前先停在读取中");
+    model.reduce(ShellMessage::Player(PlayerMessage::PlayItem {
+        item_id: "tone".into(),
+    }));
+    assert_eq!(
+        model.player.session.status, "loading",
+        "条目字节经仓库服务读取前先停在读取中"
+    );
     assert!(!model.player.can_play);
     super::super::fulfill_loads(&mut model);
     assert_eq!(model.player.session.status, "playing");
@@ -98,31 +109,75 @@ fn deep_float_extensible_and_surround_wavs_play() {
     use crate::shell::audio_decode::pcm::{fmt_chunk, wav_file};
     let dir = temp_dir("wav-formats");
     let cases = [
-        ("deep", wav_file(&fmt_chunk(1, 2, 8_000, 24, None), &vec![0; 8_000 * 2 * 3]), (2, 16)),
-        ("float", wav_file(&fmt_chunk(3, 1, 8_000, 32, None), &vec![0; 8_000 * 4]), (1, 16)),
-        ("extensible", wav_file(&fmt_chunk(0, 2, 8_000, 16, Some((1, 0x3))), &vec![0; 8_000 * 2 * 2]), (2, 16)),
-        ("surround", wav_file(&fmt_chunk(0, 6, 8_000, 32, Some((3, 0x3F))), &vec![0; 8_000 * 6 * 4]), (2, 16)),
+        (
+            "deep",
+            wav_file(&fmt_chunk(1, 2, 8_000, 24, None), &vec![0; 8_000 * 2 * 3]),
+            (2, 16),
+        ),
+        (
+            "float",
+            wav_file(&fmt_chunk(3, 1, 8_000, 32, None), &vec![0; 8_000 * 4]),
+            (1, 16),
+        ),
+        (
+            "extensible",
+            wav_file(
+                &fmt_chunk(0, 2, 8_000, 16, Some((1, 0x3))),
+                &vec![0; 8_000 * 2 * 2],
+            ),
+            (2, 16),
+        ),
+        (
+            "surround",
+            wav_file(
+                &fmt_chunk(0, 6, 8_000, 32, Some((3, 0x3F))),
+                &vec![0; 8_000 * 6 * 4],
+            ),
+            (2, 16),
+        ),
     ];
     let mut model = shell(true);
     model.player.repo_id = Some("repo".into());
     for (name, bytes, layout) in cases {
-        let pcm = super::super::pcm_from_bytes(&bytes).unwrap_or_else(|error| panic!("{name}：{error}"));
-        assert_eq!((pcm.channels, pcm.bits_per_sample, pcm.duration_ms), (layout.0, layout.1, 1_000), "{name}");
+        let pcm =
+            super::super::pcm_from_bytes(&bytes).unwrap_or_else(|error| panic!("{name}：{error}"));
+        assert_eq!(
+            (pcm.channels, pcm.bits_per_sample, pcm.duration_ms),
+            (layout.0, layout.1, 1_000),
+            "{name}"
+        );
         let path = dir.join(format!("{name}.wav"));
         std::fs::write(&path, &bytes).unwrap();
         model.player.queue = vec![wav_queue_item(name, &path)];
         model.player.current_id = None;
-        send(&mut model, PlayerMessage::PlayItem { item_id: name.into() });
-        assert_eq!(model.player.session.status, "playing", "{name}：{:?}", model.player.session.error);
+        send(
+            &mut model,
+            PlayerMessage::PlayItem {
+                item_id: name.into(),
+            },
+        );
+        assert_eq!(
+            model.player.session.status, "playing",
+            "{name}：{:?}",
+            model.player.session.error
+        );
         assert_eq!(model.player.session.duration_ms, Some(1_000), "{name}");
     }
 
     let adpcm = dir.join("adpcm.wav");
     std::fs::write(&adpcm, wav_file(&fmt_chunk(2, 1, 8_000, 4, None), &[0; 64])).unwrap();
     model.player.queue = vec![wav_queue_item("adpcm", &adpcm)];
-    send(&mut model, PlayerMessage::PlayItem { item_id: "adpcm".into() });
+    send(
+        &mut model,
+        PlayerMessage::PlayItem {
+            item_id: "adpcm".into(),
+        },
+    );
     assert_eq!(model.player.session.status, "failed");
-    assert_eq!(model.player.session.error.as_deref(), Some("不支持的 WAV 编码（0x0002）"));
+    assert_eq!(
+        model.player.session.error.as_deref(),
+        Some("不支持的 WAV 编码（0x0002）")
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -133,9 +188,22 @@ fn wav_player_rejects_a_non_wav_header() {
     std::fs::write(&path, b"not-a-wav-header").unwrap();
     let mut model = shell(true);
     model.player.queue = vec![wav_queue_item("bad", &path)];
-    send(&mut model, PlayerMessage::PlayItem { item_id: "bad".into() });
+    send(
+        &mut model,
+        PlayerMessage::PlayItem {
+            item_id: "bad".into(),
+        },
+    );
     assert_eq!(model.player.session.status, "failed");
-    assert!(model.player.session.error.as_deref().unwrap_or_default().contains("不是 WAV 头"));
+    assert!(
+        model
+            .player
+            .session
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("不是 WAV 头")
+    );
     assert_ne!(model.player.session.status, "playing");
     let _ = std::fs::remove_dir_all(dir);
 }
@@ -149,13 +217,22 @@ fn compressed_audio_playlist_loads_duration_and_plays_without_a_device() {
         .player
         .candidates
         .iter()
-        .find(|candidate| candidate.extensions.iter().any(|extension| extension == "mp3"))
+        .find(|candidate| {
+            candidate
+                .extensions
+                .iter()
+                .any(|extension| extension == "mp3")
+        })
         .expect("压缩音频候选")
         .player_type_id
         .clone();
     let cases = [
         ("tone.mp3", "mp3", crate::shell::audio_decode::fixture_mp3()),
-        ("tone.flac", "flac", crate::shell::audio_decode::fixture_flac()),
+        (
+            "tone.flac",
+            "flac",
+            crate::shell::audio_decode::fixture_flac(),
+        ),
         ("tone.ogg", "ogg", crate::shell::audio_decode::fixture_ogg()),
     ];
     for (name, extension, bytes) in cases {
@@ -169,10 +246,22 @@ fn compressed_audio_playlist_loads_duration_and_plays_without_a_device() {
         item.player_type_id = kind.clone();
         model.player.queue = vec![item];
         model.player.current_id = None;
-        send(&mut model, PlayerMessage::PlayItem { item_id: extension.into() });
+        send(
+            &mut model,
+            PlayerMessage::PlayItem {
+                item_id: extension.into(),
+            },
+        );
         assert_eq!(model.player.session.status, "playing", "{extension}");
-        assert_eq!(model.player.session.duration_ms, Some(decoded.duration_ms), "{extension}");
-        assert!(model.player.session.can_seek && model.player.session.can_volume, "{extension}");
+        assert_eq!(
+            model.player.session.duration_ms,
+            Some(decoded.duration_ms),
+            "{extension}"
+        );
+        assert!(
+            model.player.session.can_seek && model.player.session.can_volume,
+            "{extension}"
+        );
         assert!(model.player.session.error.is_none(), "{extension}");
         send(&mut model, PlayerMessage::SetPlaying(false));
         assert_eq!(model.player.session.status, "paused", "{extension}");
@@ -184,7 +273,12 @@ fn compressed_audio_playlist_loads_duration_and_plays_without_a_device() {
     item.extension = "mp3".into();
     item.player_type_id = kind;
     model.player.queue = vec![item];
-    send(&mut model, PlayerMessage::PlayItem { item_id: "bad".into() });
+    send(
+        &mut model,
+        PlayerMessage::PlayItem {
+            item_id: "bad".into(),
+        },
+    );
     assert_eq!(model.player.session.status, "failed");
     assert!(model.player.session.error.is_some());
     assert_ne!(model.player.session.status, "playing");
@@ -194,29 +288,67 @@ fn compressed_audio_playlist_loads_duration_and_plays_without_a_device() {
 #[test]
 fn preview_play_drives_the_shared_cursor_without_opening_a_device() {
     assert!(!super::super::wav_player::sound_device_compiled_in());
-    let bytes = pcm_wav(8_000, 1, 8, &[0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255]);
+    let bytes = pcm_wav(
+        8_000,
+        1,
+        8,
+        &[
+            0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255,
+        ],
+    );
     let parts = crate::shell::preview_media_parts("repo", &bytes).expect("预览");
     let (session, pcm) = (parts.session, parts.pcm);
     assert!(pcm.is_some());
     let mut model = shell(true);
-    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("audio/a.wav", "wav"))));
-    let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().unwrap() else {
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset(
+        "audio/a.wav",
+        "wav",
+    ))));
+    let InspectEffect::LoadMedia {
+        path, generation, ..
+    } = model.inspect.take_effects().pop().unwrap()
+    else {
         panic!("没有音视频请求");
     };
     let prep = crate::shell::SourcePrep::default();
-    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(session), pcm, frames: None, prep }));
+    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded {
+        path,
+        generation,
+        result: Ok(session),
+        pcm,
+        frames: None,
+        prep,
+    }));
     assert!(model.player.preview_owns_bar());
     assert!(!model.player.cursor_playing());
     send(&mut model, PlayerMessage::SetPlaying(true));
-    assert_eq!(model.inspect.media_session().map(|session| session.status.as_str()), Some("playing"));
+    assert_eq!(
+        model
+            .inspect
+            .media_session()
+            .map(|session| session.status.as_str()),
+        Some("playing")
+    );
     assert!(model.player.cursor_playing());
     assert!(!super::super::wav_player::sound_device_compiled_in());
     send(&mut model, PlayerMessage::SetPlaying(false));
     assert_eq!(model.player.session.status, "paused");
     assert!(!model.player.cursor_playing());
-    assert_eq!(model.inspect.media_session().map(|session| session.status.as_str()), Some("paused"));
+    assert_eq!(
+        model
+            .inspect
+            .media_session()
+            .map(|session| session.status.as_str()),
+        Some("paused")
+    );
     send(&mut model, PlayerMessage::Seek(1));
-    assert_eq!(model.inspect.media_session().map(|session| session.current_time_ms), Some(1));
+    assert_eq!(
+        model
+            .inspect
+            .media_session()
+            .map(|session| session.current_time_ms),
+        Some(1)
+    );
     send(&mut model, PlayerMessage::SetPlaying(true));
     assert!(model.player.cursor_playing());
 
@@ -224,7 +356,10 @@ fn preview_play_drives_the_shared_cursor_without_opening_a_device() {
     model.reduce(ShellMessage::OpenDirectory(String::new()));
     assert!(!model.player.preview_owns_bar());
     assert!(model.player.cursor_playing());
-    assert_eq!(model.player.current_item().map(|item| item.path.as_str()), Some("audio/a.wav"));
+    assert_eq!(
+        model.player.current_item().map(|item| item.path.as_str()),
+        Some("audio/a.wav")
+    );
 }
 
 /// 本平台 Nana 自己能解的音频格式都有内置候选认领；没有媒体基础的平台不认领 m4a、aac、opus，
@@ -236,15 +371,31 @@ fn builtin_candidates_claim_what_the_platform_decodes() {
         find_player_for_extension(extension, &candidates, &[]).is_some()
     };
     for extension in ["wav", "mp3", "flac", "ogg"] {
-        assert!(claims(true, extension) && claims(false, extension), "{extension} 各平台都由内置解码器认领");
+        assert!(
+            claims(true, extension) && claims(false, extension),
+            "{extension} 各平台都由内置解码器认领"
+        );
     }
     for extension in ["m4a", "aac", "opus"] {
         assert!(claims(true, extension), "有媒体基础时认领 {extension}");
-        assert!(!claims(false, extension), "没有媒体基础时不认领 {extension}");
+        assert!(
+            !claims(false, extension),
+            "没有媒体基础时不认领 {extension}"
+        );
     }
-    assert_eq!(builtin_audio_formats(&candidates_for(false)).as_deref(), Some("WAV / MP3 / FLAC / Ogg"));
-    assert_eq!(builtin_audio_formats(&candidates_for(true)).as_deref(), Some("WAV / MP3 / FLAC / Ogg / M4A / AAC / Opus"));
-    assert_eq!(builtin_candidates(), candidates_for(cfg!(windows)), "媒体基础只在 Windows 上有");
+    assert_eq!(
+        builtin_audio_formats(&candidates_for(false)).as_deref(),
+        Some("WAV / MP3 / FLAC / Ogg")
+    );
+    assert_eq!(
+        builtin_audio_formats(&candidates_for(true)).as_deref(),
+        Some("WAV / MP3 / FLAC / Ogg / Opus / M4A / AAC")
+    );
+    assert_eq!(
+        builtin_candidates(),
+        candidates_for(cfg!(windows)),
+        "媒体基础只在 Windows 上有"
+    );
 }
 
 /// 没装音频插件时，m4a 预览解出音轨后由内置候选接管播放条，播放落在同一游标上；
@@ -258,18 +409,37 @@ fn m4a_preview_takes_over_the_bar_without_the_audio_plugin() {
         let mut model = shell(true);
         model.player.candidates = candidates_for(media_foundation);
         assert!(model.player.contributions.is_empty(), "没装音频插件");
-        model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("audio/voice.m4a", "m4a"))));
-        let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().unwrap() else {
+        model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset(
+            "audio/voice.m4a",
+            "m4a",
+        ))));
+        let InspectEffect::LoadMedia {
+            path, generation, ..
+        } = model.inspect.take_effects().pop().unwrap()
+        else {
             panic!("没有音视频请求");
         };
         let prep = crate::shell::SourcePrep::default();
-        let loaded = InspectMessage::MediaLoaded { path, generation, result: Ok(parts.session), pcm: parts.pcm, frames: None, prep };
+        let loaded = InspectMessage::MediaLoaded {
+            path,
+            generation,
+            result: Ok(parts.session),
+            pcm: parts.pcm,
+            frames: None,
+            prep,
+        };
         model.reduce(ShellMessage::Inspect(loaded));
         model
     };
     let mut model = preview(true);
     assert!(model.player.preview_owns_bar());
-    assert_eq!(model.player.current_item().map(|item| item.player_type_id.as_str()), Some(SYSTEM_PLAYER_TYPE_ID));
+    assert_eq!(
+        model
+            .player
+            .current_item()
+            .map(|item| item.player_type_id.as_str()),
+        Some(SYSTEM_PLAYER_TYPE_ID)
+    );
     send(&mut model, PlayerMessage::SetPlaying(true));
     assert!(model.player.cursor_playing());
     assert!(!super::super::wav_player::sound_device_compiled_in());
@@ -278,7 +448,11 @@ fn m4a_preview_takes_over_the_bar_without_the_audio_plugin() {
     assert!(!bare.player.preview_owns_bar());
     assert!(bare.player.current_item().is_none());
     let bar = super::super::super::player_view::bar::BarProps::from_model(&bare);
-    assert_eq!(bar.subtitle(), "没有可用于播放此媒体的插件", "和 Vue 一样写在播放条次行，没有条目时也写");
+    assert_eq!(
+        bar.subtitle(),
+        "没有可用于播放此媒体的插件",
+        "和 Vue 一样写在播放条次行，没有条目时也写"
+    );
 }
 
 /// 没解到结尾的片段：解码时写的说明（只解出了多少、全长多少）跟着会话进播放条第二行，播放集的当前项和预览接管
@@ -292,7 +466,9 @@ fn a_cut_clip_keeps_its_note_on_the_bar() {
         parts.session.error = Some(note.into());
         parts
     };
-    let subtitle = |model: &super::super::super::ShellViewModel| super::super::super::player_view::bar::BarProps::from_model(model).subtitle();
+    let subtitle = |model: &super::super::super::ShellViewModel| {
+        super::super::super::player_view::bar::BarProps::from_model(model).subtitle()
+    };
 
     let dir = temp_dir("wav-cut");
     let path = dir.join("voice.wav");
@@ -300,7 +476,9 @@ fn a_cut_clip_keeps_its_note_on_the_bar() {
     let mut model = shell(true);
     model.player.repo_id = Some("repo".into());
     model.player.queue = vec![wav_queue_item("voice", &path)];
-    model.reduce(ShellMessage::Player(PlayerMessage::PlayItem { item_id: "voice".into() }));
+    model.reduce(ShellMessage::Player(PlayerMessage::PlayItem {
+        item_id: "voice".into(),
+    }));
     let generation = model
         .player
         .take_effects()
@@ -311,21 +489,46 @@ fn a_cut_clip_keeps_its_note_on_the_bar() {
         })
         .expect("当前项的读取请求");
     let loaded = super::super::LoadedItem::Media(parts());
-    model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded { item_id: "voice".into(), generation, still: false, result: Ok(loaded), prep: crate::shell::SourcePrep::default() }));
+    model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded {
+        item_id: "voice".into(),
+        generation,
+        still: false,
+        result: Ok(loaded),
+        prep: crate::shell::SourcePrep::default(),
+    }));
     assert_eq!(model.player.session.status, "playing");
     assert_eq!(model.player.session.error.as_deref(), Some(note));
     assert_eq!(subtitle(&model), note);
     let _ = std::fs::remove_dir_all(dir);
 
     let mut preview = shell(true);
-    preview.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("audio/voice.wav", "wav"))));
-    let InspectEffect::LoadMedia { path, generation, .. } = preview.inspect.take_effects().pop().unwrap() else {
+    preview.reduce(ShellMessage::AssetDetailLoaded(Ok(asset(
+        "audio/voice.wav",
+        "wav",
+    ))));
+    let InspectEffect::LoadMedia {
+        path, generation, ..
+    } = preview.inspect.take_effects().pop().unwrap()
+    else {
         panic!("没有音视频请求");
     };
     let parts = parts();
-    preview.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(parts.session), pcm: parts.pcm, frames: None, prep: crate::shell::SourcePrep::default() }));
+    preview.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded {
+        path,
+        generation,
+        result: Ok(parts.session),
+        pcm: parts.pcm,
+        frames: None,
+        prep: crate::shell::SourcePrep::default(),
+    }));
     assert!(preview.player.preview_owns_bar());
-    assert_eq!(preview.inspect.media_session().map(|session| session.status.as_str()), Some("paused"));
+    assert_eq!(
+        preview
+            .inspect
+            .media_session()
+            .map(|session| session.status.as_str()),
+        Some("paused")
+    );
     assert_eq!(subtitle(&preview), note);
 }
 
@@ -340,20 +543,35 @@ fn the_clock_advances_and_a_natural_end_moves_to_the_next_item() {
     std::fs::write(&second, pcm_wav(8_000, 1, 8, &samples)).unwrap();
     let mut model = shell(true);
     model.player.repo_id = Some("repo".into());
-    model.player.queue = vec![wav_queue_item("first", &first), wav_queue_item("second", &second)];
-    send(&mut model, PlayerMessage::PlayItem { item_id: "first".into() });
+    model.player.queue = vec![
+        wav_queue_item("first", &first),
+        wav_queue_item("second", &second),
+    ];
+    send(
+        &mut model,
+        PlayerMessage::PlayItem {
+            item_id: "first".into(),
+        },
+    );
     assert_eq!(model.player.session.status, "playing");
     assert_eq!(model.player.session.duration_ms, Some(20));
     let frame = crate::frame_clock::FrameStep::millis(16);
     assert!(crate::shell::poll_timers(&mut model, frame));
     assert_eq!(model.player.session.current_time_ms, 16);
     assert!(crate::shell::poll_timers(&mut model, frame));
-    assert_eq!(model.player.current_id.as_deref(), Some("second"), "到头切下一项");
+    assert_eq!(
+        model.player.current_id.as_deref(),
+        Some("second"),
+        "到头切下一项"
+    );
     super::super::fulfill_loads(&mut model);
     assert_eq!(model.player.session.status, "playing");
     assert_eq!(model.player.session.current_time_ms, 0);
     send(&mut model, PlayerMessage::SetPlaying(false));
-    assert!(!crate::shell::poll_timers(&mut model, frame), "暂停时时钟不动");
+    assert!(
+        !crate::shell::poll_timers(&mut model, frame),
+        "暂停时时钟不动"
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -375,8 +593,17 @@ fn resuming_after_a_pause_sounds_from_the_paused_position() {
     let mut model = shell(true);
     model.player.repo_id = Some("repo".into());
     model.player.queue = vec![wav_queue_item("tone", &path)];
-    send(&mut model, PlayerMessage::PlayItem { item_id: "tone".into() });
-    assert_eq!(model.player.wav.sounding(), Some((0, 1.0)), "装好以后从头出声");
+    send(
+        &mut model,
+        PlayerMessage::PlayItem {
+            item_id: "tone".into(),
+        },
+    );
+    assert_eq!(
+        model.player.wav.sounding(),
+        Some((0, 1.0)),
+        "装好以后从头出声"
+    );
 
     run_clock(&mut model, 600);
     assert_eq!(model.player.session.current_time_ms, 600);
@@ -384,14 +611,26 @@ fn resuming_after_a_pause_sounds_from_the_paused_position() {
     assert_eq!(model.player.wav.sounding(), None, "暂停停声");
     send(&mut model, PlayerMessage::SetPlaying(true));
     assert_eq!(model.player.session.current_time_ms, 600, "进度接着暂停处");
-    assert_eq!(model.player.wav.sounding(), Some((4_800, 1.0)), "声音也接着暂停处");
+    assert_eq!(
+        model.player.wav.sounding(),
+        Some((4_800, 1.0)),
+        "声音也接着暂停处"
+    );
 
     send(&mut model, PlayerMessage::Seek(1_000));
-    assert_eq!(model.player.wav.sounding(), Some((8_000, 1.0)), "播放中跳转从新位置出声");
+    assert_eq!(
+        model.player.wav.sounding(),
+        Some((8_000, 1.0)),
+        "播放中跳转从新位置出声"
+    );
     run_clock(&mut model, 300);
     send(&mut model, PlayerMessage::SetPlaying(false));
     send(&mut model, PlayerMessage::SetPlaying(true));
-    assert_eq!(model.player.wav.sounding(), Some((10_400, 1.0)), "继续播放不退回跳转点");
+    assert_eq!(
+        model.player.wav.sounding(),
+        Some((10_400, 1.0)),
+        "继续播放不退回跳转点"
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -401,16 +640,35 @@ fn a_previewed_track_resumes_where_it_was_paused() {
     let bytes = pcm_wav(8_000, 1, 8, &[128u8; 16_000]);
     let parts = crate::shell::preview_media_parts("repo", &bytes).expect("预览");
     let mut model = shell(true);
-    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset("audio/a.wav", "wav"))));
-    let InspectEffect::LoadMedia { path, generation, .. } = model.inspect.take_effects().pop().unwrap() else {
+    model.reduce(ShellMessage::AssetDetailLoaded(Ok(asset(
+        "audio/a.wav",
+        "wav",
+    ))));
+    let InspectEffect::LoadMedia {
+        path, generation, ..
+    } = model.inspect.take_effects().pop().unwrap()
+    else {
         panic!("没有音视频请求");
     };
-    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded { path, generation, result: Ok(parts.session), pcm: parts.pcm, frames: None, prep: crate::shell::SourcePrep::default() }));
+    model.reduce(ShellMessage::Inspect(InspectMessage::MediaLoaded {
+        path,
+        generation,
+        result: Ok(parts.session),
+        pcm: parts.pcm,
+        frames: None,
+        prep: crate::shell::SourcePrep::default(),
+    }));
     send(&mut model, PlayerMessage::SetPlaying(true));
     run_clock(&mut model, 1_200);
     send(&mut model, PlayerMessage::SetPlaying(false));
     send(&mut model, PlayerMessage::SetPlaying(true));
-    assert_eq!(model.inspect.media_session().map(|session| session.current_time_ms), Some(1_200));
+    assert_eq!(
+        model
+            .inspect
+            .media_session()
+            .map(|session| session.current_time_ms),
+        Some(1_200)
+    );
     assert_eq!(model.player.wav.sounding(), Some((9_600, 1.0)));
 }
 
@@ -424,12 +682,21 @@ fn changing_the_volume_while_playing_takes_effect_at_the_current_position() {
     let mut model = shell(true);
     model.player.repo_id = Some("repo".into());
     model.player.queue = vec![wav_queue_item("tone", &path)];
-    send(&mut model, PlayerMessage::PlayItem { item_id: "tone".into() });
+    send(
+        &mut model,
+        PlayerMessage::PlayItem {
+            item_id: "tone".into(),
+        },
+    );
     run_clock(&mut model, 500);
     send(&mut model, PlayerMessage::SetVolume(0.25));
     assert_eq!(model.player.session.volume, 0.25);
     assert_eq!(model.player.session.status, "playing");
-    assert_eq!(model.player.wav.sounding(), Some((4_000, 0.25)), "新音量从当前进度出声");
+    assert_eq!(
+        model.player.wav.sounding(),
+        Some((4_000, 0.25)),
+        "新音量从当前进度出声"
+    );
 
     send(&mut model, PlayerMessage::SetPlaying(false));
     send(&mut model, PlayerMessage::SetVolume(0.5));
@@ -466,26 +733,53 @@ fn restoring_a_session_resumes_at_the_stored_position() {
 
     let mut model = shell(true);
     model.player.stored.insert("repo".into(), stored(600));
-    load_list(&mut model, vec![summary("repo", "pl", "momobako.playlist.wav", "audio")]);
-    assert!(model.player.take_effects().iter().any(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. })));
-    model.reduce(ShellMessage::Player(PlayerMessage::RestoreDetail(Ok(playlist.clone()))));
+    load_list(
+        &mut model,
+        vec![summary("repo", "pl", "momobako.playlist.wav", "audio")],
+    );
+    assert!(
+        model
+            .player
+            .take_effects()
+            .iter()
+            .any(|effect| matches!(effect, PlayerEffect::RestoreDetail { .. }))
+    );
+    model.reduce(ShellMessage::Player(PlayerMessage::RestoreDetail(Ok(
+        playlist.clone(),
+    ))));
     assert_eq!(model.player.session.status, "loading");
-    assert_eq!(model.player.time_text(), "0:00 / 0:01", "装载期间显示存下的进度和时长");
+    assert_eq!(
+        model.player.time_text(),
+        "0:00 / 0:01",
+        "装载期间显示存下的进度和时长"
+    );
     assert_eq!(model.player.session.current_time_ms, 600);
-    assert_eq!(model.player.stored["repo"].current_time_ms, 600, "装载不能把存下的进度清零");
+    assert_eq!(
+        model.player.stored["repo"].current_time_ms, 600,
+        "装载不能把存下的进度清零"
+    );
     super::super::fulfill_loads(&mut model);
     assert_eq!(model.player.session.status, "paused", "存下时没在播放");
-    assert_eq!(model.player.session.current_time_ms, 600, "装好以后接着存下的位置");
+    assert_eq!(
+        model.player.session.current_time_ms, 600,
+        "装好以后接着存下的位置"
+    );
     assert_eq!(model.player.session.volume, 0.4);
     send(&mut model, PlayerMessage::SetPlaying(true));
     assert_eq!(model.player.session.status, "playing");
 
     let mut beyond = shell(true);
     beyond.player.stored.insert("repo".into(), stored(5_000));
-    load_list(&mut beyond, vec![summary("repo", "pl", "momobako.playlist.wav", "audio")]);
+    load_list(
+        &mut beyond,
+        vec![summary("repo", "pl", "momobako.playlist.wav", "audio")],
+    );
     beyond.player.take_effects();
     send(&mut beyond, PlayerMessage::RestoreDetail(Ok(playlist)));
-    assert_eq!(beyond.player.session.current_time_ms, 1_000, "超过时长时夹到结尾");
+    assert_eq!(
+        beyond.player.session.current_time_ms, 1_000,
+        "超过时长时夹到结尾"
+    );
     let _ = std::fs::remove_dir_all(dir);
 }
 
@@ -504,28 +798,41 @@ fn the_playback_clock_and_image_dwell_follow_real_time_at_any_frame_rate() {
     let samples = [128u8; 4_800];
     std::fs::write(&tone, pcm_wav(8_000, 1, 8, &samples)).unwrap();
     std::fs::write(&ending, pcm_wav(8_000, 1, 8, &samples)).unwrap();
-    image::RgbaImage::from_pixel(2, 2, image::Rgba([40, 80, 120, 255])).save(&slide).unwrap();
+    image::RgbaImage::from_pixel(2, 2, image::Rgba([40, 80, 120, 255]))
+        .save(&slide)
+        .unwrap();
 
     let run = |fps: u64| {
         let mut model = shell(true);
         model.player.repo_id = Some("repo".into());
-        model.player.contributions = vec![crate::backend::services::repository::PlaylistPlayerContribution {
-            player_type_id: "slides".into(),
-            label: "幻灯片".into(),
-            file_class: "image".into(),
-            supported_extensions: vec!["png".into()],
-            supports_seek: false,
-            supports_volume: false,
-            supports_preview_navigation: false,
-            description: None,
-        }];
+        model.player.contributions = vec![
+            crate::backend::services::repository::PlaylistPlayerContribution {
+                player_type_id: "slides".into(),
+                label: "幻灯片".into(),
+                file_class: "image".into(),
+                supported_extensions: vec!["png".into()],
+                supports_seek: false,
+                supports_volume: false,
+                supports_preview_navigation: false,
+                description: None,
+            },
+        ];
         let mut still = queue_item("slide", "png");
         still.path = slide.display().to_string();
         still.player_type_id = "slides".into();
         still.file_class = "image".into();
-        model.player.queue = vec![wav_queue_item("tone", &tone), still, wav_queue_item("ending", &ending)];
+        model.player.queue = vec![
+            wav_queue_item("tone", &tone),
+            still,
+            wav_queue_item("ending", &ending),
+        ];
         send(&mut model, PlayerMessage::SetImageDuration(2_000));
-        send(&mut model, PlayerMessage::PlayItem { item_id: "tone".into() });
+        send(
+            &mut model,
+            PlayerMessage::PlayItem {
+                item_id: "tone".into(),
+            },
+        );
         assert_eq!(model.player.session.duration_ms, Some(600));
         let mut window = nana_ui::ApplicationWindow::new();
         let mut clock = crate::frame_clock::FrameClock::default();
@@ -539,14 +846,97 @@ fn the_playback_clock_and_image_dwell_follow_real_time_at_any_frame_rate() {
             crate::window_host::prepare_motion(&mut model, None, &mut window, step);
             clock.note_demand(window.demand);
             if at_us % 1000 == 0 && [500, 1_000, 2_500, 3_000].contains(&(at_us / 1000)) {
-                samples.push((model.player.current_id.clone().unwrap_or_default(), model.player.session.current_time_ms));
+                samples.push((
+                    model.player.current_id.clone().unwrap_or_default(),
+                    model.player.session.current_time_ms,
+                ));
             }
         }
         samples
     };
     let slow = run(30);
     assert_eq!(slow, run(120));
-    let expected = [("tone", 500), ("slide", 400), ("slide", 1_900), ("ending", 400)];
-    assert_eq!(slow, expected.map(|(id, time)| (id.to_string(), time)), "600ms 切到图片，图片停 2 秒切到下一段");
+    let expected = [
+        ("tone", 500),
+        ("slide", 400),
+        ("slide", 1_900),
+        ("ending", 400),
+    ];
+    assert_eq!(
+        slow,
+        expected.map(|(id, time)| (id.to_string(), time)),
+        "600ms 切到图片，图片停 2 秒切到下一段"
+    );
     let _ = std::fs::remove_dir_all(dir);
+}
+
+/// 空播放集点「播放」：照 Vue `loadCurrentItem`，没有当前项时次行写「当前没有可播放条目」，
+/// 进度归零，不再接着放上一首。认不得的播放器类型写「缺少对应播放插件」。
+/// 队列本来开着就留着，不因为没有当前项收起。
+#[test]
+fn empty_playlist_play_reports_nothing_to_play() {
+    let mut model = shell(true);
+    model.player.repo_id = Some("repo".into());
+    model.player.queue = vec![queue_item("morning", "mp3")];
+    model.player.current_id = Some("morning".into());
+    model.player.session.status = "playing".into();
+    model.player.session.current_time_ms = 12_000;
+    model.player.session.duration_ms = Some(30_000);
+    model.player.wants_playing = true;
+    model.player.queue_open = true;
+    model.player.listed = Some(detail(
+        "repo",
+        "pl-empty",
+        PLAYER_TYPE_ID,
+        "audio",
+        Vec::new(),
+    ));
+    send(&mut model, PlayerMessage::PlayListed { item_id: None });
+
+    assert!(model.player.current_id.is_none(), "空播放集没有当前项");
+    assert!(model.player.queue.is_empty(), "上一首不留在队列里");
+    assert_eq!(
+        model.player.session.error.as_deref(),
+        Some("当前没有可播放条目")
+    );
+    assert_eq!(model.player.session.current_time_ms, 0);
+    assert!(model.player.session.duration_ms.is_none());
+    assert!(!model.player.can_play);
+    assert!(!model.player.wants_playing);
+    assert_ne!(model.player.session.status, "playing");
+    assert!(model.player.queue_open, "队列本来开着就留着");
+    assert!(
+        !model
+            .player
+            .take_effects()
+            .iter()
+            .any(|effect| matches!(effect, PlayerEffect::PersistSessions)),
+        "没有当前项时不写会话文件"
+    );
+    let bar = super::super::super::player_view::bar::BarProps::from_model(&model);
+    assert_eq!(bar.title(), "未选择播放内容");
+    assert_eq!(bar.subtitle(), "当前没有可播放条目");
+    assert_eq!(bar.time_text(), "0:00 / 0:00");
+    assert_eq!(
+        bar.media_label(),
+        "音频",
+        "没有当前项时封面仍按认得的播放器类别写"
+    );
+    assert!(bar.queue_open, "没有当前项时开着的队列也不收起");
+
+    model
+        .player
+        .listed
+        .as_mut()
+        .expect("播放集页还在")
+        .playlist
+        .player_type_id = "no.such.player".into();
+    send(&mut model, PlayerMessage::PlayListed { item_id: None });
+    let bar = super::super::super::player_view::bar::BarProps::from_model(&model);
+    assert_eq!(bar.subtitle(), "缺少对应播放插件");
+    assert_eq!(
+        bar.media_label(),
+        "媒体",
+        "认不得播放器时封面写「媒体」，不用播放集自己的类别"
+    );
 }

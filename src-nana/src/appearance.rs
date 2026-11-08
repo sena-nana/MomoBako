@@ -13,9 +13,10 @@ use std::sync::Arc;
 
 use nana_ui::runtime::{Easing, LengthSpec, RuntimeDocument, SemanticColorRole, ViewportAxis};
 use nana_ui::theme::{
-    builtin_theme_arc, linear_scrim_alpha, CompiledTheme, CornerShape, DialogInsets, DialogMotion, DialogRecipe,
-    DialogTransition, EffectTokens, RadiusTier, ScrollbarMetrics, ScrollbarMotion, ScrollbarRecipe, ScrollbarTransition,
-    ScrollbarVisibility, SemanticColor, ThemeAppearance, ThemeDefinition, ThemeId, ThemeMetrics, SCROLLBAR_METRICS,
+    CompiledTheme, CornerShape, DialogInsets, DialogMotion, DialogRecipe, DialogTransition,
+    EffectTokens, RadiusTier, SCROLLBAR_METRICS, ScrollbarMetrics, ScrollbarMotion,
+    ScrollbarRecipe, ScrollbarTransition, ScrollbarVisibility, SemanticColor, ThemeAppearance,
+    ThemeDefinition, ThemeId, ThemeMetrics, builtin_theme_arc, linear_scrim_alpha,
 };
 use nana_ui_core::SemanticColorMix;
 use nana_ui_platform::SystemAppearance;
@@ -61,12 +62,21 @@ impl Appearance {
         // 设置只给出浅色和深色；自定义外观按默认的深色处理。
         let (id, mode) = match self.mode {
             ThemeAppearance::Light => (ThemeId::new("momobako.light"), ThemeAppearance::Light),
-            ThemeAppearance::Dark | ThemeAppearance::Custom => (ThemeId::new("momobako.dark"), ThemeAppearance::Dark),
+            ThemeAppearance::Dark | ThemeAppearance::Custom => {
+                (ThemeId::new("momobako.dark"), ThemeAppearance::Dark)
+            }
         };
-        let shape = if self.smooth_corners { CornerShape::SQUIRCLE } else { CornerShape::Round };
+        let shape = if self.smooth_corners {
+            CornerShape::SQUIRCLE
+        } else {
+            CornerShape::Round
+        };
         let base = ThemeDefinition::for_appearance(mode);
         let effects = modal_effects(base.effects);
-        let metrics = ThemeMetrics { scrollbar: SCROLLBAR, ..theme_map::corner_metrics(self.corner_radius) };
+        let metrics = ThemeMetrics {
+            scrollbar: SCROLLBAR,
+            ..theme_map::corner_metrics(self.corner_radius)
+        };
         base.with_metrics(metrics)
             .with_corner_shape(shape)
             .with_effects(effects)
@@ -146,8 +156,14 @@ const CSS_EASE: Easing = Easing::CubicBezier([0.25, 0.1, 0.25, 1.0]);
 /// 160ms，卡片从上方 8px、0.98 倍处移回，退场倒放。
 fn dialog_recipe() -> DialogRecipe {
     DialogRecipe {
-        top: LengthSpec::Viewport { axis: ViewportAxis::Height, value: DIALOG_TOP_VH },
-        max_height: LengthSpec::Viewport { axis: ViewportAxis::Height, value: DIALOG_MAX_HEIGHT_VH },
+        top: LengthSpec::Viewport {
+            axis: ViewportAxis::Height,
+            value: DIALOG_TOP_VH,
+        },
+        max_height: LengthSpec::Viewport {
+            axis: ViewportAxis::Height,
+            value: DIALOG_MAX_HEIGHT_VH,
+        },
         icon_size: DIALOG_ICON_SIZE,
         close_size: DIALOG_CLOSE_SIZE,
         header_gap: DIALOG_GAP,
@@ -163,7 +179,10 @@ fn dialog_recipe() -> DialogRecipe {
         motion: DialogMotion {
             scrim: DialogTransition::new(DIALOG_FADE_MS, CSS_EASE),
             card_fade: DialogTransition::new(DIALOG_FADE_MS, CSS_EASE),
-            card_move: DialogTransition::new(DIALOG_MOVE_MS, Easing::CubicBezier([0.2, 0.8, 0.2, 1.0])),
+            card_move: DialogTransition::new(
+                DIALOG_MOVE_MS,
+                Easing::CubicBezier([0.2, 0.8, 0.2, 1.0]),
+            ),
             enter_offset_y: DIALOG_ENTER_OFFSET,
             enter_scale: DIALOG_ENTER_SCALE,
         },
@@ -211,7 +230,10 @@ fn smooth_corners(style: &str) -> bool {
 
 /// 把外观编译后装进文档，返回装上的主题。只改圆角形状时运行时只重画、不重排。
 /// 编译或安装失败记日志并返回 `None`，文档保留原主题。
-pub fn install(document: &mut RuntimeDocument, appearance: Appearance) -> Option<Arc<CompiledTheme>> {
+pub fn install(
+    document: &mut RuntimeDocument,
+    appearance: Appearance,
+) -> Option<Arc<CompiledTheme>> {
     let theme = match appearance.definition().compile() {
         Ok(theme) => Arc::new(theme),
         Err(error) => {
@@ -252,7 +274,10 @@ pub(crate) fn sync(app: &mut crate::MomoBakoApplication, document: &mut RuntimeD
 }
 
 /// 宿主报告系统深浅色变化。返回外观是否因此改变，改变时需要重画。
-pub(crate) fn note_system_appearance(app: &mut crate::MomoBakoApplication, system: SystemAppearance) -> bool {
+pub(crate) fn note_system_appearance(
+    app: &mut crate::MomoBakoApplication,
+    system: SystemAppearance,
+) -> bool {
     let before = Appearance::from_shell(&app.shell, app.system_appearance);
     app.system_appearance = Some(system);
     Appearance::from_shell(&app.shell, app.system_appearance) != before
@@ -264,11 +289,23 @@ mod tests {
 
     #[test]
     fn explicit_themes_win_and_system_follows_the_host() {
-        assert_eq!(theme_mode("light", Some(SystemAppearance::Dark)), ThemeAppearance::Light);
-        assert_eq!(theme_mode("dark", Some(SystemAppearance::Light)), ThemeAppearance::Dark);
-        assert_eq!(theme_mode("system", Some(SystemAppearance::Light)), ThemeAppearance::Light);
+        assert_eq!(
+            theme_mode("light", Some(SystemAppearance::Dark)),
+            ThemeAppearance::Light
+        );
+        assert_eq!(
+            theme_mode("dark", Some(SystemAppearance::Light)),
+            ThemeAppearance::Dark
+        );
+        assert_eq!(
+            theme_mode("system", Some(SystemAppearance::Light)),
+            ThemeAppearance::Light
+        );
         assert_eq!(theme_mode("system", None), ThemeAppearance::Dark);
-        assert_eq!(theme_mode("sepia", Some(SystemAppearance::Light)), ThemeAppearance::Light);
+        assert_eq!(
+            theme_mode("sepia", Some(SystemAppearance::Light)),
+            ThemeAppearance::Light
+        );
     }
 
     #[test]
@@ -285,7 +322,10 @@ mod tests {
         assert_eq!(compiled.metrics().radius_md, 20.0);
         assert_eq!(compiled.metrics().corner_shape, CornerShape::Round);
         shell.admin.corner_style = "smooth".into();
-        let smooth = Appearance::from_shell(&shell, None).definition().compile().expect("主题能编译");
+        let smooth = Appearance::from_shell(&shell, None)
+            .definition()
+            .compile()
+            .expect("主题能编译");
         assert_eq!(smooth.metrics().corner_shape, CornerShape::SQUIRCLE);
     }
 
@@ -295,38 +335,88 @@ mod tests {
     fn both_themes_install_with_the_vue_dialog_recipe_and_scrim() {
         for mode in [ThemeAppearance::Light, ThemeAppearance::Dark] {
             let mut shell = ShellViewModel::default();
-            shell.settings.theme = if mode == ThemeAppearance::Light { "light" } else { "dark" }.into();
-            let mut document = RuntimeDocument::new(nana_ui::runtime::DocumentId::new(1).expect("id"));
-            assert!(install(&mut document, Appearance::from_shell(&shell, None)).is_some(), "{mode:?} 主题装不上");
+            shell.settings.theme = if mode == ThemeAppearance::Light {
+                "light"
+            } else {
+                "dark"
+            }
+            .into();
+            let mut document =
+                RuntimeDocument::new(nana_ui::runtime::DocumentId::new(1).expect("id"));
+            assert!(
+                install(&mut document, Appearance::from_shell(&shell, None)).is_some(),
+                "{mode:?} 主题装不上"
+            );
             let theme = document.context().world().theme();
             assert_eq!(theme.appearance(), mode);
 
             let dialog = theme.recipes().dialog();
-            assert!((dialog.top_in(1200.0, 800.0) - 96.0).abs() < 1e-3, "距顶 12vh");
+            assert!(
+                (dialog.top_in(1200.0, 800.0) - 96.0).abs() < 1e-3,
+                "距顶 12vh"
+            );
             assert!((dialog.top_in(960.0, 600.0) - 72.0).abs() < 1e-3);
-            assert!((dialog.max_height_in(1200.0, 800.0) - 576.0).abs() < 1e-3, "最高 72vh");
+            assert!(
+                (dialog.max_height_in(1200.0, 800.0) - 576.0).abs() < 1e-3,
+                "最高 72vh"
+            );
             assert_eq!(dialog.radius, RadiusTier::Xl);
             assert_eq!(dialog.header, DialogInsets::new(12.0, 12.0, 14.0));
             assert_eq!(dialog.body, DialogInsets::new(12.0, 12.0, 14.0));
-            assert_eq!(dialog.body_bottom(false), 12.0, "没有底栏时正文照 CSS 留 12");
+            assert_eq!(
+                dialog.body_bottom(false),
+                12.0,
+                "没有底栏时正文照 CSS 留 12"
+            );
             assert_eq!(dialog.footer, DialogInsets::new(10.0, 10.0, 14.0));
             assert_eq!((dialog.action_gap, dialog.header_gap), (8.0, 8.0));
-            assert_eq!((dialog.icon_size, dialog.close_size, dialog.header_min_height), (14.0, 24.0, 21.7));
+            assert_eq!(
+                (
+                    dialog.icon_size,
+                    dialog.close_size,
+                    dialog.header_min_height
+                ),
+                (14.0, 24.0, 21.7)
+            );
             assert_eq!(dialog.header_divider, Some(SemanticColorRole::BorderSoft));
             assert_eq!(dialog.footer_divider, Some(SemanticColorRole::BorderSoft));
             let motion = dialog.motion;
-            assert_eq!((motion.scrim.millis, motion.card_fade.millis, motion.card_move.millis), (160, 160, 180));
-            assert_eq!(motion.scrim.easing, Easing::CubicBezier([0.25, 0.1, 0.25, 1.0]));
-            assert_eq!(motion.card_move.easing, Easing::CubicBezier([0.2, 0.8, 0.2, 1.0]));
+            assert_eq!(
+                (
+                    motion.scrim.millis,
+                    motion.card_fade.millis,
+                    motion.card_move.millis
+                ),
+                (160, 160, 180)
+            );
+            assert_eq!(
+                motion.scrim.easing,
+                Easing::CubicBezier([0.25, 0.1, 0.25, 1.0])
+            );
+            assert_eq!(
+                motion.card_move.easing,
+                Easing::CubicBezier([0.2, 0.8, 0.2, 1.0])
+            );
             assert_eq!((motion.enter_offset_y, motion.enter_scale), (-8.0, 0.98));
 
             let effects = theme.effects();
             let scrim = effects.modal_scrim;
             assert_eq!((scrim.r, scrim.g, scrim.b), (0.0, 0.0, 0.0));
-            assert!((scrim.a - (1.0 - 0.55_f32.powf(2.2))).abs() < 1e-4, "CSS 的 45% 黑换到线性光约 0.732：{}", scrim.a);
+            assert!(
+                (scrim.a - (1.0 - 0.55_f32.powf(2.2))).abs() < 1e-4,
+                "CSS 的 45% 黑换到线性光约 0.732：{}",
+                scrim.a
+            );
             assert_eq!(effects.modal_scrim_blur, 2.0);
             let builtin = builtin_theme_arc(mode).effects();
-            assert_eq!(EffectTokens { modal_scrim: builtin.modal_scrim, modal_scrim_blur: builtin.modal_scrim_blur, ..effects }, builtin);
+            assert_eq!(
+                EffectTokens {
+                    modal_scrim: builtin.modal_scrim,
+                    modal_scrim_blur: builtin.modal_scrim_blur,
+                    ..effects
+                },
+                builtin
+            );
         }
     }
 
@@ -337,7 +427,14 @@ mod tests {
         use crate::shell::view_harness::ShellHarness;
         use crate::shell::{ShellPage, ShellViewModel};
         let catalog = crate::shell::acceptance_gap_models();
-        let scene = |name: &str| catalog.iter().find(|(scene, _)| *scene == name).unwrap_or_else(|| panic!("没有场景 {name}")).1.clone();
+        let scene = |name: &str| {
+            catalog
+                .iter()
+                .find(|(scene, _)| *scene == name)
+                .unwrap_or_else(|| panic!("没有场景 {name}"))
+                .1
+                .clone()
+        };
         let models = [
             scene("live-files"),
             scene("playlist-open"),
@@ -352,7 +449,14 @@ mod tests {
             let mut surfaces = Vec::new();
             for radius in [8.0, 13.0] {
                 shell.admin.corner_radius = radius;
-                assert!(install(&mut harness.window.document, Appearance::from_shell(&shell, None)).is_some(), "主题装不上");
+                assert!(
+                    install(
+                        &mut harness.window.document,
+                        Appearance::from_shell(&shell, None)
+                    )
+                    .is_some(),
+                    "主题装不上"
+                );
                 harness.flush();
                 let context = harness.document().context();
                 let world = context.world();
@@ -360,13 +464,31 @@ mod tests {
                     surfaces = world
                         .document_order(harness.document().document())
                         .into_iter()
-                        .filter(|id| world.node_style(*id).is_some_and(|style| style.radius == Some(RadiusTier::Xxl)))
+                        .filter(|id| {
+                            world
+                                .node_style(*id)
+                                .is_some_and(|style| style.radius == Some(RadiusTier::Xxl))
+                        })
                         .collect();
-                    keys.extend(surfaces.iter().filter_map(|id| context.assembly_path(*id)?.rsplit('/').next().map(str::to_string)));
+                    keys.extend(surfaces.iter().filter_map(|id| {
+                        context
+                            .assembly_path(*id)?
+                            .rsplit('/')
+                            .next()
+                            .map(str::to_string)
+                    }));
                 }
                 for id in &surfaces {
-                    let resolved = world.extract_nodes(&[*id]).first().and_then(|node| node.source_style.layout.border_radius);
-                    assert_eq!(resolved, Some(radius as f32 * 2.0), "{:?} 的圆角没有跟着主题的 2xl 档", context.assembly_path(*id));
+                    let resolved = world
+                        .extract_nodes(&[*id])
+                        .first()
+                        .and_then(|node| node.source_style.layout.border_radius);
+                    assert_eq!(
+                        resolved,
+                        Some(radius as f32 * 2.0),
+                        "{:?} 的圆角没有跟着主题的 2xl 档",
+                        context.assembly_path(*id)
+                    );
                 }
             }
         }
@@ -390,18 +512,43 @@ mod tests {
     #[test]
     fn both_themes_install_the_vue_overlay_scrollbar() {
         for mode in [ThemeAppearance::Light, ThemeAppearance::Dark] {
-            let appearance = Appearance { mode, corner_radius: 8.0, smooth_corners: true };
+            let appearance = Appearance {
+                mode,
+                corner_radius: 8.0,
+                smooth_corners: true,
+            };
             let theme = appearance.definition().compile().expect("主题能编译");
             assert_eq!(theme.metrics().scrollbar, SCROLLBAR);
             let recipe = theme.recipes().scrollbar();
             assert_eq!(recipe.visibility, ScrollbarVisibility::AutoHide);
             let border_strong = SemanticColorMix::role(SemanticColorRole::BorderStrong);
-            assert_eq!([recipe.thumb, recipe.thumb_hot, recipe.thumb_active], [border_strong; 3], "悬停和拖动都不换色");
-            assert_eq!((recipe.track_hot, recipe.track_resident), (None, None), "没有轨道");
+            assert_eq!(
+                [recipe.thumb, recipe.thumb_hot, recipe.thumb_active],
+                [border_strong; 3],
+                "悬停和拖动都不换色"
+            );
+            assert_eq!(
+                (recipe.track_hot, recipe.track_resident),
+                (None, None),
+                "没有轨道"
+            );
             let motion = recipe.motion;
-            assert_eq!((motion.fade_in.millis, motion.fade_out.millis, motion.hide_delay_ms), (480, 480, 480));
-            assert_eq!(motion.fade_out.easing, Easing::CubicBezier([0.25, 0.1, 0.25, 1.0]));
-            assert!(theme.metrics().same_layout(&ThemeMetrics { scrollbar: SCROLLBAR_METRICS, ..theme.metrics() }));
+            assert_eq!(
+                (
+                    motion.fade_in.millis,
+                    motion.fade_out.millis,
+                    motion.hide_delay_ms
+                ),
+                (480, 480, 480)
+            );
+            assert_eq!(
+                motion.fade_out.easing,
+                Easing::CubicBezier([0.25, 0.1, 0.25, 1.0])
+            );
+            assert!(theme.metrics().same_layout(&ThemeMetrics {
+                scrollbar: SCROLLBAR_METRICS,
+                ..theme.metrics()
+            }));
         }
     }
 
@@ -416,34 +563,83 @@ mod tests {
         let mut shell = ShellViewModel::for_page(ShellPage::Settings);
         shell.settings.theme = "dark".into();
         let mut harness = ShellHarness::mount_at(shell.clone(), 960.0, 600.0);
-        assert!(install(&mut harness.window.document, Appearance::from_shell(&shell, None)).is_some(), "主题装不上");
+        assert!(
+            install(
+                &mut harness.window.document,
+                Appearance::from_shell(&shell, None)
+            )
+            .is_some(),
+            "主题装不上"
+        );
         harness.finish_motion();
         let scroll = harness.keyed("settings-scroll").expect("设置页的滚动区");
-        let world = |harness: &ShellHarness| harness.document().context().world().component_geometry(scroll);
+        let world = |harness: &ShellHarness| {
+            harness
+                .document()
+                .context()
+                .world()
+                .component_geometry(scroll)
+        };
         let content = |harness: &ShellHarness| {
             let document = harness.document();
             let world = document.context().world();
-            let child = world.document_order(document.document()).into_iter().find(|id| world.parent_id(*id) == Some(scroll));
+            let child = world
+                .document_order(document.document())
+                .into_iter()
+                .find(|id| world.parent_id(*id) == Some(scroll));
             child.and_then(|child| world.layout_box(child))
         };
         assert!(world(&harness).is_none(), "指针不在滚动区上时不画滚动条");
         let resting = content(&harness).expect("滚动内容");
 
         let (x, y) = harness.center(scroll);
-        harness.pointer(nana_ui::PointerPhase::Move, x, y, nana_ui::InputModifiers::default());
+        harness.pointer(
+            nana_ui::PointerPhase::Move,
+            x,
+            y,
+            nana_ui::InputModifiers::default(),
+        );
         harness.finish_motion();
-        let Some(ComponentGeometry::Scrollbar { vertical: Some(bar), horizontal: None }) = world(&harness) else {
+        let Some(ComponentGeometry::Scrollbar {
+            vertical: Some(bar),
+            horizontal: None,
+        }) = world(&harness)
+        else {
             panic!("指针在设置页上时竖向滚动条要显示：{:?}", world(&harness));
         };
-        let bounds = harness.document().context().world().layout_box(scroll).expect("滚动区的布局盒");
-        let border_strong = harness.document().context().world().style_model().color(SemanticColorRole::BorderStrong);
+        let bounds = harness
+            .document()
+            .context()
+            .world()
+            .layout_box(scroll)
+            .expect("滚动区的布局盒");
+        let border_strong = harness
+            .document()
+            .context()
+            .world()
+            .style_model()
+            .color(SemanticColorRole::BorderStrong);
         assert_eq!(bar.thumb.width, 4.0, "滑块 4px");
         assert_eq!(bar.lane.width, 12.0, "悬停和拖动区 12px");
-        assert!((bounds.x + bounds.width - (bar.lane.x + bar.lane.width)).abs() < 0.01, "车道贴着滚动区右边");
-        assert!((bounds.x + bounds.width - (bar.thumb.x + bar.thumb.width) - 4.0).abs() < 0.01, "滑块在车道正中，离右边 4px");
-        assert_eq!(bar.thumb_background, border_strong.as_rgba_array(), "淡入完是不透明的 --border-strong");
+        assert!(
+            (bounds.x + bounds.width - (bar.lane.x + bar.lane.width)).abs() < 0.01,
+            "车道贴着滚动区右边"
+        );
+        assert!(
+            (bounds.x + bounds.width - (bar.thumb.x + bar.thumb.width) - 4.0).abs() < 0.01,
+            "滑块在车道正中，离右边 4px"
+        );
+        assert_eq!(
+            bar.thumb_background,
+            border_strong.as_rgba_array(),
+            "淡入完是不透明的 --border-strong"
+        );
         assert_eq!(bar.track_background, None, "没有轨道");
-        assert_eq!(content(&harness), Some(resting), "滚动条叠在内容上，不占布局");
+        assert_eq!(
+            content(&harness),
+            Some(resting),
+            "滚动条叠在内容上，不占布局"
+        );
     }
 
     #[test]

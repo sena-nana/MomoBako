@@ -33,21 +33,32 @@ impl HostMessage {
 }
 
 /// 归约一条宿主事件。调用方负责把随后的效果发给领域服务。
-pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) -> Option<ShellMessage> {
+pub(crate) fn reduce_message(
+    model: &mut ShellViewModel,
+    message: ShellMessage,
+) -> Option<ShellMessage> {
     let ShellMessage::Host(message) = message else {
         return Some(message);
     };
     match message {
         HostMessage::LogRecorded(record) => note_log(model, record),
-        HostMessage::StructureUpdated { repo_id, reason } => refresh_structure(model, &repo_id, &reason),
+        HostMessage::StructureUpdated { repo_id, reason } => {
+            refresh_structure(model, &repo_id, &reason)
+        }
     }
     None
 }
 
 /// 实时日志并入管理列表。同步分类在启动加载中才进入启动日志，明细是记录的 `context`。
 fn note_log(model: &mut ShellViewModel, record: SystemLogRecord) {
-    let mirrored = (record.category == SYNC_LOG_CATEGORY)
-        .then(|| (record.source.repo_id.clone(), record.level.clone(), record.message.clone(), record.context.clone()));
+    let mirrored = (record.category == SYNC_LOG_CATEGORY).then(|| {
+        (
+            record.source.repo_id.clone(),
+            record.level.clone(),
+            record.message.clone(),
+            record.context.clone(),
+        )
+    });
     model.admin.merge_log(record);
     let Some((record_repo, level, message, context)) = mirrored else {
         return;
@@ -59,7 +70,10 @@ fn note_log(model: &mut ShellViewModel, record: SystemLogRecord) {
             return;
         }
     }
-    model.workspace.startup.append_sync_log(&level, message, &context);
+    model
+        .workspace
+        .startup
+        .append_sync_log(&level, message, &context);
 }
 
 /// 只在工作区内容读好以后（启动完成，或首屏启动只在等设置包）刷新当前仓库。缺失仓库和别的仓库直接返回。
@@ -85,9 +99,17 @@ fn refresh_structure(model: &mut ShellViewModel, repo_id: &str, reason: &str) {
         model.files.reload_silent(&context);
     }
     model.files.refresh_hardlinks_silent(repo_id);
-    model.workspace.effects.push(WorkspaceEffect::RefreshRepositoriesSilent);
+    model
+        .workspace
+        .effects
+        .push(WorkspaceEffect::RefreshRepositoriesSilent);
     if model.workspace.active_repo_id.is_some() {
-        model.workspace.effects.push(WorkspaceEffect::LoadSnapshotSilent { repo_id: repo_id.to_string() });
+        model
+            .workspace
+            .effects
+            .push(WorkspaceEffect::LoadSnapshotSilent {
+                repo_id: repo_id.to_string(),
+            });
     }
 }
 
@@ -97,7 +119,13 @@ mod tests {
     use crate::backend::services::repository::{SystemLogLocation, SystemLogSource};
     use crate::shell::{LibraryCategory, ShellViewModel, StartupStatus, WorkspaceRepository};
 
-    fn record(id: &str, timestamp: &str, category: &str, repo_id: &str, message: &str) -> SystemLogRecord {
+    fn record(
+        id: &str,
+        timestamp: &str,
+        category: &str,
+        repo_id: &str,
+        message: &str,
+    ) -> SystemLogRecord {
         SystemLogRecord {
             id: id.into(),
             timestamp: timestamp.into(),
@@ -114,6 +142,35 @@ mod tests {
             location: SystemLogLocation::default(),
             context: serde_json::Value::Null,
         }
+    }
+
+    /// 静默失败前后对照用的一行文件。已经有缩略图，归约收尾不会再排生成。
+    fn kept_file(path: &str, name: &str) -> crate::shell::FileRow {
+        use std::collections::BTreeMap;
+        crate::shell::FileRow::from_entry(&crate::backend::services::repository::FileBrowserEntry {
+            path: path.into(),
+            name: name.into(),
+            kind: "file".into(),
+            extension: None,
+            size_bytes: None,
+            size_label: None,
+            modified_at: None,
+            asset_id: None,
+            status: None,
+            thumbnail_path: Some("cache/a.png".into()),
+            thumbnail_custom: false,
+            hardlink_group_id: None,
+            hardlink_state: None,
+            tags: Vec::new(),
+            alias_paths: Vec::new(),
+            folder_metadata: None,
+            metadata: BTreeMap::new(),
+            is_virtual: false,
+            provider_id: None,
+            provider_item_id: None,
+            source_payload: None,
+            local_absolute_path: None,
+        })
     }
 
     fn repository(status: &str) -> WorkspaceRepository {
@@ -154,11 +211,25 @@ mod tests {
     fn logs_merge_by_id_and_keep_newest_first() {
         let mut model = ShellViewModel::default();
         model.admin.log_paused = true;
-        send(&mut model, HostMessage::LogRecorded(record("a", "2020", "plugin", "", "旧")));
-        send(&mut model, HostMessage::LogRecorded(record("b", "2021", "plugin", "", "新")));
-        send(&mut model, HostMessage::LogRecorded(record("a", "2022", "plugin", "", "替换")));
+        send(
+            &mut model,
+            HostMessage::LogRecorded(record("a", "2020", "plugin", "", "旧")),
+        );
+        send(
+            &mut model,
+            HostMessage::LogRecorded(record("b", "2021", "plugin", "", "新")),
+        );
+        send(
+            &mut model,
+            HostMessage::LogRecorded(record("a", "2022", "plugin", "", "替换")),
+        );
         assert_eq!(
-            model.admin.logs.iter().map(|item| item.id.as_str()).collect::<Vec<_>>(),
+            model
+                .admin
+                .logs
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
             vec!["a", "b"]
         );
         assert_eq!(model.admin.logs[0].message, "替换");
@@ -166,7 +237,13 @@ mod tests {
         for index in 0..501 {
             send(
                 &mut model,
-                HostMessage::LogRecorded(record(&format!("n{index}"), &format!("2030-{index:04}"), "plugin", "", "多")),
+                HostMessage::LogRecorded(record(
+                    &format!("n{index}"),
+                    &format!("2030-{index:04}"),
+                    "plugin",
+                    "",
+                    "多",
+                )),
             );
         }
         assert_eq!(model.admin.logs.len(), 500);
@@ -180,17 +257,41 @@ mod tests {
         model.workspace.active_repo_id = Some("repo".into());
         let begun = vec!["首屏启动流程开始。"];
         let messages = |model: &ShellViewModel| {
-            model.workspace.startup.logs.iter().map(|item| item.message.clone()).collect::<Vec<_>>()
+            model
+                .workspace
+                .startup
+                .logs
+                .iter()
+                .map(|item| item.message.clone())
+                .collect::<Vec<_>>()
         };
-        send(&mut model, HostMessage::LogRecorded(record("1", "2020", "plugin", "repo", "插件")));
+        send(
+            &mut model,
+            HostMessage::LogRecorded(record("1", "2020", "plugin", "repo", "插件")),
+        );
         assert_eq!(messages(&model), begun);
-        send(&mut model, HostMessage::LogRecorded(record("2", "2020", SYNC_LOG_CATEGORY, "other", "别处")));
+        send(
+            &mut model,
+            HostMessage::LogRecorded(record("2", "2020", SYNC_LOG_CATEGORY, "other", "别处")),
+        );
         assert_eq!(messages(&model), begun);
-        send(&mut model, HostMessage::LogRecorded(record("3", "2020", SYNC_LOG_CATEGORY, "", "没有仓库")));
-        send(&mut model, HostMessage::LogRecorded(record("4", "2020", SYNC_LOG_CATEGORY, "repo", "当前库")));
-        assert_eq!(messages(&model), vec!["首屏启动流程开始。", "没有仓库", "当前库"]);
+        send(
+            &mut model,
+            HostMessage::LogRecorded(record("3", "2020", SYNC_LOG_CATEGORY, "", "没有仓库")),
+        );
+        send(
+            &mut model,
+            HostMessage::LogRecorded(record("4", "2020", SYNC_LOG_CATEGORY, "repo", "当前库")),
+        );
+        assert_eq!(
+            messages(&model),
+            vec!["首屏启动流程开始。", "没有仓库", "当前库"]
+        );
         model.workspace.startup.finish();
-        send(&mut model, HostMessage::LogRecorded(record("5", "2020", SYNC_LOG_CATEGORY, "repo", "完成后")));
+        send(
+            &mut model,
+            HostMessage::LogRecorded(record("5", "2020", SYNC_LOG_CATEGORY, "repo", "完成后")),
+        );
         assert_eq!(model.workspace.startup.logs.len(), 3);
         assert_eq!(model.admin.logs.len(), 5);
     }
@@ -199,32 +300,70 @@ mod tests {
     fn structure_updates_refresh_the_ready_repository_only() {
         let mut loading = ready(WorkspacePanel::Files);
         loading.workspace.startup.begin();
-        send(&mut loading, HostMessage::StructureUpdated { repo_id: "repo".into(), reason: "watcher".into() });
+        send(
+            &mut loading,
+            HostMessage::StructureUpdated {
+                repo_id: "repo".into(),
+                reason: "watcher".into(),
+            },
+        );
         assert!(loading.sidebar.take_effects().is_empty());
         assert!(loading.workspace.effects.is_empty());
 
         let mut other = ready(WorkspacePanel::Files);
-        send(&mut other, HostMessage::StructureUpdated { repo_id: "other".into(), reason: "watcher".into() });
+        send(
+            &mut other,
+            HostMessage::StructureUpdated {
+                repo_id: "other".into(),
+                reason: "watcher".into(),
+            },
+        );
         assert!(other.sidebar.take_effects().is_empty());
         assert!(other.files.take_effects().is_empty());
         assert!(other.workspace.effects.is_empty());
 
         let mut missing = ready(WorkspacePanel::Files);
         missing.workspace.repositories[0].status = "missing".into();
-        send(&mut missing, HostMessage::StructureUpdated { repo_id: "repo".into(), reason: "watcher".into() });
+        send(
+            &mut missing,
+            HostMessage::StructureUpdated {
+                repo_id: "repo".into(),
+                reason: "watcher".into(),
+            },
+        );
         assert!(missing.files.take_effects().is_empty());
         assert!(missing.workspace.effects.is_empty());
 
         let mut files = ready(WorkspacePanel::Files);
         files.files.current_path = "photos".into();
+        files.files.rows = vec![kept_file("photos/a", "a.txt")];
         files.files.selected = vec!["photos/a".into()];
         files.files.primary = Some("photos/a".into());
         files.page = crate::shell::ShellPage::FileList;
-        send(&mut files, HostMessage::StructureUpdated { repo_id: "repo".into(), reason: "watcher".into() });
+        send(
+            &mut files,
+            HostMessage::StructureUpdated {
+                repo_id: "repo".into(),
+                reason: "watcher".into(),
+            },
+        );
         let sidebar_effects = files.sidebar.take_effects();
-        assert!(sidebar_effects.iter().any(|effect| matches!(effect, crate::shell::SidebarEffect::LoadTree { .. })));
-        assert!(sidebar_effects.iter().any(|effect| matches!(effect, crate::shell::SidebarEffect::LoadSmartFolders { .. })));
-        assert!(sidebar_effects.iter().any(|effect| matches!(effect, crate::shell::SidebarEffect::LoadPlaylists { .. })));
+        assert!(
+            sidebar_effects
+                .iter()
+                .any(|effect| matches!(effect, crate::shell::SidebarEffect::LoadTree { .. }))
+        );
+        assert!(
+            sidebar_effects.iter().any(|effect| matches!(
+                effect,
+                crate::shell::SidebarEffect::LoadSmartFolders { .. }
+            ))
+        );
+        assert!(
+            sidebar_effects
+                .iter()
+                .any(|effect| matches!(effect, crate::shell::SidebarEffect::LoadPlaylists { .. }))
+        );
         let browse = files.files.take_effects();
         assert!(matches!(
             browse.as_slice(),
@@ -237,6 +376,8 @@ mod tests {
         assert_eq!(files.files.selected, vec!["photos/a".to_string()]);
         assert_eq!(files.files.primary.as_deref(), Some("photos/a"));
         assert!(files.files.note_load_failed("读取失败"));
+        assert_eq!(files.files.entry_names(), vec!["a.txt".to_string()]);
+        assert_eq!(files.files.error, "");
         assert_eq!(files.page, crate::shell::ShellPage::FileList);
         assert_eq!(files.workspace.startup.status, StartupStatus::Ready);
         assert_eq!(files.workspace.list_generation, 0);
@@ -244,7 +385,9 @@ mod tests {
             files.workspace.take_effects(),
             vec![
                 WorkspaceEffect::RefreshRepositoriesSilent,
-                WorkspaceEffect::LoadSnapshotSilent { repo_id: "repo".into() },
+                WorkspaceEffect::LoadSnapshotSilent {
+                    repo_id: "repo".into()
+                },
             ]
         );
         assert!(matches!(
@@ -254,7 +397,13 @@ mod tests {
 
         let mut trash = ready(WorkspacePanel::Trash);
         trash.files.current_path = "bin".into();
-        send(&mut trash, HostMessage::StructureUpdated { repo_id: "repo".into(), reason: "watcher".into() });
+        send(
+            &mut trash,
+            HostMessage::StructureUpdated {
+                repo_id: "repo".into(),
+                reason: "watcher".into(),
+            },
+        );
         assert!(matches!(
             trash.files.take_effects().as_slice(),
             [
@@ -265,7 +414,13 @@ mod tests {
 
         let mut category = ready(WorkspacePanel::Files);
         category.workspace.library_category = LibraryCategory::Untagged;
-        send(&mut category, HostMessage::StructureUpdated { repo_id: "repo".into(), reason: "watcher".into() });
+        send(
+            &mut category,
+            HostMessage::StructureUpdated {
+                repo_id: "repo".into(),
+                reason: "watcher".into(),
+            },
+        );
         assert!(matches!(
             category.files.take_effects().as_slice(),
             [crate::shell::FilesEffect::RefreshHardlinks { repo_id, .. }] if repo_id == "repo"
@@ -273,7 +428,13 @@ mod tests {
 
         let mut playlist = ready(WorkspacePanel::Playlist);
         playlist.sidebar.active_playlist_id = Some("list".into());
-        send(&mut playlist, HostMessage::StructureUpdated { repo_id: "repo".into(), reason: "watcher".into() });
+        send(
+            &mut playlist,
+            HostMessage::StructureUpdated {
+                repo_id: "repo".into(),
+                reason: "watcher".into(),
+            },
+        );
         assert!(playlist.sidebar.take_effects().iter().any(|effect| {
             matches!(effect, crate::shell::SidebarEffect::LoadPlaylistDetail { playlist_id, .. } if playlist_id == "list")
         }));
@@ -284,9 +445,23 @@ mod tests {
 
         let mut busy = ready(WorkspacePanel::Files);
         busy.sidebar.tree_loading = true;
-        send(&mut busy, HostMessage::StructureUpdated { repo_id: "repo".into(), reason: "watcher".into() });
+        send(
+            &mut busy,
+            HostMessage::StructureUpdated {
+                repo_id: "repo".into(),
+                reason: "watcher".into(),
+            },
+        );
         let busy_effects = busy.sidebar.take_effects();
-        assert!(!busy_effects.iter().any(|effect| matches!(effect, crate::shell::SidebarEffect::LoadTree { .. })));
-        assert!(busy_effects.iter().any(|effect| matches!(effect, crate::shell::SidebarEffect::LoadPlaylists { .. })));
+        assert!(
+            !busy_effects
+                .iter()
+                .any(|effect| matches!(effect, crate::shell::SidebarEffect::LoadTree { .. }))
+        );
+        assert!(
+            busy_effects
+                .iter()
+                .any(|effect| matches!(effect, crate::shell::SidebarEffect::LoadPlaylists { .. }))
+        );
     }
 }

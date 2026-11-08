@@ -7,8 +7,8 @@
 use std::collections::BTreeMap;
 
 use crate::backend::services::repository::{
-    ApiDesignSnapshot, CacheSnapshot, PluginConfigSnapshot, PluginHookExecutionRecord, PluginManifest, RepositoryAction,
-    RepositorySummary, SystemLogRecord, SystemLogWriteRequest,
+    ApiDesignSnapshot, CacheSnapshot, PluginConfigSnapshot, PluginHookExecutionRecord,
+    PluginManifest, RepositoryAction, RepositorySummary, SystemLogRecord, SystemLogWriteRequest,
 };
 use crate::backend::services::runtime::ExternalApiConnectionStatus;
 
@@ -19,38 +19,37 @@ use super::{ShellMessage, ShellViewModel, WorkspacePanel};
 pub(crate) mod support;
 #[path = "admin_time.rs"]
 mod time;
-#[path = "admin_style.rs"]
-pub(crate) mod style;
-#[path = "admin_icons.rs"]
-pub(crate) mod icons;
+pub(crate) use time::iso8601_from_unix_ms;
+#[path = "admin_actions_view.rs"]
+mod actions_view;
+#[path = "api_playground.rs"]
+pub(crate) mod api;
 #[path = "admin_bind.rs"]
 pub(crate) mod bind;
-#[path = "admin_reduce.rs"]
-mod reduce;
-#[path = "admin_view.rs"]
-mod view;
-#[path = "admin_settings_state.rs"]
-mod settings_state;
-#[path = "admin_settings_view.rs"]
-mod settings_view;
-#[path = "admin_plugins_state.rs"]
-mod plugins_state;
-#[path = "admin_plugins_view.rs"]
-mod plugins_view;
-#[path = "admin_plugin_card.rs"]
-mod plugin_card;
+#[path = "admin_downloader.rs"]
+mod downloader;
+#[path = "admin_icons.rs"]
+pub(crate) mod icons;
 #[path = "admin_logs_state.rs"]
 mod logs_state;
 #[path = "admin_logs_view.rs"]
 mod logs_view;
-#[path = "admin_actions_view.rs"]
-mod actions_view;
-#[path = "admin_gap.rs"]
-mod tools;
-#[path = "tool_native.rs"]
-mod tool_native;
-#[path = "api_playground.rs"]
-pub(crate) mod api;
+#[path = "admin_office_convert.rs"]
+mod office;
+#[path = "admin_plugin_card.rs"]
+mod plugin_card;
+#[path = "admin_plugins_state.rs"]
+mod plugins_state;
+#[path = "admin_plugins_view.rs"]
+mod plugins_view;
+#[path = "admin_reduce.rs"]
+mod reduce;
+#[path = "admin_settings_state.rs"]
+mod settings_state;
+#[path = "admin_settings_view.rs"]
+mod settings_view;
+#[path = "source_download.rs"]
+pub(crate) mod source_download;
 #[path = "source_auth_page.rs"]
 mod source_page;
 #[path = "source_provision.rs"]
@@ -59,58 +58,93 @@ pub(crate) mod source_provision;
 pub(crate) mod source_target;
 #[path = "source_target_view.rs"]
 mod source_target_view;
-#[path = "source_download.rs"]
-pub(crate) mod source_download;
+#[path = "admin_style.rs"]
+pub(crate) mod style;
+#[path = "tool_native.rs"]
+mod tool_native;
+#[path = "admin_gap.rs"]
+mod tools;
+#[path = "admin_view.rs"]
+mod view;
 
-pub(crate) use actions_view::{actions_panel, ActionsSignals, ActionsView};
+pub(crate) use actions_view::{ActionsSignals, ActionsView, actions_panel};
 pub(crate) use logs_state::{LogsSignals, LogsView};
-pub(crate) use logs_view::logs_panel;
 #[cfg(test)]
 pub(crate) use logs_view::LIST_FLOOR as LOG_LIST_FLOOR;
+pub(crate) use logs_view::logs_panel;
 pub(crate) use plugins_state::{PluginPanelSignals, PluginPanelView};
 pub(crate) use plugins_view::delete_dialog as plugin_delete_dialog;
 pub(crate) use reduce::{open_settings_page, reduce_message, settle_directory_open};
 pub(crate) use settings_state::{SettingsSignals, SettingsView};
 pub(crate) use settings_view::settings_page;
 pub(crate) use source_provision::SourceAuthState;
-pub(crate) use source_target_view::target_dialog as download_target_dialog;
 pub use source_provision::SourceStep;
-pub(crate) use tools::{extensions_page, ToolsSignals};
+pub(crate) use source_target_view::target_dialog as download_target_dialog;
+pub(crate) use tool_native::{
+    arm_tool_file_import, begin_tool_file_import, drop_tool_file_import, eagle_import_report,
+    note_file_import_settled, note_import_settled as note_eagle_import_settled,
+};
+pub(crate) use tools::{ToolsSignals, extensions_page};
 pub(crate) use view::{task_fill_targets, task_popover};
 
 #[cfg(test)]
-#[path = "admin_tests.rs"]
-mod tests;
-#[cfg(test)]
 #[path = "admin_settings_tests.rs"]
 mod settings_tests;
+#[cfg(test)]
+#[path = "admin_tests.rs"]
+mod tests;
 
 /// 插件配置、安装、日志筛选、任务弹层、来源登录和仓库动作消息。
 #[derive(Clone, Debug)]
 pub enum AdminMessage {
     SetKeyword(String),
-    SetEnabled { plugin_id: String, enabled: bool },
+    SetEnabled {
+        plugin_id: String,
+        enabled: bool,
+    },
     RequestDelete(String),
     CancelDelete,
     ConfirmDelete,
     ToggleSettings(String),
     RoutePlugin(String),
     /// 选项或勾选的字段值，选了就提交。
-    ConfigInput { plugin_id: String, key: String, text: String, checked: Option<bool> },
+    ConfigInput {
+        plugin_id: String,
+        key: String,
+        text: String,
+        checked: Option<bool>,
+    },
     /// 单行字段的草稿，回车或失焦时提交（[`AdminMessage::CommitDraft`]）。
-    FieldDraft { plugin_id: String, key: String, value: String },
+    FieldDraft {
+        plugin_id: String,
+        key: String,
+        value: String,
+    },
     /// JSON 字段的草稿，失焦时提交。
-    JsonDraft { plugin_id: String, key: String, value: String },
+    JsonDraft {
+        plugin_id: String,
+        key: String,
+        value: String,
+    },
     /// 单行字段回车，单行和 JSON 字段失焦：草稿和现在的值不同才提交（Vue 文本框的 `@change`、JSON 文本域的
     /// `@blur`）。
-    CommitDraft { plugin_id: String, key: String },
-    ResetConfig { plugin_id: String, key: String },
+    CommitDraft {
+        plugin_id: String,
+        key: String,
+    },
+    ResetConfig {
+        plugin_id: String,
+        key: String,
+    },
     ChooseArchive,
     RefreshPlugins,
     InstallArchive(Option<String>),
     PluginsReplaced(Result<Vec<PluginManifest>, String>),
     OpenDataDirectory(String),
-    DataDirectoryFinished { name: String, result: Result<String, String> },
+    DataDirectoryFinished {
+        name: String,
+        result: Result<String, String>,
+    },
     HooksLoaded(Result<Vec<PluginHookExecutionRecord>, String>),
     CacheLoaded(Result<CacheSnapshot, String>),
     ApiDesignLoaded(Result<ApiDesignSnapshot, String>),
@@ -124,7 +158,10 @@ pub enum AdminMessage {
     },
     SetCornerStyle(String),
     SetCornerRadius(String),
-    CopyExternal { label: String, value: String },
+    CopyExternal {
+        label: String,
+        value: String,
+    },
     ExportExternal,
     CompleteExport(Option<String>),
     WriteFinished(Result<(), String>),
@@ -143,10 +180,17 @@ pub enum AdminMessage {
     ToggleTaskPopover,
     /// 弹层头部的关闭按钮和弹层外的点击层。Escape 走全局的 [`crate::shell::escape_layer`]。
     CloseTaskPopover,
+    /// 取消一个排队或运行中的后台任务。仓库操作行和已经在取消的任务不发请求。
+    CancelTask(String),
     SelectAction(String),
     RunAction(Option<String>),
-    ActionsLoaded { repo_id: String, result: Result<Vec<RepositoryAction>, String> },
-    ActionRunFinished { result: Result<RepositoryAction, String> },
+    ActionsLoaded {
+        repo_id: String,
+        result: Result<Vec<RepositoryAction>, String>,
+    },
+    ActionRunFinished {
+        result: Result<RepositoryAction, String>,
+    },
     SetToolPages(Vec<ToolPageEntry>),
     SelectToolPage(String),
     /// API Playground 上的输入和请求。
@@ -159,10 +203,16 @@ pub enum AdminMessage {
         repository_id: Option<String>,
     },
     /// 文件插件动作（清理缓存、重新获取播放资源）结束。成功刷新资源库，失败写到文件错误。
-    FilePluginFinished { method: String, result: Result<serde_json::Value, String> },
+    FilePluginFinished {
+        method: String,
+        result: Result<serde_json::Value, String>,
+    },
     /// 来源下载结束（到本地或到其他资源库）：插件交回的结果和导入时跳过的同名文件，带着开始时的下载回来
     /// （`source_download.rs`）。
-    DownloadFinished { run: source_download::DownloadRun, result: Result<source_download::DownloadOutcome, String> },
+    DownloadFinished {
+        run: source_download::DownloadRun,
+        result: Result<source_download::DownloadOutcome, String>,
+    },
     /// 宿主写系统日志的结果。写不进去时只记标准错误。
     LogsWritten(Result<(), String>),
     /// 文件右键里的「下载到其他资源库」：一个候选直接下载，几个候选弹出「选择目标资源库」（`source_target.rs`）。
@@ -172,25 +222,67 @@ pub enum AdminMessage {
     /// 「选择目标资源库」的取消、点外面和 Escape。
     CancelDownloadRepository,
     /// 文件右键里的「创建播放列表」：在本地建来源歌单对应的播放集，再把目录加进去（Vue `runPlaylistAction`）。
-    CreateSourcePlaylist { playlist: super::entry_actions::SourcePlaylist, repository_id: Option<String> },
+    CreateSourcePlaylist {
+        playlist: super::entry_actions::SourcePlaylist,
+        repository_id: Option<String>,
+    },
     /// 来源播放集建好、目录加进去了，或者哪一步失败了。
     SourcePlaylistFinished(Result<(), String>),
     /// 来源登录：连接新账号或重新登录。`repo_id` 为空是连接新账号。
-    BeginSourceAuth { plugin_id: String, repo_id: Option<String> },
+    BeginSourceAuth {
+        plugin_id: String,
+        repo_id: Option<String>,
+    },
     /// 来源登录：查询仓库登录状态。
-    CheckSourceAuth { plugin_id: String, repo_id: String },
+    CheckSourceAuth {
+        plugin_id: String,
+        repo_id: String,
+    },
     /// 来源登录：退出仓库账号，仓库和缓存保留。
-    ClearSourceAuth { plugin_id: String, repo_id: String },
+    ClearSourceAuth {
+        plugin_id: String,
+        repo_id: String,
+    },
     /// 来源登录：取消扫码会话。
     CancelSourceAuth,
     /// 来源登录：检查扫码结果，成功后创建或更新仓库。
-    PollSourceAuth { plugin_id: String },
+    PollSourceAuth {
+        plugin_id: String,
+    },
     /// 来源登录：排队选择缓存目录。取消时不改。
     ChooseSourceCache,
     /// 来源缓存目录对话框的结果。
     SetSourceCachePath(String),
+    /// Eagle 导入页：排队选择 EagleLibrary 目录。取消或失败不改页面上的路径。
+    ChooseEagleLibrary,
+    /// 系统文件夹对话框交回的 EagleLibrary 目录。空白不写入。
+    SetEagleLibraryPath(String),
+    /// 用页面上已经选中的目录提交 Eagle 导入。没有路径时不调用协议。
+    RunEagleImport(String),
     /// 来源登录流程里一步结束。
-    SourceStepFinished { step: SourceStep, result: Result<serde_json::Value, String> },
+    SourceStepFinished {
+        step: SourceStep,
+        result: Result<serde_json::Value, String>,
+    },
+    /// 下载服务设置里的「刷新」：再读一次 `downloader.getRuntimeStatus`。
+    RefreshDownloaderStatus,
+    /// 下载服务运行状态回来了。
+    DownloaderStatusLoaded(Result<serde_json::Value, String>),
+    /// Office 转换设置里的「刷新」：再读一次 `officeConvert.getRuntimeStatus`。
+    RefreshOfficeStatus,
+    /// 资源库缓存清理的下拉框换了资源库。空字符串是「选择资源库」。
+    SelectOfficeRepository(String),
+    /// 「运行自检」：`officeConvert.runRuntimeSelfCheck`。
+    RunOfficeSelfCheck,
+    /// 「关闭守护进程」：`officeConvert.shutdownDaemon`。没在运行时不调用。
+    ShutdownOfficeDaemon,
+    /// 「清理缓存」：`officeConvert.clearPreviewCache`。没选资源库时不调用。
+    ClearOfficeCache,
+    /// Office 转换设置页的插件调用回来了。
+    OfficeCallFinished {
+        call: OfficeCall,
+        result: Result<serde_json::Value, String>,
+    },
 }
 
 /// 插件调用从哪来。登录结果和文件菜单结果不能混在一起。
@@ -204,7 +296,27 @@ pub enum PluginCallOrigin {
     /// API Playground 的插件调用。
     Playground,
     /// ASMR「抓取候选」：结果交回 ASMR 候选区，按这里记的仓库和素材认是哪个文件的。
-    AsmrLookup { repo_id: String, asset_id: String },
+    AsmrLookup {
+        repo_id: String,
+        asset_id: String,
+    },
+    /// 下载服务设置页的运行状态。结果回 [`AdminMessage::DownloaderStatusLoaded`]。
+    DownloaderStatus,
+    /// Office 转换设置页。结果回 [`AdminMessage::OfficeCallFinished`]。
+    OfficeConvert(OfficeCall),
+}
+
+/// Office 转换设置页上的一次插件调用。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OfficeCall {
+    /// `officeConvert.getRuntimeStatus`。
+    Status,
+    /// `officeConvert.runRuntimeSelfCheck`。
+    SelfCheck,
+    /// `officeConvert.shutdownDaemon`。
+    Shutdown,
+    /// `officeConvert.clearPreviewCache`。
+    ClearCache,
 }
 
 pub use super::repo_operation::OperationProgress;
@@ -232,20 +344,46 @@ pub enum AdminEffect {
     LoadPlaylistPlayers,
     Install(String),
     DeletePlugin(String),
-    SetEnabled { plugin_id: String, enabled: bool },
-    SetConfig { plugin_id: String, key: String, value: serde_json::Value },
-    DeleteConfig { plugin_id: String, key: String },
+    SetEnabled {
+        plugin_id: String,
+        enabled: bool,
+    },
+    SetConfig {
+        plugin_id: String,
+        key: String,
+        value: serde_json::Value,
+    },
+    DeleteConfig {
+        plugin_id: String,
+        key: String,
+    },
     LoadConfig(String),
-    OpenDataDirectory { plugin_id: String, name: String },
-    LoadActions { repo_id: String },
-    RunAction { repo_id: String, action_id: String, paths: Vec<String> },
+    OpenDataDirectory {
+        plugin_id: String,
+        name: String,
+    },
+    /// 取消排队或运行中的后台任务。结果由任务观察线程把状态改成取消中以后刷回弹层。
+    CancelTask(String),
+    LoadActions {
+        repo_id: String,
+    },
+    RunAction {
+        repo_id: String,
+        action_id: String,
+        paths: Vec<String>,
+    },
     PersistCorners,
     /// 主题改动后立即写设置文件。
     SaveSettings,
     CopyText(String),
     RequestOpenDialog,
-    RequestSaveDialog { content: String },
-    WriteFile { path: String, bytes: Vec<u8> },
+    RequestSaveDialog {
+        content: String,
+    },
+    WriteFile {
+        path: String,
+        bytes: Vec<u8>,
+    },
     /// 调用插件方法。来源登录可带仓库；文件动作带上当前仓库。
     CallPlugin {
         plugin_id: String,
@@ -255,17 +393,35 @@ pub enum AdminEffect {
         origin: PluginCallOrigin,
     },
     /// 建来源歌单对应的播放集（已经有就不建），再把目录加进去。
-    CreateSourcePlaylist { repo_id: String, playlist_id: String, name: String, player_type_id: String, path: String },
+    CreateSourcePlaylist {
+        repo_id: String,
+        playlist_id: String,
+        name: String,
+        player_type_id: String,
+        path: String,
+    },
     /// 来源下载到其他资源库：调用插件（载荷里已经写好目标），把下载回来的文件导入目标资源库的 `parent_path`
     /// （没有这个文件夹时先在目标资源库下建）并同步它。插件、来源资源库和目标资源库都在 `run` 里，结果回
     /// [`AdminMessage::DownloadFinished`]。
-    DownloadToRepository { run: source_download::DownloadRun, payload: serde_json::Value, parent_path: Option<String> },
+    DownloadToRepository {
+        run: source_download::DownloadRun,
+        payload: serde_json::Value,
+        parent_path: Option<String>,
+    },
     /// 写系统日志（来源下载里失败的条目这类要留给「日志」页的记录），结果回 [`AdminMessage::LogsWritten`]。
     WriteLogs(Vec<SystemLogWriteRequest>),
     /// 来源登录成功后更新已有仓库的后端配置。
-    UpdateBackendConfig { repo_id: String, backend_config: serde_json::Value, step: SourceStep },
+    UpdateBackendConfig {
+        repo_id: String,
+        backend_config: serde_json::Value,
+        step: SourceStep,
+    },
     /// 需要本地缓存的来源仓库写入缓存目录，并迁移旧缓存。
-    ConfigureSourceCache { repo_id: String, path: String, step: SourceStep },
+    ConfigureSourceCache {
+        repo_id: String,
+        path: String,
+        step: SourceStep,
+    },
     /// 跳过首次同步创建来源仓库。
     CreateSourceRepository {
         repo_id: String,
@@ -275,9 +431,18 @@ pub enum AdminEffect {
         backend_config: serde_json::Value,
     },
     /// 后台同步来源仓库，完成后刷新仓库列表。
-    SyncRepository { repo_id: String },
+    SyncRepository {
+        repo_id: String,
+    },
     /// API Playground 发出的外部 HTTP 请求。
     HttpRequest(api::HttpRequest),
+}
+
+/// 文件导入工具页这次在等的导入：文件夹或 ZIP。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ToolFileImport {
+    Folder,
+    Zip,
 }
 
 #[derive(Clone, Debug)]
@@ -305,6 +470,10 @@ pub struct AdminState {
     pub(crate) settings_sync: crate::settings::SettingsSync,
     /// 来源认证页的会话、缓存目录和提示。换插件或收起设置时重置。
     pub source_auth: SourceAuthState,
+    /// 下载服务设置页的 aria2 运行状态。收起设置或换插件时清空。
+    pub(crate) downloader: downloader::DownloaderRuntime,
+    /// Office 转换设置页的运行状态、自检和缓存清理。收起设置或换插件时清空。
+    pub(crate) office: office::OfficeRuntime,
     /// 最近一次仓库列表的完整摘要。来源认证页要读登录状态和本地缓存路径。
     pub repository_summaries: Vec<RepositorySummary>,
     pub logs: Vec<SystemLogRecord>,
@@ -333,6 +502,24 @@ pub struct AdminState {
     actions_repo_id: Option<String>,
     pub tool_pages: Vec<ToolPageEntry>,
     pub active_tool_page_id: Option<String>,
+    /// Eagle 导入页选中的 EagleLibrary 目录。空字符串表示还没选，页面显示「尚未选择」。
+    pub eagle_library_path: String,
+    /// 最近一次 Eagle 导入响应里真有文件数、目录数和警告时的结果。没有返回、失败或缺字段时不画结果卡。
+    pub eagle_import: Option<super::files::EagleImportReport>,
+    /// 工具页这次 Eagle 导入还没回来。复制按钮在这期间写「处理中...」。
+    pub eagle_importing: bool,
+    /// 这次提交真正交给协议的目标目录。空表示根目录或没有路径，成功时不写完成提示。
+    eagle_pending_directory: String,
+    /// 这次提交的模式，`copy` 或 `move`。
+    eagle_pending_mode: String,
+    /// 导入成功且有真实目标目录时的提示。失败、取消、没路径时为空。
+    pub eagle_notice: String,
+    /// 文件导入工具页点了按钮、系统选择器还没交回路径。
+    file_import_armed: Option<ToolFileImport>,
+    /// 文件导入工具页这次导入已经提交、协议还没回来。
+    file_import_busy: Option<ToolFileImport>,
+    /// 文件导入工具页的完成提示。失败、取消和不是从这一页开始的导入为空。
+    file_import_notice: String,
     pub api: api::ApiState,
     pub corner_style: String,
     pub corner_radius: f64,
@@ -366,6 +553,8 @@ impl Default for AdminState {
             pending_directory: None,
             settings_sync: crate::settings::SettingsSync::default(),
             source_auth: SourceAuthState::default(),
+            downloader: downloader::DownloaderRuntime::default(),
+            office: office::OfficeRuntime::default(),
             repository_summaries: Vec::new(),
             logs: Vec::new(),
             logs_loading: false,
@@ -389,6 +578,15 @@ impl Default for AdminState {
             actions_repo_id: None,
             tool_pages: Vec::new(),
             active_tool_page_id: None,
+            eagle_library_path: String::new(),
+            eagle_import: None,
+            eagle_importing: false,
+            eagle_pending_directory: String::new(),
+            eagle_pending_mode: String::new(),
+            eagle_notice: String::new(),
+            file_import_armed: None,
+            file_import_busy: None,
+            file_import_notice: String::new(),
             api: api::ApiState::default(),
             corner_style: support::default_corner_style().into(),
             corner_radius: support::DEFAULT_CORNER_RADIUS,
@@ -427,7 +625,11 @@ impl AdminState {
     }
 
     pub(crate) fn save_corners_file(&self) {
-        support::write_corners(&support::corners_path(), &self.corner_style, self.corner_radius);
+        support::write_corners(
+            &support::corners_path(),
+            &self.corner_style,
+            self.corner_radius,
+        );
     }
 
     fn reset_action(&mut self) {
@@ -451,7 +653,11 @@ impl AdminState {
     fn apply_failure(&mut self, error: &str) {
         self.pending_notice = None;
         let fallback = self.pending_failure.take().unwrap_or_default();
-        self.action_error = if error.is_empty() { fallback } else { error.to_string() };
+        self.action_error = if error.is_empty() {
+            fallback
+        } else {
+            error.to_string()
+        };
     }
 
     pub fn note_backends(&mut self, repositories: &[RepositorySummary]) {
@@ -482,12 +688,18 @@ impl AdminState {
     fn store_plugins(&mut self, plugins: Vec<PluginManifest>) {
         self.plugins = plugins;
         let pages = support::tool_pages_from_plugins(&self.plugins);
-        self.active_tool_page_id = support::apply_tool_page_selection(&pages, self.active_tool_page_id.as_deref());
+        self.active_tool_page_id =
+            support::apply_tool_page_selection(&pages, self.active_tool_page_id.as_deref());
         self.tool_pages = pages;
     }
 
     fn sync_json_drafts(&mut self, plugin_id: &str) {
-        let Some(plugin) = self.plugins.iter().find(|plugin| plugin.plugin_id == plugin_id).cloned() else {
+        let Some(plugin) = self
+            .plugins
+            .iter()
+            .find(|plugin| plugin.plugin_id == plugin_id)
+            .cloned()
+        else {
             return;
         };
         let Some(snapshot) = self.config_snapshots.get(plugin_id) else {
@@ -498,8 +710,17 @@ impl AdminState {
             if field.field_type != "json" {
                 continue;
             }
-            let value = snapshot.values.get(&field.key).cloned().or(field.default_value);
-            drafts.insert(field.key, value.map(|item| support::json_draft_text(&item)).unwrap_or_default());
+            let value = snapshot
+                .values
+                .get(&field.key)
+                .cloned()
+                .or(field.default_value);
+            drafts.insert(
+                field.key,
+                value
+                    .map(|item| support::json_draft_text(&item))
+                    .unwrap_or_default(),
+            );
         }
         self.json_drafts.insert(plugin_id.to_string(), drafts);
         self.field_drafts.remove(plugin_id);
@@ -544,7 +765,14 @@ impl AdminState {
     }
 
     pub fn filtered_logs(&self) -> Vec<SystemLogRecord> {
-        support::filtered_logs(&self.logs, &self.log_levels, &self.log_kinds, &self.log_plugin_id, &self.log_repo_id, &self.log_search)
+        support::filtered_logs(
+            &self.logs,
+            &self.log_levels,
+            &self.log_kinds,
+            &self.log_plugin_id,
+            &self.log_repo_id,
+            &self.log_search,
+        )
     }
 
     pub fn grouped_plugins(&self) -> Vec<(String, Vec<String>)> {
@@ -554,22 +782,35 @@ impl AdminState {
 
 /// 日志按时间再 id 降序，和 Vue `sortSystemLogs` 一致。
 fn sort_logs(records: &mut [SystemLogRecord]) {
-    records.sort_by(|left, right| right.timestamp.cmp(&left.timestamp).then_with(|| right.id.cmp(&left.id)));
+    records.sort_by(|left, right| {
+        right
+            .timestamp
+            .cmp(&left.timestamp)
+            .then_with(|| right.id.cmp(&left.id))
+    });
 }
 
 impl ShellViewModel {
     /// 日志面板在追踪模式下让日志列表跟随末尾：新记录进来滚到底，暂停后停在原位。
     /// Vue 的跟随滚的是不定高的日志列表本身，列表不会出现滚动，实际没有效果；这里给列表定高再跟随。
     pub(super) fn admin_logs_follow_end(&self) -> bool {
-        self.admin_workspace_visible(WorkspacePanel::Logs) && self.admin.log_would_scroll && !self.admin.log_paused
+        self.admin_workspace_visible(WorkspacePanel::Logs)
+            && self.admin.log_would_scroll
+            && !self.admin.log_paused
     }
 
     /// 首页的日志、拓展和动作面板在显示：启动完成、不在设置页，主区有仓库或者还没有资源库（Vue 的这几个面板
     /// 不要求仓库；资源库丢失时主区是缺失页）。和主区路由（`RouteKey::of`）同一口径。
     pub(super) fn admin_workspace_visible(&self, panel: WorkspacePanel) -> bool {
         self.workspace.startup.status == super::StartupStatus::Ready
-            && !matches!(self.page, super::ShellPage::Settings | super::ShellPage::SettingsError)
-            && matches!(self.workspace.main_region(), super::MainRegion::HasRepository | super::MainRegion::EmptyRepository)
+            && !matches!(
+                self.page,
+                super::ShellPage::Settings | super::ShellPage::SettingsError
+            )
+            && matches!(
+                self.workspace.main_region(),
+                super::MainRegion::HasRepository | super::MainRegion::EmptyRepository
+            )
             && self.workspace.panel == panel
     }
 

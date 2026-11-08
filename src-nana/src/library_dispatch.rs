@@ -7,40 +7,69 @@
 use nana_ui::RuntimeProgramContext;
 use serde_json::json;
 
-use crate::backend::services::repository::EntryAccessRecordRequest;
-use crate::shell::library::LibraryEffect;
-use crate::shell::ShellMessage;
-use crate::task_guard::spawn_service;
 use crate::MomoBakoApplication;
+use crate::backend::services::repository::EntryAccessRecordRequest;
+use crate::shell::ShellMessage;
+use crate::shell::library::LibraryEffect;
+use crate::task_guard::spawn_service;
 
 /// 执行资源库素材归约留下的请求。
-pub fn dispatch_library_effects(app: &mut MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
+pub fn dispatch_library_effects(
+    app: &mut MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+) {
     for effect in app.shell.library.take_effects() {
         match effect {
-            LibraryEffect::RecordAccess { repo_id, path } => dispatch_record_access(app, context, repo_id, path),
+            LibraryEffect::RecordAccess { repo_id, path } => {
+                dispatch_record_access(app, context, repo_id, path)
+            }
         }
     }
 }
 
-fn dispatch_record_access(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String, path: String) {
+fn dispatch_record_access(
+    app: &MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+    path: String,
+) {
     let (failed_repo, failed_path) = (repo_id.clone(), path.clone());
-    let failed = move |error| ShellMessage::EntryAccessRecorded { repo_id: failed_repo.clone(), path: failed_path.clone(), result: Err(error) };
-    spawn_service(app.services.as_ref(), context, "记录访问", failed, |services| {
-        let interaction = services.repository_interaction.clone();
-        let executor = services.executor.clone();
-        move || {
-            let request = EntryAccessRecordRequest { repo_id: repo_id.clone(), path: path.clone() };
-            let result = executor.block_on(interaction.record_entry_access(request)).map(|response| response.recorded_at);
-            if let Err(error) = &result {
-                momobako_backend::app_log!(
-                    "warn",
-                    "file",
-                    "recordAccessFailed",
-                    "记录最近使用失败。",
-                    json!({ "repoId": repo_id, "path": path, "error": error })
-                );
+    let failed = move |error| ShellMessage::EntryAccessRecorded {
+        repo_id: failed_repo.clone(),
+        path: failed_path.clone(),
+        result: Err(error),
+    };
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "记录访问",
+        failed,
+        |services| {
+            let interaction = services.repository_interaction.clone();
+            let executor = services.executor.clone();
+            move || {
+                let request = EntryAccessRecordRequest {
+                    repo_id: repo_id.clone(),
+                    path: path.clone(),
+                };
+                let result = executor
+                    .block_on(interaction.record_entry_access(request))
+                    .map(|response| response.recorded_at);
+                if let Err(error) = &result {
+                    momobako_backend::app_log!(
+                        "warn",
+                        "file",
+                        "recordAccessFailed",
+                        "记录最近使用失败。",
+                        json!({ "repoId": repo_id, "path": path, "error": error })
+                    );
+                }
+                ShellMessage::EntryAccessRecorded {
+                    repo_id,
+                    path,
+                    result,
+                }
             }
-            ShellMessage::EntryAccessRecorded { repo_id, path, result }
-        }
-    });
+        },
+    );
 }

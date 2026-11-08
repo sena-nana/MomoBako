@@ -4,9 +4,9 @@
 
 use serde_json::Value;
 
+use super::super::ShellViewModel;
 use super::super::admin::source_download::{DownloadDestination, DownloadRun};
 use super::super::admin::{AdminEffect, PluginCallOrigin};
-use super::super::ShellViewModel;
 
 /// 已经点过下载、还在等目录的插件动作。
 #[derive(Clone, Debug)]
@@ -37,7 +37,14 @@ pub(super) fn submit_download(model: &mut ShellViewModel, path: String) {
         );
     }
     let destination = DownloadDestination::LocalFolder(trimmed.to_string());
-    let run = DownloadRun::begin(model, pending.progress, pending.plugin_id.clone(), pending.method.clone(), pending.repository_id.clone(), destination);
+    let run = DownloadRun::begin(
+        model,
+        pending.progress,
+        pending.plugin_id.clone(),
+        pending.method.clone(),
+        pending.repository_id.clone(),
+        destination,
+    );
     model.admin.push_effect(AdminEffect::CallPlugin {
         plugin_id: pending.plugin_id,
         method: pending.method,

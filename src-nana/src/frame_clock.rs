@@ -31,7 +31,10 @@ pub struct FrameStep {
 impl FrameStep {
     /// 两样都走 `ms` 毫秒。离屏验收和测试没有真实帧时钟，按它推进。
     pub const fn millis(ms: u64) -> Self {
-        Self { ui_ms: ms, media_ms: ms }
+        Self {
+            ui_ms: ms,
+            media_ms: ms,
+        }
     }
 }
 
@@ -56,11 +59,15 @@ impl FrameClock {
             self.carry_us = 0;
             return FrameStep::default();
         };
-        let elapsed_us = u64::try_from(now.saturating_duration_since(previous).as_micros()).unwrap_or(u64::MAX);
+        let elapsed_us =
+            u64::try_from(now.saturating_duration_since(previous).as_micros()).unwrap_or(u64::MAX);
         let total_us = elapsed_us.saturating_add(self.carry_us);
         let media_ms = total_us / 1000;
         self.carry_us = total_us % 1000;
-        FrameStep { ui_ms: media_ms.min(MAX_UI_STEP_MS), media_ms }
+        FrameStep {
+            ui_ms: media_ms.min(MAX_UI_STEP_MS),
+            media_ms,
+        }
     }
 
     /// 记下这一帧准备完以后要的帧：要连续帧时下一帧的间隔算进计时，按需重绘时不算。
@@ -89,9 +96,16 @@ mod tests {
         let mut clock = FrameClock::default();
         assert_eq!(clock.step(start), FrameStep::default(), "第一帧没有上一帧");
         clock.note_demand(FrameDemand::OnDemand);
-        assert_eq!(clock.step(start + Duration::from_secs(5)), FrameStep::default(), "闲着时过去的 5 秒不算");
+        assert_eq!(
+            clock.step(start + Duration::from_secs(5)),
+            FrameStep::default(),
+            "闲着时过去的 5 秒不算"
+        );
         clock.note_demand(continuous());
-        assert_eq!(clock.step(start + Duration::from_millis(5_033)), FrameStep::millis(33));
+        assert_eq!(
+            clock.step(start + Duration::from_millis(5_033)),
+            FrameStep::millis(33)
+        );
     }
 
     /// 毫秒以下的零头留到下一帧：30 帧的帧距 33.333 ms，30 帧以后正好 1000 ms。
@@ -118,8 +132,18 @@ mod tests {
         clock.step(start);
         clock.note_demand(continuous());
         let step = clock.step(start + Duration::from_secs(3));
-        assert_eq!(step, FrameStep { ui_ms: MAX_UI_STEP_MS, media_ms: 3_000 });
+        assert_eq!(
+            step,
+            FrameStep {
+                ui_ms: MAX_UI_STEP_MS,
+                media_ms: 3_000
+            }
+        );
         clock.note_demand(continuous());
-        assert_eq!(clock.step(start + Duration::from_millis(3_016)), FrameStep::millis(16), "卡顿以后照常走");
+        assert_eq!(
+            clock.step(start + Duration::from_millis(3_016)),
+            FrameStep::millis(16),
+            "卡顿以后照常走"
+        );
     }
 }

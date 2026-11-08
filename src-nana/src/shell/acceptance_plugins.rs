@@ -7,7 +7,7 @@
 use std::fs;
 use std::path::PathBuf;
 
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use crate::backend::services::repository::{
     ApiDesignSnapshot, CacheConfig, CacheSnapshot, PlaylistPlayerContribution, PluginManifest,
@@ -22,7 +22,11 @@ use super::base_scene::NOW;
 pub(super) fn bundled_plugins(keep: impl Fn(&str) -> bool) -> Vec<PluginManifest> {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../External/Plugins");
     let mut manifests = match fs::read_dir(&root) {
-        Ok(entries) => entries.filter_map(Result::ok).map(|entry| entry.path().join("manifest.json")).filter(|path| path.is_file()).collect::<Vec<_>>(),
+        Ok(entries) => entries
+            .filter_map(Result::ok)
+            .map(|entry| entry.path().join("manifest.json"))
+            .filter(|path| path.is_file())
+            .collect::<Vec<_>>(),
         Err(error) => {
             eprintln!("Nana 验收读不到插件目录 {}：{error}", root.display());
             return Vec::new();
@@ -32,10 +36,18 @@ pub(super) fn bundled_plugins(keep: impl Fn(&str) -> bool) -> Vec<PluginManifest
     manifests
         .into_iter()
         .filter_map(|path| {
-            let text = fs::read_to_string(&path).map_err(|error| eprintln!("Nana 验收读不到插件清单 {}：{error}", path.display())).ok()?;
-            let mut manifest: Map<String, Value> =
-                serde_json::from_str(&text).map_err(|error| eprintln!("Nana 验收插件清单不是 JSON {}：{error}", path.display())).ok()?;
-            let plugin_id = manifest.get("pluginId").and_then(Value::as_str)?.to_string();
+            let text = fs::read_to_string(&path)
+                .map_err(|error| eprintln!("Nana 验收读不到插件清单 {}：{error}", path.display()))
+                .ok()?;
+            let mut manifest: Map<String, Value> = serde_json::from_str(&text)
+                .map_err(|error| {
+                    eprintln!("Nana 验收插件清单不是 JSON {}：{error}", path.display())
+                })
+                .ok()?;
+            let plugin_id = manifest
+                .get("pluginId")
+                .and_then(Value::as_str)?
+                .to_string();
             if !keep(&plugin_id) {
                 return None;
             }
@@ -54,11 +66,13 @@ pub(super) fn players_of(plugins: &[PluginManifest]) -> Vec<PlaylistPlayerContri
         .iter()
         .filter(|plugin| plugin.enabled)
         .filter_map(|plugin| plugin.contributes.get("playlistPlayers").cloned())
-        .flat_map(|players| match serde_json::from_value::<Vec<PlaylistPlayerContribution>>(players) {
-            Ok(players) => players,
-            Err(error) => {
-                eprintln!("Nana 验收播放器声明解析失败：{error}");
-                Vec::new()
+        .flat_map(|players| {
+            match serde_json::from_value::<Vec<PlaylistPlayerContribution>>(players) {
+                Ok(players) => players,
+                Err(error) => {
+                    eprintln!("Nana 验收播放器声明解析失败：{error}");
+                    Vec::new()
+                }
             }
         })
         .collect()
@@ -86,7 +100,11 @@ fn bundle_with(plugins: Result<Vec<PluginManifest>, String>) -> AdminMessage {
 
 /// 照 `tmp/vue-mock/ipc.ts` 的 `realPlugins`：已启用、就绪、内置来源、依赖全部可用。
 fn mock_install(manifest: &mut Map<String, Value>) {
-    let version = manifest.get("version").and_then(Value::as_str).unwrap_or("0").to_string();
+    let version = manifest
+        .get("version")
+        .and_then(Value::as_str)
+        .unwrap_or("0")
+        .to_string();
     let dependencies = |key: &str| {
         manifest
             .get(key)
@@ -110,18 +128,33 @@ fn mock_install(manifest: &mut Map<String, Value>) {
     });
     manifest.insert("enabled".into(), Value::Bool(true));
     manifest.insert("status".into(), Value::String("ready".into()));
-    manifest.entry("source").or_insert_with(|| Value::String("builtin".into()));
+    manifest
+        .entry("source")
+        .or_insert_with(|| Value::String("builtin".into()));
     manifest.insert("provenance".into(), Value::String("bundled".into()));
-    manifest.insert("packageHash".into(), Value::String(format!("mock-{version}")));
+    manifest.insert(
+        "packageHash".into(),
+        Value::String(format!("mock-{version}")),
+    );
     manifest.insert("dependencyStatus".into(), status);
 }
 
 pub(super) fn cache_snapshot() -> CacheSnapshot {
-    CacheSnapshot { config: CacheConfig { metadata_capacity: 512, thumbnail_capacity: 1024, query_capacity: 256 }, entries: Vec::new() }
+    CacheSnapshot {
+        config: CacheConfig {
+            metadata_capacity: 512,
+            thumbnail_capacity: 1024,
+            query_capacity: 256,
+        },
+        entries: Vec::new(),
+    }
 }
 
 pub(super) fn api_design() -> ApiDesignSnapshot {
-    ApiDesignSnapshot { transport: "tauri-ipc".into(), endpoints: Vec::new() }
+    ApiDesignSnapshot {
+        transport: "tauri-ipc".into(),
+        endpoints: Vec::new(),
+    }
 }
 
 pub(super) fn external_status() -> ExternalApiConnectionStatus {
@@ -131,6 +164,7 @@ pub(super) fn external_status() -> ExternalApiConnectionStatus {
         version: "0.1.0".into(),
         started_at: NOW.into(),
         ready: true,
-        connection_file_path: "C:/Users/acceptance/AppData/Roaming/com.momobako.desktop/external-api.json".into(),
+        connection_file_path:
+            "C:/Users/acceptance/AppData/Roaming/com.momobako.desktop/external-api.json".into(),
     }
 }

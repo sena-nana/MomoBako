@@ -33,7 +33,13 @@ fn host_drag(phase: HostDragPhase) -> ShellMessage {
 /// 面板的底色和描边色。
 fn panel_paint(harness: &ShellHarness) -> (Option<SemanticColorRole>, Option<SemanticColorRole>) {
     let panel = harness.keyed("empty-panel").expect("空库面板");
-    let style = harness.document().context().world().node_style(panel).expect("面板样式").clone();
+    let style = harness
+        .document()
+        .context()
+        .world()
+        .node_style(panel)
+        .expect("面板样式")
+        .clone();
     (style.background, style.border)
 }
 
@@ -47,19 +53,41 @@ fn projection_follows_the_drag_state() {
     model.reduce(host_drag(HostDragPhase::Over));
     assert!(EmptyView::project(&model).dragging, "拖着文件夹经过");
     model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Playlist));
-    assert_ne!(EmptyView::project(&model).drop, view.drop, "换面板改拖放条件");
+    assert_ne!(
+        EmptyView::project(&model).drop,
+        view.drop,
+        "换面板改拖放条件"
+    );
 }
 
 /// 和空库页无关的更新：节点一个都不换，主区分支不重挂。
 #[test]
 fn unrelated_updates_keep_every_empty_node() {
     let mut harness = ShellHarness::mount(empty());
-    let keys = ["workspace-empty-scroll", "empty-repository-page", "empty-panel", "empty-title", "empty-detail", "empty-error"];
-    let nodes = keys.map(|key| harness.keyed(key).unwrap_or_else(|| panic!("空库页缺少 {key}")));
+    let keys = [
+        "workspace-empty-scroll",
+        "empty-repository-page",
+        "empty-panel",
+        "empty-title",
+        "empty-detail",
+        "empty-error",
+    ];
+    let nodes = keys.map(|key| {
+        harness
+            .keyed(key)
+            .unwrap_or_else(|| panic!("空库页缺少 {key}"))
+    });
     let branch = harness.route_branch();
     let remounts = harness.view_stats().remounts;
     let unrelated = [
-        ShellMessage::ThumbnailPixels(vec![ThumbnailFrame { path: "a.png".into(), natural_width: 1, natural_height: 1, width: 1, height: 1, rgba: vec![0; 4] }]),
+        ShellMessage::ThumbnailPixels(vec![ThumbnailFrame {
+            path: "a.png".into(),
+            natural_width: 1,
+            natural_height: 1,
+            width: 1,
+            height: 1,
+            rgba: vec![0; 4],
+        }]),
         ShellMessage::Player(crate::shell::player::PlayerMessage::SetVolume(0.3)),
         ShellMessage::SetWorkspacePanel(WorkspacePanel::Playlist),
     ];
@@ -67,11 +95,19 @@ fn unrelated_updates_keep_every_empty_node() {
         harness.apply(message);
         harness.flush();
         for (key, id) in keys.iter().zip(nodes) {
-            assert_eq!(harness.keyed(key), Some(id), "无关更新换掉了空库页节点 {key}");
+            assert_eq!(
+                harness.keyed(key),
+                Some(id),
+                "无关更新换掉了空库页节点 {key}"
+            );
         }
     }
     assert_eq!(harness.route_branch(), branch, "常驻路由的分支不该重挂");
-    assert_eq!(harness.view_stats().remounts, remounts, "常驻空库页不该重挂");
+    assert_eq!(
+        harness.view_stats().remounts,
+        remounts,
+        "常驻空库页不该重挂"
+    );
     harness.assert_same_as_fresh_mount();
 }
 
@@ -85,7 +121,13 @@ fn drag_highlight_and_error_patch_in_place() {
     harness.apply(host_drag(HostDragPhase::Over));
     harness.flush();
     assert_eq!(harness.keyed("empty-panel"), Some(panel));
-    assert_eq!(panel_paint(&harness), (Some(SemanticColorRole::AccentSoft), Some(SemanticColorRole::Accent)));
+    assert_eq!(
+        panel_paint(&harness),
+        (
+            Some(SemanticColorRole::AccentSoft),
+            Some(SemanticColorRole::Accent)
+        )
+    );
     harness.assert_same_as_fresh_mount();
 
     harness.apply(host_drag(HostDragPhase::Leave));
@@ -95,7 +137,10 @@ fn drag_highlight_and_error_patch_in_place() {
     harness.model.input.empty_repository_error = "附加失败：目录不可读".into();
     harness.sync();
     harness.flush();
-    assert!(harness.find("附加失败：目录不可读").is_some(), "错误条没有显示");
+    assert!(
+        harness.find("附加失败：目录不可读").is_some(),
+        "错误条没有显示"
+    );
     assert_eq!(harness.keyed("empty-panel"), Some(panel));
     harness.assert_same_as_fresh_mount();
 }
@@ -107,8 +152,16 @@ fn drops_carry_the_flags_at_drop_time() {
     harness.apply(ShellMessage::SetWorkspacePanel(WorkspacePanel::Playlist));
     harness.flush();
     let target = harness.keyed("empty-repository-page").expect("拖放目标");
-    let bounds = harness.document().context().world().layout_box(target).expect("拖放目标的布局");
-    let point = (bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0);
+    let bounds = harness
+        .document()
+        .context()
+        .world()
+        .layout_box(target)
+        .expect("拖放目标的布局");
+    let point = (
+        bounds.x + bounds.width / 2.0,
+        bounds.y + bounds.height / 2.0,
+    );
     let document = harness.window.document.document();
     let mut input = HeadlessInput::bind(harness.window.document.context_mut(), document);
     input
@@ -126,11 +179,18 @@ fn drops_carry_the_flags_at_drop_time() {
     let drop = messages
         .iter()
         .find_map(|message| match message {
-            ShellMessage::Input(InputMessage::HostDrag { phase: HostDragPhase::Drop, files_panel, .. }) => Some(*files_panel),
+            ShellMessage::Input(InputMessage::HostDrag {
+                phase: HostDragPhase::Drop,
+                files_panel,
+                ..
+            }) => Some(*files_panel),
             _ => None,
         })
         .expect("放下应该发出宿主拖放消息");
-    assert!(!drop, "拖放条件应是放下时的（播放集面板），不是建视图时的（文件面板）");
+    assert!(
+        !drop,
+        "拖放条件应是放下时的（播放集面板），不是建视图时的（文件面板）"
+    );
     for message in messages {
         harness.apply(message);
     }

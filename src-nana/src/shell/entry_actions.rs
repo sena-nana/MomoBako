@@ -49,13 +49,28 @@ pub struct FilePluginAction {
 /// 立刻调用插件、先问目录或目标资源库再调用，或者在本地建播放集。
 #[derive(Clone, Debug, PartialEq)]
 pub enum FilePluginDispatch {
-    Call { plugin_id: String, method: String, payload: Value },
+    Call {
+        plugin_id: String,
+        method: String,
+        payload: Value,
+    },
     /// 下载到本地：选中文件夹后把 `destination` 写进载荷再调用。`progress` 是这次下载在任务弹层里的进度行。
-    AskFolder { plugin_id: String, method: String, payload: Value, progress: DownloadProgress },
+    AskFolder {
+        plugin_id: String,
+        method: String,
+        payload: Value,
+        progress: DownloadProgress,
+    },
     /// 下载到其他资源库：选好目标资源库，把 `destination` 写进载荷再调用；下载回来的文件导入目标资源库并同步它。
     /// `parent_path` 是导入到目标资源库的哪个文件夹：下载目录时是以歌单命名的文件夹（Vue `playlistName`），没有时
     /// 先建，单曲放在根目录。
-    AskRepository { plugin_id: String, method: String, payload: Value, progress: DownloadProgress, parent_path: Option<String> },
+    AskRepository {
+        plugin_id: String,
+        method: String,
+        payload: Value,
+        progress: DownloadProgress,
+        parent_path: Option<String>,
+    },
     /// 来源目录建成本地播放集（Vue `runPlaylistAction`），不调用插件。
     CreatePlaylist(SourcePlaylist),
 }
@@ -110,7 +125,8 @@ impl SourcePlaylist {
         Self {
             playlist_id: item.map(|item| format!("{provider}-{item}")),
             name: playlist_name(row),
-            player_type_id: text(action, "playerTypeId").unwrap_or_else(|| AUDIO_SEQUENCE_TYPE.to_string()),
+            player_type_id: text(action, "playerTypeId")
+                .unwrap_or_else(|| AUDIO_SEQUENCE_TYPE.to_string()),
             path: row.path.clone(),
         }
     }
@@ -130,7 +146,10 @@ pub struct DownloadProgress {
 
 impl DownloadProgress {
     fn of(label: &str, row: &FileRow) -> Self {
-        Self { label: label.to_string(), subject: row.name.clone() }
+        Self {
+            label: label.to_string(),
+            subject: row.name.clone(),
+        }
     }
 
     /// 选好去处时的进度行文案。
@@ -145,13 +164,23 @@ impl DownloadProgress {
 }
 
 /// 按清单 `entryActions` 和当前行的类型、来源载荷匹配菜单项。
-pub fn actions_for(plugins: &[PluginManifest], row: &FileRow, context: &SourceContext) -> Vec<FilePluginAction> {
+pub fn actions_for(
+    plugins: &[PluginManifest],
+    row: &FileRow,
+    context: &SourceContext,
+) -> Vec<FilePluginAction> {
     let mut actions = Vec::new();
     for plugin in plugins {
-        if !plugin.enabled || matches!(plugin.status.as_str(), "disabled" | "unavailable" | "error") {
+        if !plugin.enabled || matches!(plugin.status.as_str(), "disabled" | "unavailable" | "error")
+        {
             continue;
         }
-        let Some(list) = plugin.contributes.get("source").and_then(|source| source.get("entryActions")).and_then(|value| value.as_array()) else {
+        let Some(list) = plugin
+            .contributes
+            .get("source")
+            .and_then(|source| source.get("entryActions"))
+            .and_then(|value| value.as_array())
+        else {
             continue;
         };
         for action in list {
@@ -165,26 +194,55 @@ pub fn actions_for(plugins: &[PluginManifest], row: &FileRow, context: &SourceCo
 
 /// 按 operation 把声明换成能执行的动作（下载按去处可能是两项）。要调用插件的 operation 找不到方法、或者
 /// operation 不在约定里时返回空并记下原因。
-fn prepare(plugin: &PluginManifest, action: &Value, row: &FileRow, context: &SourceContext) -> Vec<FilePluginAction> {
+fn prepare(
+    plugin: &PluginManifest,
+    action: &Value,
+    row: &FileRow,
+    context: &SourceContext,
+) -> Vec<FilePluginAction> {
     let action_id = text(action, "actionId").unwrap_or_else(|| "action".into());
     let label = text(action, "label").unwrap_or_else(|| action_id.clone());
     let operation = text(action, "operation").unwrap_or_default();
     let value = format!("plugin/{}/{}", plugin.plugin_id, action_id);
-    let disabled = (context.source_unavailable || entry_login_expired(row)).then_some(SOURCE_UNAVAILABLE);
+    let disabled =
+        (context.source_unavailable || entry_login_expired(row)).then_some(SOURCE_UNAVAILABLE);
     let method = action_method(plugin, action, &operation);
-    if method.is_none() && matches!(operation.as_str(), "clear-cache" | "refresh-playback" | "download-entry" | "download-directory") {
-        eprintln!("Nana 文件插件动作没有可调用的方法：{}/{action_id}（{operation}）", plugin.plugin_id);
+    if method.is_none()
+        && matches!(
+            operation.as_str(),
+            "clear-cache" | "refresh-playback" | "download-entry" | "download-directory"
+        )
+    {
+        eprintln!(
+            "Nana 文件插件动作没有可调用的方法：{}/{action_id}（{operation}）",
+            plugin.plugin_id
+        );
         return Vec::new();
     }
-    let single = |dispatch| vec![FilePluginAction { value: value.clone(), label: label.clone(), unavailable: disabled, dispatch }];
+    let single = |dispatch| {
+        vec![FilePluginAction {
+            value: value.clone(),
+            label: label.clone(),
+            unavailable: disabled,
+            dispatch,
+        }]
+    };
     match operation.as_str() {
         "clear-cache" | "refresh-playback" => {
-            let Some(method) = method else { return Vec::new() };
+            let Some(method) = method else {
+                return Vec::new();
+            };
             let payload = call_payload(row, &operation, context);
-            single(FilePluginDispatch::Call { plugin_id: plugin.plugin_id.clone(), method, payload })
+            single(FilePluginDispatch::Call {
+                plugin_id: plugin.plugin_id.clone(),
+                method,
+                payload,
+            })
         }
         "download-entry" | "download-directory" => {
-            let Some(method) = method else { return Vec::new() };
+            let Some(method) = method else {
+                return Vec::new();
+            };
             let targets = download_targets(action, &plugin.plugin_id, &action_id);
             let several = targets.len() > 1;
             targets
@@ -195,25 +253,61 @@ fn prepare(plugin: &PluginManifest, action: &Value, row: &FileRow, context: &Sou
                     let plugin_id = plugin.plugin_id.clone();
                     let method = method.clone();
                     let (dispatch, unavailable) = match target {
-                        DownloadTarget::LocalDirectory => (FilePluginDispatch::AskFolder { plugin_id, method, payload, progress }, disabled),
+                        DownloadTarget::LocalDirectory => (
+                            FilePluginDispatch::AskFolder {
+                                plugin_id,
+                                method,
+                                payload,
+                                progress,
+                            },
+                            disabled,
+                        ),
                         DownloadTarget::WritableRepository => {
-                            let parent_path = if operation == "download-directory" { download_folder(row) } else { None };
-                            let unavailable = disabled.or((!context.has_target_repository).then_some(NO_TARGET_REPOSITORY));
-                            (FilePluginDispatch::AskRepository { plugin_id, method, payload, progress, parent_path }, unavailable)
+                            let parent_path = if operation == "download-directory" {
+                                download_folder(row)
+                            } else {
+                                None
+                            };
+                            let unavailable = disabled
+                                .or((!context.has_target_repository)
+                                    .then_some(NO_TARGET_REPOSITORY));
+                            (
+                                FilePluginDispatch::AskRepository {
+                                    plugin_id,
+                                    method,
+                                    payload,
+                                    progress,
+                                    parent_path,
+                                },
+                                unavailable,
+                            )
                         }
                     };
                     FilePluginAction {
-                        value: if several { format!("{value}/{}", target.key()) } else { value.clone() },
-                        label: if several { format!("{label}到{}", target.label()) } else { label.clone() },
+                        value: if several {
+                            format!("{value}/{}", target.key())
+                        } else {
+                            value.clone()
+                        },
+                        label: if several {
+                            format!("{label}到{}", target.label())
+                        } else {
+                            label.clone()
+                        },
                         unavailable,
                         dispatch,
                     }
                 })
                 .collect()
         }
-        "playlist-from-directory" => single(FilePluginDispatch::CreatePlaylist(SourcePlaylist::of(action, row))),
+        "playlist-from-directory" => single(FilePluginDispatch::CreatePlaylist(
+            SourcePlaylist::of(action, row),
+        )),
         other => {
-            eprintln!("Nana 文件插件动作的 operation 不在插件约定里，不出菜单：{}/{action_id}（{other}）", plugin.plugin_id);
+            eprintln!(
+                "Nana 文件插件动作的 operation 不在插件约定里，不出菜单：{}/{action_id}（{other}）",
+                plugin.plugin_id
+            );
             Vec::new()
         }
     }
@@ -222,8 +316,15 @@ fn prepare(plugin: &PluginManifest, action: &Value, row: &FileRow, context: &Sou
 /// 下载的去处（Vue `downloadTargets`）：声明了 `targets` 就只出声明的，没声明时两种都出。约定以外的去处不出，
 /// 只记日志。
 fn download_targets(action: &Value, plugin_id: &str, action_id: &str) -> Vec<DownloadTarget> {
-    let Some(declared) = action.get("targets").and_then(Value::as_array).filter(|targets| !targets.is_empty()) else {
-        return vec![DownloadTarget::LocalDirectory, DownloadTarget::WritableRepository];
+    let Some(declared) = action
+        .get("targets")
+        .and_then(Value::as_array)
+        .filter(|targets| !targets.is_empty())
+    else {
+        return vec![
+            DownloadTarget::LocalDirectory,
+            DownloadTarget::WritableRepository,
+        ];
     };
     declared
         .iter()
@@ -262,7 +363,10 @@ fn action_method(plugin: &PluginManifest, action: &Value, operation: &str) -> Op
 /// 声明和这一行对得上：`scope` 和条目类型相同（Vue `action.scope !== entry.kind` 就跳过，没写 scope 的声明不出），
 /// 声明了来源时来源相同，声明了 `entryKind` 时来源载荷的条目种类相同（老载荷按歌曲、歌单标识认）。
 fn matches_row(action: &Value, row: &FileRow) -> bool {
-    let scope = action.get("scope").and_then(|value| value.as_str()).unwrap_or("");
+    let scope = action
+        .get("scope")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
     if scope != row.kind {
         return false;
     }
@@ -274,7 +378,11 @@ fn matches_row(action: &Value, row: &FileRow) -> bool {
     let Some(entry_kind) = text(action, "entryKind") else {
         return true;
     };
-    let actual = row.source_payload.as_ref().and_then(|payload| payload.get("entryKind")).and_then(|value| value.as_str());
+    let actual = row
+        .source_payload
+        .as_ref()
+        .and_then(|payload| payload.get("entryKind"))
+        .and_then(|value| value.as_str());
     if actual == Some(entry_kind.as_str()) {
         return true;
     }
@@ -288,7 +396,11 @@ fn matches_row(action: &Value, row: &FileRow) -> bool {
 /// 条目自己标了登录过期（来源载荷或元数据里的 `loginExpired`，Vue `actionDisabled` 的条目部分）。
 fn entry_login_expired(row: &FileRow) -> bool {
     let flagged = |value: Option<&Value>| value.and_then(Value::as_bool) == Some(true);
-    flagged(row.source_payload.as_ref().and_then(|payload| payload.get("loginExpired"))) || flagged(row.metadata.get("loginExpired"))
+    flagged(
+        row.source_payload
+            .as_ref()
+            .and_then(|payload| payload.get("loginExpired")),
+    ) || flagged(row.metadata.get("loginExpired"))
 }
 
 /// 调用插件的载荷，照 Vue 各动作的载荷：歌曲、歌单标识，音质，公开的来源载荷，以及当前资源库的本地缓存目录
@@ -305,12 +417,24 @@ fn call_payload(row: &FileRow, operation: &str, context: &SourceContext) -> Valu
     if matches!(operation, "download-entry" | "download-directory") {
         payload.insert("playlistName".into(), Value::String(playlist_name(row)));
     }
-    payload.insert("level".into(), Value::String(source_string(row, "level").unwrap_or_else(|| "standard".into())));
+    payload.insert(
+        "level".into(),
+        Value::String(source_string(row, "level").unwrap_or_else(|| "standard".into())),
+    );
     if operation == "refresh-playback" {
         payload.insert("forceRefresh".into(), Value::Bool(true));
     }
-    payload.insert("managedCacheRoot".into(), context.managed_cache_root.clone().map_or(Value::Null, Value::String));
-    payload.insert("sourcePayload".into(), public_payload(row.source_payload.as_ref()));
+    payload.insert(
+        "managedCacheRoot".into(),
+        context
+            .managed_cache_root
+            .clone()
+            .map_or(Value::Null, Value::String),
+    );
+    payload.insert(
+        "sourcePayload".into(),
+        public_payload(row.source_payload.as_ref()),
+    );
     Value::Object(payload)
 }
 
@@ -334,7 +458,11 @@ fn public_payload(payload: Option<&Value>) -> Value {
     let mut public = Map::new();
     for (key, value) in object {
         let normalized = key.to_ascii_lowercase();
-        if normalized.contains("cookie") || normalized.contains("password") || normalized.contains("secret") || normalized == "token" {
+        if normalized.contains("cookie")
+            || normalized.contains("password")
+            || normalized.contains("secret")
+            || normalized == "token"
+        {
             continue;
         }
         public.insert(key.clone(), value.clone());
@@ -357,7 +485,9 @@ fn source_number(row: &FileRow, key: &str) -> Option<i64> {
 /// 来源标识的文字（Vue `sourceNumber(..) ?? entry.providerItemId`）：数字标识照 [`source_number`]；条目自己那一种
 /// 标识不是数字时原样用它的来源标识。
 fn source_identifier(row: &FileRow, key: &str) -> Option<String> {
-    source_number(row, key).map(|id| id.to_string()).or_else(|| own_item_id(row, key).map(str::to_string))
+    source_number(row, key)
+        .map(|id| id.to_string())
+        .or_else(|| own_item_id(row, key).map(str::to_string))
 }
 
 /// `key` 是条目自己那一种标识时（文件是单曲的 `songId`，目录是歌单的 `playlistId`），条目的来源标识；空白的不算。
@@ -370,20 +500,38 @@ fn own_item_id<'a>(row: &'a FileRow, key: &str) -> Option<&'a str> {
     if own != key {
         return None;
     }
-    row.provider_item_id.as_deref().map(str::trim).filter(|id| !id.is_empty())
+    row.provider_item_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
 }
 
 fn number_of(value: &Value) -> Option<i64> {
-    value.as_i64().or_else(|| value.as_str().and_then(|text| text.trim().parse().ok()))
+    value
+        .as_i64()
+        .or_else(|| value.as_str().and_then(|text| text.trim().parse().ok()))
 }
 
 fn source_string(row: &FileRow, key: &str) -> Option<String> {
-    let value = row.source_payload.as_ref().and_then(|payload| payload.get(key)).or_else(|| row.metadata.get(key))?;
-    value.as_str().map(str::trim).filter(|text| !text.is_empty()).map(str::to_string)
+    let value = row
+        .source_payload
+        .as_ref()
+        .and_then(|payload| payload.get(key))
+        .or_else(|| row.metadata.get(key))?;
+    value
+        .as_str()
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .map(str::to_string)
 }
 
 fn text(value: &Value, key: &str) -> Option<String> {
-    value.get(key).and_then(|item| item.as_str()).map(str::trim).filter(|item| !item.is_empty()).map(str::to_string)
+    value
+        .get(key)
+        .and_then(|item| item.as_str())
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(str::to_string)
 }
 
 #[cfg(test)]

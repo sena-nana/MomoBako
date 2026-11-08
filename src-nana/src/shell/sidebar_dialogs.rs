@@ -10,14 +10,16 @@
 
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{signal, widget, AnyView, IntoProp, IntoView, Signal};
-use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, ListItem, RadiusTier, SemanticColorRole, Stack};
 use nana_ui::ButtonKind;
+use nana_ui::runtime::view::{AnyView, IntoProp, IntoView, Signal, signal, widget};
+use nana_ui::runtime::{
+    Activate, AlignSpec, LengthSpec, ListItem, RadiusTier, SemanticColorRole, Stack,
+};
 
 use super::super::sidebar::{FolderDeleteMode, GapMessage};
 use super::super::view_part_overlay::dialog::{
-    action, busy_note, error_line, footer, paragraph, select_field, text_field, wrapping_text, Choices, DialogFrame,
-    DimmedDisabled, MODAL_CARD,
+    Choices, DialogFrame, DimmedDisabled, MODAL_CARD, action, busy_note, error_line, footer,
+    paragraph, select_field, text_field, wrapping_text,
 };
 use super::super::view_part_overlay::session::{Draft, Projected};
 use super::super::workspace::{DeleteMode, WorkspaceDialog};
@@ -66,36 +68,66 @@ impl FolderDialogView {
     }
 }
 
-/// 新建或重命名文件夹。名称为空或文件服务忙时主按钮不可用，回车和主按钮都提交，提交后等结果再关。
+/// 新建或重命名文件夹。名称输入框照 Vue 没有 `disabled`，文件变更进行中仍可改下一份名字。
+/// 名称为空或文件服务忙时主按钮不可用，回车和主按钮都提交；处理中回车不再提交。提交后等结果再关。
 pub fn folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let view = signal(FolderDialogView::project(model)?);
     Projected::register(view, FolderDialogView::project);
-    let draft = Draft::register(model, |model| model.sidebar.folder_dialog.open.then(|| model.sidebar.folder_dialog.value.clone()));
+    let draft = Draft::register(model, |model| {
+        model
+            .sidebar
+            .folder_dialog
+            .open
+            .then(|| model.sidebar.folder_dialog.value.clone())
+    });
     let busy = move || view.with(|view| view.busy);
     let submit = || gap(GapMessage::SubmitFolderDialog);
     let body = widget(Stack::column(12.0).width(LengthSpec::Fill)).children((
-        paragraph(move || view.with(|view| view.summary.clone()), true, "folder-dialog-summary"),
+        paragraph(
+            move || view.with(|view| view.summary.clone()),
+            true,
+            "folder-dialog-summary",
+        ),
         text_field(
             "文件夹名称",
             "folder-dialog-name",
             draft,
             move || Arc::<str>::from(view.with(|view| view.placeholder)),
             false,
-            busy,
+            false,
             |value| gap(GapMessage::SetFolderValue(value)),
             Some(Arc::new(submit)),
         ),
-        error_line(move || view.with(|view| view.error.clone()), "folder-dialog-error"),
+        error_line(
+            move || view.with(|view| view.error.clone()),
+            "folder-dialog-error",
+        ),
     ));
     let buttons = vec![
-        action("取消", ButtonKind::Ghost, busy, "folder-dialog-cancel", || gap(GapMessage::CloseFolderDialog)),
-        action(move || view.with(|view| view.action.to_string()), ButtonKind::Primary, move || view.with(|view| view.blocked), "folder-dialog-submit", submit),
+        action(
+            "取消",
+            ButtonKind::Ghost,
+            busy,
+            "folder-dialog-cancel",
+            || gap(GapMessage::CloseFolderDialog),
+        ),
+        action(
+            move || view.with(|view| view.action.to_string()),
+            ButtonKind::Primary,
+            move || view.with(|view| view.blocked),
+            "folder-dialog-submit",
+            submit,
+        ),
     ];
     Some(
-        DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string()), || gap(GapMessage::CloseFolderDialog))
-            .size(MODAL_CARD)
-            .busy(busy)
-            .dialog(body, footer(None, buttons)),
+        DialogFrame::new(
+            "folder-dialog",
+            move || view.with(|view| view.title.to_string()),
+            || gap(GapMessage::CloseFolderDialog),
+        )
+        .size(MODAL_CARD)
+        .busy(busy)
+        .dialog(body, footer(None, buttons)),
     )
 }
 
@@ -114,7 +146,10 @@ impl FolderDeleteView {
             return None;
         }
         Some(Self {
-            copy: format!("将处理文件夹“{}”。请选择内部内容的处理方式。", sidebar.folder_delete_label),
+            copy: format!(
+                "将处理文件夹“{}”。请选择内部内容的处理方式。",
+                sidebar.folder_delete_label
+            ),
             error: sidebar.folder_delete_error.clone(),
             busy: model.files.mutating || sidebar.folder_delete_submitting,
         })
@@ -133,7 +168,11 @@ pub fn folder_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
             false,
             busy,
             "folder-delete-move",
-            || gap(GapMessage::ConfirmFolderDelete(FolderDeleteMode::MoveToParent)),
+            || {
+                gap(GapMessage::ConfirmFolderDelete(
+                    FolderDeleteMode::MoveToParent,
+                ))
+            },
         ),
         option_card(
             "移入回收站",
@@ -145,15 +184,30 @@ pub fn folder_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
         ),
     ));
     let body = widget(Stack::column(12.0).width(LengthSpec::Fill)).children((
-        paragraph(move || view.with(|view| view.copy.clone()), false, "folder-delete-copy"),
+        paragraph(
+            move || view.with(|view| view.copy.clone()),
+            false,
+            "folder-delete-copy",
+        ),
         options,
-        error_line(move || view.with(|view| view.error.clone()), "folder-delete-error"),
+        error_line(
+            move || view.with(|view| view.error.clone()),
+            "folder-delete-error",
+        ),
     ));
-    let buttons = vec![action("取消", ButtonKind::Ghost, busy, "folder-delete-cancel", || gap(GapMessage::CloseFolderDelete))];
+    let buttons = vec![action(
+        "取消",
+        ButtonKind::Ghost,
+        busy,
+        "folder-delete-cancel",
+        || gap(GapMessage::CloseFolderDelete),
+    )];
     Some(
-        DialogFrame::new("folder-delete-dialog", || super::super::sidebar::FOLDER_DELETE_TITLE.to_string(), || {
-            gap(GapMessage::CloseFolderDelete)
-        })
+        DialogFrame::new(
+            "folder-delete-dialog",
+            || super::super::sidebar::FOLDER_DELETE_TITLE.to_string(),
+            || gap(GapMessage::CloseFolderDelete),
+        )
         .size(MODAL_CARD)
         .danger(true)
         .busy(busy)
@@ -194,9 +248,15 @@ fn option_card(
         style.interaction.hovered.background = Some(SemanticColorRole::DangerSoftHover);
         style.interaction.pressed.background = Some(SemanticColorRole::DangerSoftPressed);
     }
-    let detail_text = widget(wrapping_text(12.0, 18.0, SemanticColorRole::Muted)).prop::<String, nana_ui::runtime::view::fields::text::value>(detail);
+    let detail_text = widget(wrapping_text(12.0, 18.0, SemanticColorRole::Muted))
+        .prop::<String, nana_ui::runtime::view::fields::text::value>(detail);
     let content = widget(Stack::column(6.0).width(LengthSpec::Fill)).children((
-        widget(parts::label_text(title, 14.0, 600, Some(SemanticColorRole::Text))),
+        widget(parts::label_text(
+            title,
+            14.0,
+            600,
+            Some(SemanticColorRole::Text),
+        )),
         detail_text,
     ));
     widget(ListItem::new(title).style(style))
@@ -223,7 +283,10 @@ impl SmartDeleteView {
         }
         Some(Self {
             title: sidebar.smart_delete_title(),
-            copy: format!("将删除“{}”及其子智能文件夹。实际文件和真实目录不会被删除。", sidebar.smart_delete_label),
+            copy: format!(
+                "将删除“{}”及其子智能文件夹。实际文件和真实目录不会被删除。",
+                sidebar.smart_delete_label
+            ),
             busy: sidebar.smart_draft.busy,
         })
     }
@@ -235,15 +298,38 @@ pub fn smart_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
     Projected::register(view, SmartDeleteView::project);
     let busy = move || view.with(|view| view.busy);
     let buttons = vec![
-        action("取消", ButtonKind::Ghost, busy, "smart-delete-cancel", || gap(GapMessage::CloseSmartDelete)),
-        action("删除", ButtonKind::Danger, busy, "smart-delete-confirm", || gap(GapMessage::ConfirmSmartDelete)),
+        action(
+            "取消",
+            ButtonKind::Ghost,
+            busy,
+            "smart-delete-cancel",
+            || gap(GapMessage::CloseSmartDelete),
+        ),
+        action(
+            "删除",
+            ButtonKind::Danger,
+            busy,
+            "smart-delete-confirm",
+            || gap(GapMessage::ConfirmSmartDelete),
+        ),
     ];
     Some(
-        DialogFrame::new("smart-delete-dialog", move || view.with(|view| view.title.to_string()), || gap(GapMessage::CloseSmartDelete))
-            .size(MODAL_CARD)
-            .danger(true)
-            .busy(busy)
-            .dialog(paragraph(move || view.with(|view| view.copy.clone()), false, "smart-delete-copy"), footer(None, buttons)),
+        DialogFrame::new(
+            "smart-delete-dialog",
+            move || view.with(|view| view.title.to_string()),
+            || gap(GapMessage::CloseSmartDelete),
+        )
+        .size(MODAL_CARD)
+        .danger(true)
+        .busy(busy)
+        .dialog(
+            paragraph(
+                move || view.with(|view| view.copy.clone()),
+                false,
+                "smart-delete-copy",
+            ),
+            footer(None, buttons),
+        ),
     )
 }
 
@@ -270,7 +356,12 @@ impl PlaylistCreateView {
             players: model
                 .playlist_players
                 .iter()
-                .map(|player| (player.player_type_id.clone(), format!("{} · {}", player.label, player.file_class)))
+                .map(|player| {
+                    (
+                        player.player_type_id.clone(),
+                        format!("{} · {}", player.label, player.file_class),
+                    )
+                })
                 .collect(),
             blocked: model.new_playlist_name.trim().is_empty() || selected.is_none(),
             selected,
@@ -284,7 +375,11 @@ impl PlaylistCreateView {
 pub fn playlist_create_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let view = signal(PlaylistCreateView::project(model)?);
     Projected::register(view, PlaylistCreateView::project);
-    let draft = Draft::register(model, |model| model.playlist_dialog_open.then(|| model.new_playlist_name.clone()));
+    let draft = Draft::register(model, |model| {
+        model
+            .playlist_dialog_open
+            .then(|| model.new_playlist_name.clone())
+    });
     let body = widget(Stack::column(12.0).width(LengthSpec::Fill)).children((
         text_field(
             "名称",
@@ -304,18 +399,40 @@ pub fn playlist_create_dialog(model: &ShellViewModel) -> Option<AnyView> {
             false,
             ShellMessage::SelectPlaylistPlayer,
         ),
-        error_line(move || view.with(|view| view.error.clone()), "playlist-dialog-error"),
+        error_line(
+            move || view.with(|view| view.error.clone()),
+            "playlist-dialog-error",
+        ),
     ));
     let creating = move || view.with(|view| view.creating);
     let buttons = vec![
-        action("取消", ButtonKind::Ghost, creating, "playlist-dialog-cancel", || ShellMessage::ClosePlaylistDialog),
-        action("创建", ButtonKind::Primary, move || view.with(|view| view.blocked || view.creating), "create-playlist", || ShellMessage::CreatePlaylist),
+        action(
+            "取消",
+            ButtonKind::Ghost,
+            creating,
+            "playlist-dialog-cancel",
+            || ShellMessage::ClosePlaylistDialog,
+        ),
+        action(
+            "创建",
+            ButtonKind::Primary,
+            move || view.with(|view| view.blocked || view.creating),
+            "create-playlist",
+            || ShellMessage::CreatePlaylist,
+        ),
     ];
     Some(
-        DialogFrame::new("playlist-dialog", || "新建播放集".to_string(), || ShellMessage::ClosePlaylistDialog)
-            .size(MODAL_CARD)
-            .busy(creating)
-            .dialog(body, footer(Some(busy_note(creating, "playlist-dialog-busy")), buttons)),
+        DialogFrame::new(
+            "playlist-dialog",
+            || "新建播放集".to_string(),
+            || ShellMessage::ClosePlaylistDialog,
+        )
+        .size(MODAL_CARD)
+        .busy(creating)
+        .dialog(
+            body,
+            footer(Some(busy_note(creating, "playlist-dialog-busy")), buttons),
+        ),
     )
 }
 
@@ -332,7 +449,11 @@ pub(crate) struct RepositoryDeleteView {
 }
 
 /// 删除资源库的三个选项，最后一个是危险项。
-const DELETE_MODES: [DeleteMode; 3] = [DeleteMode::RecordOnly, DeleteMode::DeleteMetadata, DeleteMode::DeleteFolder];
+const DELETE_MODES: [DeleteMode; 3] = [
+    DeleteMode::RecordOnly,
+    DeleteMode::DeleteMetadata,
+    DeleteMode::DeleteFolder,
+];
 
 impl RepositoryDeleteView {
     pub(crate) fn project(model: &ShellViewModel) -> Option<Self> {
@@ -343,11 +464,21 @@ impl RepositoryDeleteView {
             .repositories
             .iter()
             .find(|item| item.repo_id == dialog.repo_id)
-            .map(|item| format!("资源库“{}”位于 {}。下面每个操作都会移除当前注册记录。", item.name, item.path))
+            .map(|item| {
+                format!(
+                    "资源库“{}”位于 {}。下面每个操作都会移除当前注册记录。",
+                    item.name, item.path
+                )
+            })
             .unwrap_or_default();
         Some(Self {
             summary,
-            modes: DELETE_MODES.map(|mode| (workspace.delete_mode_detail(mode), deleting || !workspace.delete_mode_enabled(mode))),
+            modes: DELETE_MODES.map(|mode| {
+                (
+                    workspace.delete_mode_detail(mode),
+                    deleting || !workspace.delete_mode_enabled(mode),
+                )
+            }),
             error: dialog.error.clone(),
             deleting,
         })
@@ -362,9 +493,9 @@ pub fn repository_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
     // `.repository-delete-dialog__summary`：12px、行高 1.6，颜色继承正文。
     let summary = widget(wrapping_text(12.0, 19.2, SemanticColorRole::Text))
         .key("delete-dialog-summary")
-        .prop::<String, nana_ui::runtime::view::fields::HiddenWhenEmpty<nana_ui::runtime::view::fields::text::value>>(move || {
-            view.with(|view| view.summary.clone())
-        });
+        .prop::<String, nana_ui::runtime::view::fields::HiddenWhenEmpty<
+            nana_ui::runtime::view::fields::text::value,
+        >>(move || view.with(|view| view.summary.clone()));
     let options = DELETE_MODES
         .into_iter()
         .enumerate()
@@ -373,15 +504,31 @@ pub fn repository_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let body = widget(Stack::column(12.0).width(LengthSpec::Fill)).children((
         summary,
         widget(Stack::column(10.0).width(LengthSpec::Fill)).children(options),
-        error_line(move || view.with(|view| view.error.clone()), "delete-dialog-error"),
+        error_line(
+            move || view.with(|view| view.error.clone()),
+            "delete-dialog-error",
+        ),
     ));
-    let buttons = vec![action("取消", ButtonKind::Ghost, deleting, "delete-dialog-cancel", || ShellMessage::MissingCloseDelete)];
+    let buttons = vec![action(
+        "取消",
+        ButtonKind::Ghost,
+        deleting,
+        "delete-dialog-cancel",
+        || ShellMessage::MissingCloseDelete,
+    )];
     Some(
-        DialogFrame::new("repository-delete-dialog", || "删除资源库".to_string(), || ShellMessage::MissingCloseDelete)
-            .size(MODAL_CARD)
-            .danger(true)
-            .busy(deleting)
-            .dialog(body, footer(Some(busy_note(deleting, "delete-dialog-busy")), buttons)),
+        DialogFrame::new(
+            "repository-delete-dialog",
+            || "删除资源库".to_string(),
+            || ShellMessage::MissingCloseDelete,
+        )
+        .size(MODAL_CARD)
+        .danger(true)
+        .busy(deleting)
+        .dialog(
+            body,
+            footer(Some(busy_note(deleting, "delete-dialog-busy")), buttons),
+        ),
     )
 }
 

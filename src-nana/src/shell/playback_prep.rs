@@ -21,20 +21,35 @@ pub struct SourcePrep {
     /// 失败出在准备播放源（来源登录失效、网络不通、缓存目录不可用、准备好的文件读不出）：可以重试。
     /// 读到本地文件以后的解码失败重试也是一样的结果，为假。
     pub retryable: bool,
+    /// 这次预览读到的歌词正文。空串且不在读取中，舞台写「暂无歌词」。
+    pub lyric_text: String,
+    /// 音频舞台已经能画，歌词文件还在读。这时空的歌词写「读取歌词...」，读完由 `LyricsLoaded` 换上。
+    /// 视频、解不开、只有网址不置这一位。
+    pub lyrics_pending: bool,
+    /// 还要读的本地歌词。`lyrics_pending` 且为 `None` 时读同级 `.lrc`。
+    pub lyric_path: Option<String>,
 }
 
 impl SourcePrep {
     /// 播放源准备好了，后端在 `at` 写下了这一条的访问时间。
     pub fn prepared(repo_id: &str, path: &str, at: &str) -> Self {
         Self {
-            accessed: Some(PreparedAccess { repo_id: repo_id.to_string(), path: path.to_string(), at: at.to_string() }),
+            accessed: Some(PreparedAccess {
+                repo_id: repo_id.to_string(),
+                path: path.to_string(),
+                at: at.to_string(),
+            }),
             retryable: false,
+            ..Self::default()
         }
     }
 
     /// 准备播放源失败，可以重试。
     pub fn failed() -> Self {
-        Self { accessed: None, retryable: true }
+        Self {
+            retryable: true,
+            ..Self::default()
+        }
     }
 }
 

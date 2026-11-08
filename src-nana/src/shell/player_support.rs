@@ -7,7 +7,9 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::backend::services::repository::{PlaylistDetail, PlaylistItem, PlaylistPlayerContribution, PlaylistSummary};
+use crate::backend::services::repository::{
+    PlaylistDetail, PlaylistItem, PlaylistPlayerContribution, PlaylistSummary,
+};
 use crate::settings;
 
 use super::{PlaybackMode, PlaybackSettings, PlayerCandidate, QueueItem};
@@ -47,7 +49,10 @@ pub fn system_media_session_available() -> bool {
 }
 
 pub fn default_settings() -> PlaybackSettings {
-    PlaybackSettings { image_duration_ms: 5000, object_fit_cover: false }
+    PlaybackSettings {
+        image_duration_ms: 5000,
+        object_fit_cover: false,
+    }
 }
 
 /// 图片停留钳在 2–30 秒。非有限数字回到 5 秒。
@@ -71,11 +76,17 @@ pub fn normalize_mode(value: Option<&str>) -> PlaybackMode {
 }
 
 pub fn normalize_volume(value: Option<f64>) -> f32 {
-    value.filter(|value| value.is_finite()).map(|value| value.clamp(0.0, 1.0) as f32).unwrap_or(1.0)
+    value
+        .filter(|value| value.is_finite())
+        .map(|value| value.clamp(0.0, 1.0) as f32)
+        .unwrap_or(1.0)
 }
 
 pub fn playback_root() -> PathBuf {
-    settings::default_path().parent().unwrap_or_else(|| Path::new(".")).to_path_buf()
+    settings::default_path()
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .to_path_buf()
 }
 
 pub fn settings_path() -> PathBuf {
@@ -93,8 +104,12 @@ pub fn preferences_path() -> PathBuf {
 pub fn read_settings_file(path: &Path) -> PlaybackSettings {
     match read_json(path, "播放设置", SETTINGS_KEY) {
         Some(value) => PlaybackSettings {
-            image_duration_ms: normalize_image_duration_ms(value.get("imageDurationMs").and_then(|item| item.as_f64())),
-            object_fit_cover: normalize_object_fit(value.get("objectFit").and_then(|item| item.as_str())),
+            image_duration_ms: normalize_image_duration_ms(
+                value.get("imageDurationMs").and_then(|item| item.as_f64()),
+            ),
+            object_fit_cover: normalize_object_fit(
+                value.get("objectFit").and_then(|item| item.as_str()),
+            ),
         },
         None => default_settings(),
     }
@@ -117,24 +132,29 @@ pub fn read_sessions_file(path: &Path) -> BTreeMap<String, StoredSession> {
     };
     object
         .iter()
-        .filter_map(|(repo_id, value)| parse_session(repo_id, value).map(|session| (repo_id.clone(), session)))
+        .filter_map(|(repo_id, value)| {
+            parse_session(repo_id, value).map(|session| (repo_id.clone(), session))
+        })
         .collect()
 }
 
 pub fn sessions_json(sessions: &BTreeMap<String, StoredSession>) -> serde_json::Value {
     let mut object = serde_json::Map::new();
     for (repo_id, session) in sessions {
-        object.insert(repo_id.clone(), serde_json::json!({
-            "repoId": session.repo_id,
-            "playlistId": session.playlist_id,
-            "playerTypeId": session.player_type_id,
-            "currentItemId": session.current_item_id,
-            "currentTimeMs": session.current_time_ms,
-            "durationMs": session.duration_ms,
-            "mode": mode_name(session.mode),
-            "volume": session.volume,
-            "isPlaying": session.is_playing,
-        }));
+        object.insert(
+            repo_id.clone(),
+            serde_json::json!({
+                "repoId": session.repo_id,
+                "playlistId": session.playlist_id,
+                "playerTypeId": session.player_type_id,
+                "currentItemId": session.current_item_id,
+                "currentTimeMs": session.current_time_ms,
+                "durationMs": session.duration_ms,
+                "mode": mode_name(session.mode),
+                "volume": session.volume,
+                "isPlaying": session.is_playing,
+            }),
+        );
     }
     serde_json::Value::Object(object)
 }
@@ -147,7 +167,12 @@ pub fn read_preferences_file(path: &Path) -> BTreeMap<String, String> {
 }
 
 pub fn preferences_json(preferences: &BTreeMap<String, String>) -> serde_json::Value {
-    serde_json::Value::Object(preferences.iter().map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone()))).collect())
+    serde_json::Value::Object(
+        preferences
+            .iter()
+            .map(|(key, value)| (key.clone(), serde_json::Value::String(value.clone())))
+            .collect(),
+    )
 }
 
 /// 原子写入。失败时删除临时文件并记日志。
@@ -193,14 +218,26 @@ pub fn default_capability(player_type_id: &str) -> String {
     }
 }
 
-/// Nana 自带的内存解码器能放的音频格式，按候选登记顺序连成「WAV / MP3 / FLAC / Ogg」，
-/// Windows 上再接「M4A / AAC / Opus」。这些候选的 PCM 装进同一个游标出声，不依赖任何插件；一个都没有时为空。
+/// Nana 自带的内存解码器能放的音频格式，使用稳定的展示顺序。
+/// 这些候选的 PCM 装进同一个游标出声，不依赖任何插件；一个都没有时为空。
 pub fn builtin_audio_formats(candidates: &[PlayerCandidate]) -> Option<String> {
-    let labels = candidates
+    const PREFERRED_ORDER: [&str; 7] = ["WAV", "MP3", "FLAC", "Ogg", "Opus", "M4A", "AAC"];
+    let mut labels = candidates
         .iter()
-        .filter(|candidate| candidate.file_class == "audio" && super::wav_player::is_memory_candidate(candidate))
-        .map(|candidate| candidate.label.as_str())
+        .filter(|candidate| {
+            candidate.file_class == "audio" && super::wav_player::is_memory_candidate(candidate)
+        })
+        .flat_map(|candidate| candidate.label.split(" / ").map(str::trim))
+        .filter(|label| !label.is_empty())
+        .map(str::to_string)
         .collect::<Vec<_>>();
+    labels.sort_by_key(|label| {
+        PREFERRED_ORDER
+            .iter()
+            .position(|preferred| preferred.eq_ignore_ascii_case(label))
+            .unwrap_or(PREFERRED_ORDER.len())
+    });
+    labels.dedup_by(|left, right| left.eq_ignore_ascii_case(right));
     (!labels.is_empty()).then(|| labels.join(" / "))
 }
 
@@ -221,10 +258,16 @@ pub fn resolve_player(
         };
     }
     let preferred = preferred_plugin_id.as_ref().and_then(|plugin_id| {
-        candidates.iter().find(|candidate| &candidate.plugin_id == plugin_id).cloned()
+        candidates
+            .iter()
+            .find(|candidate| &candidate.plugin_id == plugin_id)
+            .cloned()
     });
     let official = official_plugin(&capability_id).and_then(|plugin_id| {
-        candidates.iter().find(|candidate| candidate.plugin_id == plugin_id).cloned()
+        candidates
+            .iter()
+            .find(|candidate| candidate.plugin_id == plugin_id)
+            .cloned()
     });
     let player = preferred.clone().or(official).or_else(|| {
         if capability_id == AUDIO_CAPABILITY {
@@ -233,13 +276,24 @@ pub fn resolve_player(
             candidates.first().cloned()
         }
     });
-    let fallback_used = preferred_plugin_id.as_ref().is_some_and(|plugin_id| player.as_ref().map(|item| &item.plugin_id) != Some(plugin_id));
-    PlayerResolution { player, capability_id, preferred_plugin_id, fallback_used }
+    let fallback_used = preferred_plugin_id
+        .as_ref()
+        .is_some_and(|plugin_id| player.as_ref().map(|item| &item.plugin_id) != Some(plugin_id));
+    PlayerResolution {
+        player,
+        capability_id,
+        preferred_plugin_id,
+        fallback_used,
+    }
 }
 
 pub fn resolution_notice(resolution: &PlayerResolution) -> String {
     if resolution.fallback_used {
-        let label = resolution.player.as_ref().map(|player| player.label.as_str()).unwrap_or("官方默认实现");
+        let label = resolution
+            .player
+            .as_ref()
+            .map(|player| player.label.as_str())
+            .unwrap_or("官方默认实现");
         return format!("所选播放器当前不可用，已回退到 {label}。");
     }
     if resolution.player.is_none() && resolution.capability_id == AUDIO_CAPABILITY {
@@ -260,7 +314,10 @@ pub fn compatible_playlist_ids(
     candidates: &[PlayerCandidate],
 ) -> Vec<String> {
     if kind == "directory" {
-        return playlists.iter().map(|playlist| playlist.playlist_id.clone()).collect();
+        return playlists
+            .iter()
+            .map(|playlist| playlist.playlist_id.clone())
+            .collect();
     }
     let extension = extension.trim().to_ascii_lowercase();
     if extension.is_empty() {
@@ -268,7 +325,14 @@ pub fn compatible_playlist_ids(
     }
     playlists
         .iter()
-        .filter(|playlist| type_supports_extension(&playlist.player_type_id, &extension, contributions, candidates))
+        .filter(|playlist| {
+            type_supports_extension(
+                &playlist.player_type_id,
+                &extension,
+                contributions,
+                candidates,
+            )
+        })
         .map(|playlist| playlist.playlist_id.clone())
         .collect()
 }
@@ -279,7 +343,11 @@ pub fn membership_can_toggle(kind: &str, asset_id: &str, is_virtual: bool) -> bo
 
 pub fn next_membership_ids(current: &[String], playlist_id: &str) -> Vec<String> {
     if current.iter().any(|item| item == playlist_id) {
-        current.iter().filter(|item| item.as_str() != playlist_id).cloned().collect()
+        current
+            .iter()
+            .filter(|item| item.as_str() != playlist_id)
+            .cloned()
+            .collect()
     } else {
         let mut next = current.to_vec();
         next.push(playlist_id.to_string());
@@ -295,7 +363,11 @@ pub fn reorder_before(ids: &[String], source: &str, before: Option<&str>) -> Opt
     if before == Some(source) {
         return None;
     }
-    let mut next: Vec<String> = ids.iter().filter(|id| id.as_str() != source).cloned().collect();
+    let mut next: Vec<String> = ids
+        .iter()
+        .filter(|id| id.as_str() != source)
+        .cloned()
+        .collect();
     match before {
         Some(target) => {
             let index = next.iter().position(|id| id == target)?;
@@ -307,12 +379,19 @@ pub fn reorder_before(ids: &[String], source: &str, before: Option<&str>) -> Opt
 }
 
 /// 点到的播放条目。队列里有就用队列，否则从已打开的播放集拼一条，不开始播放。
-pub fn listed_preview_item(queue: &[QueueItem], listed: Option<&PlaylistDetail>, id: &str) -> Option<QueueItem> {
+pub fn listed_preview_item(
+    queue: &[QueueItem],
+    listed: Option<&PlaylistDetail>,
+    id: &str,
+) -> Option<QueueItem> {
     if let Some(item) = queue.iter().find(|item| item.id == id) {
         return Some(item.clone());
     }
     let detail = listed?;
-    let item = detail.items.iter().find(|item| item.playlist_item_id == id)?;
+    let item = detail
+        .items
+        .iter()
+        .find(|item| item.playlist_item_id == id)?;
     Some(queue_item_from_playlist(item, &detail.playlist))
 }
 
@@ -332,6 +411,7 @@ pub fn queue_item_from_playlist(item: &PlaylistItem, playlist: &PlaylistSummary)
         file_class: playlist.file_class.clone(),
         thumbnail_path: item.thumbnail_path.clone(),
         is_virtual: item.is_virtual,
+        local_absolute_path: item.local_absolute_path.clone(),
     }
 }
 
@@ -348,14 +428,23 @@ pub fn find_player_for_extension<'a>(
     }
     if let Some(contribution) = contributions.iter().find(|contribution| {
         matches!(contribution.file_class.as_str(), "audio" | "video")
-            && contribution.supported_extensions.iter().any(|item| item.eq_ignore_ascii_case(&extension))
+            && contribution
+                .supported_extensions
+                .iter()
+                .any(|item| item.eq_ignore_ascii_case(&extension))
     }) {
         return Some(PlayerMatch::Contribution(contribution));
     }
-    candidates.iter().find(|candidate| {
-        matches!(candidate.file_class.as_str(), "audio" | "video")
-            && candidate.extensions.iter().any(|item| item.eq_ignore_ascii_case(&extension))
-    }).map(PlayerMatch::Native)
+    candidates
+        .iter()
+        .find(|candidate| {
+            matches!(candidate.file_class.as_str(), "audio" | "video")
+                && candidate
+                    .extensions
+                    .iter()
+                    .any(|item| item.eq_ignore_ascii_case(&extension))
+        })
+        .map(PlayerMatch::Native)
 }
 
 pub enum PlayerMatch<'a> {
@@ -364,12 +453,20 @@ pub enum PlayerMatch<'a> {
 }
 
 pub fn ready_ids(queue: &[QueueItem]) -> Vec<String> {
-    queue.iter().filter(|item| item.status == "ready").map(|item| item.id.clone()).collect()
+    queue
+        .iter()
+        .filter(|item| item.status == "ready")
+        .map(|item| item.id.clone())
+        .collect()
 }
 
 /// 当前项留在洗牌序列开头，其余用固定种子的 Fisher-Yates。
 pub fn shuffle_order(current: Option<&str>, ready: &[String], seed: u64) -> Vec<String> {
-    let mut rest: Vec<String> = ready.iter().filter(|id| Some(id.as_str()) != current).cloned().collect();
+    let mut rest: Vec<String> = ready
+        .iter()
+        .filter(|id| Some(id.as_str()) != current)
+        .cloned()
+        .collect();
     let mut state = seed.max(1);
     for index in (1..rest.len()).rev() {
         state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
@@ -403,7 +500,10 @@ pub fn next_ready_id(
         if shuffle.is_empty() || !shuffle.iter().any(|id| Some(id.as_str()) == current) {
             return NextStep::ReshuffleMissing;
         }
-        let index = shuffle.iter().position(|id| Some(id.as_str()) == current).unwrap_or(usize::MAX);
+        let index = shuffle
+            .iter()
+            .position(|id| Some(id.as_str()) == current)
+            .unwrap_or(usize::MAX);
         if let Some(next) = shuffle.get(index.saturating_add(1)) {
             return NextStep::Item(next.clone());
         }
@@ -423,7 +523,12 @@ pub fn next_ready_id(
     }
 }
 
-pub fn previous_ready_id(mode: PlaybackMode, current: Option<&str>, ready: &[String], history: &[String]) -> Option<String> {
+pub fn previous_ready_id(
+    mode: PlaybackMode,
+    current: Option<&str>,
+    ready: &[String],
+    history: &[String],
+) -> Option<String> {
     if mode == PlaybackMode::Shuffle && history.len() > 1 {
         return history.get(history.len() - 2).cloned();
     }
@@ -476,18 +581,27 @@ fn type_supports_extension(
 ) -> bool {
     let from_candidate = candidates.iter().any(|candidate| {
         candidate.player_type_id == player_type_id
-            && candidate.extensions.iter().any(|item| item.eq_ignore_ascii_case(extension))
+            && candidate
+                .extensions
+                .iter()
+                .any(|item| item.eq_ignore_ascii_case(extension))
     });
     from_candidate
         || contributions.iter().any(|contribution| {
             contribution.player_type_id == player_type_id
-                && contribution.supported_extensions.iter().any(|item| item.eq_ignore_ascii_case(extension))
+                && contribution
+                    .supported_extensions
+                    .iter()
+                    .any(|item| item.eq_ignore_ascii_case(extension))
         })
 }
 
 fn resolve_capability(player_type_id: &str, candidates: &[PlayerCandidate]) -> String {
     let stable = default_capability(player_type_id);
-    if candidates.iter().any(|candidate| capability_id(candidate) == stable) {
+    if candidates
+        .iter()
+        .any(|candidate| capability_id(candidate) == stable)
+    {
         return stable;
     }
     candidates.first().map(capability_id).unwrap_or(stable)
@@ -498,22 +612,49 @@ fn official_plugin(capability_id: &str) -> Option<&'static str> {
 }
 
 fn parse_session(repo_id: &str, value: &serde_json::Value) -> Option<StoredSession> {
-    let playlist_id = value.get("playlistId").and_then(|item| item.as_str()).unwrap_or("").trim().to_string();
-    let current_item_id = value.get("currentItemId").and_then(|item| item.as_str()).unwrap_or("").trim().to_string();
+    let playlist_id = value
+        .get("playlistId")
+        .and_then(|item| item.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let current_item_id = value
+        .get("currentItemId")
+        .and_then(|item| item.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if playlist_id.is_empty() || current_item_id.is_empty() {
         eprintln!("Nana 忽略不完整的播放会话：{repo_id}");
         return None;
     }
     Some(StoredSession {
-        repo_id: value.get("repoId").and_then(|item| item.as_str()).unwrap_or(repo_id).to_string(),
+        repo_id: value
+            .get("repoId")
+            .and_then(|item| item.as_str())
+            .unwrap_or(repo_id)
+            .to_string(),
         playlist_id,
-        player_type_id: value.get("playerTypeId").and_then(|item| item.as_str()).unwrap_or("").to_string(),
+        player_type_id: value
+            .get("playerTypeId")
+            .and_then(|item| item.as_str())
+            .unwrap_or("")
+            .to_string(),
         current_item_id,
-        current_time_ms: value.get("currentTimeMs").and_then(|item| item.as_u64()).unwrap_or(0),
-        duration_ms: value.get("durationMs").and_then(|item| item.as_u64()).unwrap_or(0),
+        current_time_ms: value
+            .get("currentTimeMs")
+            .and_then(|item| item.as_u64())
+            .unwrap_or(0),
+        duration_ms: value
+            .get("durationMs")
+            .and_then(|item| item.as_u64())
+            .unwrap_or(0),
         mode: normalize_mode(value.get("mode").and_then(|item| item.as_str())),
         volume: normalize_volume(value.get("volume").and_then(|item| item.as_f64())),
-        is_playing: value.get("isPlaying").and_then(|item| item.as_bool()).unwrap_or(false),
+        is_playing: value
+            .get("isPlaying")
+            .and_then(|item| item.as_bool())
+            .unwrap_or(false),
     })
 }
 

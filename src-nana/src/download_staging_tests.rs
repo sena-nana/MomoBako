@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::{staging_root, StagingDir};
+use super::{StagingDir, staging_root};
 
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
@@ -14,7 +14,11 @@ pub(crate) struct Scratch(PathBuf);
 
 impl Scratch {
     pub(crate) fn new(name: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("momobako-staging-{name}-{}-{}", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+        let path = std::env::temp_dir().join(format!(
+            "momobako-staging-{name}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
         fs::create_dir_all(&path).expect("临时目录");
         Self(path)
     }
@@ -49,10 +53,20 @@ fn the_staging_root_follows_the_managed_cache_layout() {
     let service = Path::new("D:/service");
     assert_eq!(
         staging_root(Some(" D:/MomoCache/netease "), service, "third-repo"),
-        PathBuf::from("D:/MomoCache/netease").join(".momo").join("cache").join("download-staging").join("third-repo")
+        PathBuf::from("D:/MomoCache/netease")
+            .join(".momo")
+            .join("cache")
+            .join("download-staging")
+            .join("third-repo")
     );
-    assert_eq!(staging_root(None, service, "netease:42/x"), service.join("download-staging").join("netease_42_x"));
-    assert_eq!(staging_root(Some("  "), service, ".."), service.join("download-staging").join("repository"));
+    assert_eq!(
+        staging_root(None, service, "netease:42/x"),
+        service.join("download-staging").join("netease_42_x")
+    );
+    assert_eq!(
+        staging_root(Some("  "), service, ".."),
+        service.join("download-staging").join("repository")
+    );
 }
 
 /// 每次下载一个新的空目录，不沿用已有的目录。
@@ -65,7 +79,11 @@ fn every_download_gets_a_fresh_empty_folder() {
     assert_ne!(first.path(), second.path());
     for staging in [&first, &second] {
         assert!(staging.path().starts_with(&root));
-        assert_eq!(fs::read_dir(staging.path()).expect("读目录").count(), 0, "新建的是空目录");
+        assert_eq!(
+            fs::read_dir(staging.path()).expect("读目录").count(),
+            0,
+            "新建的是空目录"
+        );
     }
 
     let blocked = scratch.file("blocked", "根目录的位置是个文件");
@@ -79,7 +97,10 @@ fn every_download_gets_a_fresh_empty_folder() {
 fn clearing_removes_only_what_this_download_reported_inside_its_folder() {
     let scratch = Scratch::new("clear");
     let root = scratch.path().join("staging");
-    let older_run = scratch.file("staging/older-run/夜曲/周杰伦 - 晴天.mp3", "上次导入失败留下的");
+    let older_run = scratch.file(
+        "staging/older-run/夜曲/周杰伦 - 晴天.mp3",
+        "上次导入失败留下的",
+    );
     let legacy = scratch.file("staging/旧暂存.mp3", "插件旧的暂存文件");
     let user_file = scratch.file("Music/周杰伦 - 晴天.mp3", "用户自己的文件");
     let staging = StagingDir::create(&root).expect("暂存目录");
@@ -91,7 +112,13 @@ fn clearing_removes_only_what_this_download_reported_inside_its_folder() {
     };
     let audio = staged("周杰伦 - 晴天.mp3");
     let lyric = staged("周杰伦 - 晴天.lrc");
-    let reported = vec![text(&audio), text(&lyric), text(&user_file), text(&older_run), "相对路径.mp3".into()];
+    let reported = vec![
+        text(&audio),
+        text(&lyric),
+        text(&user_file),
+        text(&older_run),
+        "相对路径.mp3".into(),
+    ];
 
     let cleanup = staging.clear(&reported);
 
@@ -99,11 +126,27 @@ fn clearing_removes_only_what_this_download_reported_inside_its_folder() {
     assert!(!audio.exists() && !lyric.exists());
     assert!(!staging.path().exists(), "这次的暂存目录清空以后删掉");
     assert!(!cleanup.left);
-    assert_eq!(cleanup.outside, [text(&user_file), text(&older_run), "相对路径.mp3".to_string()]);
+    assert_eq!(
+        cleanup.outside,
+        [
+            text(&user_file),
+            text(&older_run),
+            "相对路径.mp3".to_string()
+        ]
+    );
     assert!(cleanup.failed.is_empty());
-    assert_eq!(fs::read_to_string(&user_file).expect("用户文件还在"), "用户自己的文件");
-    assert_eq!(fs::read_to_string(&older_run).expect("别的下载留下的还在"), "上次导入失败留下的");
-    assert_eq!(fs::read_to_string(&legacy).expect("旧暂存文件还在"), "插件旧的暂存文件");
+    assert_eq!(
+        fs::read_to_string(&user_file).expect("用户文件还在"),
+        "用户自己的文件"
+    );
+    assert_eq!(
+        fs::read_to_string(&older_run).expect("别的下载留下的还在"),
+        "上次导入失败留下的"
+    );
+    assert_eq!(
+        fs::read_to_string(&legacy).expect("旧暂存文件还在"),
+        "插件旧的暂存文件"
+    );
     assert!(root.is_dir(), "暂存根目录不删");
 }
 
@@ -118,7 +161,10 @@ fn unreported_files_keep_the_folder() {
     fs::write(&unreported, "b").expect("b");
     let cleanup = staging.clear(&[text(&reported)]);
     assert!(!reported.exists());
-    assert!(cleanup.left && unreported.exists(), "没报告的不删，目录留着");
+    assert!(
+        cleanup.left && unreported.exists(),
+        "没报告的不删，目录留着"
+    );
 }
 
 /// 插件报告了一个文件夹：只在它清空以后随空文件夹一起删，不递归删里面的东西。

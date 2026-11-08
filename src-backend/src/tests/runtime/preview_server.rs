@@ -245,11 +245,10 @@ fn repository_query_prepare_preview_file_source_returns_preview_url() {
         .expect("repository should be created")
         .repository
         .repo_id;
-    let response =
-        tokio::runtime::Builder::new_current_thread()
-            .build()
-            .expect("tokio")
-            .block_on(view_model.prepare_preview_file_source(FileReadRequest {
+    let response = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("tokio")
+        .block_on(view_model.prepare_preview_file_source(FileReadRequest {
             repo_id,
             path: "model.glb".to_string(),
         }))

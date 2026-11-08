@@ -57,8 +57,14 @@ pub fn backend_options(plugins: &[PluginManifest]) -> Vec<BackendOption> {
             name: plugin.name.clone(),
             description: plugin.description.clone(),
             enabled: runtime_available(plugin),
-            local_root: plugin.capabilities.iter().any(|item| item == LOCAL_ROOT_CAPABILITY),
-            authentication: plugin.capabilities.iter().any(|item| item == AUTHENTICATION_CAPABILITY),
+            local_root: plugin
+                .capabilities
+                .iter()
+                .any(|item| item == LOCAL_ROOT_CAPABILITY),
+            authentication: plugin
+                .capabilities
+                .iter()
+                .any(|item| item == AUTHENTICATION_CAPABILITY),
         })
         .collect()
 }
@@ -91,9 +97,21 @@ fn backend_label(plugin_id: &str, fallback: &str) -> String {
 
 /// 从 Eagle Library 目录推资源库名：取最后一段并去掉 `.library`，空了用 `Eagle Library`。
 pub fn eagle_repository_name(path: &str) -> String {
-    let last = path.split(['/', '\\']).filter(|segment| !segment.is_empty()).next_back().unwrap_or("");
-    let trimmed = if last.to_ascii_lowercase().ends_with(".library") { &last[..last.len() - ".library".len()] } else { last };
-    if trimmed.is_empty() { "Eagle Library".into() } else { trimmed.to_string() }
+    let last = path
+        .split(['/', '\\'])
+        .filter(|segment| !segment.is_empty())
+        .next_back()
+        .unwrap_or("");
+    let trimmed = if last.to_ascii_lowercase().ends_with(".library") {
+        &last[..last.len() - ".library".len()]
+    } else {
+        last
+    };
+    if trimmed.is_empty() {
+        "Eagle Library".into()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 impl SidebarState {
@@ -232,7 +250,8 @@ impl SidebarState {
     fn begin_attach(&mut self) {
         self.creating = false;
         self.operation.start(
-            OperationStart::new("挂载资源库", "检查文件夹并读取索引", 8.0).runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_ATTACH]),
+            OperationStart::new("挂载资源库", "检查文件夹并读取索引", 8.0)
+                .runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_ATTACH]),
         );
     }
 
@@ -240,7 +259,8 @@ impl SidebarState {
     fn begin_create(&mut self) {
         self.creating = true;
         self.operation.start(
-            OperationStart::new("创建资源库", "初始化资源库并扫描文件", 8.0).runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_CREATE]),
+            OperationStart::new("创建资源库", "初始化资源库并扫描文件", 8.0)
+                .runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_CREATE]),
         );
     }
 
@@ -254,7 +274,8 @@ impl SidebarState {
                 self.attach_path.clear();
                 self.popover_error.clear();
                 if std::mem::take(&mut self.creating) {
-                    self.operation.update(OperationPatch::step("切换到新资源库", 88.0));
+                    self.operation
+                        .update(OperationPatch::step("切换到新资源库", 88.0));
                 }
             }
             Err(error) => {
@@ -281,19 +302,31 @@ impl SidebarState {
         }
         let path = self.backend_url.trim().to_string();
         let name = if self.backend_name.trim().is_empty() {
-            option.map(|option| option.name.clone()).filter(|name| !name.is_empty()).unwrap_or_else(|| "新资源库".into())
+            option
+                .map(|option| option.name.clone())
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| "新资源库".into())
         } else {
             self.backend_name.trim().to_string()
         };
         let mut config = serde_json::Map::new();
         config.insert("baseUrl".into(), serde_json::Value::String(path.clone()));
         if !self.backend_user.trim().is_empty() {
-            config.insert("username".into(), serde_json::Value::String(self.backend_user.trim().to_string()));
+            config.insert(
+                "username".into(),
+                serde_json::Value::String(self.backend_user.trim().to_string()),
+            );
         }
         if !self.backend_password.trim().is_empty() {
-            config.insert("password".into(), serde_json::Value::String(self.backend_password.trim().to_string()));
+            config.insert(
+                "password".into(),
+                serde_json::Value::String(self.backend_password.trim().to_string()),
+            );
         }
-        config.insert("rootPath".into(), serde_json::Value::String(self.backend_root.trim().to_string()));
+        config.insert(
+            "rootPath".into(),
+            serde_json::Value::String(self.backend_root.trim().to_string()),
+        );
         self.submitting = true;
         self.popover_error.clear();
         self.begin_create();
@@ -345,7 +378,12 @@ mod tests {
     #[test]
     fn backend_options_follow_vue_labels_and_routes() {
         let plugins = vec![
-            plugin(LOCAL_FILESYSTEM_PLUGIN_ID, "source", &["localRootPath"], true),
+            plugin(
+                LOCAL_FILESYSTEM_PLUGIN_ID,
+                "source",
+                &["localRootPath"],
+                true,
+            ),
             plugin(EAGLE_PLUGIN_ID, "source", &[], true),
             plugin("momobako.source.login", "source", &["authentication"], true),
             plugin("momobako.source.dav", "source", &[], true),
@@ -354,17 +392,36 @@ mod tests {
         ];
         let options = backend_options(&plugins);
         assert_eq!(
-            options.iter().map(|option| option.label.as_str()).collect::<Vec<_>>(),
-            ["本地文件夹", "Eagle Library", "插件 momobako.source.login", "插件 momobako.source.dav", "插件 momobako.source.off"]
+            options
+                .iter()
+                .map(|option| option.label.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "本地文件夹",
+                "Eagle Library",
+                "插件 momobako.source.login",
+                "插件 momobako.source.dav",
+                "插件 momobako.source.off"
+            ]
         );
         let mut sidebar = SidebarState::default();
         sidebar.open_switcher();
         assert!(sidebar.show_add_menu());
-        assert_eq!(sidebar.choose_backend(&options[4]), None, "未启用的后端不能选");
-        assert_eq!(sidebar.choose_backend(&options[0]), Some(BackendRoute::PickLocalFolder));
+        assert_eq!(
+            sidebar.choose_backend(&options[4]),
+            None,
+            "未启用的后端不能选"
+        );
+        assert_eq!(
+            sidebar.choose_backend(&options[0]),
+            Some(BackendRoute::PickLocalFolder)
+        );
         assert_eq!(sidebar.popover, PopoverMode::Closed);
         sidebar.popover = PopoverMode::AddMenu;
-        assert_eq!(sidebar.choose_backend(&options[1]), Some(BackendRoute::PickEagleLibrary));
+        assert_eq!(
+            sidebar.choose_backend(&options[1]),
+            Some(BackendRoute::PickEagleLibrary)
+        );
         sidebar.attach_path = "D:/素材/Anime.library".into();
         assert!(sidebar.submit_attach());
         assert!(matches!(
@@ -378,15 +435,27 @@ mod tests {
             Some(BackendRoute::OpenSettings("momobako.source.login".into()))
         );
         sidebar.popover = PopoverMode::AddMenu;
-        assert_eq!(sidebar.choose_backend(&options[3]), Some(BackendRoute::Form));
+        assert_eq!(
+            sidebar.choose_backend(&options[3]),
+            Some(BackendRoute::Form)
+        );
         assert_eq!(sidebar.popover, PopoverMode::BackendForm);
-        assert!(sidebar.backend_submit_disabled(Some(&options[3])), "服务地址必填");
+        assert!(
+            sidebar.backend_submit_disabled(Some(&options[3])),
+            "服务地址必填"
+        );
         sidebar.backend_url = " https://example.com/dav/ ".into();
         sidebar.backend_user = "alice".into();
         sidebar.submit_backend(Some(&options[3]));
         assert!(sidebar.submitting);
         let effects = sidebar.take_effects();
-        let Some(SidebarEffect::CreateBackendRepository { name, path, config: Some(config), .. }) = effects.first() else {
+        let Some(SidebarEffect::CreateBackendRepository {
+            name,
+            path,
+            config: Some(config),
+            ..
+        }) = effects.first()
+        else {
             panic!("表单没有提交：{effects:?}");
         };
         assert_eq!(name, "插件 momobako.source.dav");
@@ -394,7 +463,11 @@ mod tests {
         assert_eq!(config["username"], "alice");
         assert_eq!(config["rootPath"], "");
         sidebar.note_attach_finished(Err("连接失败".into()));
-        assert_eq!(sidebar.popover, PopoverMode::BackendForm, "表单失败留在表单");
+        assert_eq!(
+            sidebar.popover,
+            PopoverMode::BackendForm,
+            "表单失败留在表单"
+        );
         assert_eq!(sidebar.popover_error, "连接失败");
     }
 

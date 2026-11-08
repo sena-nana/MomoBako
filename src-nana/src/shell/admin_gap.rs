@@ -7,8 +7,10 @@
 //! 页面只建一次，只读 [`ToolsSignals`]：导航按工具页 id 做键，选中态和文字是绑定；右侧按当前工具页
 //! 的种类换内容（原生页面的输入框和按钮在各自的页面里绑定），没有内置页面的工具页的说明随工具页一起换。
 
-use nana_ui::runtime::view::{css, dynamic, signal, widget, AnyView, IntoView, Signal};
-use nana_ui::runtime::{Activate, AlignSpec, InteractionStyle, LengthSpec, NodeStyle, SemanticPaint, Stack};
+use nana_ui::runtime::view::{AnyView, IntoView, Signal, css, dynamic, signal, widget};
+use nana_ui::runtime::{
+    Activate, AlignSpec, InteractionStyle, LengthSpec, NodeStyle, SemanticPaint, Stack,
+};
 use nana_ui_core::{GridTrack, RadiusTier, SemanticColorRole as Role};
 
 use super::super::{ShellMessage, ShellViewModel};
@@ -61,13 +63,19 @@ impl ToolsView {
                 .map(|page| ToolTab {
                     id: page.id.clone(),
                     label: page.label.clone(),
-                    description: if page.description.trim().is_empty() { page.plugin_name.clone() } else { page.description.clone() },
+                    description: if page.description.trim().is_empty() {
+                        page.plugin_name.clone()
+                    } else {
+                        page.description.clone()
+                    },
                 })
                 .collect(),
             active: active.map(|page| page.id.clone()),
             page: match active {
                 Some(page) if page.id == TOOL_API_PLAYGROUND => ToolPageKind::Playground,
-                Some(page) if support::is_builtin_tool_page(&page.id) => ToolPageKind::Native(page.id.clone()),
+                Some(page) if support::is_builtin_tool_page(&page.id) => {
+                    ToolPageKind::Native(page.id.clone())
+                }
                 Some(page) => ToolPageKind::Foreign(page.clone()),
                 None => ToolPageKind::None,
             },
@@ -116,33 +124,61 @@ pub(crate) fn extensions_page(signals: ToolsSignals, plugins: PluginPanelSignals
     let tabs = signals.tabs;
     let body = (
         tools(signals).visible(move || tabs.with(|tabs| !tabs.is_empty())),
-        widget(Stack::column(0.0).with_layout(|layout| layout.min_height = Some(LengthSpec::Px(420.0))))
-            .children((super::plugins_view::manager_panel(plugins, &super::plugins_view::EXTENSIONS_COPY),)),
+        widget(
+            Stack::column(0.0)
+                .with_layout(|layout| layout.min_height = Some(LengthSpec::Px(420.0))),
+        )
+        .children((super::plugins_view::manager_panel(
+            plugins,
+            &super::plugins_view::EXTENSIONS_COPY,
+        ),)),
     );
-    widget(column(14.0)).children(body).key("admin-extensions").into_any()
+    widget(column(14.0))
+        .children(body)
+        .key("admin-extensions")
+        .into_any()
 }
 
 /// 工具区：两栏网格，最小高 520。
 fn tools(signals: ToolsSignals) -> nana_ui::runtime::view::El<Stack, (AnyView, AnyView)> {
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
         layout.display = Some(nana_ui_core::DisplaySpec::Grid);
-        layout.grid_columns = Some(vec![style::capped(180.0, 240.0), GridTrack::MinMax { min_px: 0.0, fr: 1.0, max_px: None }]);
+        layout.grid_columns = Some(vec![
+            style::capped(180.0, 240.0),
+            GridTrack::MinMax {
+                min_px: 0.0,
+                fr: 1.0,
+                max_px: None,
+            },
+        ]);
         layout.gap = Some(LengthSpec::Px(12.0));
         layout.width = Some(LengthSpec::Fill);
         layout.min_height = Some(LengthSpec::Px(520.0));
         layout.align_items = AlignSpec::Stretch;
     });
-    widget(grid).children((nav(signals), page_frame(signals))).key("admin-tool-workbench")
+    widget(grid)
+        .children((nav(signals), page_frame(signals)))
+        .key("admin-tool-workbench")
 }
 
 /// 左侧导航：`bg-elev` 底、md 圆角、内边距 14、间距 8。工具页按 id 做键。
 fn nav(signals: ToolsSignals) -> AnyView {
     let active = signals.active;
-    let tabs = nana_ui::runtime::view::each(signals.tabs, ToolTab::clone, move |tab: ToolTab| tool_tab(tab, active)).gap(8.0);
-    widget(pad(column(8.0), 14.0, 14.0, 14.0, 14.0).surface(Role::Surface).radius(RadiusTier::Md))
-        .children((widget(style::eyebrow_text("插件工具")).key("admin-tool-nav-eyebrow"), tabs))
-        .key("admin-tool-nav")
-        .into_any()
+    let tabs = nana_ui::runtime::view::each(signals.tabs, ToolTab::clone, move |tab: ToolTab| {
+        tool_tab(tab, active)
+    })
+    .gap(8.0);
+    widget(
+        pad(column(8.0), 14.0, 14.0, 14.0, 14.0)
+            .surface(Role::Surface)
+            .radius(RadiusTier::Md),
+    )
+    .children((
+        widget(style::eyebrow_text("插件工具")).key("admin-tool-nav-eyebrow"),
+        tabs,
+    ))
+    .key("admin-tool-nav")
+    .into_any()
 }
 
 /// 导航里的一个工具：最小高 58、内边距 10、sm 圆角；13/700 名称和 12 号弱色说明。
@@ -155,7 +191,10 @@ fn tool_tab(page: ToolTab, active: Signal<Option<String>>) -> AnyView {
     let mut node = NodeStyle {
         radius: Some(RadiusTier::Sm),
         interaction: InteractionStyle {
-            hovered: SemanticPaint { background: Some(Role::Hover), ..SemanticPaint::default() },
+            hovered: SemanticPaint {
+                background: Some(Role::Hover),
+                ..SemanticPaint::default()
+            },
             ..InteractionStyle::default()
         },
         ..NodeStyle::default()
@@ -180,11 +219,20 @@ fn tool_tab(page: ToolTab, active: Signal<Option<String>>) -> AnyView {
             widget(wrapping(label(page.label.clone(), 13.0, 700, Role::Text)))
                 .foreground(move || Some(if selected() { Role::Accent } else { Role::Text }))
                 .key(format!("admin-tool-{tid}")),
-            widget(wrapping(style::label_lh(page.description.clone(), 12.0, 400, Role::Muted, 1.35))).key(format!("admin-tool-desc-{tid}")),
+            widget(wrapping(style::label_lh(
+                page.description.clone(),
+                12.0,
+                400,
+                Role::Muted,
+                1.35,
+            )))
+            .key(format!("admin-tool-desc-{tid}")),
         ))
         .key(format!("admin-tool-tab-{tid}"))
         .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SelectToolPage(page_id.clone())));
+            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SelectToolPage(
+                page_id.clone(),
+            )));
         })
         .into_any()
 }
@@ -209,11 +257,16 @@ fn page_frame(signals: ToolsSignals) -> AnyView {
         ToolPageKind::None => widget(column(0.0)).into_any(),
     })
     .css(css! { height: 100%; min-height: 0; flex-grow: 1; flex-shrink: 1; });
-    widget(Stack::fill_column(0.0).surface(Role::Surface).radius(RadiusTier::Md).with_layout(|layout| {
-        layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
-        layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
-        layout.height = Some(LengthSpec::Fill);
-    }))
+    widget(
+        Stack::fill_column(0.0)
+            .surface(Role::Surface)
+            .radius(RadiusTier::Md)
+            .with_layout(|layout| {
+                layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
+                layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
+                layout.height = Some(LengthSpec::Fill);
+            }),
+    )
     .children((body,))
     .key("admin-tool-page")
     .into_any()
@@ -222,19 +275,44 @@ fn page_frame(signals: ToolsSignals) -> AnyView {
 /// 宿主没有内置的工具页：插件不能自带页面，只画页头并说明原因。
 fn foreign_page(page: &ToolPageEntry) -> AnyView {
     let mut header = vec![
-        widget(style::eyebrow_text(&page.plugin_name)).key(format!("admin-foreign-tool-eyebrow-{}", style::key_part(&page.id))).into_any(),
+        widget(style::eyebrow_text(&page.plugin_name))
+            .key(format!(
+                "admin-foreign-tool-eyebrow-{}",
+                style::key_part(&page.id)
+            ))
+            .into_any(),
         widget(pad(column(0.0), 4.0, 0.0, 0.0, 0.0))
-            .children((widget(style::label_lh(page.label.clone(), 22.0, 700, Role::Text, 1.25)).key(format!("admin-foreign-tool-title-{}", style::key_part(&page.id))),))
+            .children((widget(style::label_lh(
+                page.label.clone(),
+                22.0,
+                700,
+                Role::Text,
+                1.25,
+            ))
+            .key(format!(
+                "admin-foreign-tool-title-{}",
+                style::key_part(&page.id)
+            )),))
             .into_any(),
     ];
     if !page.description.trim().is_empty() {
         header.push(
             widget(pad(column(0.0), 8.0, 0.0, 0.0, 0.0))
-                .children((widget(wrapping(label(page.description.clone(), 13.0, 400, Role::Muted))),))
+                .children((widget(wrapping(label(
+                    page.description.clone(),
+                    13.0,
+                    400,
+                    Role::Muted,
+                ))),))
                 .into_any(),
         );
     }
-    let notice = style::state_notice("MomoBako 没有这个工具页：插件只能打开内置的工具页，不能自带页面。", false, "admin-foreign-tool-notice").into_any();
+    let notice = style::state_notice(
+        "MomoBako 没有这个工具页：插件只能打开内置的工具页，不能自带页面。",
+        false,
+        "admin-foreign-tool-notice",
+    )
+    .into_any();
     widget(pad(column(14.0), 18.0, 18.0, 18.0, 18.0))
         .children((widget(column(0.0)).children(header), notice))
         .key(format!("admin-foreign-tool-{}", style::key_part(&page.id)))

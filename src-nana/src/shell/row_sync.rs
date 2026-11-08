@@ -11,7 +11,7 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
-use nana_ui::runtime::view::{untrack, StoreList, StorePath};
+use nana_ui::runtime::view::{StoreList, StorePath, untrack};
 
 /// 一次写入要做的结构操作，按新列表（已经去掉重复键）的下标记。
 #[derive(Debug, PartialEq, Eq)]
@@ -39,7 +39,11 @@ where
     let Some(plan) = untrack(|| list.with(|current| plan_rows(current, &next, key_of))) else {
         return;
     };
-    let position = next.iter().enumerate().map(|(index, row)| (key_of(row), index)).collect::<HashMap<_, _>>();
+    let position = next
+        .iter()
+        .enumerate()
+        .map(|(index, row)| (key_of(row), index))
+        .collect::<HashMap<_, _>>();
     if plan.remove {
         let mut kept = HashSet::with_capacity(next.len());
         list.retain(|row| {
@@ -62,7 +66,9 @@ where
 /// 去掉键重复的行，只留第一行。
 fn unique_rows<T, K: Hash + Eq>(rows: Vec<T>, key_of: fn(&T) -> K) -> Vec<T> {
     let mut seen = HashSet::with_capacity(rows.len());
-    rows.into_iter().filter(|row| seen.insert(key_of(row))).collect()
+    rows.into_iter()
+        .filter(|row| seen.insert(key_of(row)))
+        .collect()
 }
 
 /// 比较现有列表和新列表（没有重复键），算出要做的操作；一样时为 `None`。
@@ -70,7 +76,11 @@ fn unique_rows<T, K: Hash + Eq>(rows: Vec<T>, key_of: fn(&T) -> K) -> Vec<T> {
 /// 算法：现有列表里每个键只认第一行。新列表里现有列表没有的键是插入，有的键内容不同是改写；
 /// 现有列表里新列表没有的键、以及重复的键要删。删掉以后留下的行保持原来的相对顺序，新行按最终下标
 /// 从小到大插入，所以只要留下的行相对顺序和新列表里一样，插完就是新列表的顺序；否则再排一次。
-fn plan_rows<T: PartialEq, K: Hash + Eq>(current: &[T], next: &[T], key_of: fn(&T) -> K) -> Option<RowPlan> {
+fn plan_rows<T: PartialEq, K: Hash + Eq>(
+    current: &[T],
+    next: &[T],
+    key_of: fn(&T) -> K,
+) -> Option<RowPlan> {
     if current == next {
         return None;
     }
@@ -97,11 +107,21 @@ fn plan_rows<T: PartialEq, K: Hash + Eq>(current: &[T], next: &[T], key_of: fn(&
     }
     let kept = current.iter().filter_map(|row| {
         let key = key_of(row);
-        let first_of_key = first.get(&key).is_some_and(|first| std::ptr::eq(*first, row));
+        let first_of_key = first
+            .get(&key)
+            .is_some_and(|first| std::ptr::eq(*first, row));
         (first_of_key && wanted.contains(&key)).then_some(key)
     });
-    let reorder = kept.ne(next.iter().map(key_of).filter(|key| first.contains_key(key)));
-    Some(RowPlan { remove, insert, change, reorder })
+    let reorder = kept.ne(next
+        .iter()
+        .map(key_of)
+        .filter(|key| first.contains_key(key)));
+    Some(RowPlan {
+        remove,
+        insert,
+        change,
+        reorder,
+    })
 }
 
 #[cfg(test)]

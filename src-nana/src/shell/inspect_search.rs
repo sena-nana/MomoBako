@@ -9,7 +9,9 @@ use std::collections::BTreeMap;
 
 use serde_json::Value;
 
-use crate::backend::services::repository::{FileBrowserSnapshot, RepositorySnapshot, RepositoryTagGroup, SearchHit};
+use crate::backend::services::repository::{
+    FileBrowserSnapshot, RepositorySnapshot, RepositoryTagGroup, SearchHit,
+};
 
 use super::super::workspace::{LibraryCategory, WorkspacePanel};
 use super::super::workspace_refresh::SilentMessage;
@@ -47,7 +49,11 @@ impl SortDirection {
 
     /// 只有 `desc` 是降序，其余都按升序。
     pub fn parse(value: &str) -> Self {
-        if value == "desc" { Self::Desc } else { Self::Asc }
+        if value == "desc" {
+            Self::Desc
+        } else {
+            Self::Asc
+        }
     }
 }
 
@@ -279,6 +285,20 @@ pub struct SearchUi {
     /// 命中在别的仓库：等换仓库走完再读它所在的目录（Vue `openSearchHit` 先 `await selectRepository`）。
     /// 换仓库清空搜索时留着它。
     after_switch: Option<SearchRow>,
+    /// 目录快照里的命中是文件。这份快照写进文件列以后立刻打开预览页，不等素材详情。
+    preview_after_browse: bool,
+}
+
+impl SearchUi {
+    /// 这次命中是目录里的文件：快照落地后立刻打开预览，不等 `selectAsset`。
+    pub(in crate::shell) fn arm_preview_after_browse(&mut self) {
+        self.preview_after_browse = true;
+    }
+
+    /// 取走「快照落地后打开预览」。过期或对不上的目录结果也取走，免得下一份目录误开预览。
+    pub(in crate::shell) fn take_preview_after_browse(&mut self) -> bool {
+        std::mem::take(&mut self.preview_after_browse)
+    }
 }
 
 /// 打开命中时先读所在目录，目录到达后再选中并读取详情。
@@ -295,13 +315,20 @@ impl InspectState {
     }
 
     /// 只归约搜索与筛选消息，其余消息由 `InspectState::reduce` 自己处理。
-    pub(super) fn reduce_search(&mut self, writable: bool, active_repo: Option<&str>, message: InspectMessage) {
+    pub(super) fn reduce_search(
+        &mut self,
+        writable: bool,
+        active_repo: Option<&str>,
+        message: InspectMessage,
+    ) {
         match message {
             InspectMessage::SetQuery(value) => self.query = value,
             InspectMessage::RunSearch => self.run_search(active_repo),
             InspectMessage::ToggleFilterBar => self.filter_bar_open = !self.filter_bar_open,
             InspectMessage::CloseFilterBar => self.filter_bar_open = false,
-            InspectMessage::ToggleFilter { key, value } => self.toggle_search_filter(writable, active_repo, key, &value),
+            InspectMessage::ToggleFilter { key, value } => {
+                self.toggle_search_filter(writable, active_repo, key, &value)
+            }
             InspectMessage::SetMinimumRating(value) => {
                 if !writable {
                     eprintln!("Nana 当前资源库不可写，忽略评分筛选");
@@ -311,23 +338,43 @@ impl InspectState {
                 self.search_ui.reveal_panel = true;
                 self.run_filtered_search(active_repo);
             }
-            InspectMessage::SetMetadataInput { key, value } => *self.search_ui.draft.metadata_input_mut(key) = value,
-            InspectMessage::SubmitMetadataInput(key) => self.submit_metadata_input(writable, active_repo, key),
-            InspectMessage::SetAdvanced { field, value } => *self.search_ui.draft.advanced_mut(field) = value,
-            InspectMessage::SetSortDirection(direction) => self.search_ui.draft.sort_direction = direction,
+            InspectMessage::SetMetadataInput { key, value } => {
+                *self.search_ui.draft.metadata_input_mut(key) = value
+            }
+            InspectMessage::SubmitMetadataInput(key) => {
+                self.submit_metadata_input(writable, active_repo, key)
+            }
+            InspectMessage::SetAdvanced { field, value } => {
+                *self.search_ui.draft.advanced_mut(field) = value
+            }
+            InspectMessage::SetSortDirection(direction) => {
+                self.search_ui.draft.sort_direction = direction
+            }
             InspectMessage::ApplyAdvanced => self.apply_advanced(writable, active_repo),
             InspectMessage::ClearFilters => self.clear_filters(writable, active_repo),
-            InspectMessage::ApplyShortcut { metadata, sort_field, sort_direction } => {
+            InspectMessage::ApplyShortcut {
+                metadata,
+                sort_field,
+                sort_direction,
+            } => {
                 self.apply_shortcut(writable, active_repo, metadata, sort_field, sort_direction);
             }
-            InspectMessage::SearchFinished { generation, result } => self.note_search(generation, result),
+            InspectMessage::SearchFinished { generation, result } => {
+                self.note_search(generation, result)
+            }
             InspectMessage::OpenHit { repo_id, asset_id } => self.request_hit(&repo_id, &asset_id),
             _ => eprintln!("Nana 搜索归约收到非搜索消息"),
         }
     }
 
     /// Vue `toggleSearchFilter`：切换芯片后切到搜索面板并重新查询。
-    fn toggle_search_filter(&mut self, writable: bool, active_repo: Option<&str>, key: FilterList, value: &str) {
+    fn toggle_search_filter(
+        &mut self,
+        writable: bool,
+        active_repo: Option<&str>,
+        key: FilterList,
+        value: &str,
+    ) {
         if !writable {
             eprintln!("Nana 当前资源库不可写，忽略筛选");
             return;
@@ -338,7 +385,12 @@ impl InspectState {
     }
 
     /// Vue `submitMetadataFilterInput`：去空白后按芯片切换，再清空输入框。
-    fn submit_metadata_input(&mut self, writable: bool, active_repo: Option<&str>, key: MetadataInput) {
+    fn submit_metadata_input(
+        &mut self,
+        writable: bool,
+        active_repo: Option<&str>,
+        key: MetadataInput,
+    ) {
         if !writable {
             eprintln!("Nana 当前资源库不可写，忽略添加筛选");
             return;
@@ -439,7 +491,10 @@ impl InspectState {
         }
         self.searching = true;
         self.search_error.clear();
-        self.effects.push(InspectEffect::Search { generation, request });
+        self.effects.push(InspectEffect::Search {
+            generation,
+            request,
+        });
     }
 
     /// Vue `runFilteredSearch`：筛选生效却没有活动仓库时只清空结果。
@@ -477,7 +532,12 @@ impl InspectState {
 
     /// 点中一条结果。素材 id 缺失时留在搜索面板并写明原因。
     fn request_hit(&mut self, repo_id: &str, asset_id: &str) {
-        let Some(row) = self.results.iter().find(|row| row.repo_id == repo_id && row.asset_id == asset_id).cloned() else {
+        let Some(row) = self
+            .results
+            .iter()
+            .find(|row| row.repo_id == repo_id && row.asset_id == asset_id)
+            .cloned()
+        else {
             eprintln!("Nana 搜索结果不存在：{repo_id} / {asset_id}");
             return;
         };
@@ -501,6 +561,7 @@ impl InspectState {
         self.searched = false;
         self.search_error.clear();
         self.search_ui.reveal_hit = None;
+        self.search_ui.preview_after_browse = false;
     }
 }
 
@@ -514,11 +575,18 @@ pub(super) fn observe(model: &mut ShellViewModel, message: &ShellMessage) {
         eprintln!("Nana 搜索结果所在目录的读取被别的浏览顶掉，放弃等待中的命中");
     }
     match message {
-        ShellMessage::RepositorySnapshotLoaded { result: Ok(snapshot), .. } => note_snapshot(&mut model.inspect, snapshot),
-        ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Ok(snapshot))) => note_snapshot(&mut model.inspect, snapshot),
+        ShellMessage::RepositorySnapshotLoaded {
+            result: Ok(snapshot),
+            ..
+        } => note_snapshot(&mut model.inspect, snapshot),
+        ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Ok(snapshot))) => {
+            note_snapshot(&mut model.inspect, snapshot)
+        }
         ShellMessage::FileBrowserLoaded(result) => reveal_after_browse(model, result),
         // 用户已经去了别处：等待中的命中不再打开，免得以后读到同一目录时突然跳进预览。
-        ShellMessage::OpenDirectory(_) | ShellMessage::SelectFile { .. } | ShellMessage::SetWorkspacePanel(_) => {
+        ShellMessage::OpenDirectory(_)
+        | ShellMessage::SelectFile { .. }
+        | ShellMessage::SetWorkspacePanel(_) => {
             if model.inspect.search_ui.reveal_hit.take().is_some() {
                 eprintln!("Nana 打开搜索结果前已经切到别处，放弃等待中的命中");
             }
@@ -542,7 +610,10 @@ fn note_snapshot(inspect: &mut InspectState, snapshot: &RepositorySnapshot) {
     inspect.search_ui.facets = snapshot
         .assets
         .iter()
-        .map(|asset| AssetFacet { tags: asset.tags.clone(), extension: asset.extension.clone() })
+        .map(|asset| AssetFacet {
+            tags: asset.tags.clone(),
+            extension: asset.extension.clone(),
+        })
         .collect();
     inspect.search_ui.tag_groups = snapshot.tag_groups.clone();
 }
@@ -559,7 +630,12 @@ fn open_hit(model: &mut ShellViewModel, row: SearchRow) {
     model.preview_pixels = None;
     model.inspect.clear();
     if model.workspace.active_repo_id.as_deref() != Some(row.repo_id.as_str()) {
-        if !model.workspace.repositories.iter().any(|item| item.repo_id == row.repo_id) {
+        if !model
+            .workspace
+            .repositories
+            .iter()
+            .any(|item| item.repo_id == row.repo_id)
+        {
             eprintln!("Nana 搜索结果所在的资源库不在列表里：{}", row.repo_id);
             return;
         }
@@ -580,7 +656,9 @@ pub(in crate::shell) fn resume_after_switch(model: &mut ShellViewModel) {
     let Some(row) = model.inspect.search_ui.after_switch.take() else {
         return;
     };
-    if model.workspace.active_repo_id.as_deref() != Some(row.repo_id.as_str()) || model.navigation_locked() {
+    if model.workspace.active_repo_id.as_deref() != Some(row.repo_id.as_str())
+        || model.navigation_locked()
+    {
         eprintln!("Nana 换仓库以后不再打开搜索结果：{}", row.path);
         return;
     }
@@ -599,16 +677,24 @@ fn reveal_in_current(model: &mut ShellViewModel, row: SearchRow) {
     let parent = parent_path(&row.path);
     let context = super::super::files::FileContext::from_model(model);
     // Vue 读命中所在目录时带上目录树（`includeTree: true`），任务弹层是「读取文件树」。
-    if model.files.request_browse_reporting(&context, &parent, super::super::files::ReadProgress::Tree) {
-        model.files.set_drag_selection(vec![row.path.clone()], Some(row.path.clone()), Some(row.path.clone()));
+    if model.files.request_browse_reporting(
+        &context,
+        &parent,
+        super::super::files::ReadProgress::Tree,
+    ) {
+        model.files.set_drag_selection(
+            vec![row.path.clone()],
+            Some(row.path.clone()),
+            Some(row.path.clone()),
+        );
         model.inspect.search_ui.reveal_hit = Some(HitReveal { row, parent });
     } else {
         eprintln!("Nana 搜索结果所在目录没有发出读取：{parent}");
-        load_hit(model, row);
+        load_hit(model, row, false);
     }
 }
 
-/// 命中所在目录的快照到达：选中命中并读取详情，详情到达后进入预览。
+/// 命中所在目录的快照到达：选中命中并读取详情。快照里这条是文件时立刻打开预览，不等详情。
 fn reveal_after_browse(model: &mut ShellViewModel, result: &Result<FileBrowserSnapshot, String>) {
     let Some(reveal) = model.inspect.search_ui.reveal_hit.as_ref() else {
         return;
@@ -621,25 +707,46 @@ fn reveal_after_browse(model: &mut ShellViewModel, result: &Result<FileBrowserSn
             return;
         }
     } else {
-        eprintln!("Nana 搜索结果所在目录读取失败，直接打开详情：{}", reveal.parent);
+        eprintln!(
+            "Nana 搜索结果所在目录读取失败，直接打开详情：{}",
+            reveal.parent
+        );
     }
     let Some(reveal) = model.inspect.search_ui.reveal_hit.take() else {
         return;
     };
-    load_hit(model, reveal.row);
+    // Vue 只在快照里找到文件时 `setPreviewFilePath`。目录、读失败或名单里没有这条都不在这里开预览。
+    let open_preview = result.as_ref().ok().is_some_and(|snapshot| {
+        snapshot
+            .entries
+            .iter()
+            .any(|entry| entry.path == reveal.row.path && entry.kind == "file")
+    });
+    load_hit(model, reveal.row, open_preview);
 }
 
-fn load_hit(model: &mut ShellViewModel, row: SearchRow) {
+/// 选中命中并读取详情。`open_preview` 时预览页在这份目录快照落地后就换上，不等详情回来。
+fn load_hit(model: &mut ShellViewModel, row: SearchRow, open_preview: bool) {
+    if open_preview {
+        // 单击选中的同一条也要打开：清掉「只在右侧详情里看」。
+        model.files.reveal_explicit_preview(&row.path);
+        model.inspect.search_ui.arm_preview_after_browse();
+    }
     model.selected_path = Some(row.path.clone());
     model.inspect.begin_selection(&row.path);
     model.inspect.repo_id = Some(row.repo_id.clone());
-    model.inspect.effects.push(InspectEffect::LoadAsset { repo_id: row.repo_id, asset_id: row.asset_id });
+    model.inspect.effects.push(InspectEffect::LoadAsset {
+        repo_id: row.repo_id,
+        asset_id: row.asset_id,
+    });
 }
 
 /// 命中路径的父目录。根目录下的文件父目录是空串。
 fn parent_path(path: &str) -> String {
     let path = normalize_directory(path);
-    path.rsplit_once('/').map(|(parent, _)| parent.to_string()).unwrap_or_default()
+    path.rsplit_once('/')
+        .map(|(parent, _)| parent.to_string())
+        .unwrap_or_default()
 }
 
 fn normalize_directory(path: &str) -> String {

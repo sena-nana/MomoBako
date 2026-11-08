@@ -1,11 +1,10 @@
 //! Plugin and cache orchestration.
 
 use crate::services::repository::{
-    ApiDesignSnapshot, CacheSnapshot, PluginCallRequest, PluginCallResult,
-    PluginConfigDeleteRequest, PluginConfigSetRequest, PluginConfigSnapshot,
+    ApiDesignSnapshot, CacheSnapshot, PlaylistPlayerContribution, PluginCallRequest,
+    PluginCallResult, PluginConfigDeleteRequest, PluginConfigSetRequest, PluginConfigSnapshot,
     PluginDataDirectoryResponse, PluginEnabledRequest, PluginHookExecutionListRequest,
     PluginHookExecutionListResponse, PluginInstallRequest, PluginManifest, PluginMutationResponse,
-    PlaylistPlayerContribution,
 };
 use crate::services::runtime::RepositoryRuntime;
 

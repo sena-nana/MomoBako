@@ -8,7 +8,7 @@ use std::task::{Context, Poll, Waker};
 
 use nana_ui::runtime::Task;
 
-use super::{settle, spawn, spawn_service, TaskHost};
+use super::{TaskHost, settle, spawn, spawn_service};
 use crate::shell::ShellMessage;
 
 /// 假的宿主：`accept` 为假时排不进任务；排进来的任务当场跑完，结果和送回归约的消息都记在 `delivered` 里。
@@ -20,11 +20,18 @@ pub(crate) struct InlineHost {
 
 impl InlineHost {
     pub(crate) fn new() -> Self {
-        Self { accept: true, submitted: RefCell::new(0), delivered: RefCell::new(Vec::new()) }
+        Self {
+            accept: true,
+            submitted: RefCell::new(0),
+            delivered: RefCell::new(Vec::new()),
+        }
     }
 
     fn rejecting() -> Self {
-        Self { accept: false, ..Self::new() }
+        Self {
+            accept: false,
+            ..Self::new()
+        }
     }
 }
 
@@ -35,7 +42,10 @@ impl TaskHost for InlineHost {
         }
         *self.submitted.borrow_mut() += 1;
         let mut future = task.into_future();
-        match future.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+        match future
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+        {
             Poll::Ready(message) => self.delivered.borrow_mut().push(message),
             Poll::Pending => panic!("服务任务都是一次跑完的同步工作"),
         }
@@ -75,18 +85,45 @@ fn listing_failed(error: String) -> ShellMessage {
 #[test]
 fn a_panicking_task_hands_back_its_failure() {
     let message = run_guarded("文件浏览", listing_failed, || panic!("解码器越界"));
-    assert_eq!(listing_error(&message), Some("文件浏览任务异常退出：解码器越界"));
+    assert_eq!(
+        listing_error(&message),
+        Some("文件浏览任务异常退出：解码器越界")
+    );
     let formatted = run_guarded("文件浏览", listing_failed, || panic!("第 {} 页", 2));
-    assert_eq!(listing_error(&formatted), Some("文件浏览任务异常退出：第 2 页"));
+    assert_eq!(
+        listing_error(&formatted),
+        Some("文件浏览任务异常退出：第 2 页")
+    );
 }
 
 /// 任务排不进去：当场把失败送回归约。
 #[test]
 fn a_task_that_cannot_be_queued_hands_back_its_failure() {
     let host = InlineHost::rejecting();
-    spawn(&host, "文件浏览", listing_failed, || panic!("排不进去的任务不会跑"));
+    spawn(&host, "文件浏览", listing_failed, || {
+        panic!("排不进去的任务不会跑")
+    });
     let delivered = host.delivered.into_inner();
-    assert_eq!(delivered.iter().filter_map(listing_error).collect::<Vec<_>>(), ["文件浏览任务提交失败：runtime host task queue is full"]);
+    assert_eq!(
+        delivered
+            .iter()
+            .filter_map(listing_error)
+            .collect::<Vec<_>>(),
+        ["文件浏览任务提交失败：runtime host task queue is full"]
+    );
+}
+
+/// 取回的原因就是服务没起来时交给失败回调的那一句，不另写。
+#[test]
+fn search_failed_without_services_returns_the_handed_back_reason() {
+    assert_eq!(
+        super::failure_when_services_missing("搜索").as_deref(),
+        Some("领域服务未启动")
+    );
+    assert_eq!(
+        super::failure_when_services_missing("搜索").as_deref(),
+        Some(super::NO_SERVICES)
+    );
 }
 
 /// 服务没起来：不派发，当场把失败送回归约。
@@ -100,27 +137,50 @@ fn missing_services_hand_back_their_failure_without_queueing() {
     });
     assert!(!*prepared.borrow());
     assert_eq!(*host.submitted.borrow(), 0);
-    assert_eq!(host.delivered.borrow().iter().filter_map(listing_error).collect::<Vec<_>>(), ["领域服务未启动"]);
+    assert_eq!(
+        host.delivered
+            .borrow()
+            .iter()
+            .filter_map(listing_error)
+            .collect::<Vec<_>>(),
+        ["领域服务未启动"]
+    );
 
-    spawn_service(Some(&7_u32), &host, "文件浏览", listing_failed, |value| {
-        let value = *value;
-        move || listing_failed(format!("拿到 {value}"))
-    });
+    spawn_service(
+        Some(&7_u32),
+        &host,
+        "文件浏览",
+        listing_failed,
+        |value| {
+            let value = *value;
+            move || listing_failed(format!("拿到 {value}"))
+        },
+    );
     assert_eq!(*host.submitted.borrow(), 1);
-    assert_eq!(host.delivered.borrow().last().and_then(listing_error), Some("拿到 7"));
+    assert_eq!(
+        host.delivered.borrow().last().and_then(listing_error),
+        Some("拿到 7")
+    );
 }
 
 #[test]
 fn panic_reasons_are_written_out() {
     let result: Result<u32, String> = settle("设置页数据", || panic!("插件宿主没有响应"), Err);
-    assert_eq!(result, Err("设置页数据任务异常退出：插件宿主没有响应".into()));
+    assert_eq!(
+        result,
+        Err("设置页数据任务异常退出：插件宿主没有响应".into())
+    );
     let unknown: Result<u32, String> = settle("播放器类型", || std::panic::panic_any(7_u8), Err);
     assert_eq!(unknown, Err("播放器类型任务异常退出：未知原因".into()));
 }
 
 #[test]
 fn a_finished_task_keeps_its_own_result() {
-    let result: Result<u32, String> = settle("设置页数据", || Ok(3), |_| unreachable!("没有 panic 不交回失败"));
+    let result: Result<u32, String> = settle(
+        "设置页数据",
+        || Ok(3),
+        |_| unreachable!("没有 panic 不交回失败"),
+    );
     assert_eq!(result, Ok(3));
 }
 
@@ -132,8 +192,14 @@ fn every_task_goes_through_the_guard() {
     let mut offenders = Vec::new();
     let mut guarded = 0;
     visit(&root, &mut |path, text| {
-        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or_default();
-        let count = text.lines().filter(|line| line.contains(".run_task(")).count();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        let count = text
+            .lines()
+            .filter(|line| line.contains(".run_task("))
+            .count();
         match name {
             "task_guard.rs" => guarded += count,
             "task_guard_tests.rs" => {}
@@ -141,7 +207,10 @@ fn every_task_goes_through_the_guard() {
             _ => {}
         }
     });
-    assert!(offenders.is_empty(), "这些文件直接排任务，没经过 task_guard::spawn：{offenders:#?}");
+    assert!(
+        offenders.is_empty(),
+        "这些文件直接排任务，没经过 task_guard::spawn：{offenders:#?}"
+    );
     assert_eq!(guarded, 1, "task_guard.rs 里只有宿主能力那一处排任务");
 }
 

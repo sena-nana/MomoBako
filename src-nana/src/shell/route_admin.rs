@@ -7,12 +7,13 @@
 
 use nana_ui::runtime::view::AnyView;
 
-use super::admin::{
-    ActionsSignals, ActionsView, LogsSignals, LogsView, PluginPanelSignals, PluginPanelView, SettingsSignals, SettingsView, ToolsSignals,
-};
-use super::inspect_search_view::{resident_filter_bar, FilterBarSignals};
-use super::route_home::{home_page, home_scroll};
 use super::ShellViewModel;
+use super::admin::{
+    ActionsSignals, ActionsView, LogsSignals, LogsView, PluginPanelSignals, PluginPanelView,
+    SettingsSignals, SettingsView, ToolsSignals,
+};
+use super::inspect_search_view::{FilterBarSignals, resident_filter_bar};
+use super::route_home::{home_page, home_scroll};
 
 /// 设置、日志、拓展和动作页的常驻信号，在主区块的骨架作用域里建，进出路由都不重建。
 #[derive(Clone, Copy)]
@@ -61,17 +62,29 @@ impl AdminSignals {
 
 /// 日志面板：主体滚动，面板至少撑满主体；日志列表在筛选下面自己滚动、追踪时跟随末尾。
 pub(super) fn logs(filter: FilterBarSignals, signals: AdminSignals) -> AnyView {
-    panel(filter, "workspace-page-scroll-HasRepository-Logs", super::admin::logs_panel(signals.logs))
+    panel(
+        filter,
+        "workspace-page-scroll-HasRepository-Logs",
+        super::admin::logs_panel(signals.logs),
+    )
 }
 
 /// 拓展页。
 pub(super) fn extensions(filter: FilterBarSignals, signals: AdminSignals) -> AnyView {
-    panel(filter, "workspace-page-scroll-HasRepository-Extensions", super::admin::extensions_page(signals.tools, signals.plugins))
+    panel(
+        filter,
+        "workspace-page-scroll-HasRepository-Extensions",
+        super::admin::extensions_page(signals.tools, signals.plugins),
+    )
 }
 
 /// 仓库动作面板。
 pub(super) fn actions(filter: FilterBarSignals, signals: AdminSignals) -> AnyView {
-    panel(filter, "workspace-page-scroll-HasRepository-Actions", super::admin::actions_panel(signals.actions))
+    panel(
+        filter,
+        "workspace-page-scroll-HasRepository-Actions",
+        super::admin::actions_panel(signals.actions),
+    )
 }
 
 /// 首页外框：常驻筛选栏在上，下面是纵向滚动的面板。

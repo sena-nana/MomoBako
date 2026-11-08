@@ -6,29 +6,38 @@
 //! 文件预览页常驻在文件路由里（[`preview_page`]），读 [`PreviewSignals`]。宿主按预览框这一帧画不画
 //! 纹理槽决定上不上传预览画面（[`wants_preview_texture`]）。
 
-use nana_ui::runtime::view::{widget, AnyView, IntoView, NodeRef};
+use nana_ui::runtime::view::{AnyView, IntoView, NodeRef, Signal, widget};
 use nana_ui::runtime::{LengthSpec, Stack};
 
 use super::inspect_metadata_view::MetadataSignals;
 
 #[path = "inspect_preview_frame.rs"]
 mod frame;
-#[path = "inspect_preview_body.rs"]
-mod body;
+#[cfg(test)]
+pub(crate) use frame::preview_open_target;
 #[path = "inspect_audio_stage.rs"]
 mod audio_stage;
+#[path = "inspect_preview_body.rs"]
+mod body;
 #[path = "inspect_preview_page.rs"]
 mod page;
 #[path = "preview_paint.rs"]
 mod preview_paint;
 
+pub(crate) use audio_stage::{LyricFollow, follow_active_lyric};
+pub(crate) use body::shows_preview_sweep;
 pub(crate) use body::wants_preview_texture;
-pub(crate) use frame::PreviewSignals;
+pub(crate) use frame::{PreviewSignals, seed_detail_card_editor, seed_preview_facts};
 
 /// 文件预览页：预览框架铺满文件列，播放条由框架贴在页底（Vue `files-preview-page` 里的
 /// `WorkspacePlayerBar`）。`bar` 是播放条的占位节点。
-pub(super) fn preview_page(signals: PreviewSignals, metadata: MetadataSignals, bar: NodeRef) -> AnyView {
-    surface(vec![frame::preview_page(signals, metadata, bar)])
+pub(super) fn preview_page(
+    signals: PreviewSignals,
+    metadata: MetadataSignals,
+    bar: NodeRef,
+    sweep: Signal<f32>,
+) -> AnyView {
+    surface(vec![frame::preview_page(signals, metadata, bar, sweep)])
 }
 
 /// 预览页的外框：占满剩余高度，行距 8。

@@ -5,15 +5,18 @@
 //! 来源插件的条目动作不能用时禁用，紧跟着一行弱色小字写原因（Vue 把原因放在禁用项的 `confirmLabel` 里，
 //! 禁用的按钮点不了，原因从来显示不出来）。
 
-use nana_ui::icons_tabler::{CLIPBOARD, EYE, FILES, FOLDER_OPEN, PENCIL, PHOTO, PHOTO_OFF, PHOTO_PLUS, REFRESH, ROTATE, TRASH};
-use nana_ui::runtime::view::{signal, AnyView};
+use nana_ui::icons_tabler::{
+    CLIPBOARD, EYE, FILES, FOLDER_OPEN, PENCIL, PHOTO, PHOTO_OFF, PHOTO_PLUS, REFRESH, ROTATE,
+    TRASH,
+};
+use nana_ui::runtime::view::{AnyView, signal};
 
-use super::super::admin::source_target::{self, RepositoryDownload};
 use super::super::admin::AdminMessage;
-use super::super::context_menu::{context_menu, MenuAction, MenuChrome, MenuEntry, MenuView};
+use super::super::admin::source_target::{self, RepositoryDownload};
+use super::super::context_menu::{MenuAction, MenuChrome, MenuEntry, MenuView, context_menu};
 use super::super::entry_actions::{self, FilePluginAction, FilePluginDispatch, SourceContext};
 use super::super::files::{BranchSource, FileContext, FileDialog, FileRow, FilesMessage};
-use super::super::input::{repository_absolute, InputMessage};
+use super::super::input::InputMessage;
 use super::super::view_part_overlay::session::Projected;
 use super::super::workspace::WorkspacePanel;
 use super::super::{ShellMessage, ShellViewModel};
@@ -23,7 +26,13 @@ use super::style;
 const CHROME: MenuChrome = MenuChrome {
     prefix: "file",
     close: || ShellMessage::Files(FilesMessage::CloseEntryMenu),
-    branch: Some(|branch, source: BranchSource, inside| ShellMessage::Files(FilesMessage::MenuBranchChanged { branch, source, inside })),
+    branch: Some(|branch, source: BranchSource, inside| {
+        ShellMessage::Files(FilesMessage::MenuBranchChanged {
+            branch,
+            source,
+            inside,
+        })
+    }),
     arm: Some(|id| ShellMessage::Files(FilesMessage::ArmMenuConfirm(id))),
 };
 
@@ -47,13 +56,20 @@ impl EntryMenuView {
     pub(crate) fn project(model: &ShellViewModel) -> Option<MenuView> {
         let menu = model.files.entry_menu.as_ref()?;
         let ctx = FileContext::from_model(model);
-        let row = model.files.visible_rows(&ctx).into_iter().find(|row| row.path == menu.path)?;
+        let row = model
+            .files
+            .visible_rows(&ctx)
+            .into_iter()
+            .find(|row| row.path == menu.path)?;
         let mut entries = menu_entries(model, &row);
         let pending = model.files.menu_pending.as_deref();
         for entry in &mut entries {
             entry.pending = entry.confirm_label.is_some() && pending == Some(entry.id.as_str());
         }
-        Some(MenuView::new(entries, model.files.menu_branch.open().map(str::to_string)))
+        Some(MenuView::new(
+            entries,
+            model.files.menu_branch.open().map(str::to_string),
+        ))
     }
 }
 
@@ -69,11 +85,39 @@ pub(super) fn entry_menu(model: &ShellViewModel) -> Option<AnyView> {
     Some(context_menu(view, menu.x, menu.y, CHROME))
 }
 
+/// 右键菜单里「打开」和「定位」现在要交给系统的绝对路径。测试用来核对菜单和 `resolve_entry_absolute` 是同一条。
+#[cfg(test)]
+pub(crate) fn open_and_reveal_targets(
+    model: &ShellViewModel,
+    path: &str,
+) -> Option<(String, String)> {
+    let ctx = FileContext::from_model(model);
+    let row = model
+        .files
+        .visible_rows(&ctx)
+        .into_iter()
+        .find(|row| row.path == path)?;
+    let entries = menu_entries(model, &row);
+    let absolute = |id: &str| {
+        entries
+            .iter()
+            .find(|entry| entry.id == id)
+            .and_then(|entry| match &entry.action {
+                Some(MenuAction::Input(InputMessage::OpenEntry { absolute_path, .. }))
+                | Some(MenuAction::Input(InputMessage::RevealEntry { absolute_path })) => {
+                    Some(absolute_path.clone())
+                }
+                _ => None,
+            })
+    };
+    Some((absolute("open")?, absolute("reveal")?))
+}
+
 /// 和 Vue `fileEntryContextMenu` 同样的条目、顺序和禁用规则。
 fn menu_entries(model: &ShellViewModel, row: &FileRow) -> Vec<MenuEntry> {
     let repository = model.workspace.active_repository();
     let repo_id = repository.map(|item| item.repo_id.clone());
-    let absolute = repository_absolute(&repository.map(|item| item.path.clone()).unwrap_or_default(), &row.path);
+    let absolute = super::super::input::resolve_entry_absolute(model, &row.path);
     let has_repo = repository.is_some();
     let trash = model.workspace.panel == WorkspacePanel::Trash;
     let smart = model.workspace.panel == WorkspacePanel::SmartFolder;
@@ -81,27 +125,50 @@ fn menu_entries(model: &ShellViewModel, row: &FileRow) -> Vec<MenuEntry> {
     let mutating = model.files.mutating;
     let file = row.kind == "file";
     let preview = || files(FilesMessage::OpenRow(row.path.clone()));
-    let open = input(InputMessage::OpenEntry { has_repo, absolute_path: absolute.clone(), path: row.path.clone() });
-    let reveal = input(InputMessage::RevealEntry { absolute_path: absolute.clone() });
+    let open = input(InputMessage::OpenEntry {
+        has_repo,
+        absolute_path: absolute.clone(),
+        path: row.path.clone(),
+    });
+    let reveal = input(InputMessage::RevealEntry {
+        absolute_path: absolute.clone(),
+    });
     if smart {
         return vec![
-            MenuEntry::new("preview", "预览", Some(EYE)).disabled(!file).message(preview()),
-            MenuEntry::new("open", "打开", Some(EYE)).disabled(!file).message(open),
+            MenuEntry::new("preview", "预览", Some(EYE))
+                .disabled(!file)
+                .message(preview()),
+            MenuEntry::new("open", "打开", Some(EYE))
+                .disabled(!file)
+                .message(open),
             MenuEntry::new("reveal", "定位", Some(FOLDER_OPEN)).message(reveal),
         ];
     }
     let mut entries = Vec::new();
     if trash {
-        entries.push(MenuEntry::new("restore", "还原", Some(ROTATE)).disabled(mutating).message(files(FilesMessage::RestoreSelected)));
+        entries.push(
+            MenuEntry::new("restore", "还原", Some(ROTATE))
+                .disabled(mutating)
+                .message(files(FilesMessage::RestoreSelected)),
+        );
     }
-    entries.push(MenuEntry::new("preview", "预览", Some(EYE)).disabled(!file || trash || multiple).message(preview()));
+    entries.push(
+        MenuEntry::new("preview", "预览", Some(EYE))
+            .disabled(!file || trash || multiple)
+            .message(preview()),
+    );
     let open_entry = if row.kind == "directory" {
-        MenuEntry::new("open", "进入", Some(EYE)).message(files(FilesMessage::OpenPath(row.path.clone())))
+        MenuEntry::new("open", "进入", Some(EYE))
+            .message(files(FilesMessage::OpenPath(row.path.clone())))
     } else {
         MenuEntry::new("open", "打开", Some(EYE)).message(open)
     };
     entries.push(open_entry.disabled(trash || multiple));
-    entries.push(MenuEntry::new("reveal", "定位", Some(FOLDER_OPEN)).disabled(trash).message(reveal));
+    entries.push(
+        MenuEntry::new("reveal", "定位", Some(FOLDER_OPEN))
+            .disabled(trash)
+            .message(reveal),
+    );
     entries.push(
         MenuEntry::new("copy-target", "复制到…", Some(FILES))
             .disabled(trash || mutating)
@@ -110,7 +177,11 @@ fn menu_entries(model: &ShellViewModel, row: &FileRow) -> Vec<MenuEntry> {
     if !trash && !multiple {
         let playlists = playlist_entries(model, row);
         if !playlists.is_empty() {
-            let label = if row.kind == "directory" { "整个加入播放列表" } else { "加入播放列表" };
+            let label = if row.kind == "directory" {
+                "整个加入播放列表"
+            } else {
+                "加入播放列表"
+            };
             let mut group = MenuEntry::new("playlist-membership", label, None);
             group.children = playlists;
             entries.push(group);
@@ -123,7 +194,11 @@ fn menu_entries(model: &ShellViewModel, row: &FileRow) -> Vec<MenuEntry> {
             has_target_repository: source_target::has_target_repository(&model.workspace),
         };
         let actions = entry_actions::actions_for(&model.admin.plugins, row, &context);
-        entries.extend(actions.iter().map(|action| plugin_entry(action, repo_id.clone())));
+        entries.extend(
+            actions
+                .iter()
+                .map(|action| plugin_entry(action, repo_id.clone())),
+        );
         // 禁用项后面各写一次原因：同一个原因只写一行。
         let mut reasons: Vec<&'static str> = Vec::new();
         for reason in actions.iter().filter_map(|action| action.unavailable) {
@@ -131,7 +206,12 @@ fn menu_entries(model: &ShellViewModel, row: &FileRow) -> Vec<MenuEntry> {
                 reasons.push(reason);
             }
         }
-        entries.extend(reasons.into_iter().enumerate().map(|(index, reason)| MenuEntry::note(&format!("plugin-note-{index}"), reason)));
+        entries.extend(
+            reasons
+                .into_iter()
+                .enumerate()
+                .map(|(index, reason)| MenuEntry::note(&format!("plugin-note-{index}"), reason)),
+        );
     }
     let mut thumbnail = MenuEntry::new("thumbnail", "缩略图", Some(PHOTO)).disabled(trash);
     thumbnail.children = thumbnail_entries(row, repo_id.clone());
@@ -141,10 +221,14 @@ fn menu_entries(model: &ShellViewModel, row: &FileRow) -> Vec<MenuEntry> {
             .disabled(trash || multiple)
             .message(files(FilesMessage::OpenDialog(FileDialog::Rename))),
     );
-    let mut delete = MenuEntry::new("delete", if trash { "彻底删除" } else { "删除" }, Some(TRASH))
-        .disabled(mutating)
-        .danger()
-        .message(files(FilesMessage::DeleteSelected));
+    let mut delete = MenuEntry::new(
+        "delete",
+        if trash { "彻底删除" } else { "删除" },
+        Some(TRASH),
+    )
+    .disabled(mutating)
+    .danger()
+    .message(files(FilesMessage::DeleteSelected));
     delete.confirm_label = trash.then_some("确认彻底删除？再点一次");
     entries.push(delete);
     entries
@@ -174,7 +258,12 @@ fn playlist_entries(model: &ShellViewModel, row: &FileRow) -> Vec<MenuEntry> {
                 is_virtual: row.is_virtual,
                 path: row.path.clone(),
             };
-            let mut entry = MenuEntry::new(&format!("playlist-{}", style::key_part(&action.playlist_id)), name, None).message(toggle);
+            let mut entry = MenuEntry::new(
+                &format!("playlist-{}", style::key_part(&action.playlist_id)),
+                name,
+                None,
+            )
+            .message(toggle);
             entry.checked = action.checked;
             entry
         })
@@ -185,32 +274,46 @@ fn playlist_entries(model: &ShellViewModel, row: &FileRow) -> Vec<MenuEntry> {
 /// 不能用的动作禁用，原因写在后面一行。
 fn plugin_entry(action: &FilePluginAction, repository_id: Option<String>) -> MenuEntry {
     let message = match &action.dispatch {
-        FilePluginDispatch::Call { plugin_id, method, payload } => admin(AdminMessage::CallFilePlugin {
+        FilePluginDispatch::Call {
+            plugin_id,
+            method,
+            payload,
+        } => admin(AdminMessage::CallFilePlugin {
             plugin_id: plugin_id.clone(),
             method: method.clone(),
             payload: payload.clone(),
             repository_id,
         }),
-        FilePluginDispatch::AskFolder { plugin_id, method, payload, progress } => input(InputMessage::BeginDownloadFolder {
+        FilePluginDispatch::AskFolder {
+            plugin_id,
+            method,
+            payload,
+            progress,
+        } => input(InputMessage::BeginDownloadFolder {
             plugin_id: plugin_id.clone(),
             method: method.clone(),
             payload: payload.clone(),
             repository_id,
             progress: progress.clone(),
         }),
-        FilePluginDispatch::AskRepository { plugin_id, method, payload, progress, parent_path } => {
-            admin(AdminMessage::BeginRepositoryDownload(RepositoryDownload {
-                plugin_id: plugin_id.clone(),
-                method: method.clone(),
-                payload: payload.clone(),
-                repository_id,
-                progress: progress.clone(),
-                parent_path: parent_path.clone(),
-            }))
-        }
-        FilePluginDispatch::CreatePlaylist(playlist) => {
-            admin(AdminMessage::CreateSourcePlaylist { playlist: playlist.clone(), repository_id })
-        }
+        FilePluginDispatch::AskRepository {
+            plugin_id,
+            method,
+            payload,
+            progress,
+            parent_path,
+        } => admin(AdminMessage::BeginRepositoryDownload(RepositoryDownload {
+            plugin_id: plugin_id.clone(),
+            method: method.clone(),
+            payload: payload.clone(),
+            repository_id,
+            progress: progress.clone(),
+            parent_path: parent_path.clone(),
+        })),
+        FilePluginDispatch::CreatePlaylist(playlist) => admin(AdminMessage::CreateSourcePlaylist {
+            playlist: playlist.clone(),
+            repository_id,
+        }),
     };
     MenuEntry::new(&action.value.replace('/', "-"), action.label.clone(), None)
         .disabled(action.unavailable.is_some())
@@ -231,13 +334,39 @@ fn thumbnail_entries(row: &FileRow, repo_id: Option<String>) -> Vec<MenuEntry> {
         }
     };
     vec![
-        MenuEntry::new("thumbnail-custom-file", "自定义缩略图（选择文件）", Some(PHOTO_PLUS))
-            .message(custom(|repo_id, path, kind| InputMessage::BeginThumbnailFile { repo_id, path, kind })),
-        MenuEntry::new("thumbnail-custom-clipboard", "新增自定义缩略图（从剪贴板）", Some(CLIPBOARD))
-            .message(custom(|repo_id, path, kind| InputMessage::PasteThumbnail { repo_id, path, kind })),
-        MenuEntry::new("thumbnail-clear-custom", "取消自定义缩略图", Some(PHOTO_OFF))
-            .disabled(!row.thumbnail_custom)
-            .message(custom(|repo_id, path, kind| InputMessage::ClearThumbnail { repo_id, path, kind })),
+        MenuEntry::new(
+            "thumbnail-custom-file",
+            "自定义缩略图（选择文件）",
+            Some(PHOTO_PLUS),
+        )
+        .message(custom(|repo_id, path, kind| {
+            InputMessage::BeginThumbnailFile {
+                repo_id,
+                path,
+                kind,
+            }
+        })),
+        MenuEntry::new(
+            "thumbnail-custom-clipboard",
+            "新增自定义缩略图（从剪贴板）",
+            Some(CLIPBOARD),
+        )
+        .message(custom(|repo_id, path, kind| InputMessage::PasteThumbnail {
+            repo_id,
+            path,
+            kind,
+        })),
+        MenuEntry::new(
+            "thumbnail-clear-custom",
+            "取消自定义缩略图",
+            Some(PHOTO_OFF),
+        )
+        .disabled(!row.thumbnail_custom)
+        .message(custom(|repo_id, path, kind| InputMessage::ClearThumbnail {
+            repo_id,
+            path,
+            kind,
+        })),
         MenuEntry::new("thumbnail-refresh", "刷新缩略图", Some(REFRESH))
             .message(files(FilesMessage::RefreshThumbnail(row.path.clone()))),
     ]

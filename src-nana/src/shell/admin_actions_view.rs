@@ -6,16 +6,16 @@
 //! 面板只建一次，只读 [`ActionsSignals`]：动作行按动作 id 做键，选中底色和文字是绑定；详情的文字、
 //! 执行按钮的图标和禁用是绑定，步骤列表内容变了整块换。执行按钮点下去时现读选中的动作。
 
-use nana_ui::runtime::view::{dynamic, each, signal, widget, AnyView, IntoView, Signal};
+use nana_ui::runtime::view::{AnyView, IntoView, Signal, dynamic, each, signal, widget};
 use nana_ui::runtime::{Activate, AlignSpec, JustifySpec, LengthSpec, Stack};
 use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
 
 use super::super::{ShellMessage, ShellViewModel};
+use super::AdminMessage;
 use super::bind::{ActionDisabled, ButtonIcon};
 use super::icons;
-use super::style::{self, action, column, label, pad, wrapping, Tone};
+use super::style::{self, Tone, action, column, label, pad, wrapping};
 use super::support::{action_can_run, action_status_label};
-use super::AdminMessage;
 
 /// 面板主体显示哪一块。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -99,17 +99,34 @@ impl ActionsView {
                 .map(|item| ActionRow {
                     id: item.action_id.clone(),
                     name: item.name.clone(),
-                    meta: format!("{} · {} 步 · {}", item.source, item.steps.len(), action_status_label(&item.status, item.enabled)),
+                    meta: format!(
+                        "{} · {} 步 · {}",
+                        item.source,
+                        item.steps.len(),
+                        action_status_label(&item.status, item.enabled)
+                    ),
                     warn: item.status != "ready",
                 })
                 .collect(),
             detail: active.map(|current| {
-                let last = current.last_run.as_ref().map(|run| run.status.clone()).unwrap_or_else(|| "无".into());
+                let last = current
+                    .last_run
+                    .as_ref()
+                    .map(|run| run.status.clone())
+                    .unwrap_or_else(|| "无".into());
                 ActionDetail {
                     id: current.action_id.clone(),
                     name: current.name.clone(),
-                    status: format!("{} · 最近运行 {last}", action_status_label(&current.status, current.enabled)),
-                    can_run: action_can_run(&current.status, current.enabled, model.files.selected_paths().len(), admin.actions_running),
+                    status: format!(
+                        "{} · 最近运行 {last}",
+                        action_status_label(&current.status, current.enabled)
+                    ),
+                    can_run: action_can_run(
+                        &current.status,
+                        current.enabled,
+                        model.files.selected_paths().len(),
+                        admin.actions_running,
+                    ),
                     running: admin.actions_running,
                     unsupported: current.unsupported_reason.clone(),
                     steps: current
@@ -140,7 +157,13 @@ pub(crate) struct ActionsSignals {
 impl ActionsSignals {
     /// 空的信号，进路由之前由同步写入第一份投影。
     pub(crate) fn new() -> Self {
-        Self { count: signal(String::new()), state: signal(ActionsState::default()), error: signal(String::new()), rows: signal(Vec::new()), detail: signal(None) }
+        Self {
+            count: signal(String::new()),
+            state: signal(ActionsState::default()),
+            error: signal(String::new()),
+            rows: signal(Vec::new()),
+            detail: signal(None),
+        }
     }
 
     /// 写入投影，只写变了的信号。
@@ -160,30 +183,54 @@ pub(crate) fn actions_panel(signals: ActionsSignals) -> AnyView {
         .children((
             widget(column(0.0)).children((
                 widget(style::eyebrow_text("动作")).key("admin-actions-eyebrow"),
-                widget(style::label_lh("仓库动作", 18.0, 700, Role::Text, 1.25)).key("admin-actions-title"),
+                widget(style::label_lh("仓库动作", 18.0, 700, Role::Text, 1.25))
+                    .key("admin-actions-title"),
             )),
             style::hint_chip(count, "admin-actions-count"),
         ))
         .into_any();
     let body = (
         header,
-        style::state_notice("正在加载动作", false, "admin-actions-loading").visible(move || state.with(|state| *state == ActionsState::Loading)),
-        style::state_notice("当前仓库没有导入动作。", false, "admin-actions-empty").visible(move || state.with(|state| *state == ActionsState::Empty)),
+        style::state_notice("正在加载动作", false, "admin-actions-loading")
+            .visible(move || state.with(|state| *state == ActionsState::Loading)),
+        style::state_notice("当前仓库没有导入动作。", false, "admin-actions-empty")
+            .visible(move || state.with(|state| *state == ActionsState::Empty)),
         action_body(signals),
-        style::state_notice(error, true, "admin-actions-error").visible(move || error.with(|error| !error.is_empty())),
+        style::state_notice(error, true, "admin-actions-error")
+            .visible(move || error.with(|error| !error.is_empty())),
     );
-    widget(pad(column(12.0), 18.0, 18.0, 18.0, 18.0)).children(body).key("admin-actions").into_any()
+    widget(pad(column(12.0), 18.0, 18.0, 18.0, 18.0))
+        .children(body)
+        .key("admin-actions")
+        .into_any()
 }
 
 /// 左边动作列表（220–300 宽），右边选中动作的详情和步骤。有动作时才占布局。
 fn action_body(signals: ActionsSignals) -> AnyView {
     let detail = signals.detail;
     let state = signals.state;
-    let items = each(signals.rows, ActionRow::clone, move |item: ActionRow| action_row(item, detail));
-    let list = widget(column(0.0).surface(Role::Surface).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Md)).children((items,)).key("admin-action-list").into_any();
+    let items = each(signals.rows, ActionRow::clone, move |item: ActionRow| {
+        action_row(item, detail)
+    });
+    let list = widget(
+        column(0.0)
+            .surface(Role::Surface)
+            .outline(Role::BorderSoft, 1.0)
+            .radius(RadiusTier::Md),
+    )
+    .children((items,))
+    .key("admin-action-list")
+    .into_any();
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
         layout.display = Some(nana_ui_core::DisplaySpec::Grid);
-        layout.grid_columns = Some(vec![style::capped(220.0, 300.0), nana_ui_core::GridTrack::MinMax { min_px: 0.0, fr: 1.0, max_px: None }]);
+        layout.grid_columns = Some(vec![
+            style::capped(220.0, 300.0),
+            nana_ui_core::GridTrack::MinMax {
+                min_px: 0.0,
+                fr: 1.0,
+                max_px: None,
+            },
+        ]);
         layout.gap = Some(LengthSpec::Px(12.0));
         layout.width = Some(LengthSpec::Fill);
         layout.align_items = AlignSpec::Start;
@@ -200,7 +247,10 @@ fn action_row(item: ActionRow, detail: Signal<Option<ActionDetail>>) -> AnyView 
     let selected_id = item.id.clone();
     let mut node = nana_ui::runtime::NodeStyle {
         interaction: nana_ui::runtime::InteractionStyle {
-            hovered: nana_ui::runtime::SemanticPaint { background: Some(Role::Hover), ..Default::default() },
+            hovered: nana_ui::runtime::SemanticPaint {
+                background: Some(Role::Hover),
+                ..Default::default()
+            },
             ..Default::default()
         },
         ..Default::default()
@@ -218,22 +268,45 @@ fn action_row(item: ActionRow, detail: Signal<Option<ActionDetail>>) -> AnyView 
         layout.justify_content = JustifySpec::SpaceBetween;
         layout.gap = Some(LengthSpec::Px(10.0));
     }
-    let mut children = vec![widget(Stack::column(3.0).width(LengthSpec::Shrink).grow(1.0).shrink(1.0).min_width(LengthSpec::Px(0.0)))
-        .children((widget(label(item.name.clone(), 13.0, 600, Role::Text)), widget(wrapping(label(item.meta.clone(), 12.0, 400, Role::Muted)))))
-        .into_any()];
+    let mut children = vec![
+        widget(
+            Stack::column(3.0)
+                .width(LengthSpec::Shrink)
+                .grow(1.0)
+                .shrink(1.0)
+                .min_width(LengthSpec::Px(0.0)),
+        )
+        .children((
+            widget(label(item.name.clone(), 13.0, 600, Role::Text)),
+            widget(wrapping(label(item.meta.clone(), 12.0, 400, Role::Muted))),
+        ))
+        .into_any(),
+    ];
     if item.warn {
         children.push(widget(style::glyph(icons::SHIELD_ALERT, 14.0, Role::Text)).into_any());
     }
     widget(style::bottom_rule(Stack::row(10.0).style(node)).hittable())
-        .background(move || detail.with(|detail| detail.as_ref().is_some_and(|detail| detail.id == selected_id).then_some(Role::Hover)))
+        .background(move || {
+            detail.with(|detail| {
+                detail
+                    .as_ref()
+                    .is_some_and(|detail| detail.id == selected_id)
+                    .then_some(Role::Hover)
+            })
+        })
         .children(children)
         .key(format!("admin-action-{}", style::key_part(&item.id)))
-        .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SelectAction(id.clone()))))
+        .on_cx(move |_, _: &Activate, cx| {
+            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SelectAction(id.clone())))
+        })
         .into_any()
 }
 
 /// 详情里的一个值。没有选中的动作时读默认值。
-fn detail_value<R: Default + 'static>(detail: Signal<Option<ActionDetail>>, pick: fn(&ActionDetail) -> R) -> impl Fn() -> R + Send + 'static {
+fn detail_value<R: Default + 'static>(
+    detail: Signal<Option<ActionDetail>>,
+    pick: fn(&ActionDetail) -> R,
+) -> impl Fn() -> R + Send + 'static {
     move || detail.with(|detail| detail.as_ref().map(pick).unwrap_or_default())
 }
 
@@ -242,40 +315,86 @@ fn action_detail(detail: Signal<Option<ActionDetail>>) -> AnyView {
     let running = detail_value(detail, |detail| detail.running);
     let head = widget(style::spread(12.0, AlignSpec::Center)).children((
         widget(column(4.0)).children((
-            style::bound(style::label_lh(String::new(), 18.0, 700, Role::Text, 1.25), detail_value(detail, |detail| detail.name.clone())),
-            style::bound(label(String::new(), 12.0, 400, Role::Muted), detail_value(detail, |detail| detail.status.clone())).key("admin-action-detail"),
+            style::bound(
+                style::label_lh(String::new(), 18.0, 700, Role::Text, 1.25),
+                detail_value(detail, |detail| detail.name.clone()),
+            ),
+            style::bound(
+                label(String::new(), 12.0, 400, Role::Muted),
+                detail_value(detail, |detail| detail.status.clone()),
+            )
+            .key("admin-action-detail"),
         )),
         widget(action("执行", Some(icons::PLAY), Tone::Primary, false))
-            .prop::<Option<nana_ui_core::Icon>, ButtonIcon>(move || Some(if running() { icons::LOADER_CIRCLE } else { icons::PLAY }))
+            .prop::<Option<nana_ui_core::Icon>, ButtonIcon>(move || {
+                Some(if running() {
+                    icons::LOADER_CIRCLE
+                } else {
+                    icons::PLAY
+                })
+            })
             .prop::<bool, ActionDisabled>(detail_value(detail, |detail| !detail.can_run))
             .key("admin-action-run")
             .on_cx(move |_, _: &Activate, cx| {
                 // 选中的动作随点选变，点下去时现读。
-                let action_id = detail.with_untracked(|detail| detail.as_ref().map(|detail| detail.id.clone()));
+                let action_id =
+                    detail.with_untracked(|detail| detail.as_ref().map(|detail| detail.id.clone()));
                 cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::RunAction(action_id)));
             }),
     ));
-    let unsupported = style::state_notice(detail_value(detail, |detail| detail.unsupported.clone().unwrap_or_default()), true, "admin-action-unsupported")
-        .visible(detail_value(detail, |detail| detail.unsupported.is_some()));
-    let steps = dynamic(detail_value(detail, |detail| detail.steps.clone()), |steps: &Vec<StepView>| {
-        widget(pad(column(8.0), 12.0, 0.0, 0.0, 0.0)).children(steps.iter().map(step_view).collect::<Vec<_>>()).into_any()
-    });
-    widget(pad(column(0.0), 14.0, 14.0, 14.0, 14.0).surface(Role::Surface).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Md))
-        .visible(move || detail.with(Option::is_some))
-        .children((head, unsupported, steps))
-        .key("admin-action-detail-card")
-        .into_any()
+    let unsupported = style::state_notice(
+        detail_value(detail, |detail| {
+            detail.unsupported.clone().unwrap_or_default()
+        }),
+        true,
+        "admin-action-unsupported",
+    )
+    .visible(detail_value(detail, |detail| detail.unsupported.is_some()));
+    let steps = dynamic(
+        detail_value(detail, |detail| detail.steps.clone()),
+        |steps: &Vec<StepView>| {
+            widget(pad(column(8.0), 12.0, 0.0, 0.0, 0.0))
+                .children(steps.iter().map(step_view).collect::<Vec<_>>())
+                .into_any()
+        },
+    );
+    widget(
+        pad(column(0.0), 14.0, 14.0, 14.0, 14.0)
+            .surface(Role::Surface)
+            .outline(Role::BorderSoft, 1.0)
+            .radius(RadiusTier::Md),
+    )
+    .visible(move || detail.with(Option::is_some))
+    .children((head, unsupported, steps))
+    .key("admin-action-detail-card")
+    .into_any()
 }
 
 /// 一步：标签和「类型 · 状态」，不支持时右边写原因。
 fn step_view(step: &StepView) -> AnyView {
-    let mut children = vec![widget(column(3.0).shrink(1.0))
-        .children((widget(label(step.label.clone(), 13.0, 600, Role::Text)), widget(label(step.meta.clone(), 12.0, 400, Role::Muted))))
-        .into_any()];
+    let mut children = vec![
+        widget(column(3.0).shrink(1.0))
+            .children((
+                widget(label(step.label.clone(), 13.0, 600, Role::Text)),
+                widget(label(step.meta.clone(), 12.0, 400, Role::Muted)),
+            ))
+            .into_any(),
+    ];
     if let Some(reason) = step.reason.clone() {
         children.push(widget(style::align_end(label(reason, 12.0, 400, Role::Danger))).into_any());
     }
-    widget(pad(style::spread(10.0, AlignSpec::Start), 10.0, 10.0, 10.0, 10.0).surface(Role::Subtle).outline(Role::BorderSoft, 1.0).radius(RadiusTier::Sm))
-        .children(children)
-        .into_any()
+    widget(
+        pad(
+            style::spread(10.0, AlignSpec::Start),
+            10.0,
+            10.0,
+            10.0,
+            10.0,
+        )
+        .surface(Role::Subtle)
+        .outline(Role::BorderSoft, 1.0)
+        .radius(RadiusTier::Sm),
+    )
+    .children(children)
+    .into_any()
 }

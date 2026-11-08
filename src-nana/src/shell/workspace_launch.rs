@@ -25,7 +25,9 @@ impl WorkspaceState {
         }
         self.list_generation = self.list_generation.saturating_add(1);
         self.begin_startup();
-        self.effects.push(WorkspaceEffect::RefreshRepositories { generation: self.list_generation });
+        self.effects.push(WorkspaceEffect::RefreshRepositories {
+            generation: self.list_generation,
+        });
         true
     }
 
@@ -33,9 +35,18 @@ impl WorkspaceState {
     /// 上一轮留下的（[`Self::logged_active_repo_id`]），重试时和 Vue 一样带着失败那一轮已经换上的仓库。
     fn begin_startup(&mut self) {
         let active = self.logged_active_repo_id();
-        self.startup.begin_with(active.as_deref(), self.last_active_repo_id.as_deref());
-        self.startup.set_progress(1, "加载仓库列表", "读取已注册资源库，并匹配上次打开的工作区。");
-        self.startup.log("info", "首屏启动开始读取资源库列表。", &[("step", Some("1"))]);
+        self.startup
+            .begin_with(active.as_deref(), self.last_active_repo_id.as_deref());
+        self.startup.set_progress(
+            1,
+            "加载仓库列表",
+            "读取已注册资源库，并匹配上次打开的工作区。",
+        );
+        self.startup.log(
+            "info",
+            "首屏启动开始读取资源库列表。",
+            &[("step", Some("1"))],
+        );
     }
 
     /// 加载日志里的活动仓库，照 Vue `activeRepoId` 的时机：首屏启动换上目标（读完摘要、选中缺失仓库、列表为空）
@@ -52,7 +63,8 @@ impl WorkspaceState {
     /// 换仓库失败照 Vue 不写日志（`StartupState::log` 跳过），任务弹层这一行取消。
     fn fail_startup(&mut self, error: impl Into<String>) {
         let (active, target) = (self.logged_active_repo_id(), self.active_repo_id.clone());
-        self.startup.fail_with(error, active.as_deref(), target.as_deref());
+        self.startup
+            .fail_with(error, active.as_deref(), target.as_deref());
         self.presence = RepositoryPresence::LoadError;
         self.snapshot_loading = false;
         if self.startup.mode == StartupMode::Switch {
@@ -62,11 +74,18 @@ impl WorkspaceState {
 
     /// 应用一轮仓库列表，返回是否应用了。`generation` 不匹配时保留当前步骤和已选仓库。
     /// 启动以后的列表接着选仓库（[`Self::apply_ready_list`]）；读失败时取消「加载资源库」这一行。
-    pub fn apply_repository_list(&mut self, generation: Option<u64>, result: Result<Vec<WorkspaceRepository>, String>) -> bool {
+    pub fn apply_repository_list(
+        &mut self,
+        generation: Option<u64>,
+        result: Result<Vec<WorkspaceRepository>, String>,
+    ) -> bool {
         if let Some(generation) = generation
             && generation != self.list_generation
         {
-            eprintln!("Nana 忽略过期的资源库列表结果：代次 {generation}，当前 {}", self.list_generation);
+            eprintln!(
+                "Nana 忽略过期的资源库列表结果：代次 {generation}，当前 {}",
+                self.list_generation
+            );
             return false;
         }
         let startup_open = self.startup.status != StartupStatus::Ready;
@@ -96,7 +115,11 @@ impl WorkspaceState {
 
     /// 同步的结果：启动和换仓库接着读摘要；同一个仓库的刷新见 [`Self::note_refresh_synced`]。
     /// 返回要写进状态区的失败（只有同仓库刷新会有，启动的失败停在启动页上）。
-    pub fn note_sync_finished(&mut self, generation: u64, result: Result<SyncCounts, String>) -> Option<String> {
+    pub fn note_sync_finished(
+        &mut self,
+        generation: u64,
+        result: Result<SyncCounts, String>,
+    ) -> Option<String> {
         if self.startup.status != StartupStatus::Loading {
             return self.note_refresh_synced(generation, result.map(|_| ()));
         }
@@ -134,7 +157,11 @@ impl WorkspaceState {
                         "读取仓库摘要",
                         "读取资源库摘要、素材索引和默认预览对象。",
                     );
-                    self.startup.log("info", "首屏启动开始读取资源库摘要。", &[("step", Some("3"))]);
+                    self.startup.log(
+                        "info",
+                        "首屏启动开始读取资源库摘要。",
+                        &[("step", Some("3"))],
+                    );
                     self.load_snapshot(repo_id);
                 } else {
                     self.fail_startup("同步完成时没有活动资源库");
@@ -161,7 +188,10 @@ impl WorkspaceState {
         };
         match result {
             Ok(counts) => {
-                let (assets, playlists) = (counts.asset_count.to_string(), counts.playlist_count.to_string());
+                let (assets, playlists) = (
+                    counts.asset_count.to_string(),
+                    counts.playlist_count.to_string(),
+                );
                 self.startup.log(
                     "info",
                     "首屏启动资源库摘要读取完成。",
@@ -176,12 +206,18 @@ impl WorkspaceState {
                 self.startup.active_applied = true;
                 self.remember_repository(Some(repo_id.clone()));
                 if self.startup.mode == StartupMode::Switch {
-                    self.operation.update(OperationPatch::step("加载资源索引", 46.0));
+                    self.operation
+                        .update(OperationPatch::step("加载资源索引", 46.0));
                 }
                 let detail = self.startup.first_screen_detail();
                 self.startup.set_progress(4, "读取首屏目录", detail);
-                self.startup.log("info", "首屏启动开始加载首屏目录与关联数据。", &[("step", Some("4"))]);
-                self.effects.push(WorkspaceEffect::LoadFirstScreen { repo_id });
+                self.startup.log(
+                    "info",
+                    "首屏启动开始加载首屏目录与关联数据。",
+                    &[("step", Some("4"))],
+                );
+                self.effects
+                    .push(WorkspaceEffect::LoadFirstScreen { repo_id });
             }
             Err(error) => {
                 eprintln!("Nana 读取资源库摘要失败：{error}");
@@ -201,11 +237,19 @@ impl WorkspaceState {
         }
         match result {
             Ok(()) => {
-                let playlists = self.startup.index.as_ref().map_or(0, |counts| counts.playlist_count).to_string();
+                let playlists = self
+                    .startup
+                    .index
+                    .as_ref()
+                    .map_or(0, |counts| counts.playlist_count)
+                    .to_string();
                 self.startup.log(
                     "info",
                     "首屏启动首屏目录与关联数据加载完成。",
-                    &[("step", Some("4")), ("playlistCount", Some(playlists.as_str()))],
+                    &[
+                        ("step", Some("4")),
+                        ("playlistCount", Some(playlists.as_str())),
+                    ],
                 );
                 self.presence = RepositoryPresence::Ready;
                 self.finish_loading_run();
@@ -253,15 +297,34 @@ impl WorkspaceState {
     fn apply_repository_items(&mut self, items: Vec<WorkspaceRepository>) {
         self.repositories = items;
         let total = self.repositories.len().to_string();
-        let ready = self.repositories.iter().filter(|item| item.status == "ready").count().to_string();
-        let missing = self.repositories.iter().filter(|item| item.status == "missing").count().to_string();
+        let ready = self
+            .repositories
+            .iter()
+            .filter(|item| item.status == "ready")
+            .count()
+            .to_string();
+        let missing = self
+            .repositories
+            .iter()
+            .filter(|item| item.status == "missing")
+            .count()
+            .to_string();
         self.startup.log(
             "info",
             "首屏启动资源库列表读取完成。",
-            &[("step", Some("1")), ("repositoryCount", Some(&total)), ("readyRepositoryCount", Some(&ready)), ("missingRepositoryCount", Some(&missing))],
+            &[
+                ("step", Some("1")),
+                ("repositoryCount", Some(&total)),
+                ("readyRepositoryCount", Some(&ready)),
+                ("missingRepositoryCount", Some(&missing)),
+            ],
         );
         if self.repositories.is_empty() {
-            self.startup.log("warn", "首屏启动未找到可加载的资源库。", &[("repositoryCount", Some("0"))]);
+            self.startup.log(
+                "warn",
+                "首屏启动未找到可加载的资源库。",
+                &[("repositoryCount", Some("0"))],
+            );
             self.assign_active(None);
             self.startup.active_applied = true;
             self.remember_repository(None);
@@ -273,14 +336,24 @@ impl WorkspaceState {
         let next_id = self
             .active_repo_id
             .clone()
-            .filter(|repo_id| self.repositories.iter().any(|item| &item.repo_id == repo_id))
+            .filter(|repo_id| {
+                self.repositories
+                    .iter()
+                    .any(|item| &item.repo_id == repo_id)
+            })
             .or_else(|| {
                 self.last_active_repo_id.clone().filter(|repo_id| {
-                    self.repositories.iter().any(|item| &item.repo_id == repo_id)
+                    self.repositories
+                        .iter()
+                        .any(|item| &item.repo_id == repo_id)
                 })
             })
             .unwrap_or_else(|| self.repositories[0].repo_id.clone());
-        let next = self.repositories.iter().find(|item| item.repo_id == next_id).cloned();
+        let next = self
+            .repositories
+            .iter()
+            .find(|item| item.repo_id == next_id)
+            .cloned();
         let missing = next.as_ref().is_some_and(|item| item.status == "missing");
         let remembered = self.last_active_repo_id.clone();
         self.startup.log(
@@ -289,9 +362,18 @@ impl WorkspaceState {
             &[
                 ("repositoryCount", Some(&total)),
                 ("rememberedRepoId", remembered.as_deref()),
-                ("repositoryStatus", next.as_ref().map(|item| item.status.as_str())),
-                ("repositoryName", next.as_ref().map(|item| item.name.as_str())),
-                ("repositoryPath", next.as_ref().map(|item| item.path.as_str())),
+                (
+                    "repositoryStatus",
+                    next.as_ref().map(|item| item.status.as_str()),
+                ),
+                (
+                    "repositoryName",
+                    next.as_ref().map(|item| item.name.as_str()),
+                ),
+                (
+                    "repositoryPath",
+                    next.as_ref().map(|item| item.path.as_str()),
+                ),
             ],
         );
         self.assign_active(Some(next_id.clone()));
@@ -300,8 +382,14 @@ impl WorkspaceState {
                 "warn",
                 "首屏启动遇到缺失资源库。",
                 &[
-                    ("repositoryName", next.as_ref().map(|item| item.name.as_str())),
-                    ("repositoryPath", next.as_ref().map(|item| item.path.as_str())),
+                    (
+                        "repositoryName",
+                        next.as_ref().map(|item| item.name.as_str()),
+                    ),
+                    (
+                        "repositoryPath",
+                        next.as_ref().map(|item| item.path.as_str()),
+                    ),
                 ],
             );
             self.startup.active_applied = true;
@@ -317,14 +405,25 @@ impl WorkspaceState {
 
     /// 启动和换仓库进入第 2 步：记下「开始同步文件变化」并发出同步请求。
     pub(super) fn begin_sync(&mut self, repo_id: String) {
-        self.startup.set_progress(2, "扫描资源库文件", "同步文件变化，更新新增、移动和删除记录。");
-        self.startup.log("info", "首屏启动开始同步文件变化。", &[("step", Some("2"))]);
-        self.effects.push(WorkspaceEffect::SyncRepository { repo_id, generation: self.list_generation });
+        self.startup.set_progress(
+            2,
+            "扫描资源库文件",
+            "同步文件变化，更新新增、移动和删除记录。",
+        );
+        self.startup
+            .log("info", "首屏启动开始同步文件变化。", &[("step", Some("2"))]);
+        self.effects.push(WorkspaceEffect::SyncRepository {
+            repo_id,
+            generation: self.list_generation,
+        });
     }
 
     /// 读仓库摘要，带上这一代，过期的结果认得出来。
     pub(super) fn load_snapshot(&mut self, repo_id: String) {
         self.snapshot_loading = true;
-        self.effects.push(WorkspaceEffect::LoadSnapshot { repo_id, generation: self.list_generation });
+        self.effects.push(WorkspaceEffect::LoadSnapshot {
+            repo_id,
+            generation: self.list_generation,
+        });
     }
 }

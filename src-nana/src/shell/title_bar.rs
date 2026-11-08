@@ -8,12 +8,14 @@
 
 use std::sync::Arc;
 
-use nana_ui::icons_tabler::{ADJUSTMENTS_HORIZONTAL, LAYOUT_SIDEBAR_LEFT_COLLAPSE, LAYOUT_SIDEBAR_LEFT_EXPAND};
-use nana_ui::runtime::view::{fields, widget, AnyView, FieldWrite, IntoView, Signal};
+use nana_ui::icons_tabler::{
+    ADJUSTMENTS_HORIZONTAL, LAYOUT_SIDEBAR_LEFT_COLLAPSE, LAYOUT_SIDEBAR_LEFT_EXPAND,
+};
+use nana_ui::runtime::view::{AnyView, FieldWrite, IntoView, Signal, fields, widget};
 use nana_ui::runtime::{
-    component_descriptors, Activate, AlignSpec, AppTitleBar, AppTitleBarControls, Entity, IconButton, JustifySpec,
-    LengthSpec, NodeStyle, RadiusTier, RuntimeDocument, SemanticColorRole, SemanticPaint, Stack, StableNodeId,
-    TextChanged, TextHorizontalAlignment, TextInput,
+    Activate, AlignSpec, AppTitleBar, AppTitleBarControls, Entity, IconButton, JustifySpec,
+    LengthSpec, NodeStyle, RadiusTier, RuntimeDocument, SemanticColorRole, SemanticPaint,
+    StableNodeId, Stack, TextChanged, TextHorizontalAlignment, TextInput, component_descriptors,
 };
 use nana_ui::{ControlSize, Icon};
 
@@ -30,7 +32,11 @@ const CONTROL_EDGE: f32 = 28.0;
 ///
 /// 标题栏是常驻骨架的一部分：侧栏开关的图标和说明、筛选开关的样子和角标按 `signals` 绑定，
 /// 搜索框用 `.model(query)` 受控，组合输入中更新也不会打断预编辑。事件处理器只发消息，不捕获状态。
-pub(super) fn title_bar(signals: TitleSignals, query: Signal<String>, initial_query: &str) -> impl IntoView + use<> {
+pub(super) fn title_bar(
+    signals: TitleSignals,
+    query: Signal<String>,
+    initial_query: &str,
+) -> impl IntoView + use<> {
     widget(
         AppTitleBar::new("MomoBako")
             .show_window_controls(true)
@@ -45,13 +51,22 @@ pub(super) fn title_bar(signals: TitleSignals, query: Signal<String>, initial_qu
                 cx.dispatch_program_all(ShellMessage::ToggleSidebar);
             }),
     )
-    .center(widget(Stack::row(4.0).align(AlignSpec::Center)).children((
-        widget(search_field(initial_query)).model(query).key("global-search").on_cx(|_, event: &TextChanged, cx| {
-            cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(WorkspacePanel::Search));
-            cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::SetQuery(event.value.to_string())));
-        }),
-        filter_toggle(signals),
-    )))
+    .center(
+        widget(Stack::row(4.0).align(AlignSpec::Center)).children((
+            widget(search_field(initial_query))
+                .model(query)
+                .key("global-search")
+                .on_cx(|_, event: &TextChanged, cx| {
+                    cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(
+                        WorkspacePanel::Search,
+                    ));
+                    cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::SetQuery(
+                        event.value.to_string(),
+                    )));
+                }),
+            filter_toggle(signals),
+        )),
+    )
 }
 
 /// 侧栏开关的图标和说明：收起时是「展开侧边栏」，展开时是「折叠侧边栏」。
@@ -80,7 +95,12 @@ impl FieldWrite<IconButton, bool> for SidebarToggleField {
 
     fn differs(target: &IconButton, collapsed: &bool) -> bool {
         let (icon, label) = sidebar_toggle_look(*collapsed);
-        target.icon != icon || &*target.label != label || target.tooltip.as_ref().is_some_and(|tooltip| &*tooltip.label != label)
+        target.icon != icon
+            || &*target.label != label
+            || target
+                .tooltip
+                .as_ref()
+                .is_some_and(|tooltip| &*tooltip.label != label)
     }
 }
 
@@ -88,19 +108,31 @@ impl FieldWrite<IconButton, bool> for SidebarToggleField {
 /// 和 Vue 的侧栏开关一样从不停用，所以没有停用的样子；要停用时得照所在底色写 `interaction.disabled`，
 /// `colors_from_style` 的按钮 NanaUI 不会替它淡化。
 fn chrome_button(icon: Icon, label: &'static str) -> IconButton {
-    let mut button = IconButton::new(icon, label).size(ControlSize::Large).with_tooltip(label);
-    button.style = parts::icon_button_style(CONTROL_EDGE, RadiusTier::Sm, SemanticColorRole::Muted, None);
+    let mut button = IconButton::new(icon, label)
+        .size(ControlSize::Large)
+        .with_tooltip(label);
+    button.style =
+        parts::icon_button_style(CONTROL_EDGE, RadiusTier::Sm, SemanticColorRole::Muted, None);
     button.colors_from_style()
 }
 
 /// 筛选开关的说明：筛选栏打开时是「隐藏筛选栏」。
 fn filter_label(open: bool) -> &'static str {
-    if open { "隐藏筛选栏" } else { "显示筛选栏" }
+    if open {
+        "隐藏筛选栏"
+    } else {
+        "显示筛选栏"
+    }
 }
 
 /// 筛选开关的样式：平时弱色，悬停和按下强调色；打开或有条件时强调色底。
 fn filter_style(active: bool) -> NodeStyle {
-    let mut style = parts::icon_button_style(CONTROL_EDGE, RadiusTier::Sm, SemanticColorRole::Muted, Some(SemanticColorRole::Subtle));
+    let mut style = parts::icon_button_style(
+        CONTROL_EDGE,
+        RadiusTier::Sm,
+        SemanticColorRole::Muted,
+        Some(SemanticColorRole::Subtle),
+    );
     let accent = SemanticPaint {
         background: Some(SemanticColorRole::AccentSoft),
         foreground: Some(SemanticColorRole::Accent),
@@ -134,7 +166,9 @@ impl FieldWrite<IconButton, FilterLook> for FilterLookField {
 /// 筛选开关。打开或有条件时强调色底；条件数大于 0 时右上角 14px 角标。对应 `.titlebar__filter-btn`。
 /// 角标常驻，没有条件时藏起来。
 fn filter_toggle(signals: TitleSignals) -> AnyView {
-    let mut button = IconButton::new(ADJUSTMENTS_HORIZONTAL, filter_label(false)).size(ControlSize::Large).with_tooltip("筛选");
+    let mut button = IconButton::new(ADJUSTMENTS_HORIZONTAL, filter_label(false))
+        .size(ControlSize::Large)
+        .with_tooltip("筛选");
     button.style = filter_style(false);
     let toggle = widget(button.colors_from_style())
         .prop::<FilterLook, FilterLookField>(signals.filter)
@@ -162,12 +196,17 @@ fn filter_toggle(signals: TitleSignals) -> AnyView {
             }),
     )
     .visible(move || count.get() > 0)
-    .children((widget(parts::label_text("0", 10.0, 700, Some(SemanticColorRole::Background)).line_height(14.0))
-        .prop::<String, fields::text::value>(move || count.get().to_string()),))
+    .children((widget(
+        parts::label_text("0", 10.0, 700, Some(SemanticColorRole::Background)).line_height(14.0),
+    )
+    .prop::<String, fields::text::value>(move || count.get().to_string()),))
     .key("filter-count");
-    widget(Stack::row(0.0).with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative))
-        .children((toggle, badge))
-        .into_any()
+    widget(
+        Stack::row(0.0)
+            .with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative),
+    )
+    .children((toggle, badge))
+    .into_any()
 }
 
 /// 搜索框：`--bg-subtle` 底、无描边、左右 10px、文字和占位居中；悬停或聚焦换 `--bg-hover`。
@@ -182,7 +221,10 @@ fn search_field(initial_query: &str) -> TextInput {
     style.border = None;
     style.radius = Some(RadiusTier::Sm);
     style.control_padding_x = None;
-    let hover = SemanticPaint { background: Some(SemanticColorRole::Hover), ..SemanticPaint::default() };
+    let hover = SemanticPaint {
+        background: Some(SemanticColorRole::Hover),
+        ..SemanticPaint::default()
+    };
     style.interaction.hovered = hover;
     style.interaction.focused = hover;
     style.text_horizontal_alignment = TextHorizontalAlignment::Center;
@@ -207,13 +249,23 @@ fn search_field(initial_query: &str) -> TextInput {
 /// 指针点击由 Nana 宿主直接执行；这里发出的是同一套绝对命令（最大化按当前窗口状态取最大化或还原），
 /// 和宿主重复时结果不变。按钮由 Nana 在组装标题栏时创建，视图闭包里拿不到节点，所以挂载后按按钮组的
 /// 次序登记：最小化、最大化/还原、关闭，和宿主的映射一致；不按会随框架文案表变化的无障碍名称匹配。
-pub(super) fn bind_window_controls(document: &mut RuntimeDocument) -> Result<(), nana_ui::runtime::FrameworkError> {
+pub(super) fn bind_window_controls(
+    document: &mut RuntimeDocument,
+) -> Result<(), nana_ui::runtime::FrameworkError> {
     let buttons = window_control_buttons(document);
     if buttons.iter().any(Option::is_none) {
         eprintln!("Nana 标题栏窗口控件不全：{buttons:?}");
     }
-    let actions = [super::WindowAction::Minimize, super::WindowAction::ToggleMaximize, super::WindowAction::Close];
-    for (id, action) in buttons.into_iter().zip(actions).filter_map(|(id, action)| Some((id?, action))) {
+    let actions = [
+        super::WindowAction::Minimize,
+        super::WindowAction::ToggleMaximize,
+        super::WindowAction::Close,
+    ];
+    for (id, action) in buttons
+        .into_iter()
+        .zip(actions)
+        .filter_map(|(id, action)| Some((id?, action)))
+    {
         let entity = Entity::<IconButton>::from_stable_id(id);
         if let Err(error) = document.context_mut().on_keyed(
             entity,
@@ -234,20 +286,42 @@ pub(super) fn bind_window_controls(document: &mut RuntimeDocument) -> Result<(),
 fn window_control_buttons(document: &RuntimeDocument) -> [Option<StableNodeId>; 3] {
     let context = document.context();
     let world = context.world();
-    let Some(bar) = world.nodes_of_component(document.document(), component_descriptors::APP_TITLE_BAR.type_id).next() else {
+    let Some(bar) = world
+        .nodes_of_component(
+            document.document(),
+            component_descriptors::APP_TITLE_BAR.type_id,
+        )
+        .next()
+    else {
         eprintln!("Nana 文档里没有标题栏，窗口按钮没有接上");
         return [None; 3];
     };
-    let Some(controls) = context.read(Entity::<AppTitleBar>::from_stable_id(bar), |bar| bar.controls).ok().flatten() else {
+    let Some(controls) = context
+        .read(Entity::<AppTitleBar>::from_stable_id(bar), |bar| {
+            bar.controls
+        })
+        .ok()
+        .flatten()
+    else {
         eprintln!("Nana 标题栏还没有窗口按钮组");
         return [None; 3];
     };
     let explicit = context
-        .read(Entity::<AppTitleBarControls>::from_stable_id(controls), |group| [group.minimize, group.maximize, group.close])
+        .read(
+            Entity::<AppTitleBarControls>::from_stable_id(controls),
+            |group| [group.minimize, group.maximize, group.close],
+        )
         .unwrap_or([None; 3]);
     if explicit.iter().any(Option::is_some) {
         return explicit;
     }
-    let children = world.node(controls).map(|node| node.children).unwrap_or_default();
-    [children.first().copied(), children.get(1).copied(), children.get(2).copied()]
+    let children = world
+        .node(controls)
+        .map(|node| node.children)
+        .unwrap_or_default();
+    [
+        children.first().copied(),
+        children.get(1).copied(),
+        children.get(2).copied(),
+    ]
 }

@@ -5,8 +5,8 @@
 
 use nana_ui::RuntimeProgramContext;
 
-use crate::backend::services::repository::{RepositorySnapshot, RepositorySummary};
 use crate::MomoBakoApplication;
+use crate::backend::services::repository::{RepositorySnapshot, RepositorySummary};
 
 use super::{ShellMessage, ShellViewModel, WorkspaceRepository};
 
@@ -18,7 +18,10 @@ pub enum SilentMessage {
 }
 
 /// 归约静默列表或摘要。不是这两类消息时交回主归约。
-pub(crate) fn reduce_message(model: &mut ShellViewModel, message: ShellMessage) -> Option<ShellMessage> {
+pub(crate) fn reduce_message(
+    model: &mut ShellViewModel,
+    message: ShellMessage,
+) -> Option<ShellMessage> {
     let ShellMessage::SilentWorkspace(message) = message else {
         return Some(message);
     };
@@ -42,14 +45,22 @@ fn apply_repositories(model: &mut ShellViewModel, result: Result<Vec<RepositoryS
         eprintln!("Nana 启动未完成，忽略静默仓库列表");
         return;
     }
-    let items: Vec<WorkspaceRepository> = items.iter().map(WorkspaceRepository::from_summary).collect();
+    let items: Vec<WorkspaceRepository> = items
+        .iter()
+        .map(WorkspaceRepository::from_summary)
+        .collect();
     let active_id = model.workspace.active_repo_id.clone();
     model.workspace.repositories = items;
     let Some(active_id) = active_id else {
         eprintln!("Nana 静默列表没有活动仓库，只替换列表");
         return;
     };
-    let Some(current) = model.workspace.repositories.iter().find(|item| item.repo_id == active_id) else {
+    let Some(current) = model
+        .workspace
+        .repositories
+        .iter()
+        .find(|item| item.repo_id == active_id)
+    else {
         eprintln!("Nana 静默列表里没有当前仓库，保留现有内容：{active_id}");
         return;
     };
@@ -62,7 +73,10 @@ fn apply_repositories(model: &mut ShellViewModel, result: Result<Vec<RepositoryS
 }
 
 /// 就绪且仍是当前仓库时更新名称、摘要和快捷计数。文件夹树刷新重读的摘要也走这里。
-pub(super) fn apply_snapshot(model: &mut ShellViewModel, result: Result<RepositorySnapshot, String>) {
+pub(super) fn apply_snapshot(
+    model: &mut ShellViewModel,
+    result: Result<RepositorySnapshot, String>,
+) {
     let snapshot = match result {
         Err(error) => {
             eprintln!("Nana 静默刷新仓库摘要失败：{error}");
@@ -71,15 +85,24 @@ pub(super) fn apply_snapshot(model: &mut ShellViewModel, result: Result<Reposito
         Ok(snapshot) => snapshot,
     };
     if !model.workspace.content_loaded() {
-        eprintln!("Nana 启动未完成，忽略静默仓库摘要：{}", snapshot.repository.repo_id);
+        eprintln!(
+            "Nana 启动未完成，忽略静默仓库摘要：{}",
+            snapshot.repository.repo_id
+        );
         return;
     }
     if model.workspace.active_repo_id.as_deref() != Some(snapshot.repository.repo_id.as_str()) {
-        eprintln!("Nana 静默摘要与当前仓库不一致，已忽略：{}", snapshot.repository.repo_id);
+        eprintln!(
+            "Nana 静默摘要与当前仓库不一致，已忽略：{}",
+            snapshot.repository.repo_id
+        );
         return;
     }
     if model.navigation_locked() {
-        eprintln!("Nana 资源库缺失，忽略静默摘要：{}", snapshot.repository.repo_id);
+        eprintln!(
+            "Nana 资源库缺失，忽略静默摘要：{}",
+            snapshot.repository.repo_id
+        );
         return;
     }
     model.repository_name = snapshot.repository.name.clone();
@@ -88,23 +111,50 @@ pub(super) fn apply_snapshot(model: &mut ShellViewModel, result: Result<Reposito
 }
 
 /// 后台读取仓库列表。失败（含服务没起来、任务排不进去和 panic，`task_guard.rs`）交回静默归约，不增加列表代次。
-pub(crate) fn dispatch_silent_list(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
+pub(crate) fn dispatch_silent_list(
+    app: &MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+) {
     let failed = |error| ShellMessage::SilentWorkspace(SilentMessage::Repositories(Err(error)));
-    crate::task_guard::spawn_service(app.services.as_ref(), context, "静默资源库列表", failed, |services| {
-        let query = services.repository_query.clone();
-        let executor = services.executor.clone();
-        move || ShellMessage::SilentWorkspace(SilentMessage::Repositories(executor.block_on(query.list_repositories())))
-    });
+    crate::task_guard::spawn_service(
+        app.services.as_ref(),
+        context,
+        "静默资源库列表",
+        failed,
+        |services| {
+            let query = services.repository_query.clone();
+            let executor = services.executor.clone();
+            move || {
+                ShellMessage::SilentWorkspace(SilentMessage::Repositories(
+                    executor.block_on(query.list_repositories()),
+                ))
+            }
+        },
+    );
 }
 
 /// 后台读取仓库摘要。失败走静默消息，不把页面改成错误。
-pub(crate) fn dispatch_silent_snapshot(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>, repo_id: String) {
+pub(crate) fn dispatch_silent_snapshot(
+    app: &MomoBakoApplication,
+    context: &RuntimeProgramContext<ShellMessage>,
+    repo_id: String,
+) {
     let failed = |error| ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Err(error)));
-    crate::task_guard::spawn_service(app.services.as_ref(), context, "静默资源库摘要", failed, |services| {
-        let query = services.repository_query.clone();
-        let executor = services.executor.clone();
-        move || ShellMessage::SilentWorkspace(SilentMessage::Snapshot(executor.block_on(query.get_repository_snapshot(repo_id))))
-    });
+    crate::task_guard::spawn_service(
+        app.services.as_ref(),
+        context,
+        "静默资源库摘要",
+        failed,
+        |services| {
+            let query = services.repository_query.clone();
+            let executor = services.executor.clone();
+            move || {
+                ShellMessage::SilentWorkspace(SilentMessage::Snapshot(
+                    executor.block_on(query.get_repository_snapshot(repo_id)),
+                ))
+            }
+        },
+    );
 }
 
 #[cfg(test)]
@@ -113,7 +163,9 @@ mod tests {
     use crate::backend::services::repository::{
         AssetSummary, RepositoryBackendSummary, RepositoryOverview, RepositoryShortcut,
     };
-    use crate::shell::{MainRegion, ShellPage, StartupStatus, WorkspaceEffect, WorkspaceRepository};
+    use crate::shell::{
+        MainRegion, ShellPage, StartupStatus, WorkspaceEffect, WorkspaceRepository,
+    };
 
     fn summary(repo_id: &str, name: &str, status: &str) -> RepositorySummary {
         RepositorySummary {
@@ -195,7 +247,9 @@ mod tests {
     fn ready_shell() -> ShellViewModel {
         let mut model = ShellViewModel::default();
         model.page = ShellPage::FileList;
-        model.workspace.present_repository(repository("repo", "库", "ready"));
+        model
+            .workspace
+            .present_repository(repository("repo", "库", "ready"));
         model.workspace.take_effects();
         model.repository_name = "库".into();
         model.repository_id = Some("repo".into());
@@ -204,7 +258,9 @@ mod tests {
     }
 
     fn send_list(model: &mut ShellViewModel, result: Result<Vec<RepositorySummary>, String>) {
-        model.reduce(ShellMessage::SilentWorkspace(SilentMessage::Repositories(result)));
+        model.reduce(ShellMessage::SilentWorkspace(SilentMessage::Repositories(
+            result,
+        )));
     }
 
     #[test]
@@ -284,7 +340,9 @@ mod tests {
             label: "照片".into(),
             children: Vec::new(),
         });
-        model.reduce(ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Ok(snapshot("repo", "新库")))));
+        model.reduce(ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Ok(
+            snapshot("repo", "新库"),
+        ))));
         assert_eq!(model.repository_name, "新库");
         assert_eq!(model.repository_id.as_deref(), Some("repo"));
         assert_eq!(model.sidebar.counts.all, 1);
@@ -306,12 +364,16 @@ mod tests {
     #[test]
     fn silent_snapshot_ignores_errors_and_other_repositories() {
         let mut model = ready_shell();
-        model.reduce(ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Err("摘要不可用".into()))));
+        model.reduce(ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Err(
+            "摘要不可用".into(),
+        ))));
         assert_eq!(model.page, ShellPage::FileList);
         assert_ne!(model.page, ShellPage::Error);
         assert_eq!(model.sidebar.counts.all, 0);
 
-        model.reduce(ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Ok(snapshot("other", "别处")))));
+        model.reduce(ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Ok(
+            snapshot("other", "别处"),
+        ))));
         assert_eq!(model.repository_name, "库");
         assert_eq!(model.sidebar.counts.all, 0);
         assert!(model.sidebar.quick_access.is_empty());
@@ -319,14 +381,18 @@ mod tests {
         assert_eq!(model.page, ShellPage::FileList);
 
         model.workspace.startup.begin();
-        model.reduce(ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Ok(snapshot("repo", "新库")))));
+        model.reduce(ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Ok(
+            snapshot("repo", "新库"),
+        ))));
         assert_eq!(model.repository_name, "库");
         assert_eq!(model.workspace.startup.status, StartupStatus::Loading);
         assert_eq!(model.page, ShellPage::FileList);
 
         model.workspace.startup.finish();
         model.workspace.repositories[0].status = "missing".into();
-        model.reduce(ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Ok(snapshot("repo", "新库")))));
+        model.reduce(ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Ok(
+            snapshot("repo", "新库"),
+        ))));
         assert_eq!(model.repository_name, "库");
         assert!(!model.sidebar.tree_loading);
         assert_eq!(model.sidebar.counts.all, 0);

@@ -27,6 +27,7 @@ fn item(id: &str, path: &str, extension: &str) -> QueueItem {
         file_class: "video".into(),
         thumbnail_path: None,
         is_virtual: false,
+        local_absolute_path: None,
     }
 }
 
@@ -63,13 +64,29 @@ fn current_m4a_enters_the_session_without_a_sound_device() {
     let other = "DO-NOT-DECODE-other-queue.mp4";
     let mut model = ShellViewModel::default();
     model.player.repo_id = Some("repo".into());
-    model.player.queue = vec![item("tone", &current.display().to_string(), "m4a"), item("other", other, "mp4")];
-    send(&mut model, PlayerMessage::PlayItem { item_id: "missing".into() });
+    model.player.queue = vec![
+        item("tone", &current.display().to_string(), "m4a"),
+        item("other", other, "mp4"),
+    ];
+    send(
+        &mut model,
+        PlayerMessage::PlayItem {
+            item_id: "missing".into(),
+        },
+    );
     assert_eq!(model.player.session.status, "idle");
     assert!(model.player.session.error.is_none());
-    assert!(model.player.current_id.is_none(), "队列里没有的条目不当成当前项");
+    assert!(
+        model.player.current_id.is_none(),
+        "队列里没有的条目不当成当前项"
+    );
 
-    send(&mut model, PlayerMessage::PlayItem { item_id: "tone".into() });
+    send(
+        &mut model,
+        PlayerMessage::PlayItem {
+            item_id: "tone".into(),
+        },
+    );
     assert_eq!(model.player.session.status, "playing");
     assert!(model.player.session.duration_ms.unwrap_or(0) > 0);
     assert!(model.player.session.can_seek && model.player.session.can_volume);
@@ -77,8 +94,16 @@ fn current_m4a_enters_the_session_without_a_sound_device() {
 
     let bad = dir.join("bad.m4a");
     std::fs::write(&bad, b"\x00\x00\x00\x18ftypM4A \x00\x00\x00\x00M4A mp42").unwrap();
-    model.player.queue = vec![item("bad", &bad.display().to_string(), "m4a"), item("other", other, "mp4")];
-    send(&mut model, PlayerMessage::PlayItem { item_id: "bad".into() });
+    model.player.queue = vec![
+        item("bad", &bad.display().to_string(), "m4a"),
+        item("other", other, "mp4"),
+    ];
+    send(
+        &mut model,
+        PlayerMessage::PlayItem {
+            item_id: "bad".into(),
+        },
+    );
     assert_eq!(model.player.session.status, "failed");
     let error = model.player.session.error.clone().unwrap_or_default();
     assert!(error.contains("解码失败"), "{error}");
@@ -92,12 +117,21 @@ fn current_m4a_enters_the_session_without_a_sound_device() {
 #[test]
 fn media_decode_names_the_real_reason_for_each_format() {
     let mp3 = super::decode_media("repo", "mp3", b"ID3 not really an mp3").expect_err("坏 mp3");
-    assert!(!mp3.contains("没有原生解码器"), "坏 mp3 不该说没有解码器：{mp3}");
+    assert!(
+        !mp3.contains("没有原生解码器"),
+        "坏 mp3 不该说没有解码器：{mp3}"
+    );
     let wav = super::decode_media("repo", "WAV", b"RIFF\x00\x00\x00\x00WAVE").expect_err("坏 wav");
-    assert!(!wav.contains("没有原生解码器"), "坏 wav 不该说没有解码器：{wav}");
+    assert!(
+        !wav.contains("没有原生解码器"),
+        "坏 wav 不该说没有解码器：{wav}"
+    );
     let video = super::decode_media("repo", "mp4", b"not a container").expect_err("认不出的视频");
     assert_eq!(video, "没有原生解码器");
-    assert!(super::decode_media("repo", "m4a", &pcm_wav()).is_ok(), "能解的字节照常解出");
+    assert!(
+        super::decode_media("repo", "m4a", &pcm_wav()).is_ok(),
+        "能解的字节照常解出"
+    );
 }
 
 #[test]
@@ -115,21 +149,42 @@ fn still_png_uses_real_pixels_and_a_missing_file_fails_without_a_frame() {
     model.player.contributions = vec![slideshow()];
     model.player.repo_id = Some("repo".into());
     model.player.queue = vec![still_item("dot", &path.display().to_string())];
-    send(&mut model, PlayerMessage::PlayItem { item_id: "dot".into() });
+    send(
+        &mut model,
+        PlayerMessage::PlayItem {
+            item_id: "dot".into(),
+        },
+    );
     assert_eq!(model.player.session.status, "playing");
     assert_eq!(model.player.session.duration_ms, Some(5000));
     assert!(!model.player.session.can_seek && !model.player.session.can_volume);
     assert!(model.player.session.error.is_none());
-    let frame = model.player.still.as_ref().and_then(|item| item.frame.as_ref()).expect("画面");
+    let frame = model
+        .player
+        .still
+        .as_ref()
+        .and_then(|item| item.frame.as_ref())
+        .expect("画面");
     assert_eq!((frame.width, frame.height), (2, 3));
 
     model.player.queue = vec![still_item("gone", "pics/missing.png")];
-    send(&mut model, PlayerMessage::PlayItem { item_id: "gone".into() });
+    send(
+        &mut model,
+        PlayerMessage::PlayItem {
+            item_id: "gone".into(),
+        },
+    );
     assert_eq!(model.player.session.status, "failed");
     let error = model.player.session.error.clone().unwrap_or_default();
     assert!(error.contains("图片无法播放"), "{error}");
     assert!(!error.contains("需要升级"), "{error}");
-    assert!(model.player.still.as_ref().is_some_and(|item| item.path == "pics/missing.png" && item.frame.is_none()));
+    assert!(
+        model
+            .player
+            .still
+            .as_ref()
+            .is_some_and(|item| item.path == "pics/missing.png" && item.frame.is_none())
+    );
 
     model.player.contributions[0].supported_extensions = vec!["wma".into()];
     let mut audio = still_item("side", "notes/side.wma");
@@ -137,7 +192,12 @@ fn still_png_uses_real_pixels_and_a_missing_file_fails_without_a_frame() {
     audio.file_class = "audio".into();
     audio.player_type_id = "momobako.playlist.image-slideshow".into();
     model.player.queue = vec![audio];
-    send(&mut model, PlayerMessage::PlayItem { item_id: "side".into() });
+    send(
+        &mut model,
+        PlayerMessage::PlayItem {
+            item_id: "side".into(),
+        },
+    );
     assert!(model.player.still.is_none());
     assert_eq!(model.player.session.duration_ms, None);
     let note = model.player.outside_note.clone().unwrap_or_default();
@@ -188,15 +248,28 @@ fn relative_item_paths_load_through_the_repository() {
     track.player_type_id = "momobako.playlist.audio-sequence".into();
     track.file_class = "audio".into();
     model.player.queue = vec![track];
-    model.reduce(ShellMessage::Player(PlayerMessage::PlayItem { item_id: "a".into() }));
+    model.reduce(ShellMessage::Player(PlayerMessage::PlayItem {
+        item_id: "a".into(),
+    }));
     assert_eq!(model.player.session.status, "loading");
     let effects = model.player.take_effects();
-    let Some(super::PlayerEffect::LoadItem { repo_id, path, still, generation, .. }) =
-        effects.iter().find(|effect| matches!(effect, super::PlayerEffect::LoadItem { .. })).cloned()
+    let Some(super::PlayerEffect::LoadItem {
+        repo_id,
+        path,
+        still,
+        generation,
+        ..
+    }) = effects
+        .iter()
+        .find(|effect| matches!(effect, super::PlayerEffect::LoadItem { .. }))
+        .cloned()
     else {
         panic!("播放没有留下读取请求");
     };
-    assert_eq!((repo_id.as_str(), path.as_str(), still), ("repo", "music/a.mp3", false));
+    assert_eq!(
+        (repo_id.as_str(), path.as_str(), still),
+        ("repo", "music/a.mp3", false)
+    );
 
     model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded {
         item_id: "a".into(),
@@ -207,14 +280,35 @@ fn relative_item_paths_load_through_the_repository() {
     }));
     assert_eq!(model.player.session.status, "loading", "过期的读取结果不装");
 
-    let loaded = super::decode_loaded("repo", false, "mp3", crate::shell::audio_decode::fixture_mp3()).expect("解码");
+    let loaded = super::decode_loaded(
+        "repo",
+        false,
+        "mp3",
+        crate::shell::audio_decode::fixture_mp3(),
+    )
+    .expect("解码");
     let prep = crate::shell::SourcePrep::default();
-    model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded { item_id: "a".into(), generation, still: false, result: Ok(loaded), prep }));
+    model.reduce(ShellMessage::Player(PlayerMessage::ItemLoaded {
+        item_id: "a".into(),
+        generation,
+        still: false,
+        result: Ok(loaded),
+        prep,
+    }));
     assert_eq!(model.player.session.status, "playing");
-    assert!(model.player.session.duration_ms.is_some_and(|duration| duration > 0));
+    assert!(
+        model
+            .player
+            .session
+            .duration_ms
+            .is_some_and(|duration| duration > 0)
+    );
     assert!(model.player.can_play);
 
     send(&mut model, PlayerMessage::SetPlaying(false));
-    assert_eq!(model.player.session.status, "paused", "暂停落在同一游标上，不报缺解码器");
+    assert_eq!(
+        model.player.session.status, "paused",
+        "暂停落在同一游标上，不报缺解码器"
+    );
     assert!(model.player.session.error.is_none());
 }

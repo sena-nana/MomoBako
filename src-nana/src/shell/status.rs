@@ -82,8 +82,12 @@ pub struct Failure {
 }
 
 /// 被盯着的领域错误字段：新写一次就记一次失败，清掉时它记下的那一条一起清。
-const WATCHED: [FailureSource; 4] =
-    [FailureSource::Files, FailureSource::FolderTree, FailureSource::SmartFolder, FailureSource::SettingsData];
+const WATCHED: [FailureSource; 4] = [
+    FailureSource::Files,
+    FailureSource::FolderTree,
+    FailureSource::SmartFolder,
+    FailureSource::SettingsData,
+];
 
 /// 全局状态区的状态。
 #[derive(Clone, Debug, Default)]
@@ -124,12 +128,21 @@ impl StatusState {
         let kind = if warning { "提醒" } else { "失败" };
         eprintln!("Nana 状态区记下{kind}（{source:?}）：{message}");
         self.seq += 1;
-        self.failure = Some(Failure { source, message, warning, seq: self.seq });
+        self.failure = Some(Failure {
+            source,
+            message,
+            warning,
+            seq: self.seq,
+        });
     }
 
     /// 清掉第 `seq` 次及以前记的失败；之后新记的留着。
     fn clear_through(&mut self, seq: u64) {
-        if self.failure.as_ref().is_some_and(|failure| failure.seq <= seq) {
+        if self
+            .failure
+            .as_ref()
+            .is_some_and(|failure| failure.seq <= seq)
+        {
             self.failure = None;
         }
     }
@@ -141,7 +154,11 @@ impl StatusState {
 
     /// 清掉来自 `source` 的失败。
     fn clear_source(&mut self, source: FailureSource) {
-        if self.failure.as_ref().is_some_and(|failure| failure.source == source) {
+        if self
+            .failure
+            .as_ref()
+            .is_some_and(|failure| failure.source == source)
+        {
             self.failure = None;
         }
     }
@@ -159,8 +176,13 @@ pub(super) struct Activity {
 impl Activity {
     pub(super) fn of(model: &ShellViewModel) -> Self {
         // 来源下载收尾的那一轮刷新属于下载本身：它读列表、选仓库和重读目录时的忙碌不算用户开始了新操作。
-        let follow_up = model.workspace.refresh.as_ref().is_some_and(|run| run.keeps_status);
-        let follow_up_directory = follow_up && model.workspace.refresh_stage() == Some(RefreshStage::Directory);
+        let follow_up = model
+            .workspace
+            .refresh
+            .as_ref()
+            .is_some_and(|run| run.keeps_status);
+        let follow_up_directory =
+            follow_up && model.workspace.refresh_stage() == Some(RefreshStage::Directory);
         Self {
             busy: [
                 // 读目录（非静默）、文件变更、刷新文件夹树（同步仓库）。
@@ -188,7 +210,10 @@ impl Activity {
 
     /// 和 `before` 比，有操作开始了。
     fn started_since(&self, before: &Activity) -> bool {
-        self.busy.iter().zip(before.busy).any(|(now, was)| *now && !was)
+        self.busy
+            .iter()
+            .zip(before.busy)
+            .any(|(now, was)| *now && !was)
             || (self.selection.is_some() && self.selection != before.selection)
     }
 }
@@ -198,12 +223,19 @@ impl Activity {
 pub(super) fn starts_operation(message: &ShellMessage) -> bool {
     let filled = |text: &str| !text.trim().is_empty();
     match message {
-        ShellMessage::Input(InputMessage::OpenEntry { has_repo, absolute_path, .. }) => *has_repo && filled(absolute_path),
+        ShellMessage::Input(InputMessage::OpenEntry {
+            has_repo,
+            absolute_path,
+            ..
+        }) => *has_repo && filled(absolute_path),
         ShellMessage::Input(InputMessage::RevealEntry { absolute_path }) => filled(absolute_path),
         ShellMessage::Input(InputMessage::OpenExternalUrl { url }) => filled(url),
-        ShellMessage::Input(InputMessage::StartExternalDrag { paths, trash, backend_kind, .. }) => {
-            !*trash && backend_kind == "filesystem" && paths.iter().any(|path| filled(path))
-        }
+        ShellMessage::Input(InputMessage::StartExternalDrag {
+            paths,
+            trash,
+            backend_kind,
+            ..
+        }) => !*trash && backend_kind == "filesystem" && paths.iter().any(|path| filled(path)),
         ShellMessage::SelectWorkspaceRepository(_)
         | ShellMessage::StartupRetry
         | ShellMessage::Sidebar(SidebarMessage::OpenSmartFolder(_)) => true,
@@ -260,7 +292,10 @@ pub(crate) enum StatusLine {
     /// 「正在同步仓库状态」：读资源库列表、读仓库摘要或读素材详情时。
     Busy,
     /// 同步进度：这一步的文案和百分比（扫描、写入、刷新三档）。
-    Progress { label: String, percent: u8 },
+    Progress {
+        label: String,
+        percent: u8,
+    },
 }
 
 impl StatusLine {
@@ -270,13 +305,20 @@ impl StatusLine {
             && !shown_in_place(model, failure.source)
         {
             let message = failure.message.clone();
-            return if failure.warning { Self::Warning(message) } else { Self::Failure(message) };
+            return if failure.warning {
+                Self::Warning(message)
+            } else {
+                Self::Failure(message)
+            };
         }
         if busy(model) {
             return Self::Busy;
         }
         match model.tree_sync.progress.shown() {
-            Some((label, percent)) => Self::Progress { label: label.to_string(), percent },
+            Some((label, percent)) => Self::Progress {
+                label: label.to_string(),
+                percent,
+            },
             None => Self::Hidden,
         }
     }
@@ -287,10 +329,14 @@ impl StatusLine {
 /// 有操作结果时读取失败让给状态区。
 fn shown_in_place(model: &ShellViewModel, source: FailureSource) -> bool {
     match source {
-        FailureSource::Files => RouteKey::of(model) == RouteKey::Files && !super::files_view::previewing(model),
+        FailureSource::Files => {
+            RouteKey::of(model) == RouteKey::Files && !super::files_view::previewing(model)
+        }
         FailureSource::SettingsData => {
             let admin = &model.admin;
-            RouteKey::of(model) == RouteKey::Extensions && admin.action_error.is_empty() && admin.action_message.is_empty()
+            RouteKey::of(model) == RouteKey::Extensions
+                && admin.action_error.is_empty()
+                && admin.action_message.is_empty()
         }
         _ => false,
     }

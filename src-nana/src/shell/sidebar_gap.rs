@@ -30,7 +30,11 @@ pub struct FolderDialog {
 
 impl FolderDialog {
     pub fn title(&self) -> &'static str {
-        if self.rename { FOLDER_RENAME_TITLE } else { FOLDER_CREATE_TITLE }
+        if self.rename {
+            FOLDER_RENAME_TITLE
+        } else {
+            FOLDER_CREATE_TITLE
+        }
     }
 
     /// 主按钮文案：新建是「创建」，重命名是「保存」。
@@ -39,7 +43,11 @@ impl FolderDialog {
     }
 
     pub fn placeholder(&self) -> &'static str {
-        if self.rename { "输入新的文件夹名称" } else { "输入文件夹名称" }
+        if self.rename {
+            "输入新的文件夹名称"
+        } else {
+            "输入文件夹名称"
+        }
     }
 
     /// 对话框里的说明句。
@@ -47,7 +55,11 @@ impl FolderDialog {
         if self.rename {
             format!("正在重命名 {}。", self.label)
         } else {
-            let parent = if self.parent.is_empty() { "根目录" } else { self.parent.as_str() };
+            let parent = if self.parent.is_empty() {
+                "根目录"
+            } else {
+                self.parent.as_str()
+            };
             format!("将在 {parent} 下创建新文件夹。")
         }
     }
@@ -83,7 +95,11 @@ pub struct FolderMenu {
 
 impl SidebarState {
     pub fn smart_dialog_title(&self) -> &'static str {
-        if self.smart_draft.mode_edit { SMART_EDIT_TITLE } else { "新建智能文件夹" }
+        if self.smart_draft.mode_edit {
+            SMART_EDIT_TITLE
+        } else {
+            "新建智能文件夹"
+        }
     }
 
     pub fn smart_delete_title(&self) -> &'static str {
@@ -93,21 +109,39 @@ impl SidebarState {
 
 #[derive(Clone, Debug)]
 pub enum GapMessage {
-    FolderHover { path: String, now_ms: u64, dragging: bool },
+    FolderHover {
+        path: String,
+        now_ms: u64,
+        dragging: bool,
+    },
     FolderLeave(String),
     OpenFolderCreate(String),
-    OpenFolderRename { path: String, label: String },
+    OpenFolderRename {
+        path: String,
+        label: String,
+    },
     SetFolderValue(String),
     CloseFolderDialog,
     SubmitFolderDialog,
-    OpenFolderDelete { path: String, label: String },
+    OpenFolderDelete {
+        path: String,
+        label: String,
+    },
     CloseFolderDelete,
     ConfirmFolderDelete(FolderDeleteMode),
     /// 文件夹行右键。
-    OpenFolderMenu { path: String, label: String, x: f32, y: f32 },
+    OpenFolderMenu {
+        path: String,
+        label: String,
+        x: f32,
+        y: f32,
+    },
     CloseFolderMenu,
     OpenSmartEdit(String),
-    OpenSmartDelete { id: String, label: String },
+    OpenSmartDelete {
+        id: String,
+        label: String,
+    },
     CloseSmartDelete,
     ConfirmSmartDelete,
     PlayPlaylist(String),
@@ -126,41 +160,61 @@ pub(super) fn reduce(model: &mut super::super::ShellViewModel, message: GapMessa
     let repo_id = model.workspace.active_repo_id.clone();
     let mutating = model.files.mutating;
     match message {
-        GapMessage::FolderHover { path, now_ms, dragging } => {
+        GapMessage::FolderHover {
+            path,
+            now_ms,
+            dragging,
+        } => {
             if let Some(path) = model.sidebar.hover_folder(path, now_ms, dragging, locked) {
                 model.apply_open_folder(path);
             }
         }
         GapMessage::FolderLeave(path) => model.sidebar.leave_folder(&path),
         GapMessage::OpenFolderCreate(parent) => model.sidebar.open_folder_create(parent, locked),
-        GapMessage::OpenFolderRename { path, label } => model.sidebar.open_folder_rename(path, label, locked),
-        GapMessage::SetFolderValue(value) => {
-            if !model.sidebar.folder_dialog.submitting {
-                model.sidebar.folder_dialog.value = value;
-            }
+        GapMessage::OpenFolderRename { path, label } => {
+            model.sidebar.open_folder_rename(path, label, locked)
         }
+        // Vue 的文件夹名称输入框没有 disabled，处理中打的字照样进草稿。
+        // 已经发出的那一次用的是提交当时的名字，这里只改对话框里还看着的这份。
+        GapMessage::SetFolderValue(value) => model.sidebar.folder_dialog.value = value,
         GapMessage::CloseFolderDialog => model.sidebar.close_folder_dialog(mutating),
         GapMessage::SubmitFolderDialog => {
-            if model.sidebar.submit_folder_dialog(repo_id.as_deref(), mutating) {
+            if model
+                .sidebar
+                .submit_folder_dialog(repo_id.as_deref(), mutating)
+            {
                 // 新的变更开始，上一次的文件错误不再算这次的结果。
                 model.files.error.clear();
             }
         }
-        GapMessage::OpenFolderDelete { path, label } => model.sidebar.open_folder_delete(path, label, locked),
+        GapMessage::OpenFolderDelete { path, label } => {
+            model.sidebar.open_folder_delete(path, label, locked)
+        }
         GapMessage::CloseFolderDelete => model.sidebar.close_folder_delete(mutating),
         GapMessage::ConfirmFolderDelete(mode) => {
-            if model.sidebar.confirm_folder_delete(repo_id.as_deref(), mode, mutating) {
+            if model
+                .sidebar
+                .confirm_folder_delete(repo_id.as_deref(), mode, mutating)
+            {
                 model.files.error.clear();
             }
         }
-        GapMessage::OpenFolderMenu { path, label, x, y } => model.sidebar.open_folder_menu(path, label, x, y, locked),
+        GapMessage::OpenFolderMenu { path, label, x, y } => {
+            model.sidebar.open_folder_menu(path, label, x, y, locked)
+        }
         GapMessage::CloseFolderMenu => model.sidebar.folder_menu = None,
         GapMessage::OpenSmartEdit(id) => model.sidebar.open_smart_edit(&id, locked),
-        GapMessage::OpenSmartDelete { id, label } => model.sidebar.open_smart_delete(id, label, locked),
+        GapMessage::OpenSmartDelete { id, label } => {
+            model.sidebar.open_smart_delete(id, label, locked)
+        }
         GapMessage::CloseSmartDelete => model.sidebar.close_smart_delete(),
         GapMessage::ConfirmSmartDelete => model.sidebar.confirm_smart_delete(repo_id.as_deref()),
         GapMessage::PlayPlaylist(id) => model.sidebar.play_playlist(id, locked),
-        GapMessage::RemovePlaylist(id) => model.sidebar.remove_playlist(id, repo_id.as_deref(), locked),
+        GapMessage::RemovePlaylist(id) => {
+            model
+                .sidebar
+                .remove_playlist(id, repo_id.as_deref(), locked)
+        }
         GapMessage::SetBackendName(value) => model.sidebar.backend_name = value,
         GapMessage::SetBackendUrl(value) => model.sidebar.backend_url = value,
         GapMessage::SetBackendRoot(value) => model.sidebar.backend_root = value,
@@ -168,7 +222,9 @@ pub(super) fn reduce(model: &mut super::super::ShellViewModel, message: GapMessa
         GapMessage::SetBackendPassword(value) => model.sidebar.backend_password = value,
         GapMessage::SubmitBackend => {
             let options = super::backend_options(&model.admin.plugins);
-            let option = options.iter().find(|option| option.plugin_id == model.sidebar.backend_plugin_id);
+            let option = options
+                .iter()
+                .find(|option| option.plugin_id == model.sidebar.backend_plugin_id);
             model.sidebar.submit_backend(option);
         }
         GapMessage::Escape => {
@@ -271,7 +327,13 @@ impl SidebarState {
     }
 
     /// 同一路径停满 450ms 时返回该路径，由 `apply_open_folder` 打开。离开后再进来重新计时。
-    fn hover_folder(&mut self, path: String, now_ms: u64, dragging: bool, locked: bool) -> Option<String> {
+    fn hover_folder(
+        &mut self,
+        path: String,
+        now_ms: u64,
+        dragging: bool,
+        locked: bool,
+    ) -> Option<String> {
         if locked || !dragging || path.is_empty() {
             return None;
         }
@@ -308,7 +370,11 @@ impl SidebarState {
             return;
         }
         self.folder_menu = None;
-        self.folder_dialog = FolderDialog { open: true, parent, ..FolderDialog::default() };
+        self.folder_dialog = FolderDialog {
+            open: true,
+            parent,
+            ..FolderDialog::default()
+        };
     }
 
     fn open_folder_rename(&mut self, path: String, label: String, locked: bool) {
@@ -335,9 +401,11 @@ impl SidebarState {
         self.folder_dialog = FolderDialog::default();
     }
 
-    /// 名称为空或文件服务忙时不提交。提交后对话框保持打开，等结果。
+    /// 名称为空或文件服务忙时不提交。忙时记一条日志：输入框还能打字，回车会再走到这里。
+    /// 提交后对话框保持打开，等结果。
     fn submit_folder_dialog(&mut self, repo_id: Option<&str>, mutating: bool) -> bool {
         if mutating || self.folder_dialog.submitting {
+            eprintln!("Nana 文件变更进行中，不重复提交文件夹");
             return false;
         }
         let Some(repo_id) = repo_id.filter(|id| !id.is_empty()) else {
@@ -349,9 +417,11 @@ impl SidebarState {
             return false;
         }
         if self.folder_dialog.rename {
-            self.pending_folder_rename = Some((repo_id.to_string(), self.folder_dialog.target.clone(), name));
+            self.pending_folder_rename =
+                Some((repo_id.to_string(), self.folder_dialog.target.clone(), name));
         } else {
-            self.pending_folder_create = Some((repo_id.to_string(), self.folder_dialog.parent.clone(), name));
+            self.pending_folder_create =
+                Some((repo_id.to_string(), self.folder_dialog.parent.clone(), name));
         }
         self.folder_dialog.error.clear();
         self.folder_dialog.submitting = true;
@@ -378,7 +448,12 @@ impl SidebarState {
         self.folder_delete_error.clear();
     }
 
-    fn confirm_folder_delete(&mut self, repo_id: Option<&str>, mode: FolderDeleteMode, mutating: bool) -> bool {
+    fn confirm_folder_delete(
+        &mut self,
+        repo_id: Option<&str>,
+        mode: FolderDeleteMode,
+        mutating: bool,
+    ) -> bool {
         if mutating || self.folder_delete_submitting {
             return false;
         }
@@ -388,7 +463,8 @@ impl SidebarState {
         if self.folder_delete_path.is_empty() {
             return false;
         }
-        self.pending_folder_delete = Some((repo_id.to_string(), self.folder_delete_path.clone(), mode));
+        self.pending_folder_delete =
+            Some((repo_id.to_string(), self.folder_delete_path.clone(), mode));
         self.folder_delete_error.clear();
         self.folder_delete_submitting = true;
         true
@@ -402,7 +478,8 @@ impl SidebarState {
         if self.folder_dialog.submitting {
             self.folder_dialog.submitting = false;
             if error.is_empty() {
-                let parent = (!self.folder_dialog.rename).then(|| self.folder_dialog.parent.clone());
+                let parent =
+                    (!self.folder_dialog.rename).then(|| self.folder_dialog.parent.clone());
                 self.folder_dialog = FolderDialog::default();
                 if let Some(parent) = parent.filter(|parent| !parent.is_empty()) {
                     if !self.expanded_folders.iter().any(|path| path == &parent) {
@@ -474,7 +551,10 @@ impl SidebarState {
             return;
         };
         self.pending_play = Some(id.clone());
-        self.effects.push(SidebarEffect::LoadPlaylistDetail { repo_id, playlist_id: id });
+        self.effects.push(SidebarEffect::LoadPlaylistDetail {
+            repo_id,
+            playlist_id: id,
+        });
     }
 
     pub fn take_pending_play(&mut self, playlist_id: &str) -> bool {
@@ -493,7 +573,10 @@ impl SidebarState {
         if locked || id.is_empty() {
             return;
         }
-        self.effects.push(SidebarEffect::DeletePlaylist { repo_id: repo_id.to_string(), playlist_id: id });
+        self.effects.push(SidebarEffect::DeletePlaylist {
+            repo_id: repo_id.to_string(),
+            playlist_id: id,
+        });
     }
 }
 
@@ -513,13 +596,25 @@ fn find_smart<'a>(folders: &'a [SidebarSmartFolder], id: &str) -> Option<&'a Sid
 impl SidebarState {
     pub fn take_folder_mutation(&mut self) -> Option<FolderMutation> {
         if let Some((repo_id, parent, name)) = self.pending_folder_create.take() {
-            return Some(FolderMutation::Create { repo_id, parent, name });
+            return Some(FolderMutation::Create {
+                repo_id,
+                parent,
+                name,
+            });
         }
         if let Some((repo_id, path, name)) = self.pending_folder_rename.take() {
-            return Some(FolderMutation::Rename { repo_id, path, name });
+            return Some(FolderMutation::Rename {
+                repo_id,
+                path,
+                name,
+            });
         }
         if let Some((repo_id, path, mode)) = self.pending_folder_delete.take() {
-            return Some(FolderMutation::Delete { repo_id, path, mode });
+            return Some(FolderMutation::Delete {
+                repo_id,
+                path,
+                mode,
+            });
         }
         None
     }
@@ -527,9 +622,21 @@ impl SidebarState {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FolderMutation {
-    Create { repo_id: String, parent: String, name: String },
-    Rename { repo_id: String, path: String, name: String },
-    Delete { repo_id: String, path: String, mode: FolderDeleteMode },
+    Create {
+        repo_id: String,
+        parent: String,
+        name: String,
+    },
+    Rename {
+        repo_id: String,
+        path: String,
+        name: String,
+    },
+    Delete {
+        repo_id: String,
+        path: String,
+        mode: FolderDeleteMode,
+    },
 }
 
 #[cfg(test)]

@@ -15,18 +15,20 @@
 //! 记下的「打开前的焦点」是旧对话框还回去的那一个。弹层和菜单没有退场，换下就卸。每种浮层的
 //! 入口函数在 [`overlay_branch`] 里登记。
 
-use nana_ui::runtime::view::{widget, AnyView, IntoView, NodeRef};
-use nana_ui::runtime::{AppContext, FrameworkError, MountedView, RuntimeDocument, Stack, StableNodeId};
+use nana_ui::runtime::view::{AnyView, IntoView, NodeRef, widget};
+use nana_ui::runtime::{
+    AppContext, FrameworkError, MountedView, RuntimeDocument, StableNodeId, Stack,
+};
 
+use super::ShellViewModel;
 use super::remount_state;
 use super::sidebar::PopoverMode;
-use super::view_part::{first_root, mount_detached, BodyMode, PartCx, PartId, ShellPart, Swap};
-use super::ShellViewModel;
+use super::view_part::{BodyMode, PartCx, PartId, ShellPart, Swap, first_root, mount_detached};
 
-#[path = "overlay_session.rs"]
-pub(crate) mod session;
 #[path = "overlay_dialog.rs"]
 pub(crate) mod dialog;
+#[path = "overlay_session.rs"]
+pub(crate) mod session;
 
 use session::OverlaySession;
 
@@ -118,7 +120,10 @@ impl OverlayKey {
     /// 模态的对话框（NanaUI `Dialog` / `ConfirmDialog`）：打开时框架把焦点拿进去、关上时还到打开前的
     /// 位置。弹层和右键菜单不是。
     pub(crate) fn modal(self) -> bool {
-        !matches!(self, Self::RepositoryPopover | Self::FolderMenu | Self::TaskPopover | Self::EntryMenu)
+        !matches!(
+            self,
+            Self::RepositoryPopover | Self::FolderMenu | Self::TaskPopover | Self::EntryMenu
+        )
     }
 }
 
@@ -136,18 +141,31 @@ impl OverlayIdentity {
         let key = OverlayKey::of(model)?;
         let structure = match key {
             // 硬链接确认在队列空了的那一刻没有内容，有了下一条时要重新建。
-            OverlayKey::FileDialog => format!("{:?}:{}", model.files.dialog, model.files.current_hardlink().is_some()),
+            OverlayKey::FileDialog => format!(
+                "{:?}:{}",
+                model.files.dialog,
+                model.files.current_hardlink().is_some()
+            ),
             OverlayKey::RepositoryPopover => format!("{:?}", model.sidebar.popover),
-            OverlayKey::FolderMenu => {
-                model.sidebar.folder_menu.as_ref().map(|menu| format!("{}@{},{}", menu.path, menu.x, menu.y)).unwrap_or_default()
-            }
+            OverlayKey::FolderMenu => model
+                .sidebar
+                .folder_menu
+                .as_ref()
+                .map(|menu| format!("{}@{},{}", menu.path, menu.x, menu.y))
+                .unwrap_or_default(),
             OverlayKey::EntryMenu => entry_menu_structure(model),
             // 候选在打开时定下；换了一批候选（关上又开了另一次）就换块。
             OverlayKey::DownloadTarget => model
                 .admin
                 .download_target
                 .as_ref()
-                .map(|pick| pick.candidates.iter().map(|candidate| candidate.repo_id.as_str()).collect::<Vec<_>>().join("|"))
+                .map(|pick| {
+                    pick.candidates
+                        .iter()
+                        .map(|candidate| candidate.repo_id.as_str())
+                        .collect::<Vec<_>>()
+                        .join("|")
+                })
                 .unwrap_or_default(),
             _ => String::new(),
         };
@@ -161,7 +179,11 @@ fn entry_menu_structure(model: &ShellViewModel) -> String {
         return String::new();
     };
     let ctx = super::files::FileContext::from_model(model);
-    let present = model.files.visible_rows(&ctx).iter().any(|row| row.path == menu.path);
+    let present = model
+        .files
+        .visible_rows(&ctx)
+        .iter()
+        .any(|row| row.path == menu.path);
     format!("{}@{},{}:{present}", menu.path, menu.x, menu.y)
 }
 
@@ -181,9 +203,8 @@ pub(crate) fn overlay_branch(key: OverlayKey, model: &ShellViewModel) -> Option<
         OverlayKey::SmartFolderDialog => super::sidebar_view::smart_folder_dialog(model),
         OverlayKey::RepositoryPopover => super::sidebar_view::repository_popover(model),
         OverlayKey::FolderMenu => super::sidebar_view::folder_menu(model),
-        OverlayKey::TaskPopover => {
-            super::admin::task_popover(model).map(|popover| super::motion::paint_panel(popover, &model.motion))
-        }
+        OverlayKey::TaskPopover => super::admin::task_popover(model)
+            .map(|popover| super::motion::paint_panel(popover, &model.motion)),
         OverlayKey::EntryMenu => super::files_view::entry_menu(model),
         OverlayKey::ExportDialog => super::workspace_dialogs::export_dialog(model),
         OverlayKey::FileDialog => super::workspace_dialogs::file_dialog(model),
@@ -194,7 +215,10 @@ pub(crate) fn overlay_branch(key: OverlayKey, model: &ShellViewModel) -> Option<
 /// 布局补丁，有没隐藏的子节点时让它挡住下面的点击；补丁只在 AppShell 投影时写，所以它上面
 /// 不放绑定。各块自己铺满它（对话框绝对定位铺满，弹层是撑满的一列）。
 pub(crate) fn layer(node: NodeRef) -> AnyView {
-    widget(Stack::column(0.0)).node_ref(node).key("shell-overlay").into_any()
+    widget(Stack::column(0.0))
+        .node_ref(node)
+        .key("shell-overlay")
+        .into_any()
 }
 
 /// 浮层层里的一块：挂出来的内容和它登记的会话。
@@ -206,7 +230,9 @@ struct Block {
 impl Block {
     /// 要换下：告诉每个会话，有会话要放退场时返回真。每个会话都要通知到。
     fn hide(&mut self) -> bool {
-        self.sessions.iter_mut().fold(false, |waits, session| session.hide() || waits)
+        self.sessions
+            .iter_mut()
+            .fold(false, |waits, session| session.hide() || waits)
     }
 
     fn settled(&self, context: &AppContext) -> bool {
@@ -274,7 +300,12 @@ impl OverlayPart {
             eprintln!("Nana 浮层层还没有挂上，浮层块放不进去");
             return Err(FrameworkError::InvalidInput);
         };
-        let children = self.leaving.iter().chain(&self.current).flat_map(|block| block.view.roots().iter().copied()).collect::<Vec<_>>();
+        let children = self
+            .leaving
+            .iter()
+            .chain(&self.current)
+            .flat_map(|block| block.view.roots().iter().copied())
+            .collect::<Vec<_>>();
         context.reconcile_children(layer, &children).map(|_| ())
     }
 }
@@ -289,7 +320,12 @@ impl ShellPart for OverlayPart {
     }
 
     fn new(layer: Self::Signals) -> Self {
-        Self { layer, identity: None, current: None, leaving: Vec::new() }
+        Self {
+            layer,
+            identity: None,
+            current: None,
+            leaving: Vec::new(),
+        }
     }
 
     fn root(&self) -> Option<StableNodeId> {
@@ -297,7 +333,12 @@ impl ShellPart for OverlayPart {
     }
 
     /// 浮层不跟工作台排法走。
-    fn mount(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel, _: BodyMode) -> Result<Swap, FrameworkError> {
+    fn mount(
+        &mut self,
+        cx: &mut PartCx<'_>,
+        model: &ShellViewModel,
+        _: BodyMode,
+    ) -> Result<Swap, FrameworkError> {
         self.remount(cx, model)
     }
 
@@ -317,11 +358,17 @@ impl ShellPart for OverlayPart {
 
     /// 换块：先挂好新的一块；旧的一块声明关上，要放退场的留在浮层层里，别的随这次换块卸掉；
     /// 新块放进浮层层以后再声明打开。旧块的焦点和滚动按键路径在新块里找回。
-    fn remount(&mut self, cx: &mut PartCx<'_>, model: &ShellViewModel) -> Result<Swap, FrameworkError> {
+    fn remount(
+        &mut self,
+        cx: &mut PartCx<'_>,
+        model: &ShellViewModel,
+    ) -> Result<Swap, FrameworkError> {
         let identity = OverlayIdentity::of(model);
         self.drop_settled(cx.document.context_mut());
         let document_id = cx.document.document();
-        let kept = self.current.as_ref().map(|block| remount_state::capture(cx.document.context(), document_id, block.view.roots()));
+        let kept = self.current.as_ref().map(|block| {
+            remount_state::capture(cx.document.context(), document_id, block.view.roots())
+        });
         let mut sessions = Vec::new();
         let fresh = match &identity {
             Some(identity) => mount_detached(cx.document, cx.hot, Self::ID, || {
@@ -351,7 +398,11 @@ impl ShellPart for OverlayPart {
             }
         }
         placed?;
-        Ok(Swap::replace(retired, kept, self.current.as_ref().map(|block| &block.view)))
+        Ok(Swap::replace(
+            retired,
+            kept,
+            self.current.as_ref().map(|block| &block.view),
+        ))
     }
 
     /// 浮层换块要等组合结束的情形比别的块多一种：焦点在浮层里时换块会换掉输入框；焦点在别处
@@ -360,7 +411,9 @@ impl ShellPart for OverlayPart {
     /// 只写信号，不受影响。
     fn composing(&self, document: &RuntimeDocument) -> bool {
         let world = document.context().world();
-        world.focused(document.document()).is_some_and(|focused| world.ime(focused).is_some_and(|ime| !ime.text.is_empty()))
+        world
+            .focused(document.document())
+            .is_some_and(|focused| world.ime(focused).is_some_and(|ime| !ime.text.is_empty()))
     }
 }
 

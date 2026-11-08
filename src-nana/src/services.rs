@@ -6,6 +6,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+use std::time::Duration;
 
 use crate::backend::RepositoryRuntime;
 use crate::backend::services::mutsuki_runner::MomoTaskRuntime;
@@ -29,18 +31,24 @@ pub struct NativeServices {
     pub tasks: MutsukiTaskViewModel,
     pub settings: SettingsStore,
     host_events: Mutex<Option<mpsc::Receiver<crate::backend::services::host_events::HostEvent>>>,
-    /// 任务观察线程的停止标记，服务销毁时置真。
+    /// 宿主事件线程的停止标记和句柄，服务销毁时在运行时关闭前回收。
+    host_events_stop: Arc<AtomicBool>,
+    host_events_handle: Mutex<Option<JoinHandle<()>>>,
+    /// 任务观察线程的停止标记和句柄，服务销毁时置真并等待退出。
     task_watch_stop: Arc<AtomicBool>,
+    task_watch_handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl NativeServices {
     /// 启动一次领域 Runtime，并将所有页面 ViewModel 绑定到同一实例。服务目录按布局取（`app_paths.rs`）；
     /// 日志器起来以后接上随附插件和插件宿主（`plugin_host.rs`）。
     pub fn start() -> Result<Self, String> {
-        let executor = Arc::new(tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .map_err(|error| format!("领域异步执行器启动失败：{error}"))?);
+        let executor = Arc::new(
+            tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| format!("领域异步执行器启动失败：{error}"))?,
+        );
         let locations = crate::app_paths::current();
         let runtime = RepositoryRuntime::start_at(locations.service_root.clone())?;
         let (sink, receiver) = crate::backend::services::host_events::host_event_channel();
@@ -56,7 +64,26 @@ impl NativeServices {
             Err(error) => eprintln!("Nana 应用日志器启动失败：{error}"),
         }
         let task_runtime = Arc::new(MomoTaskRuntime::new(runtime.clone()));
-        crate::plugin_host::start(locations, &runtime, &task_runtime);
+        let plugin_report = crate::plugin_host::start(locations, &runtime, &task_runtime);
+        if plugin_report.degraded() {
+            eprintln!(
+                "Nana 插件能力处于降级状态：随附插件={}、外部程序={}、插件宿主={}；可在插件管理页重试。",
+                plugin_report.bundled_plugins,
+                plugin_report.external_tools,
+                plugin_report.plugin_host
+            );
+            momobako_backend::app_log!(
+                "warn",
+                "plugin.startup",
+                "degraded",
+                "插件能力处于降级状态，可在插件管理页重试。",
+                serde_json::json!({
+                    "bundledPlugins": plugin_report.bundled_plugins,
+                    "externalTools": plugin_report.external_tools,
+                    "pluginHost": plugin_report.plugin_host,
+                })
+            );
+        }
         Ok(Self {
             executor,
             repository_query: RepositoryQueryViewModel::new(runtime.clone()),
@@ -69,7 +96,10 @@ impl NativeServices {
             settings: SettingsStore::new(settings::default_path()),
             runtime,
             host_events: Mutex::new(Some(receiver)),
+            host_events_stop: Arc::new(AtomicBool::new(false)),
+            host_events_handle: Mutex::new(None),
             task_watch_stop: Arc::new(AtomicBool::new(false)),
+            task_watch_handle: Mutex::new(None),
         })
     }
 
@@ -81,13 +111,29 @@ impl NativeServices {
         let Some(receiver) = self.take_host_events() else {
             return;
         };
-        if let Err(error) = std::thread::Builder::new().name("nana-host-events".into()).spawn(move || {
-            while let Ok(event) = receiver.recv() {
-                dispatch(event);
-            }
-            eprintln!("Nana 宿主事件通道已关闭");
-        }) {
-            eprintln!("Nana 宿主事件线程启动失败：{error}");
+        let stop = Arc::clone(&self.host_events_stop);
+        let started = std::thread::Builder::new()
+            .name("nana-host-events".into())
+            .spawn(move || {
+                while !stop.load(Ordering::Acquire) {
+                    match receiver.recv_timeout(Duration::from_millis(100)) {
+                        Ok(event) => dispatch(event),
+                        Err(mpsc::RecvTimeoutError::Timeout) => continue,
+                        Err(mpsc::RecvTimeoutError::Disconnected) => {
+                            eprintln!("Nana 宿主事件通道已关闭");
+                            break;
+                        }
+                    }
+                }
+            });
+        match started {
+            Ok(handle) => match self.host_events_handle.lock() {
+                Ok(mut slot) => *slot = Some(handle),
+                Err(error) => {
+                    eprintln!("Nana 宿主事件线程句柄锁失效，线程将在停止信号后退出：{error}");
+                }
+            },
+            Err(error) => eprintln!("Nana 宿主事件线程启动失败：{error}"),
         }
     }
 
@@ -96,11 +142,42 @@ impl NativeServices {
     where
         F: Fn(Vec<crate::backend::services::repository::TaskProgressSnapshot>) + Send + 'static,
     {
-        crate::task_watch::spawn(self.tasks.clone(), Arc::clone(&self.task_watch_stop), dispatch);
+        let stop = Arc::clone(&self.task_watch_stop);
+        let tasks = self.tasks.clone();
+        let started = std::thread::Builder::new()
+            .name("nana-task-watch".into())
+            .spawn(move || {
+                let mut watch = crate::task_watch::TaskWatch::default();
+                while !stop.load(Ordering::Acquire) {
+                    if let Some(active) =
+                        watch.poll(&tasks.active_task_ids(), || tasks.progress_snapshots())
+                    {
+                        dispatch(active);
+                    }
+                    // 可中断的短睡眠让服务销毁时无需等完整轮询周期。
+                    for _ in 0..25 {
+                        if stop.load(Ordering::Acquire) {
+                            return;
+                        }
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                }
+            });
+        match started {
+            Ok(handle) => match self.task_watch_handle.lock() {
+                Ok(mut slot) => *slot = Some(handle),
+                Err(error) => {
+                    eprintln!("Nana 任务观察线程句柄锁失效，线程将在停止信号后退出：{error}");
+                }
+            },
+            Err(error) => eprintln!("Nana 任务观察线程启动失败，任务弹层不会更新：{error}"),
+        }
     }
 
     /// 取出宿主事件接收端。通道只交给一个消费线程。
-    pub fn take_host_events(&self) -> Option<mpsc::Receiver<crate::backend::services::host_events::HostEvent>> {
+    pub fn take_host_events(
+        &self,
+    ) -> Option<mpsc::Receiver<crate::backend::services::host_events::HostEvent>> {
         match self.host_events.lock() {
             Ok(mut receiver) => receiver.take(),
             Err(error) => {
@@ -114,7 +191,10 @@ impl NativeServices {
         self.settings.load_or_recover()
     }
 
-    pub fn save_settings(&self, settings: &ApplicationSettings) -> Result<ApplicationSettings, String> {
+    pub fn save_settings(
+        &self,
+        settings: &ApplicationSettings,
+    ) -> Result<ApplicationSettings, String> {
         settings.validate()?;
         self.settings.save(settings)?;
         Ok(settings.clone())
@@ -123,7 +203,23 @@ impl NativeServices {
 
 impl Drop for NativeServices {
     fn drop(&mut self) {
+        self.host_events_stop.store(true, Ordering::Release);
         self.task_watch_stop.store(true, Ordering::Release);
+        // 先收回观察线程，再销毁 RepositoryRuntime，避免线程在服务依赖被拆掉后继续读快照。
+        if let Ok(mut slot) = self.task_watch_handle.lock() {
+            if let Some(handle) = slot.take() {
+                if handle.join().is_err() {
+                    eprintln!("Nana 任务观察线程异常退出");
+                }
+            }
+        }
+        if let Ok(mut slot) = self.host_events_handle.lock() {
+            if let Some(handle) = slot.take() {
+                if handle.join().is_err() {
+                    eprintln!("Nana 宿主事件线程异常退出");
+                }
+            }
+        }
         self.runtime.shutdown_helpers();
     }
 }

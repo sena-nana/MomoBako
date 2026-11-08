@@ -8,14 +8,14 @@
 use std::fs;
 use std::path::PathBuf;
 
+use momobako_nana::acceptance_document_at_width;
+use momobako_nana::appearance::{self, Appearance};
 use momobako_nana::backend::services::repository::{
     FileBrowserEntry, FileBrowserSnapshot, RepositoryStructureCacheState, TaskProgressSnapshot,
 };
-use momobako_nana::appearance::{self, Appearance};
 use momobako_nana::shell::{
-    commit_interaction, mount_shell, ShellMessage, ShellPage, ShellViewModel, WorkspaceRepository,
+    ShellMessage, ShellPage, ShellViewModel, WorkspaceRepository, commit_interaction, mount_shell,
 };
-use momobako_nana::acceptance_document_at_width;
 use nana_ui::runtime::{ComponentGeometry, Entity, StableNodeId, TextInput};
 use nana_ui::theme::{SemanticPalette, ThemeAppearance};
 use nana_ui_devtools::agent::{
@@ -82,12 +82,25 @@ fn hovered_settings_page_paints_the_overlay_thumb() {
     let document = acceptance_document_at_width(model.clone(), 960.0).expect("production document");
     let mut session = RuntimeAgentSession::new(document, 960, 600).expect("agent session");
     session.set_theme(ThemeName::Dark).expect("theme");
-    let installed = appearance::install(session.document_mut(), Appearance::for_mode(&model, ThemeAppearance::Dark));
+    let installed = appearance::install(
+        session.document_mut(),
+        Appearance::for_mode(&model, ThemeAppearance::Dark),
+    );
     assert!(installed.is_some(), "外观装不上");
     session.flush().expect("layout");
     let scroll = keyed(&session, "settings-scroll");
-    let bounds = session.document().context().world().layout_box(scroll).expect("滚动区的布局盒");
-    session.hover_xy(bounds.x + bounds.width / 2.0, bounds.y + bounds.height / 2.0).expect("悬停");
+    let bounds = session
+        .document()
+        .context()
+        .world()
+        .layout_box(scroll)
+        .expect("滚动区的布局盒");
+    session
+        .hover_xy(
+            bounds.x + bounds.width / 2.0,
+            bounds.y + bounds.height / 2.0,
+        )
+        .expect("悬停");
     // 淡入放完：越过下一个动效截止时间 2 秒。指针还在里面，不会开始淡出。
     for _ in 0..2 {
         let context = session.document_mut().context_mut();
@@ -97,20 +110,34 @@ fn hovered_settings_page_paints_the_overlay_thumb() {
         context.advance_animations(deadline + std::time::Duration::from_secs(2));
     }
     session.flush().expect("淡入后的布局");
-    let Some(ComponentGeometry::Scrollbar { vertical: Some(bar), .. }) =
-        session.document().context().world().component_geometry(scroll)
+    let Some(ComponentGeometry::Scrollbar {
+        vertical: Some(bar),
+        ..
+    }) = session
+        .document()
+        .context()
+        .world()
+        .component_geometry(scroll)
     else {
         panic!("指针在设置页上时竖向滚动条要显示");
     };
-    session.screenshot_png(visual_dir().join("settings-scrollbar-dark-960.png")).expect("截图");
+    session
+        .screenshot_png(visual_dir().join("settings-scrollbar-dark-960.png"))
+        .expect("截图");
     let (size, pixels) = session.screenshot_rgba().expect("pixels");
-    let (x, y) = ((bar.thumb.x + bar.thumb.width / 2.0) as u32, (bar.thumb.y + bar.thumb.height / 2.0) as u32);
+    let (x, y) = (
+        (bar.thumb.x + bar.thumb.width / 2.0) as u32,
+        (bar.thumb.y + bar.thumb.height / 2.0) as u32,
+    );
     let at = ((y * size.width + x) * 4) as usize;
     let thumb = SemanticPalette::dark().border_strong;
     let expected = [thumb.r, thumb.g, thumb.b].map(|channel| (channel * 255.0).round() as i32);
     let painted = [pixels[at], pixels[at + 1], pixels[at + 2]].map(i32::from);
     assert!(
-        painted.iter().zip(expected).all(|(painted, expected)| (painted - expected).abs() <= 2),
+        painted
+            .iter()
+            .zip(expected)
+            .all(|(painted, expected)| (painted - expected).abs() <= 2),
         "滑块中心 ({x}, {y}) 应该是 --border-strong {expected:?}，实际 {painted:?}"
     );
     assert_eq!(bar.thumb.width, 4.0);
@@ -124,7 +151,11 @@ fn keyed(session: &RuntimeAgentSession, key: &str) -> StableNodeId {
         .world()
         .document_order(document.document())
         .into_iter()
-        .find(|id| context.assembly_path(*id).is_some_and(|path| path.rsplit('/').next() == Some(key)))
+        .find(|id| {
+            context
+                .assembly_path(*id)
+                .is_some_and(|path| path.rsplit('/').next() == Some(key))
+        })
         .unwrap_or_else(|| panic!("没有键为 {key} 的节点"))
 }
 
@@ -138,7 +169,11 @@ fn typing_survives_a_remount_between_keys() {
     let _ = pump(&mut session, &mut model);
     session.type_text("b").expect("输入 b");
     let _ = pump(&mut session, &mut model);
-    assert_eq!(input_value(&session, "全局搜索"), "ab", "重挂后第二个字没有进搜索框");
+    assert_eq!(
+        input_value(&session, "全局搜索"),
+        "ab",
+        "重挂后第二个字没有进搜索框"
+    );
 
     // 对话框里的输入框在浮层里，键路径要经过壳层的浮层槽位。
     click_label(&mut session, "新建智能文件夹");
@@ -148,7 +183,11 @@ fn typing_survives_a_remount_between_keys() {
     let _ = pump(&mut session, &mut model);
     session.type_text("评").expect("输入 评");
     let _ = pump(&mut session, &mut model);
-    assert_eq!(input_value(&session, "名称"), "高评", "重挂后对话框输入框失焦");
+    assert_eq!(
+        input_value(&session, "名称"),
+        "高评",
+        "重挂后对话框输入框失焦"
+    );
 }
 
 /// 光标在文字中间时重挂，光标要留在原处，后面的字接着插在中间。
@@ -159,12 +198,18 @@ fn remount_restores_the_caret_inside_the_text() {
     click_input(&mut session, "全局搜索");
     session.type_text("ab").expect("输入 ab");
     let _ = pump(&mut session, &mut model);
-    session.key_press("ArrowLeft", "ArrowLeft", InputModifiers::default()).expect("光标左移");
+    session
+        .key_press("ArrowLeft", "ArrowLeft", InputModifiers::default())
+        .expect("光标左移");
     session.type_text("x").expect("输入 x");
     let _ = pump(&mut session, &mut model);
     session.type_text("y").expect("输入 y");
     let _ = pump(&mut session, &mut model);
-    assert_eq!(input_value(&session, "全局搜索"), "axyb", "重挂后光标跳到了末尾");
+    assert_eq!(
+        input_value(&session, "全局搜索"),
+        "axyb",
+        "重挂后光标跳到了末尾"
+    );
 }
 
 fn input_value(session: &RuntimeAgentSession, label: &str) -> String {
@@ -183,17 +228,25 @@ fn assert_startup() {
     let nodes = session.accessibility_dump();
     assert_title_bar(&nodes);
     assert!(
-        nodes.iter().all(|node| node.label.as_deref() != Some("快捷方式")),
+        nodes
+            .iter()
+            .all(|node| node.label.as_deref() != Some("快捷方式")),
         "启动时侧栏应该隐藏"
     );
-    for step in ["准备资源库", "同步文件变化", "读取资源索引", "加载首屏内容"] {
+    for step in ["准备资源库", "同步文件变化", "读取资源索引", "加载首屏内容"]
+    {
         assert!(
-            nodes.iter().any(|node| node.label.as_deref().is_some_and(|label| label.contains(step))),
+            nodes.iter().any(|node| node
+                .label
+                .as_deref()
+                .is_some_and(|label| label.contains(step))),
             "缺少启动步骤 {step}"
         );
     }
     assert!(
-        nodes.iter().any(|node| node.label.as_deref() == Some("第 0 / 4 步")),
+        nodes
+            .iter()
+            .any(|node| node.label.as_deref() == Some("第 0 / 4 步")),
         "缺少四步进度"
     );
     paint(&mut session);
@@ -202,13 +255,17 @@ fn assert_startup() {
 fn assert_missing() {
     let mut model = ShellViewModel::default();
     model.workspace.startup.finish();
-    model.workspace.apply_repository_list(None, Ok(vec![repository("missing")]));
+    model
+        .workspace
+        .apply_repository_list(None, Ok(vec![repository("missing")]));
     let mut session = open_session(model, 1200, 800, ThemeName::Light);
     let nodes = session.accessibility_dump();
     assert_title_bar(&nodes);
     for label in ["重定向", "刷新", "删除资源库"] {
         assert!(
-            nodes.iter().any(|node| node.label.as_deref() == Some(label)),
+            nodes
+                .iter()
+                .any(|node| node.label.as_deref() == Some(label)),
             "缺失仓库缺少 {label}"
         );
     }
@@ -223,21 +280,36 @@ fn assert_clicks() {
     click_label(&mut session, "折叠侧边栏");
     let _ = pump(&mut session, &mut model);
     assert!(
-        session.accessibility_dump().iter().any(|node| node.label.as_deref() == Some("展开侧边栏")),
+        session
+            .accessibility_dump()
+            .iter()
+            .any(|node| node.label.as_deref() == Some("展开侧边栏")),
         "侧栏开关没有切换"
     );
 
     click_label(&mut session, "最小化");
     let commands = pump(&mut session, &mut model);
     assert!(
-        commands.iter().any(|command| matches!(command, WindowCommand::SetMinimized { minimized: true, .. })),
+        commands.iter().any(|command| matches!(
+            command,
+            WindowCommand::SetMinimized {
+                minimized: true,
+                ..
+            }
+        )),
         "最小化没有排队宿主命令：{commands:?}"
     );
 
     click_label(&mut session, "最大化");
     let commands = pump(&mut session, &mut model);
     assert!(
-        commands.iter().any(|command| matches!(command, WindowCommand::SetMaximized { maximized: true, .. })),
+        commands.iter().any(|command| matches!(
+            command,
+            WindowCommand::SetMaximized {
+                maximized: true,
+                ..
+            }
+        )),
         "最大化没有排队宿主命令：{commands:?}"
     );
 
@@ -245,11 +317,16 @@ fn assert_clicks() {
     click_label(&mut session, "关闭");
     let commands = pump(&mut session, &mut model);
     assert!(
-        commands.iter().any(|command| matches!(command, WindowCommand::Close(_))),
+        commands
+            .iter()
+            .any(|command| matches!(command, WindowCommand::Close(_))),
         "关闭没有排队关窗命令：{commands:?}"
     );
     assert!(
-        session.accessibility_dump().iter().all(|node| node.label.as_deref() != Some("确认关闭 MomoBako？")),
+        session
+            .accessibility_dump()
+            .iter()
+            .all(|node| node.label.as_deref() != Some("确认关闭 MomoBako？")),
         "没有未保存的修改时不该弹关闭确认"
     );
 
@@ -268,7 +345,9 @@ fn assert_clicks() {
     let nodes = session.accessibility_dump();
     assert!(has_label(&nodes, "当前资源库筛选"), "打开筛选后没有筛选栏");
     assert!(
-        nodes.iter().any(|node| node.role == "button" && node.label.as_deref() == Some("关闭筛选栏")),
+        nodes
+            .iter()
+            .any(|node| node.role == "button" && node.label.as_deref() == Some("关闭筛选栏")),
         "筛选栏缺少关闭按钮"
     );
 
@@ -276,11 +355,18 @@ fn assert_clicks() {
     let _ = pump(&mut session, &mut model);
     let nodes = session.accessibility_dump();
     assert_eq!(
-        nodes.iter().filter(|node| node.label.as_deref() == Some("显示筛选栏")).count(),
+        nodes
+            .iter()
+            .filter(|node| node.label.as_deref() == Some("显示筛选栏"))
+            .count(),
         1,
         "筛选开关被重复挂载"
     );
-    assert!(nodes.iter().all(|node| node.label.as_deref() != Some("隐藏筛选栏")));
+    assert!(
+        nodes
+            .iter()
+            .all(|node| node.label.as_deref() != Some("隐藏筛选栏"))
+    );
     assert!(!has_label(&nodes, "当前资源库筛选"), "关闭筛选后筛选栏还在");
 }
 
@@ -299,11 +385,18 @@ fn assert_smart_folder_dialog() {
             .iter()
             .find(|node| node.role == "combo-box" && node.label.as_deref() == Some(label))
             .unwrap_or_else(|| panic!("下拉框 {label} 没有字段名"));
-        assert_eq!(combo.value.as_deref(), Some(value), "下拉框 {label} 的当前值");
+        assert_eq!(
+            combo.value.as_deref(),
+            Some(value),
+            "下拉框 {label} 的当前值"
+        );
     }
     assert_eq!(input_placeholder(&session, "名称"), "例如 高评分 PSD");
-    let dialog_shot = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/nana-live-visual/smart-folder-dialog.png");
-    session.screenshot_png(&dialog_shot).expect("智能文件夹对话框截图");
+    let dialog_shot = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("target/nana-live-visual/smart-folder-dialog.png");
+    session
+        .screenshot_png(&dialog_shot)
+        .expect("智能文件夹对话框截图");
 
     click_input(&mut session, "名称");
     session.type_text("高评分 PSD").expect("输入名称");
@@ -330,14 +423,18 @@ fn open_session(
     session.flush().expect("layout");
     let nodes = session.accessibility_dump();
     assert!(
-        nodes.iter().any(|node| node.bounds.width > 0.0 && node.bounds.height > 0.0),
+        nodes
+            .iter()
+            .any(|node| node.bounds.width > 0.0 && node.bounds.height > 0.0),
         "布局盒为空"
     );
     session
 }
 
 fn paint(session: &mut RuntimeAgentSession) {
-    let stats = session.screenshot_png(shot_path(ThemeName::Light, 32, 32)).expect("pixels");
+    let stats = session
+        .screenshot_png(shot_path(ThemeName::Light, 32, 32))
+        .expect("pixels");
     assert!(stats.width > 0 && stats.height > 0);
 }
 
@@ -368,13 +465,17 @@ fn assert_title_bar(nodes: &[AccessibilityDumpNode]) {
     // 窗口按钮的名称来自 Nana 的框架文案表，默认中文。
     for control in ["最小化", "最大化", "关闭"] {
         assert!(
-            nodes.iter().any(|node| node.label.as_deref() == Some(control) && node.role == "button"),
+            nodes
+                .iter()
+                .any(|node| node.label.as_deref() == Some(control) && node.role == "button"),
             "缺少窗口按钮 {control}"
         );
     }
     for banned in ["资源库工作区"] {
         assert!(
-            nodes.iter().all(|node| node.label.as_deref() != Some(banned)),
+            nodes
+                .iter()
+                .all(|node| node.label.as_deref() != Some(banned)),
             "标题栏仍是占位文案 {banned}"
         );
     }
@@ -452,7 +553,11 @@ fn contains(outer: &BoundsDump, inner: &BoundsDump) -> bool {
 }
 
 /// 宽窗里文件名必须真的露在列表里；最小窗只要求看得到的部分不压在播放条下。
-fn assert_file_layout(session: &RuntimeAgentSession, nodes: &[AccessibilityDumpNode], expect_visible_names: bool) {
+fn assert_file_layout(
+    session: &RuntimeAgentSession,
+    nodes: &[AccessibilityDumpNode],
+    expect_visible_names: bool,
+) {
     let task = required(nodes, "任务");
     assert_footer_inside_sidebar(nodes);
     let modes = vec![display_mode_select(nodes)];
@@ -460,15 +565,27 @@ fn assert_file_layout(session: &RuntimeAgentSession, nodes: &[AccessibilityDumpN
     let names = NAMES.map(|name| {
         nodes
             .iter()
-            .find(|node| matches!(node.role.as_str(), "button" | "list-item") && node.label.as_deref() == Some(name))
+            .find(|node| {
+                matches!(node.role.as_str(), "button" | "list-item")
+                    && node.label.as_deref() == Some(name)
+            })
             .unwrap_or_else(|| panic!("缺少文件名 {name}"))
     });
     let player = nodes
         .iter()
-        .filter(|node| node.label.as_deref().is_some_and(|label| PLAYER.contains(&label)))
+        .filter(|node| {
+            node.label
+                .as_deref()
+                .is_some_and(|label| PLAYER.contains(&label))
+        })
         .collect::<Vec<_>>();
     assert!(!player.is_empty(), "缺少播放条");
-    for node in modes.iter().chain(tools.iter()).chain(names.iter()).chain(player.iter()) {
+    for node in modes
+        .iter()
+        .chain(tools.iter())
+        .chain(names.iter())
+        .chain(player.iter())
+    {
         assert!(
             node.bounds.width > 0.0 && node.bounds.height > 0.0,
             "布局盒为空：{:?}",
@@ -478,14 +595,21 @@ fn assert_file_layout(session: &RuntimeAgentSession, nodes: &[AccessibilityDumpN
     assert_disjoint(&modes, "展示方式");
     assert_disjoint(&tools, "文件工具条");
     for mode in &modes {
-        assert!(!intersects(&mode.bounds, &task.bounds), "展示方式与任务读数相交");
+        assert!(
+            !intersects(&mode.bounds, &task.bounds),
+            "展示方式与任务读数相交"
+        );
         for tool in &tools {
-            assert!(!intersects(&mode.bounds, &tool.bounds), "展示方式与文件工具条相交");
+            assert!(
+                !intersects(&mode.bounds, &tool.bounds),
+                "展示方式与文件工具条相交"
+            );
         }
     }
     let mut visible_names = 0;
     for name in &names {
-        let probe = AgentSession::scene_probe(session, name.id).unwrap_or_else(|| panic!("读不到文件名布局盒 {:?}", name.label));
+        let probe = AgentSession::scene_probe(session, name.id)
+            .unwrap_or_else(|| panic!("读不到文件名布局盒 {:?}", name.label));
         // 滚动区外的卡片被裁掉，画面上看不到，不算和播放条重叠。
         let Some(shown) = visible_part(&name.bounds, &probe.clips) else {
             continue;
@@ -508,7 +632,10 @@ fn assert_file_layout(session: &RuntimeAgentSession, nodes: &[AccessibilityDumpN
             );
         }
     }
-    assert!(!expect_visible_names || visible_names == names.len(), "宽窗里只露出 {visible_names} 个文件名");
+    assert!(
+        !expect_visible_names || visible_names == names.len(),
+        "宽窗里只露出 {visible_names} 个文件名"
+    );
 }
 
 /// 展示方式和 Vue 一样是一个下拉，读出的是当前值。
@@ -516,7 +643,13 @@ fn display_mode_select(nodes: &[AccessibilityDumpNode]) -> &AccessibilityDumpNod
     assert!(has_label(nodes, "展示方式"), "缺少展示方式标签");
     nodes
         .iter()
-        .find(|node| node.role == "combo-box" && node.label.as_deref().is_some_and(|label| DISPLAY_MODES.contains(&label)))
+        .find(|node| {
+            node.role == "combo-box"
+                && node
+                    .label
+                    .as_deref()
+                    .is_some_and(|label| DISPLAY_MODES.contains(&label))
+        })
         .expect("缺少展示方式下拉")
 }
 
@@ -549,14 +682,24 @@ fn visible_part(bounds: &BoundsDump, clips: &[RectDump]) -> Option<BoundsDump> {
         right = right.min(clip.x + clip.width);
         bottom = bottom.min(clip.y + clip.height);
     }
-    (right - left > 0.5 && bottom - top > 0.5).then(|| BoundsDump { x: left, y: top, width: right - left, height: bottom - top })
+    (right - left > 0.5 && bottom - top > 0.5).then(|| BoundsDump {
+        x: left,
+        y: top,
+        width: right - left,
+        height: bottom - top,
+    })
 }
 
 fn is_player(hit: &HitDump) -> bool {
-    hit.label.as_deref().is_some_and(|label| PLAYER.contains(&label))
+    hit.label
+        .as_deref()
+        .is_some_and(|label| PLAYER.contains(&label))
 }
 
-fn buttons<'a>(nodes: &'a [AccessibilityDumpNode], labels: &[&str]) -> Vec<&'a AccessibilityDumpNode> {
+fn buttons<'a>(
+    nodes: &'a [AccessibilityDumpNode],
+    labels: &[&str],
+) -> Vec<&'a AccessibilityDumpNode> {
     labels
         .iter()
         .map(|label| {
@@ -576,7 +719,9 @@ fn required<'a>(nodes: &'a [AccessibilityDumpNode], label: &str) -> &'a Accessib
 }
 
 fn has_label(nodes: &[AccessibilityDumpNode], label: &str) -> bool {
-    nodes.iter().any(|node| node.label.as_deref() == Some(label))
+    nodes
+        .iter()
+        .any(|node| node.label.as_deref() == Some(label))
 }
 
 fn assert_disjoint(nodes: &[&AccessibilityDumpNode], kind: &str) {
@@ -607,7 +752,10 @@ fn live_files() -> ShellViewModel {
     let mut model = ShellViewModel::default();
     model.workspace.present_repository(repository("ready"));
     model.reduce(ShellMessage::FileBrowserLoaded(Ok(snapshot())));
-    model.reduce(ShellMessage::TaskProgressLoaded(vec![running_task("task-1"), running_task("task-2")]));
+    model.reduce(ShellMessage::TaskProgressLoaded(vec![
+        running_task("task-1"),
+        running_task("task-2"),
+    ]));
     model
 }
 
@@ -649,7 +797,12 @@ fn snapshot() -> FileBrowserSnapshot {
         .map(|name| FileBrowserEntry {
             path: name.into(),
             name: name.into(),
-            kind: if name == "cover.png" { "file" } else { "directory" }.into(),
+            kind: if name == "cover.png" {
+                "file"
+            } else {
+                "directory"
+            }
+            .into(),
             extension: None,
             size_bytes: None,
             size_label: None,
@@ -708,7 +861,10 @@ fn click_input(session: &mut RuntimeAgentSession, label: &str) {
         .into_iter()
         .find(|node| node.role == "text-input" && node.label.as_deref() == Some(label))
         .unwrap_or_else(|| panic!("点不到输入 {label}"));
-    assert!(session.click_node(node.id).expect("click"), "点击没有命中输入 {label}");
+    assert!(
+        session.click_node(node.id).expect("click"),
+        "点击没有命中输入 {label}"
+    );
 }
 
 fn click_label(session: &mut RuntimeAgentSession, label: &str) {
@@ -717,7 +873,10 @@ fn click_label(session: &mut RuntimeAgentSession, label: &str) {
         .into_iter()
         .find(|node| node.label.as_deref() == Some(label))
         .unwrap_or_else(|| panic!("点不到 {label}"));
-    assert!(session.click_node(node.id).expect("click"), "点击没有命中 {label}");
+    assert!(
+        session.click_node(node.id).expect("click"),
+        "点击没有命中 {label}"
+    );
 }
 
 fn search_placeholder(session: &RuntimeAgentSession) -> String {
@@ -734,6 +893,8 @@ fn input_placeholder(session: &RuntimeAgentSession, label: &str) -> String {
     session
         .document()
         .context()
-        .read(Entity::<TextInput>::from_stable_id(id), |input| input.placeholder.to_string())
+        .read(Entity::<TextInput>::from_stable_id(id), |input| {
+            input.placeholder.to_string()
+        })
         .unwrap_or_else(|_| panic!("读不到输入 {label}"))
 }

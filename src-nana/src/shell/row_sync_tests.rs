@@ -4,9 +4,9 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use nana_ui::runtime::view::{computed, store, StoreList, StorePath};
+use nana_ui::runtime::view::{StoreList, StorePath, computed, store};
 
-use super::{plan_rows, sync_rows, RowPlan};
+use super::{RowPlan, plan_rows, sync_rows};
 
 type Row = (u32, &'static str);
 
@@ -15,38 +15,95 @@ fn key(row: &Row) -> u32 {
 }
 
 fn plan(remove: bool, insert: &[usize], change: &[usize], reorder: bool) -> Option<RowPlan> {
-    Some(RowPlan { remove, insert: insert.to_vec(), change: change.to_vec(), reorder })
+    Some(RowPlan {
+        remove,
+        insert: insert.to_vec(),
+        change: change.to_vec(),
+        reorder,
+    })
 }
 
 #[test]
 fn plans_follow_keys_contents_and_order() {
     let current: [Row; 3] = [(1, "一"), (2, "二"), (3, "三")];
     assert_eq!(plan_rows(&current, &current, key), None, "一样时不写");
-    assert_eq!(plan_rows(&current, &[(1, "一"), (2, "贰"), (3, "三")], key), plan(false, &[], &[1], false), "只改一行");
-    assert_eq!(plan_rows(&current, &[(0, "零"), (1, "一"), (2, "二"), (3, "三")], key), plan(false, &[0], &[], false), "插在最前");
-    assert_eq!(plan_rows(&current, &[(1, "一"), (4, "四"), (2, "二"), (3, "三"), (5, "五")], key), plan(false, &[1, 4], &[], false), "插在中间和末尾");
-    assert_eq!(plan_rows(&current, &[(1, "一"), (3, "三")], key), plan(true, &[], &[], false), "删一行");
-    assert_eq!(plan_rows(&current, &[(4, "四"), (1, "一"), (2, "二")], key), plan(true, &[0], &[], false), "新的进来、最旧的掉出去");
-    assert_eq!(plan_rows(&current, &[(3, "三"), (2, "二"), (1, "一")], key), plan(false, &[], &[], true), "倒过来");
+    assert_eq!(
+        plan_rows(&current, &[(1, "一"), (2, "贰"), (3, "三")], key),
+        plan(false, &[], &[1], false),
+        "只改一行"
+    );
+    assert_eq!(
+        plan_rows(&current, &[(0, "零"), (1, "一"), (2, "二"), (3, "三")], key),
+        plan(false, &[0], &[], false),
+        "插在最前"
+    );
+    assert_eq!(
+        plan_rows(
+            &current,
+            &[(1, "一"), (4, "四"), (2, "二"), (3, "三"), (5, "五")],
+            key
+        ),
+        plan(false, &[1, 4], &[], false),
+        "插在中间和末尾"
+    );
+    assert_eq!(
+        plan_rows(&current, &[(1, "一"), (3, "三")], key),
+        plan(true, &[], &[], false),
+        "删一行"
+    );
+    assert_eq!(
+        plan_rows(&current, &[(4, "四"), (1, "一"), (2, "二")], key),
+        plan(true, &[0], &[], false),
+        "新的进来、最旧的掉出去"
+    );
+    assert_eq!(
+        plan_rows(&current, &[(3, "三"), (2, "二"), (1, "一")], key),
+        plan(false, &[], &[], true),
+        "倒过来"
+    );
     assert_eq!(
         plan_rows(&current, &[(3, "叁"), (5, "五"), (1, "一")], key),
         plan(true, &[1], &[0], true),
         "删、插、改、排混在一起"
     );
-    assert_eq!(plan_rows(&[], &current, key), plan(false, &[0, 1, 2], &[], false), "从空列表开始");
-    assert_eq!(plan_rows(&current, &[], key), plan(true, &[], &[], false), "清空");
+    assert_eq!(
+        plan_rows(&[], &current, key),
+        plan(false, &[0, 1, 2], &[], false),
+        "从空列表开始"
+    );
+    assert_eq!(
+        plan_rows(&current, &[], key),
+        plan(true, &[], &[], false),
+        "清空"
+    );
 }
 
 /// 现有列表里重复的键：只认第一行，删掉后面的；新列表里重复的键在写之前就只留第一行。
 #[test]
 fn duplicate_keys_keep_their_first_row() {
     let current: [Row; 3] = [(1, "一"), (1, "壹"), (2, "二")];
-    assert_eq!(plan_rows(&current, &[(1, "一"), (2, "二")], key), plan(true, &[], &[], false), "现有列表的重复行要删");
-    assert_eq!(plan_rows(&current, &[(1, "甲"), (2, "二")], key), plan(true, &[], &[0], false), "按第一行比内容");
+    assert_eq!(
+        plan_rows(&current, &[(1, "一"), (2, "二")], key),
+        plan(true, &[], &[], false),
+        "现有列表的重复行要删"
+    );
+    assert_eq!(
+        plan_rows(&current, &[(1, "甲"), (2, "二")], key),
+        plan(true, &[], &[0], false),
+        "按第一行比内容"
+    );
 
     let list = store(current.to_vec());
-    sync_rows(list, key, vec![(2, "二"), (1, "一"), (2, "重复"), (1, "又重复")]);
-    assert_eq!(list.get_untracked(), [(2, "二"), (1, "一")], "两边的重复键都只留第一行");
+    sync_rows(
+        list,
+        key,
+        vec![(2, "二"), (1, "一"), (2, "重复"), (1, "又重复")],
+    );
+    assert_eq!(
+        list.get_untracked(),
+        [(2, "二"), (1, "一")],
+        "两边的重复键都只留第一行"
+    );
 }
 
 /// 一串写入：每次写完的列表都和新列表（去掉重复键以后）一样。

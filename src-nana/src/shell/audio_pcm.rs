@@ -11,7 +11,9 @@ const FORMAT_PCM: u16 = 0x0001;
 const FORMAT_IEEE_FLOAT: u16 = 0x0003;
 const FORMAT_EXTENSIBLE: u16 = 0xFFFE;
 /// KSDATAFORMAT_SUBTYPE_PCM / _IEEE_FLOAT 这类子格式 GUID 的后 12 字节；前 4 字节里低 2 字节是编码标签。
-const SUBTYPE_TAIL: [u8; 12] = [0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71];
+const SUBTYPE_TAIL: [u8; 12] = [
+    0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0xAA, 0x00, 0x38, 0x9B, 0x71,
+];
 
 /// 扬声器位置，和 WAVE 声道掩码的位一致（symphonia 的 `Position` 前 18 位也是这一套）。
 const FRONT_LEFT: u64 = 1 << 0;
@@ -114,7 +116,9 @@ impl WaveFormat {
         bits_per_sample: u16,
         channel_mask: Option<u64>,
     ) -> Result<Self, String> {
-        let block_align = channels.checked_mul(bits_per_sample.div_ceil(8)).ok_or("WAV 帧长无效")?;
+        let block_align = channels
+            .checked_mul(bits_per_sample.div_ceil(8))
+            .ok_or("WAV 帧长无效")?;
         let format = Self {
             encoding,
             channels,
@@ -140,7 +144,8 @@ impl WaveFormat {
             return Err("WAV 采样率无效".into());
         }
         let bytes = self.sample_bytes();
-        let whole = self.block_align != 0 && usize::from(self.block_align) % usize::from(self.channels) == 0;
+        let whole = self.block_align != 0
+            && usize::from(self.block_align) % usize::from(self.channels) == 0;
         if !whole || usize::from(self.bits_per_sample).div_ceil(8) != bytes {
             return Err("WAV 帧长无效".into());
         }
@@ -185,7 +190,11 @@ impl WaveFormat {
         out.reserve(data.len() / frame_bytes * usize::from(channels) * 2);
         for bytes in data.chunks_exact(frame_bytes) {
             frame.clear();
-            frame.extend(bytes.chunks_exact(width).map(|sample| self.sample_at(sample)));
+            frame.extend(
+                bytes
+                    .chunks_exact(width)
+                    .map(|sample| self.sample_at(sample)),
+            );
             mixer.push(&frame, out);
         }
         Ok(())
@@ -214,8 +223,12 @@ impl WaveFormat {
             (Encoding::Integer, [low, high]) => i16::from_le_bytes([*low, *high]),
             (Encoding::Integer, [_, low, high]) => i16::from_le_bytes([*low, *high]),
             (Encoding::Integer, [_, _, low, high]) => i16::from_le_bytes([*low, *high]),
-            (Encoding::Float, [a, b, c, d]) => float_sample(f64::from(f32::from_le_bytes([*a, *b, *c, *d]))),
-            (Encoding::Float, [a, b, c, d, e, f, g, h]) => float_sample(f64::from_le_bytes([*a, *b, *c, *d, *e, *f, *g, *h])),
+            (Encoding::Float, [a, b, c, d]) => {
+                float_sample(f64::from(f32::from_le_bytes([*a, *b, *c, *d])))
+            }
+            (Encoding::Float, [a, b, c, d, e, f, g, h]) => {
+                float_sample(f64::from_le_bytes([*a, *b, *c, *d, *e, *f, *g, *h]))
+            }
             _ => 0,
         }
     }
@@ -233,7 +246,11 @@ pub(crate) fn positions(channels: u16, mask: Option<u64>) -> Vec<u64> {
     let Some(mask) = mask.filter(|mask| *mask != 0) else {
         return default_layout(count);
     };
-    let mut placed: Vec<u64> = (0..64).map(|bit| 1u64 << bit).filter(|bit| mask & bit != 0).take(count).collect();
+    let mut placed: Vec<u64> = (0..64)
+        .map(|bit| 1u64 << bit)
+        .filter(|bit| mask & bit != 0)
+        .take(count)
+        .collect();
     placed.resize(count, UNPLACED);
     placed
 }
@@ -245,9 +262,33 @@ fn default_layout(count: usize) -> Vec<u64> {
         3 => vec![FRONT_LEFT, FRONT_RIGHT, FRONT_CENTER],
         4 => vec![FRONT_LEFT, FRONT_RIGHT, BACK_LEFT, BACK_RIGHT],
         5 => vec![FRONT_LEFT, FRONT_RIGHT, FRONT_CENTER, BACK_LEFT, BACK_RIGHT],
-        6 => vec![FRONT_LEFT, FRONT_RIGHT, FRONT_CENTER, LOW_FREQUENCY, BACK_LEFT, BACK_RIGHT],
-        7 => vec![FRONT_LEFT, FRONT_RIGHT, FRONT_CENTER, LOW_FREQUENCY, BACK_CENTER, SIDE_LEFT, SIDE_RIGHT],
-        8 => vec![FRONT_LEFT, FRONT_RIGHT, FRONT_CENTER, LOW_FREQUENCY, BACK_LEFT, BACK_RIGHT, SIDE_LEFT, SIDE_RIGHT],
+        6 => vec![
+            FRONT_LEFT,
+            FRONT_RIGHT,
+            FRONT_CENTER,
+            LOW_FREQUENCY,
+            BACK_LEFT,
+            BACK_RIGHT,
+        ],
+        7 => vec![
+            FRONT_LEFT,
+            FRONT_RIGHT,
+            FRONT_CENTER,
+            LOW_FREQUENCY,
+            BACK_CENTER,
+            SIDE_LEFT,
+            SIDE_RIGHT,
+        ],
+        8 => vec![
+            FRONT_LEFT,
+            FRONT_RIGHT,
+            FRONT_CENTER,
+            LOW_FREQUENCY,
+            BACK_LEFT,
+            BACK_RIGHT,
+            SIDE_LEFT,
+            SIDE_RIGHT,
+        ],
         _ => vec![UNPLACED; count],
     }
 }
@@ -259,8 +300,10 @@ fn gains(position: u64) -> (f32, f32) {
         FRONT_LEFT | FRONT_LEFT_OF_CENTER | FRONT_LEFT_WIDE => (1.0, 0.0),
         FRONT_RIGHT | FRONT_RIGHT_OF_CENTER | FRONT_RIGHT_WIDE => (0.0, 1.0),
         LOW_FREQUENCY | LOW_FREQUENCY_2 => (0.0, 0.0),
-        BACK_LEFT | SIDE_LEFT | TOP_FRONT_LEFT | TOP_BACK_LEFT | TOP_SIDE_LEFT | BOTTOM_FRONT_LEFT => (HALF_POWER, 0.0),
-        BACK_RIGHT | SIDE_RIGHT | TOP_FRONT_RIGHT | TOP_BACK_RIGHT | TOP_SIDE_RIGHT | BOTTOM_FRONT_RIGHT => (0.0, HALF_POWER),
+        BACK_LEFT | SIDE_LEFT | TOP_FRONT_LEFT | TOP_BACK_LEFT | TOP_SIDE_LEFT
+        | BOTTOM_FRONT_LEFT => (HALF_POWER, 0.0),
+        BACK_RIGHT | SIDE_RIGHT | TOP_FRONT_RIGHT | TOP_BACK_RIGHT | TOP_SIDE_RIGHT
+        | BOTTOM_FRONT_RIGHT => (0.0, HALF_POWER),
         _ => (HALF_POWER, HALF_POWER),
     }
 }
@@ -279,12 +322,22 @@ impl Mixer {
     /// 输入不会削波（和 ffmpeg 默认的下混一样归一）；目标是单声道时再取两侧平均。
     pub(crate) fn new(positions: &[u64], target: u16) -> Self {
         let source = positions.len();
-        let (mut left, mut right): (Vec<f32>, Vec<f32>) = positions.iter().map(|position| gains(*position)).unzip();
-        let peak = left.iter().sum::<f32>().max(right.iter().sum::<f32>()).max(1.0);
+        let (mut left, mut right): (Vec<f32>, Vec<f32>) =
+            positions.iter().map(|position| gains(*position)).unzip();
+        let peak = left
+            .iter()
+            .sum::<f32>()
+            .max(right.iter().sum::<f32>())
+            .max(1.0);
         for gain in left.iter_mut().chain(right.iter_mut()) {
             *gain /= peak;
         }
-        Self { source, target: target.clamp(1, 2), left, right }
+        Self {
+            source,
+            target: target.clamp(1, 2),
+            left,
+            right,
+        }
     }
 
     /// 一帧样本换算后按小端 16-bit 追加到 `out`。样本数和建它时的声道数对不上时不追加。
@@ -298,7 +351,11 @@ impl Mixer {
             _ => (mix(frame, &self.left), mix(frame, &self.right)),
         };
         if self.target == 1 {
-            let mono = if self.source == 1 { frame[0] } else { ((i32::from(stereo.0) + i32::from(stereo.1)) / 2) as i16 };
+            let mono = if self.source == 1 {
+                frame[0]
+            } else {
+                ((i32::from(stereo.0) + i32::from(stereo.1)) / 2) as i16
+            };
             out.extend_from_slice(&mono.to_le_bytes());
             return;
         }
@@ -308,7 +365,11 @@ impl Mixer {
 }
 
 fn mix(frame: &[i16], gains: &[f32]) -> i16 {
-    let sum: f32 = frame.iter().zip(gains).map(|(sample, gain)| f32::from(*sample) * gain).sum();
+    let sum: f32 = frame
+        .iter()
+        .zip(gains)
+        .map(|(sample, gain)| f32::from(*sample) * gain)
+        .sum();
     sum.round().clamp(f32::from(i16::MIN), f32::from(i16::MAX)) as i16
 }
 
@@ -322,10 +383,23 @@ fn u32_at(bytes: &[u8], at: usize) -> u32 {
 
 /// 拼一个 `fmt ` 块。`extensible` 有值时写 WAVE_FORMAT_EXTENSIBLE：（子格式编码标签，声道掩码）。
 #[cfg(test)]
-pub(crate) fn fmt_chunk(tag: u16, channels: u16, sample_rate: u32, bits: u16, extensible: Option<(u16, u32)>) -> Vec<u8> {
+pub(crate) fn fmt_chunk(
+    tag: u16,
+    channels: u16,
+    sample_rate: u32,
+    bits: u16,
+    extensible: Option<(u16, u32)>,
+) -> Vec<u8> {
     let block_align = channels * bits.div_ceil(8);
     let mut chunk = Vec::new();
-    chunk.extend_from_slice(&(if extensible.is_some() { FORMAT_EXTENSIBLE } else { tag }).to_le_bytes());
+    chunk.extend_from_slice(
+        &(if extensible.is_some() {
+            FORMAT_EXTENSIBLE
+        } else {
+            tag
+        })
+        .to_le_bytes(),
+    );
     chunk.extend_from_slice(&channels.to_le_bytes());
     chunk.extend_from_slice(&sample_rate.to_le_bytes());
     chunk.extend_from_slice(&(sample_rate * u32::from(block_align)).to_le_bytes());
@@ -364,34 +438,70 @@ mod tests {
     use super::*;
 
     fn le16(samples: &[i16]) -> Vec<u8> {
-        samples.iter().flat_map(|sample| sample.to_le_bytes()).collect()
+        samples
+            .iter()
+            .flat_map(|sample| sample.to_le_bytes())
+            .collect()
     }
 
     fn i16s(bytes: &[u8]) -> Vec<i16> {
-        bytes.chunks_exact(2).map(|pair| i16::from_le_bytes([pair[0], pair[1]])).collect()
+        bytes
+            .chunks_exact(2)
+            .map(|pair| i16::from_le_bytes([pair[0], pair[1]]))
+            .collect()
     }
 
     /// PCM、浮点和扩展格式都认得；ADPCM 这类压缩编码、认不出的子格式和对不上的帧长报出原因。
     #[test]
     fn parses_pcm_float_and_extensible_and_names_what_it_cannot_play() {
-        let pcm24 = WaveFormat::parse(&fmt_chunk(FORMAT_PCM, 2, 48_000, 24, None)).expect("24 位 PCM");
-        assert_eq!((pcm24.encoding, pcm24.block_align, pcm24.channel_mask), (Encoding::Integer, 6, None));
-        let float = WaveFormat::parse(&fmt_chunk(FORMAT_IEEE_FLOAT, 1, 44_100, 32, None)).expect("32 位浮点");
+        let pcm24 =
+            WaveFormat::parse(&fmt_chunk(FORMAT_PCM, 2, 48_000, 24, None)).expect("24 位 PCM");
+        assert_eq!(
+            (pcm24.encoding, pcm24.block_align, pcm24.channel_mask),
+            (Encoding::Integer, 6, None)
+        );
+        let float = WaveFormat::parse(&fmt_chunk(FORMAT_IEEE_FLOAT, 1, 44_100, 32, None))
+            .expect("32 位浮点");
         assert_eq!(float.encoding, Encoding::Float);
-        let extensible = WaveFormat::parse(&fmt_chunk(0, 6, 48_000, 32, Some((FORMAT_IEEE_FLOAT, 0x3F)))).expect("扩展格式浮点");
-        assert_eq!((extensible.encoding, extensible.channels, extensible.channel_mask), (Encoding::Float, 6, Some(0x3F)));
-        let no_mask = WaveFormat::parse(&fmt_chunk(0, 2, 48_000, 16, Some((FORMAT_PCM, 0)))).expect("扩展格式 PCM");
+        let extensible = WaveFormat::parse(&fmt_chunk(
+            0,
+            6,
+            48_000,
+            32,
+            Some((FORMAT_IEEE_FLOAT, 0x3F)),
+        ))
+        .expect("扩展格式浮点");
+        assert_eq!(
+            (
+                extensible.encoding,
+                extensible.channels,
+                extensible.channel_mask
+            ),
+            (Encoding::Float, 6, Some(0x3F))
+        );
+        let no_mask = WaveFormat::parse(&fmt_chunk(0, 2, 48_000, 16, Some((FORMAT_PCM, 0))))
+            .expect("扩展格式 PCM");
         assert_eq!(no_mask.channel_mask, None, "掩码是 0 时按声道数取布局");
 
         let adpcm = WaveFormat::parse(&fmt_chunk(0x0002, 2, 44_100, 4, None)).expect_err("ADPCM");
         assert!(adpcm.contains("0x0002"), "{adpcm}");
         let mut unknown = fmt_chunk(0, 2, 44_100, 16, Some((FORMAT_PCM, 3)));
         unknown[30] = 0x11;
-        assert!(WaveFormat::parse(&unknown).expect_err("子格式").contains("子格式"));
+        assert!(
+            WaveFormat::parse(&unknown)
+                .expect_err("子格式")
+                .contains("子格式")
+        );
         let mut misaligned = fmt_chunk(FORMAT_PCM, 2, 44_100, 16, None);
         misaligned[12] = 2;
-        assert_eq!(WaveFormat::parse(&misaligned).expect_err("帧长"), "WAV 帧长无效");
-        assert!(WaveFormat::parse(&fmt_chunk(FORMAT_IEEE_FLOAT, 1, 44_100, 16, None)).is_err(), "16 位浮点不是合法格式");
+        assert_eq!(
+            WaveFormat::parse(&misaligned).expect_err("帧长"),
+            "WAV 帧长无效"
+        );
+        assert!(
+            WaveFormat::parse(&fmt_chunk(FORMAT_IEEE_FLOAT, 1, 44_100, 16, None)).is_err(),
+            "16 位浮点不是合法格式"
+        );
     }
 
     /// 8/16-bit 单双声道原样留下；24、32 位整数取高 16 位，浮点按满幅映射并夹住。
@@ -399,45 +509,128 @@ mod tests {
     fn samples_become_sixteen_bit_and_small_formats_pass_through() {
         let byte = WaveFormat::parse(&fmt_chunk(FORMAT_PCM, 2, 8_000, 8, None)).unwrap();
         let pcm = byte.preview_pcm(&[0, 255, 128, 1]).unwrap();
-        assert_eq!((pcm.channels, pcm.bits_per_sample, pcm.frame_count, pcm.pcm.as_slice()), (2, 8, 2, [0u8, 255, 128, 1].as_slice()));
+        assert_eq!(
+            (
+                pcm.channels,
+                pcm.bits_per_sample,
+                pcm.frame_count,
+                pcm.pcm.as_slice()
+            ),
+            (2, 8, 2, [0u8, 255, 128, 1].as_slice())
+        );
 
         let deep = WaveFormat::parse(&fmt_chunk(FORMAT_PCM, 1, 8_000, 24, None)).unwrap();
-        let pcm = deep.preview_pcm(&[0xAA, 0x34, 0x12, 0x00, 0x00, 0x80]).unwrap();
-        assert_eq!((pcm.channels, pcm.bits_per_sample, pcm.frame_count), (1, 16, 2));
+        let pcm = deep
+            .preview_pcm(&[0xAA, 0x34, 0x12, 0x00, 0x00, 0x80])
+            .unwrap();
+        assert_eq!(
+            (pcm.channels, pcm.bits_per_sample, pcm.frame_count),
+            (1, 16, 2)
+        );
         assert_eq!(i16s(&pcm.pcm), [0x1234, i16::MIN]);
 
         let wide = WaveFormat::parse(&fmt_chunk(FORMAT_PCM, 1, 8_000, 32, None)).unwrap();
-        let samples: Vec<u8> = [0x7FFF_FFFFi32, -0x4000_0000].iter().flat_map(|sample| sample.to_le_bytes()).collect();
-        assert_eq!(i16s(&wide.preview_pcm(&samples).unwrap().pcm), [i16::MAX, -0x4000]);
+        let samples: Vec<u8> = [0x7FFF_FFFFi32, -0x4000_0000]
+            .iter()
+            .flat_map(|sample| sample.to_le_bytes())
+            .collect();
+        assert_eq!(
+            i16s(&wide.preview_pcm(&samples).unwrap().pcm),
+            [i16::MAX, -0x4000]
+        );
 
         let float = WaveFormat::parse(&fmt_chunk(FORMAT_IEEE_FLOAT, 1, 8_000, 32, None)).unwrap();
-        let samples: Vec<u8> = [0.5f32, -1.5, f32::NAN].iter().flat_map(|sample| sample.to_le_bytes()).collect();
-        assert_eq!(i16s(&float.preview_pcm(&samples).unwrap().pcm), [16_384, -i16::MAX, 0]);
+        let samples: Vec<u8> = [0.5f32, -1.5, f32::NAN]
+            .iter()
+            .flat_map(|sample| sample.to_le_bytes())
+            .collect();
+        assert_eq!(
+            i16s(&float.preview_pcm(&samples).unwrap().pcm),
+            [16_384, -i16::MAX, 0]
+        );
         let double = WaveFormat::parse(&fmt_chunk(FORMAT_IEEE_FLOAT, 1, 8_000, 64, None)).unwrap();
-        assert_eq!(i16s(&double.preview_pcm(&(-0.25f64).to_le_bytes()).unwrap().pcm), [-8_192]);
-        assert_eq!(double.preview_pcm(&[0; 12]).expect_err("半帧"), "WAV 数据长度不是整帧");
+        assert_eq!(
+            i16s(&double.preview_pcm(&(-0.25f64).to_le_bytes()).unwrap().pcm),
+            [-8_192]
+        );
+        assert_eq!(
+            double.preview_pcm(&[0; 12]).expect_err("半帧"),
+            "WAV 数据长度不是整帧"
+        );
     }
 
     /// 5.1 下混成立体声：前左右整份、中置和后方 -3 dB，低音不进；分量和最大的一侧归一到 1，满幅不削波。
     #[test]
     fn surround_downmixes_to_stereo_without_clipping() {
-        let format = WaveFormat::parse(&fmt_chunk(0, 6, 48_000, 16, Some((FORMAT_PCM, 0x3F)))).unwrap();
+        let format =
+            WaveFormat::parse(&fmt_chunk(0, 6, 48_000, 16, Some((FORMAT_PCM, 0x3F)))).unwrap();
         let scale = 1.0 / (1.0 + 2.0 * HALF_POWER);
-        let frames = le16(&[1_000, 0, 0, 30_000, 0, 0, 0, 0, 1_000, 0, 0, 0, i16::MAX, i16::MAX, i16::MAX, 0, i16::MAX, i16::MAX]);
+        let frames = le16(&[
+            1_000,
+            0,
+            0,
+            30_000,
+            0,
+            0,
+            0,
+            0,
+            1_000,
+            0,
+            0,
+            0,
+            i16::MAX,
+            i16::MAX,
+            i16::MAX,
+            0,
+            i16::MAX,
+            i16::MAX,
+        ]);
         let pcm = format.preview_pcm(&frames).unwrap();
-        assert_eq!((pcm.channels, pcm.bits_per_sample, pcm.frame_count), (2, 16, 3));
+        assert_eq!(
+            (pcm.channels, pcm.bits_per_sample, pcm.frame_count),
+            (2, 16, 3)
+        );
         let center = (1_000.0 * HALF_POWER * scale).round() as i16;
-        assert_eq!(i16s(&pcm.pcm), [(1_000.0 * scale).round() as i16, 0, center, center, i16::MAX, i16::MAX]);
+        assert_eq!(
+            i16s(&pcm.pcm),
+            [
+                (1_000.0 * scale).round() as i16,
+                0,
+                center,
+                center,
+                i16::MAX,
+                i16::MAX
+            ]
+        );
     }
 
     /// 掩码里的位按顺序对应声道，位不够时多出的声道没有位置；没有掩码时按声道数取常见布局。
     #[test]
     fn positions_follow_the_mask_or_the_usual_layout() {
-        assert_eq!(positions(3, Some(0b1_0000_0011)), [FRONT_LEFT, FRONT_RIGHT, BACK_CENTER]);
-        assert_eq!(positions(3, Some(0b11)), [FRONT_LEFT, FRONT_RIGHT, UNPLACED]);
+        assert_eq!(
+            positions(3, Some(0b1_0000_0011)),
+            [FRONT_LEFT, FRONT_RIGHT, BACK_CENTER]
+        );
+        assert_eq!(
+            positions(3, Some(0b11)),
+            [FRONT_LEFT, FRONT_RIGHT, UNPLACED]
+        );
         assert_eq!(positions(2, Some(0b111)), [FRONT_LEFT, FRONT_RIGHT]);
-        assert_eq!(positions(6, None), [FRONT_LEFT, FRONT_RIGHT, FRONT_CENTER, LOW_FREQUENCY, BACK_LEFT, BACK_RIGHT]);
-        assert_eq!(positions(4, Some(0)), [FRONT_LEFT, FRONT_RIGHT, BACK_LEFT, BACK_RIGHT]);
+        assert_eq!(
+            positions(6, None),
+            [
+                FRONT_LEFT,
+                FRONT_RIGHT,
+                FRONT_CENTER,
+                LOW_FREQUENCY,
+                BACK_LEFT,
+                BACK_RIGHT
+            ]
+        );
+        assert_eq!(
+            positions(4, Some(0)),
+            [FRONT_LEFT, FRONT_RIGHT, BACK_LEFT, BACK_RIGHT]
+        );
         assert_eq!(positions(9, None), vec![UNPLACED; 9]);
     }
 

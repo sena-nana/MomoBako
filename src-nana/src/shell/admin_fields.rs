@@ -10,18 +10,20 @@
 
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{fields, widget, AnyView, IntoView, Item, Store, StoreList, StorePath};
+use nana_ui::runtime::view::{
+    AnyView, IntoView, Item, Store, StoreList, StorePath, fields, widget,
+};
 use nana_ui::runtime::{
-    Activate, AlignSpec, Checkbox, FocusWithinChanged, LengthSpec, Select, SelectChanged, SelectOption, Stack, TextArea, TextChanged,
-    TextInput, TextSubmitted, ToggleChanged,
+    Activate, AlignSpec, Checkbox, FocusWithinChanged, LengthSpec, Select, SelectChanged,
+    SelectOption, Stack, TextArea, TextChanged, TextInput, TextSubmitted, ToggleChanged,
 };
 use nana_ui_core::{GridTrack, SemanticColorRole as Role};
 use serde_json::Value;
 
-use super::admin::bind::{row_draft, row_flag, row_text, ActionDisabled};
-use super::admin::style::{self, action, label, Tone};
-use super::admin::support::{self, ConfigField};
 use super::admin::AdminMessage;
+use super::admin::bind::{ActionDisabled, row_draft, row_flag, row_text};
+use super::admin::style::{self, Tone, action, label};
+use super::admin::support::{self, ConfigField};
 use super::{ShellMessage, ShellViewModel};
 use crate::backend::services::repository::PluginManifest;
 
@@ -57,7 +59,10 @@ pub(crate) struct FieldRowView {
 impl FieldRowView {
     /// `plugin` 声明的全部字段。没有字段时为空，表单不占位。
     pub(crate) fn project_all(model: &ShellViewModel, plugin: &PluginManifest) -> Vec<Self> {
-        support::settings_fields(plugin).iter().map(|field| Self::project(model, plugin, field)).collect()
+        support::settings_fields(plugin)
+            .iter()
+            .map(|field| Self::project(model, plugin, field))
+            .collect()
     }
 
     fn project(model: &ShellViewModel, plugin: &PluginManifest, field: &ConfigField) -> Self {
@@ -73,12 +78,20 @@ impl FieldRowView {
             FieldKind::Json => model.admin.json_drafts.get(plugin_id),
             _ => model.admin.field_drafts.get(plugin_id),
         };
-        let text = drafts.and_then(|drafts| drafts.get(&field.key)).cloned().unwrap_or_else(|| match kind {
-            FieldKind::Json => current.map(support::json_draft_text).unwrap_or_default(),
-            _ => support::field_text(current),
-        });
+        let text = drafts
+            .and_then(|drafts| drafts.get(&field.key))
+            .cloned()
+            .unwrap_or_else(|| match kind {
+                FieldKind::Json => current.map(support::json_draft_text).unwrap_or_default(),
+                _ => support::field_text(current),
+            });
         let mut options = vec![(String::new(), String::new())];
-        options.extend(field.options.iter().map(|option| (support::option_wire(&option.value), option.label.clone())));
+        options.extend(
+            field
+                .options
+                .iter()
+                .map(|option| (support::option_wire(&option.value), option.label.clone())),
+        );
         Self {
             plugin_id: plugin_id.to_string(),
             field_key: field.key.clone(),
@@ -88,7 +101,10 @@ impl FieldRowView {
             placeholder: field.placeholder.clone().unwrap_or_default(),
             checked: current.is_some_and(truthy),
             options,
-            selected: current.filter(|value| value.is_string() || value.is_number() || value.is_boolean()).map(support::option_wire).unwrap_or_default(),
+            selected: current
+                .filter(|value| value.is_string() || value.is_number() || value.is_boolean())
+                .map(support::option_wire)
+                .unwrap_or_default(),
             text,
             disabled: model.admin.managing,
         }
@@ -117,40 +133,70 @@ pub(super) fn fields_form(plugin_id: &str, fields: Store<Vec<FieldRowView>>) -> 
 /// 一行字段。布尔字段的控件列不拉伸，其余字段中间列占满。行的身份建行时就定了。
 fn field_row(item: FieldItem) -> AnyView {
     let row = item.get_untracked();
-    let fkey = format!("{}-{}", style::key_part(&row.plugin_id), style::key_part(&row.field_key));
+    let fkey = format!(
+        "{}-{}",
+        style::key_part(&row.plugin_id),
+        style::key_part(&row.field_key)
+    );
     // 不用 `style::capped`：中间列有 180 的下限，第一列权重过大时同一轮会把中间列冻在下限。
     // 两列等权重，宽度够时第一列先停在 220，余下都给中间列。
     let columns = if row.kind == FieldKind::Boolean {
-        vec![GridTrack::MinMax { min_px: 140.0, fr: 1.0, max_px: Some(220.0) }, GridTrack::Auto, GridTrack::Auto]
+        vec![
+            GridTrack::MinMax {
+                min_px: 140.0,
+                fr: 1.0,
+                max_px: Some(220.0),
+            },
+            GridTrack::Auto,
+            GridTrack::Auto,
+        ]
     } else {
         vec![
-            GridTrack::MinMax { min_px: 140.0, fr: 1.0, max_px: Some(220.0) },
-            GridTrack::MinMax { min_px: 180.0, fr: 1.0, max_px: None },
+            GridTrack::MinMax {
+                min_px: 140.0,
+                fr: 1.0,
+                max_px: Some(220.0),
+            },
+            GridTrack::MinMax {
+                min_px: 180.0,
+                fr: 1.0,
+                max_px: None,
+            },
             GridTrack::Auto,
         ]
     };
-    let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(move |layout| {
-        layout.display = Some(nana_ui_core::DisplaySpec::Grid);
-        layout.grid_columns = Some(columns);
-        layout.gap = Some(LengthSpec::Px(10.0));
-        layout.width = Some(LengthSpec::Fill);
-        layout.align_items = AlignSpec::Center;
-    });
+    let grid =
+        Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(move |layout| {
+            layout.display = Some(nana_ui_core::DisplaySpec::Grid);
+            layout.grid_columns = Some(columns);
+            layout.gap = Some(LengthSpec::Px(10.0));
+            layout.width = Some(LengthSpec::Fill);
+            layout.align_items = AlignSpec::Center;
+        });
     let caption = nana_ui::runtime::view::node_ref();
     let name = widget(Stack::column(0.0).min_width(LengthSpec::Px(0.0))).children((
-        style::bound(label(String::new(), 13.0, 600, Role::Text), row_text(item, |row| &row.label))
-            .node_ref(caption)
-            .key(format!("admin-field-label-{fkey}")),
+        style::bound(
+            label(String::new(), 13.0, 600, Role::Text),
+            row_text(item, |row| &row.label),
+        )
+        .node_ref(caption)
+        .key(format!("admin-field-label-{fkey}")),
         widget(style::pad(style::column(0.0), 3.0, 0.0, 0.0, 0.0))
             .visible(row_flag(item, |row| !row.description.is_empty()))
-            .children((style::bound(style::wrapping(style::label_lh(String::new(), 12.0, 400, Role::Muted, 1.4)), row_text(item, |row| &row.description)),)),
+            .children((style::bound(
+                style::wrapping(style::label_lh(String::new(), 12.0, 400, Role::Muted, 1.4)),
+                row_text(item, |row| &row.description),
+            ),)),
     ));
     let (reset_id, reset_key) = (row.plugin_id.clone(), row.field_key.clone());
     let reset = widget(action("重置", None, Tone::Plain, false))
         .prop::<bool, ActionDisabled>(row_flag(item, |row| row.disabled))
         .key(format!("admin-field-reset-{fkey}"))
         .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ResetConfig { plugin_id: reset_id.clone(), key: reset_key.clone() }));
+            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ResetConfig {
+                plugin_id: reset_id.clone(),
+                key: reset_key.clone(),
+            }));
         })
         .into_any();
     widget(grid)
@@ -160,7 +206,12 @@ fn field_row(item: FieldItem) -> AnyView {
 }
 
 /// 字段的控件。勾选框、下拉框和文本域没有自己的名字，用左边的字段名当读屏名称。
-fn control(item: FieldItem, row: &FieldRowView, fkey: &str, caption: nana_ui::runtime::view::NodeRef) -> AnyView {
+fn control(
+    item: FieldItem,
+    row: &FieldRowView,
+    fkey: &str,
+    caption: nana_ui::runtime::view::NodeRef,
+) -> AnyView {
     let id = row.plugin_id.clone();
     let key = row.field_key.clone();
     match row.kind {
@@ -183,7 +234,8 @@ fn control(item: FieldItem, row: &FieldRowView, fkey: &str, caption: nana_ui::ru
                 .into_any()
         }
         FieldKind::Select => {
-            let mut select = Select::new(Some(row.selected.clone())).options(select_options(&row.options));
+            let mut select =
+                Select::new(Some(row.selected.clone())).options(select_options(&row.options));
             {
                 let layout = Arc::make_mut(&mut select.style.layout);
                 layout.width = Some(LengthSpec::Fill);
@@ -192,8 +244,13 @@ fn control(item: FieldItem, row: &FieldRowView, fkey: &str, caption: nana_ui::ru
                 layout.font_size = Some(14.0);
             }
             widget(select)
-                .prop::<Vec<SelectOption>, fields::select::options>(move || item.try_with(|row| select_options(&row.options)).unwrap_or_default())
-                .prop::<Option<Arc<str>>, fields::select::value>(move || item.try_with(|row| Arc::from(row.selected.as_str())))
+                .prop::<Vec<SelectOption>, fields::select::options>(move || {
+                    item.try_with(|row| select_options(&row.options))
+                        .unwrap_or_default()
+                })
+                .prop::<Option<Arc<str>>, fields::select::value>(move || {
+                    item.try_with(|row| Arc::from(row.selected.as_str()))
+                })
                 .prop::<bool, fields::select::disabled>(row_flag(item, |row| row.disabled))
                 .labelled_by(caption)
                 .key(format!("admin-field-select-{fkey}"))
@@ -209,7 +266,8 @@ fn control(item: FieldItem, row: &FieldRowView, fkey: &str, caption: nana_ui::ru
         }
         FieldKind::Json => {
             let draft = row_draft(move || item.try_with(|row| row.text.clone()));
-            let mut area = TextArea::new(draft.signal().get_untracked()).placeholder(row.placeholder.clone());
+            let mut area =
+                TextArea::new(draft.signal().get_untracked()).placeholder(row.placeholder.clone());
             area.style = style::native_field_style(92.0);
             {
                 let layout = Arc::make_mut(&mut area.style.layout);
@@ -226,7 +284,12 @@ fn control(item: FieldItem, row: &FieldRowView, fkey: &str, caption: nana_ui::ru
             let (blur_id, blur_key) = (id.clone(), key.clone());
             widget(area)
                 .model(draft.signal())
-                .prop::<Arc<str>, fields::text_area::placeholder>(move || Arc::from(item.try_with(|row| row.placeholder.clone()).unwrap_or_default()))
+                .prop::<Arc<str>, fields::text_area::placeholder>(move || {
+                    Arc::from(
+                        item.try_with(|row| row.placeholder.clone())
+                            .unwrap_or_default(),
+                    )
+                })
                 .prop::<bool, fields::text_area::disabled>(row_flag(item, |row| row.disabled))
                 .labelled_by(caption)
                 .key(format!("admin-field-json-{fkey}"))
@@ -247,15 +310,24 @@ fn control(item: FieldItem, row: &FieldRowView, fkey: &str, caption: nana_ui::ru
         FieldKind::Text => {
             let draft = row_draft(move || item.try_with(|row| row.text.clone()));
             let input = style::native_input(
-                TextInput::new(draft.signal().get_untracked()).label(row.label.clone()).placeholder(row.placeholder.clone()),
+                TextInput::new(draft.signal().get_untracked())
+                    .label(row.label.clone())
+                    .placeholder(row.placeholder.clone()),
             );
             // 回车和失焦都提交（Vue 文本框的 `@change`），改完点到别处、收起设置都不丢。
             let (submit_id, submit_key) = (id.clone(), key.clone());
             let (blur_id, blur_key) = (id.clone(), key.clone());
             widget(input)
                 .model(draft.signal())
-                .prop::<Option<Arc<str>>, fields::text_input::label>(move || item.try_with(|row| Arc::from(row.label.as_str())))
-                .prop::<Arc<str>, fields::text_input::placeholder>(move || Arc::from(item.try_with(|row| row.placeholder.clone()).unwrap_or_default()))
+                .prop::<Option<Arc<str>>, fields::text_input::label>(move || {
+                    item.try_with(|row| Arc::from(row.label.as_str()))
+                })
+                .prop::<Arc<str>, fields::text_input::placeholder>(move || {
+                    Arc::from(
+                        item.try_with(|row| row.placeholder.clone())
+                            .unwrap_or_default(),
+                    )
+                })
                 .prop::<bool, fields::text_input::disabled>(row_flag(item, |row| row.disabled))
                 .key(format!("admin-field-text-{fkey}"))
                 .on_cx(move |_, event: &TextChanged, cx| {
@@ -265,7 +337,9 @@ fn control(item: FieldItem, row: &FieldRowView, fkey: &str, caption: nana_ui::ru
                         value: event.value.to_string(),
                     }));
                 })
-                .on_cx(move |_, _: &TextSubmitted, cx| cx.dispatch_program_all(commit_draft(&submit_id, &submit_key)))
+                .on_cx(move |_, _: &TextSubmitted, cx| {
+                    cx.dispatch_program_all(commit_draft(&submit_id, &submit_key))
+                })
                 .on_cx(move |_, event: &FocusWithinChanged, cx| {
                     if !event.focused {
                         cx.dispatch_program_all(commit_draft(&blur_id, &blur_key));
@@ -278,7 +352,10 @@ fn control(item: FieldItem, row: &FieldRowView, fkey: &str, caption: nana_ui::ru
 
 /// 下拉框选项：`(值, 文字)`。
 fn select_options(options: &[(String, String)]) -> Vec<SelectOption> {
-    options.iter().map(|(value, text)| SelectOption::new(value.clone(), text.clone())).collect()
+    options
+        .iter()
+        .map(|(value, text)| SelectOption::new(value.clone(), text.clone()))
+        .collect()
 }
 
 /// Vue `Boolean(value)`：空串、0、false、null 都是假。
@@ -294,7 +371,10 @@ fn truthy(value: &Value) -> bool {
 
 /// 草稿提交（回车、失焦）：草稿和现在的值不同才保存，由归约判断。
 fn commit_draft(plugin_id: &str, key: &str) -> ShellMessage {
-    ShellMessage::Admin(AdminMessage::CommitDraft { plugin_id: plugin_id.to_string(), key: key.to_string() })
+    ShellMessage::Admin(AdminMessage::CommitDraft {
+        plugin_id: plugin_id.to_string(),
+        key: key.to_string(),
+    })
 }
 
 #[cfg(test)]
