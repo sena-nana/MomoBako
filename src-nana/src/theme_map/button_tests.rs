@@ -55,7 +55,7 @@ const ALLOWED_LITERALS: &[(&str, &str, &str)] = &[
         "评分星的金色，`.file-metadata-card__star.is-active`",
     ),
     (
-        "inspect_view/body.rs",
+        "inspect_view/body/widgets.rs",
         "[0.02, 0.02, 0.02, 1.0]",
         "视频画面的黑底，`.media-preview__video`",
     ),

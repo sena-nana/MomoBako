@@ -1,0 +1,426 @@
+//! 预览工具栏、图片与视频、文档与模型视图、覆盖层、状态层与字节数格式化等小部件。
+
+use super::*;
+
+/// 插件顶栏：42px 起，8/12 内边距，底边 border-soft，标签可折行。
+pub(super) fn toolbar(chips: Vec<AnyView>, key: &'static str) -> AnyView {
+    let bar = super::super::super::workbench::with_bottom_divider(
+        Stack::bar(8.0)
+            .wrap(true)
+            .align(AlignSpec::Center)
+            .min_height(LengthSpec::Px(42.0))
+            .with_layout(|layout| {
+                layout.padding_top = Some(LengthSpec::Px(8.0));
+                layout.padding_bottom = Some(LengthSpec::Px(8.0));
+                layout.padding_left = Some(LengthSpec::Px(12.0));
+                layout.padding_right = Some(LengthSpec::Px(12.0));
+            }),
+    );
+    widget(bar).children(chips).key(key).into_any()
+}
+
+/// 顶栏标签：bg-elev 底、border 细边、8px 圆角，12px 字。第一枚是种类，正文色半粗。
+pub(super) fn chip(label: &str, emphasis: bool, key: &str) -> AnyView {
+    let role = if emphasis {
+        SemanticColorRole::Text
+    } else {
+        SemanticColorRole::Muted
+    };
+    let weight = if emphasis { 600 } else { 400 };
+    widget(
+        Stack::row(6.0)
+            .align(AlignSpec::Center)
+            .min_height(LengthSpec::Px(26.0))
+            .padding_xy(8.0, 4.0)
+            .surface(SemanticColorRole::Surface)
+            .border(SemanticColorRole::Border, 1.0)
+            .radius(RadiusTier::Md)
+            .grow(0.0)
+            .shrink(0.0),
+    )
+    .children((widget(text(label, 12.0, weight, role, 18.6)),))
+    .key(key.to_string())
+    .into_any()
+}
+
+/// 把 RGBA 按 contain（或 cover）画进铺满的盒子，底色是 bg。
+pub(super) fn pixel_image(pixels: &Pixels, cover: bool, key: &'static str) -> AnyView {
+    frame_pixels(pixels, cover, key, false)
+}
+
+/// 宿主纹理槽上的视频画面，和文件预览的 `inspect-video` 同一棵。近黑底，适应或填充跟 `cover`。
+pub(in super::super) fn host_video(cover: bool) -> AnyView {
+    let fit = if cover {
+        ContentFit::Cover
+    } else {
+        ContentFit::Contain
+    };
+    widget(
+        Stack::fill_column(0.0)
+            .with_layout(|layout| layout.background = Some([0.02, 0.02, 0.02, 1.0])),
+    )
+    .children((widget(GpuTextureView::new("file-preview").fit(fit)).key("inspect-video"),))
+    .key("inspect-video-frame")
+    .into_any()
+}
+
+/// 把一块像素编成内容图。`video` 时底色是视频画面的近黑，否则是 bg。
+/// 像素来自已经解出的缓冲区，编不成图时记日志并留空，不另涂一块同色矩形。
+pub(super) fn frame_pixels(
+    pixels: &Pixels,
+    cover: bool,
+    key: &'static str,
+    video: bool,
+) -> AnyView {
+    let Some(url) =
+        super::super::super::inspect::rgba_png_data_url(pixels.width, pixels.height, pixels.rgba())
+    else {
+        eprintln!("Nana 预览图编码失败：{}x{}", pixels.width, pixels.height);
+        return widget(Stack::fill_column(0.0)).key(key).into_any();
+    };
+    let image = nana_ui_core::BackgroundImage::Url {
+        url,
+        fit: if cover {
+            nana_ui_core::BackgroundImageFit::Cover
+        } else {
+            nana_ui_core::BackgroundImageFit::Contain
+        },
+        size_width: None,
+        size_height: None,
+        position: nana_ui_core::BackgroundPosition::center(),
+        repeat: nana_ui_core::BackgroundRepeat::NoRepeat,
+        sampling: nana_ui_core::ImageSampling::Resample,
+    };
+    let stack = if video {
+        Stack::fill_column(0.0)
+    } else {
+        Stack::fill_column(0.0).surface(SemanticColorRole::Background)
+    };
+    widget(stack.with_layout(|layout| {
+        if video {
+            layout.background = Some([0.02, 0.02, 0.02, 1.0]);
+        }
+        layout.paint.content_image = Some(image);
+    }))
+    .key(key)
+    .into_any()
+}
+
+/// PDF 和 Office：顶栏、翻页和整页；读不出页面时是失败浮层或抽出的文字。
+///
+/// 画不出来的页也带翻页（`nav`）：翻页一行留在原来的位置，下面是这一页的失败原因，前后的页照样翻得到。
+pub(super) fn document_view(
+    toolbar: Option<&DocumentBar>,
+    nav: Option<(usize, usize)>,
+    page: Option<&Pixels>,
+    error: Option<&str>,
+    body: &str,
+    scope: &str,
+) -> AnyView {
+    let mut rows = Vec::new();
+    if let Some(bar) = toolbar {
+        rows.push(inspect_library::document_toolbar_view(bar));
+    }
+    if let Some(raster) = page {
+        let index = nav.map(|(index, _)| index).unwrap_or(0);
+        let key = format!("preview-page-{scope}-{index}");
+        rows.push(super::super::page::page_scroller(
+            super::super::page::page_bitmap(raster),
+            nav,
+            key,
+        ));
+    } else if let Some(error) = error {
+        if let Some((index, total)) = nav {
+            rows.push(
+                widget(
+                    Stack::column(0.0)
+                        .padding(18.0)
+                        .width(LengthSpec::Fill)
+                        .min_width(LengthSpec::Px(0.0)),
+                )
+                .children((super::super::page::page_nav(index, total),))
+                .key(format!("inspect-page-failed-{scope}-{index}"))
+                .into_any(),
+            );
+        }
+        rows.push(overlay("无法预览该文档", error, "inspect-native-error"));
+    } else {
+        rows.push(
+            widget(Stack::fill_column(0.0).padding(18.0))
+                .children((
+                    widget(text(body, 13.0, 400, SemanticColorRole::Text, 20.15))
+                        .key("inspect-native"),
+                ))
+                .key("inspect-native-text")
+                .into_any(),
+        );
+    }
+    // 插件根自带 bg 底，盖住预览框的插件光晕。
+    widget(
+        Stack::fill_column(0.0)
+            .min_height(LengthSpec::Px(0.0))
+            .surface(SemanticColorRole::Background),
+    )
+    .children(rows)
+    .key("inspect-native-view")
+    .into_any()
+}
+
+/// 3D 模型：画面铺满，左下角是扩展名和尺寸标签。旋转、缩放按钮在右上角。
+/// `extent` 是包围盒三轴尺寸，没有网格时为空，不编一个数。
+pub(super) fn model_view(
+    extension: &str,
+    raster: Option<&Pixels>,
+    content: &str,
+    mesh: bool,
+    extent: &str,
+) -> AnyView {
+    let extension = extension
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_uppercase();
+    let picture = match raster {
+        Some(raster) => super::super::page::page_bitmap(raster),
+        None => widget(Stack::fill_column(0.0).padding(18.0))
+            .children((widget(text(
+                content,
+                13.0,
+                400,
+                SemanticColorRole::Muted,
+                20.15,
+            )),))
+            .into_any(),
+    };
+    let mut layers = vec![picture];
+    let mut chips = Vec::new();
+    if !extension.is_empty() {
+        chips.push(hud_chip(&extension, "inspect-model-hud-ext"));
+    }
+    if !extent.is_empty() {
+        chips.push(hud_chip(extent, "inspect-model-hud-size"));
+    }
+    if !chips.is_empty() {
+        layers.push(
+            widget(Stack::row(8.0).with_layout(|layout| {
+                layout.position = nana_ui_core::PositionSpec::Absolute;
+                layout.offset_left = Some(LengthSpec::Px(12.0));
+                layout.offset_bottom = Some(LengthSpec::Px(12.0));
+            }))
+            .children(chips)
+            .key("inspect-model-hud")
+            .into_any(),
+        );
+    }
+    if mesh {
+        layers.push(orbit_controls());
+    }
+    widget(Stack::fill_column(0.0).surface(SemanticColorRole::Background))
+        .children(layers)
+        .key("inspect-model")
+        .into_any()
+}
+
+/// 模型的旋转和缩放，用按钮操作。
+pub(super) fn orbit_controls() -> AnyView {
+    let buttons = [
+        ("左转", -0.4, 1.0, "inspect-orbit-left"),
+        ("右转", 0.4, 1.0, "inspect-orbit-right"),
+        ("放大", 0.0, 1.25, "inspect-orbit-in"),
+        ("缩小", 0.0, 0.8, "inspect-orbit-out"),
+    ]
+    .into_iter()
+    .map(|(label, yaw, zoom, key)| {
+        widget(nana_ui::runtime::Button::new(label).kind(nana_ui::ButtonKind::Ghost))
+            .key(key)
+            .on_cx(move |_, _: &Activate, cx| {
+                cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::Orbit { yaw, zoom }));
+            })
+            .into_any()
+    })
+    .collect::<Vec<_>>();
+    widget(Stack::row(4.0).with_layout(|layout| {
+        layout.position = nana_ui_core::PositionSpec::Absolute;
+        layout.offset_right = Some(LengthSpec::Px(12.0));
+        layout.offset_top = Some(LengthSpec::Px(12.0));
+    }))
+    .children(buttons)
+    .key("inspect-orbit")
+    .into_any()
+}
+
+/// 画面上的小标签：26px 高、border 细边、8px 圆角，12px 半粗弱色字。尺寸底是 bg-elev 的 88%。
+pub(super) fn hud_chip(label: &str, key: &'static str) -> AnyView {
+    let frame = Stack::row(0.0)
+        .align(AlignSpec::Center)
+        .min_height(LengthSpec::Px(26.0))
+        .padding_xy(8.0, 4.0)
+        .border(SemanticColorRole::Border, 1.0)
+        .radius(RadiusTier::Md);
+    let frame = if key == "inspect-model-hud-size" {
+        let style = frame
+            .node_style()
+            .surface_mix(nana_ui_core::SemanticColorMix::alpha(
+                SemanticColorRole::Surface,
+                0.88,
+            ));
+        frame.style(style)
+    } else {
+        frame.surface(SemanticColorRole::Surface)
+    };
+    widget(frame)
+        .children((widget(text(
+            label,
+            12.0,
+            600,
+            SemanticColorRole::Muted,
+            18.6,
+        )),))
+        .key(key)
+        .into_any()
+}
+
+/// 失败浮层铺满预览框。底是 `color-mix(in srgb, var(--bg) 74%, transparent)`，失败时才画。
+pub(super) fn overlay(title: &str, message: &str, key: &'static str) -> AnyView {
+    failed_mask(title, message, key, None)
+}
+
+/// 在线条目的播放源准备失败：同一个浮层，原因下面多一个「重试」，点了重新准备播放源。
+pub(super) fn retry_overlay(title: &str, message: &str) -> AnyView {
+    let retry = widget(
+        Button::new("重试")
+            .kind(ButtonKind::Ghost)
+            .icon(REFRESH)
+            .icon_size(14.0),
+    )
+    .key("inspect-failed-retry")
+    .on_cx(|_, _: &Activate, cx| {
+        cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::RetryMedia))
+    })
+    .into_any();
+    failed_mask(title, message, "inspect-failed", Some(retry))
+}
+
+/// 遮罩写在浮层上：背景色占 74%，其余透明。没有失败时不会进到这里。标题和原因仍是调用处的原文。
+pub(super) fn failed_mask(
+    title: &str,
+    message: &str,
+    key: &'static str,
+    retry: Option<AnyView>,
+) -> AnyView {
+    let mut children = vec![
+        widget(overlay_heading(title)).key(key).into_any(),
+        widget(overlay_reason(message))
+            .key(format!("{key}-reason"))
+            .into_any(),
+    ];
+    if let Some(retry) = retry {
+        children.push(
+            widget(Stack::row(0.0).justify(JustifySpec::Center))
+                .children((retry,))
+                .into_any(),
+        );
+    }
+    let frame = Stack::fill_column(8.0)
+        .align(AlignSpec::Center)
+        .justify(JustifySpec::Center)
+        .padding(24.0);
+    let style = frame
+        .node_style()
+        .surface_mix(nana_ui_core::SemanticColorMix::alpha(
+            SemanticColorRole::Background,
+            0.74,
+        ));
+    widget(frame.style(style))
+        .children(children)
+        .key(format!("{key}-overlay"))
+        .into_any()
+}
+
+pub(super) fn overlay_heading(title: &str) -> Text {
+    let mut heading = text(title, 14.0, 700, SemanticColorRole::Danger, 21.7);
+    heading.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
+    heading
+}
+
+pub(super) fn overlay_reason(message: &str) -> Text {
+    let mut reason = text(message, 14.0, 400, SemanticColorRole::Muted, 21.7);
+    reason.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
+    {
+        let layout = std::sync::Arc::make_mut(&mut reason.style.layout);
+        layout.max_width = Some(LengthSpec::Px(520.0));
+        layout.text_ext.line_break = Some(nana_ui_core::LineBreakSpec::Anywhere);
+        layout.text_ext.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
+    }
+    reason
+}
+
+/// 居中的两行状态：压缩包读取中用它。
+pub(super) fn centered_status(title: &str, detail: &str) -> AnyView {
+    widget(
+        Stack::fill_column(8.0)
+            .align(AlignSpec::Center)
+            .justify(JustifySpec::Center),
+    )
+    .children((
+        widget(text(title, 14.0, 600, SemanticColorRole::Text, 21.7)),
+        widget(text(detail, 14.0, 400, SemanticColorRole::Muted, 21.7)),
+    ))
+    .key("inspect-status-center")
+    .into_any()
+}
+
+/// 状态胶囊盖在预览框左上角（PDF 在顶栏下面）。
+pub(super) fn status_layer(pill: AnyView, toolbar: Option<AnyView>) -> AnyView {
+    let top = if toolbar.is_some() { 54.0 } else { 12.0 };
+    let pill = widget(Stack::row(0.0).with_layout(move |layout| {
+        layout.position = nana_ui_core::PositionSpec::Absolute;
+        layout.offset_left = Some(LengthSpec::Px(12.0));
+        layout.offset_top = Some(LengthSpec::Px(top));
+        layout.max_width = Some(LengthSpec::percent_offset(100.0, -24.0));
+    }))
+    .children((pill,))
+    .key("inspect-status-layer")
+    .into_any();
+    let mut rows = Vec::new();
+    if let Some(toolbar) = toolbar {
+        rows.push(toolbar);
+    }
+    rows.push(pill);
+    widget(Stack::fill_column(0.0))
+        .children(rows)
+        .key("inspect-loading")
+        .into_any()
+}
+
+/// 状态胶囊：底是 bg-elev 的 84%，border-soft 细边。图片读取多一条 132×6 的扫动进度。
+pub(super) fn status_pill(title: &str, detail: &str, progress: bool) -> AnyView {
+    let mut children = vec![
+        widget(text(title, 12.0, 600, SemanticColorRole::Text, 18.6)).into_any(),
+        widget(text(detail, 12.0, 400, SemanticColorRole::Muted, 18.6).truncating()).into_any(),
+    ];
+    if progress {
+        children.push(super::super::preview_paint::status_progress());
+    }
+    let frame = Stack::row(8.0)
+        .align(AlignSpec::Center)
+        .padding_xy(8.0, 5.0)
+        .border(SemanticColorRole::BorderSoft, 1.0)
+        .radius(RadiusTier::Md);
+    let fill = nana_ui_core::SemanticColorMix::alpha(SemanticColorRole::Surface, 0.84);
+    let style = frame.node_style().surface_mix(fill);
+    widget(frame.style(style))
+        .children(children)
+        .key("inspect-status-pill")
+        .into_any()
+}
+
+/// 1024 以下写字节，其余换成 KB 或 MB，保留一位小数。
+pub(in super::super) fn format_byte_count(value: u64) -> String {
+    if value < 1024 {
+        return format!("{value} B");
+    }
+    if value < 1024 * 1024 {
+        return format!("{:.1} KB", value as f64 / 1024.0);
+    }
+    format!("{:.1} MB", value as f64 / 1024.0 / 1024.0)
+}
