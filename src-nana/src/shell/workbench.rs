@@ -27,7 +27,9 @@ pub(crate) fn meta(label: impl Into<String>) -> Text {
 pub(crate) fn with_bottom_divider(column: Stack) -> Stack {
     let mut style = column.node_style();
     style.border = Some(SemanticColorRole::BorderSoft);
-    std::sync::Arc::make_mut(&mut style.layout).border_bottom_width = Some(1.0);
+    std::sync::Arc::make_mut(&mut style.layout)
+        .border_sides
+        .bottom_width = Some(1.0);
     column.style(style)
 }
 

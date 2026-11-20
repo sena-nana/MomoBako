@@ -109,12 +109,14 @@ fn looks_like_svg(bytes: &[u8]) -> bool {
 /// 算法：先按文档尺寸画（最长边超过 [`SVG_EDGE`] 时缩到它以内）；文档比它小时按原比例拉到最长边正好是
 /// [`SVG_EDGE`] 重画一次。拉伸的画法交回预乘的像素，还原成直通 alpha，和别的图片一样由上传那一步再预乘。
 fn rasterize_svg(bytes: &[u8]) -> Result<super::PreviewPixels, String> {
-    let font = Some(nana_svg_raster::SvgFont {
-        bytes: nana_ui_core::fonts::UI_FONT_REGULAR,
-        family: nana_ui_core::fonts::UI_FONT_FAMILY,
-    });
+    let fonts = nana_svg_raster::SvgFonts {
+        faces: vec![std::sync::Arc::new(nana_ui_core::fonts::UI_FONT_REGULAR)],
+        sans_serif: Some(nana_ui_core::fonts::UI_FONT_FAMILY.into()),
+        ..Default::default()
+    };
+    let font = Some(&fonts);
     let Some(document) =
-        nana_svg_raster::rasterize_document_capped_with_font(bytes, SVG_EDGE, font)
+        nana_svg_raster::rasterize_document_capped_with_fonts(bytes, SVG_EDGE, font)
     else {
         eprintln!("Nana SVG 解析或绘制失败");
         return Err("SVG 解析或绘制失败".into());

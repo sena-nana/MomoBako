@@ -323,7 +323,7 @@ fn meta(head: Signal<PlaygroundHead>) -> AnyView {
 fn columns(signals: PlaygroundSignals) -> AnyView {
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
         layout.display = Some(nana_ui_core::DisplaySpec::Grid);
-        layout.grid_columns = Some(vec![
+        layout.grid.columns = Some(vec![
             style::capped(260.0, 420.0),
             GridTrack::MinMax {
                 min_px: 0.0,
@@ -346,7 +346,7 @@ fn columns(signals: PlaygroundSignals) -> AnyView {
 fn frame(gap: f32) -> Stack {
     pad(column(gap), 14.0, 14.0, 14.0, 14.0)
         .surface(Role::Background)
-        .outline(Role::BorderSoft, 1.0)
+        .border(Role::BorderSoft, 1.0)
         .radius(RadiusTier::Md)
         .with_layout(|layout| {
             layout.min_height = Some(LengthSpec::Px(0.0));
@@ -388,7 +388,7 @@ fn two_columns(
 ) -> AnyView {
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
         layout.display = Some(nana_ui_core::DisplaySpec::Grid);
-        layout.grid_columns = Some(vec![first, second]);
+        layout.grid.columns = Some(vec![first, second]);
         layout.gap = Some(LengthSpec::Px(10.0));
         layout.width = Some(LengthSpec::Fill);
     });
@@ -645,7 +645,7 @@ fn code_area_style(min_height: f32) -> nana_ui::runtime::NodeStyle {
     layout.min_height = Some(LengthSpec::Px(min_height));
     layout.flex_grow = Some(1.0);
     layout.white_space_nowrap = false;
-    layout.font_family = Some(style::MONO_FAMILY.into());
+    layout.text_ext.font_family = Some(style::MONO_FAMILY.into());
     layout.font_size = Some(12.0);
     layout.line_height = Some(nana_ui_core::LineHeightSpec::Relative(1.5));
     layout.padding_top = Some(LengthSpec::Px(10.0));
@@ -671,8 +671,8 @@ fn response_column(response: Signal<PlaygroundResponse>) -> AnyView {
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
         layout.display = Some(nana_ui_core::DisplaySpec::Grid);
         // CSS 只写了行轨道，隐式的一列会拉满宽度；Nana 网格要写明。
-        layout.grid_columns = Some(vec![GridTrack::Fr(1.0)]);
-        layout.grid_rows = Some(vec![
+        layout.grid.columns = Some(vec![GridTrack::Fr(1.0)]);
+        layout.grid.rows = Some(vec![
             GridTrack::MinMax {
                 min_px: 120.0,
                 fr: 0.34,

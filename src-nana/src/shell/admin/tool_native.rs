@@ -228,7 +228,7 @@ fn target_card(rows: Vec<AnyView>) -> AnyView {
     widget(
         pad(column(8.0), 12.0, 14.0, 12.0, 14.0)
             .surface(Role::Background)
-            .outline(Role::BorderSoft, 1.0)
+            .border(Role::BorderSoft, 1.0)
             .radius(RadiusTier::Md),
     )
     .children(rows)
@@ -246,7 +246,7 @@ fn code(text: impl nana_ui::runtime::view::IntoProp<String>, key: String) -> Any
     widget(
         pad(row(0.0), 1.0, 6.0, 1.0, 6.0)
             .surface(Role::Subtle)
-            .outline(Role::BorderSoft, 1.0)
+            .border(Role::BorderSoft, 1.0)
             .radius(RadiusTier::Xs),
     )
     .children((style::bound(mono(String::new(), 12.0, 400, Role::Text), text).key(key),))

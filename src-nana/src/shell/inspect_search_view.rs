@@ -130,7 +130,7 @@ fn header(head: Signal<SearchHead>) -> AnyView {
 fn searching_state(status: Signal<SearchStatus>) -> AnyView {
     widget(
         state_box()
-            .outline(SemanticColorRole::Border, 1.0)
+            .border(SemanticColorRole::Border, 1.0)
             .surface(SemanticColorRole::Background),
     )
     .visible(move || status.with(|status| status.searching))
@@ -151,7 +151,7 @@ fn searching_state(status: Signal<SearchStatus>) -> AnyView {
 /// 搜索失败。Vue 只把错误写进全局状态、面板里不显示；这里用 `.asset-browser__state--error`
 /// 的危险色写出真实错误，不让失败看起来像「没有结果」。
 fn error_state(status: Signal<SearchStatus>) -> AnyView {
-    widget(state_box().outline(SemanticColorRole::Danger, 1.0))
+    widget(state_box().border(SemanticColorRole::Danger, 1.0))
         .visible(move || status.with(|status| !status.error.is_empty()))
         .children((widgets::bound(
             widgets::wrapping_label(String::new(), 14.0, 400, SemanticColorRole::Danger),
@@ -194,7 +194,7 @@ fn empty_state(status: Signal<SearchStatus>) -> AnyView {
             .justify(JustifySpec::Center)
             .padding(24.0)
             .surface(SemanticColorRole::Subtle)
-            .outline(SemanticColorRole::BorderStrong, 1.0)
+            .border(SemanticColorRole::BorderStrong, 1.0)
             .radius(RadiusTier::Xl)
             .grow(0.0)
             .shrink(0.0)

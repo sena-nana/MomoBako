@@ -387,7 +387,7 @@ impl ShellView {
                 thumb.resource.clone()
             }) {
                 Ok(resource) => {
-                    if let Some(path) = super::thumbs::slot_file(&resource) {
+                    if let Some(path) = super::thumbs::slot_file(resource.as_str()) {
                         mounted.insert(path.to_string());
                     }
                 }
@@ -586,9 +586,12 @@ fn place_regions(
     sidebar: Option<StableNodeId>,
     primary: Option<StableNodeId>,
 ) -> Result<bool, FrameworkError> {
-    let slots = [(RegionId::Resources, sidebar), (RegionId::Primary, primary)]
+    // 主区外框是借给工作区的：工作区只管区域布局和底色，无障碍和输入仍是外框自己的。
+    // 侧栏折叠时外框要挪出工作区（`PrimaryPart::hold_solo`），借用的语义才不会把区域的无障碍留在它身上。
+    let slots = sidebar
+        .map(|sidebar| WorkspaceRegionSlot::new(RegionId::Resources, sidebar))
         .into_iter()
-        .filter_map(|(region, content)| Some(WorkspaceRegionSlot::new(region, content?)))
+        .chain(primary.map(|primary| WorkspaceRegionSlot::borrowed(RegionId::Primary, primary)))
         .collect::<Vec<_>>();
     if context.read(workspace, |current| current.slots == slots)? {
         return Ok(false);

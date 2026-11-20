@@ -2,7 +2,7 @@
 
 本文锁定 `momobako-nana` 当前构建能用的 Nana 组件、和旧 Tauri/Vue 工作台的对应关系，以及还没有现成组件的宿主缺口。稳定 id 以 `src-nana/src/capability.rs` 的 `COMPILED_COMPONENT_IDS` 为准；目录变了，`compiled_catalog_matches_the_locked_product_set` 会失败。
 
-`src-nana/Cargo.toml` 给 `nana-ui` 开 `hosted`、`bundled-fonts`、`components`、`icons-tabler`、`view-macro`、`packaged-resources`，给 `nana-ui-platform` 开 `clipboard`。`components` 打开 calendar、charts、controls、graph-canvas、image-viewer、rich-text；`hosted` 带上 GPU 和 AccessKit 平台适配；`view-macro` 提供结构块容器的 `css!` 和 `#[derive(Store)]`；`packaged-resources` 让程序启动时读发布包的 manifest，并回答 `nana-packager validate --run` 的自检（见 [发布包](./nana-packaging.md)）。没开 `syntax-highlighting`。Nana 修订是 `da9b22bf72d16dd9674dcd2b17c4f50970ce613a`，不保留本地副本。
+`src-nana/Cargo.toml` 给 `nana-ui` 开 `hosted`、`bundled-fonts`、`components`、`icons-tabler`、`view-macro`、`packaged-resources`，给 `nana-ui-platform` 开 `clipboard`。`components` 打开 calendar、charts、controls、graph-canvas、image-viewer、rich-text；`hosted` 带上 GPU 和 AccessKit 平台适配；`view-macro` 提供结构块容器的 `css!` 和 `#[derive(Store)]`；`packaged-resources` 让程序启动时读发布包的 manifest，并回答 `nana-packager validate --run` 的自检（见 [发布包](./nana-packaging.md)）。没开 `syntax-highlighting`。Nana 修订是 `bf35e6e64924533a292938258dafbd42966d18a3`，不保留本地副本。
 
 ## 已编译组件
 
@@ -85,6 +85,6 @@
 ## 没有现成组件的部分
 
 - 视频画面、PDF 页面和 3D 模型。视频帧解码后放进宿主纹理槽 `file-preview`，由 `GpuTextureView` 显示；PDF 页和模型网格软件光栅成 RGBA 帧，预览框把帧编码成 PNG 画出来（`src-nana/src/shell/inspect_view/page.rs`）。`GpuView` 只有内置调色板着色器，没有网格管线，产品没有用它。压缩包、Office 文本和 FBX、BLEND 文件头由内置预览读出（`src-nana/src/shell/inspect/native_preview.rs`）。
-- 系统托盘、拖出、窗口几何和系统媒体传输控件。托盘、拖出和媒体控件由宿主用 `tray-icon`、`drag`、`windows` crate 实现（`tray.rs`、`drag_out.rs`、`system_media.rs`）；窗口几何用 NanaUI 自带的 `persist_key` 持久化（`window_state.rs` 只给描述符和存储）。系统文件对话框和文件拖入用 Nana 平台的 `WindowCommand::OpenFileDialog` 和 `FileDropEvent`。测试只断言排出的请求和命令，真效果记在 `nana-device-matrix.md`。
+- 系统托盘、拖出、窗口几何和系统媒体传输控件。托盘用 NanaUI 的 `install_tray`（`tray.rs`）；拖出和媒体控件由宿主用 `drag`、`windows` crate 实现（`drag_out.rs`、`system_media.rs`）；窗口几何用 NanaUI 自带的 `persist_key` 持久化（`window_state.rs` 只给描述符和存储）。系统文件对话框和文件拖入用 Nana 平台的 `WindowCommand::OpenFileDialog` 和 `FileDropEvent`。测试只断言排出的请求和命令，真效果记在 `nana-device-matrix.md`。
 - 全局快捷键：没有实现。
 - 代码高亮：没开 `syntax-highlighting`。文本预览和 Vue `text-preview` 一样显示等宽原文，不着色。

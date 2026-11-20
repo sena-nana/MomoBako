@@ -143,7 +143,7 @@ pub(crate) fn extensions_page(signals: ToolsSignals, plugins: PluginPanelSignals
 fn tools(signals: ToolsSignals) -> nana_ui::runtime::view::El<Stack, (AnyView, AnyView)> {
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
         layout.display = Some(nana_ui_core::DisplaySpec::Grid);
-        layout.grid_columns = Some(vec![
+        layout.grid.columns = Some(vec![
             style::capped(180.0, 240.0),
             GridTrack::MinMax {
                 min_px: 0.0,
@@ -196,7 +196,8 @@ fn tool_tab(page: ToolTab, active: Signal<Option<String>>) -> AnyView {
                 ..SemanticPaint::default()
             },
             ..InteractionStyle::default()
-        },
+        }
+        .into(),
         ..NodeStyle::default()
     };
     {

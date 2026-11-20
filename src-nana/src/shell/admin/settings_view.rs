@@ -84,7 +84,9 @@ pub(crate) fn card(key: &'static str, children: Vec<AnyView>) -> AnyView {
 /// `.card h2`：13/600 弱色、大写、字距 0.5，下边距 8。
 pub(crate) fn card_title(text: &str, key: &'static str) -> AnyView {
     let mut title = label(text.to_uppercase(), 13.0, 600, Role::Muted);
-    Arc::make_mut(&mut title.style.layout).letter_spacing = Some(0.5);
+    Arc::make_mut(&mut title.style.layout)
+        .text_ext
+        .letter_spacing = Some(0.5);
     widget(pad(column(0.0), 0.0, 0.0, 8.0, 0.0))
         .children((widget(title).key(key),))
         .into_any()
@@ -311,7 +313,7 @@ fn segmented(items: Vec<AnyView>, key: &'static str) -> AnyView {
     let body = style::fixed(row(2.0), None, Some(34.0));
     let stack = pad(body, 2.0, 2.0, 2.0, 2.0)
         .surface(Role::Background)
-        .outline(Role::Border, 1.0)
+        .border(Role::Border, 1.0)
         .radius(RadiusTier::Md);
     widget(stack).children(items).key(key).into_any()
 }
@@ -347,7 +349,8 @@ fn segment_style(active: bool) -> NodeStyle {
                 ..SemanticPaint::default()
             },
             ..InteractionStyle::default()
-        },
+        }
+        .into(),
         text_horizontal_alignment: TextHorizontalAlignment::Center,
         text_vertical_alignment: TextVerticalAlignment::Center,
         ..NodeStyle::default()
@@ -713,7 +716,7 @@ fn cache_card(signals: SettingsSignals) -> AnyView {
     let cache = signals.cache;
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
         layout.display = Some(nana_ui_core::DisplaySpec::Grid);
-        layout.grid_columns = Some(vec![
+        layout.grid.columns = Some(vec![
             GridTrack::Fr(1.0),
             GridTrack::Fr(1.0),
             GridTrack::Fr(1.0),

@@ -332,7 +332,9 @@ fn header(head: Signal<PageHead>) -> AnyView {
         .font_size(11.0)
         .font_weight(600)
         .line_height(17.05);
-    Arc::make_mut(&mut eyebrow.style.layout).letter_spacing = Some(0.4);
+    Arc::make_mut(&mut eyebrow.style.layout)
+        .text_ext
+        .letter_spacing = Some(0.4);
     let titles = widget(
         Stack::column(0.0)
             .width(LengthSpec::Shrink)
@@ -664,7 +666,7 @@ fn item_title(item: EntryItem, id: &str, title: &str, head: Signal<PageHead>) ->
             .unwrap_or_default()
     };
     let ready = move || item.try_with(|entry| entry.ready).unwrap_or(false);
-    let hit = widget(bar::hit_area(title, false, 0.0, 6.0))
+    let hit = widget(bar::hit_area(title, false, 6.0))
         .prop::<Arc<str>, fields::icon_button::label>(move || Arc::from(filename()))
         .key(format!("playlist-item-title-{}", key_part(id)))
         .on_cx(move |_, _: &Activate, cx| {
@@ -695,7 +697,8 @@ fn item_title(item: EntryItem, id: &str, title: &str, head: Signal<PageHead>) ->
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0))
             .height(LengthSpec::Px(32.0))
-            .min_height(LengthSpec::Px(32.0)),
+            .min_height(LengthSpec::Px(32.0))
+            .with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative),
     )
     .children((
         hit,
@@ -769,7 +772,7 @@ fn dashed_empty(
             .align(AlignSpec::Center)
             .justify(JustifySpec::Center)
             .surface(SemanticColorRole::Subtle)
-            .outline(SemanticColorRole::BorderStrong, 1.0)
+            .border(SemanticColorRole::BorderStrong, 1.0)
             .radius(RadiusTier::Xl)
             .min_height(LengthSpec::Px(280.0))
             .with_layout(|layout| layout.border_style = Some(nana_ui_core::BorderStyle::Dashed)),

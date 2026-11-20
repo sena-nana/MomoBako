@@ -16,7 +16,7 @@ use momobako_nana::backend::services::repository::{
 use momobako_nana::shell::{
     ShellMessage, ShellPage, ShellViewModel, WorkspaceRepository, commit_interaction, mount_shell,
 };
-use nana_ui::runtime::{ComponentGeometry, Entity, StableNodeId, TextInput};
+use nana_ui::runtime::{Entity, ScrollbarBars, StableNodeId, TextInput};
 use nana_ui::theme::{SemanticPalette, ThemeAppearance};
 use nana_ui_devtools::agent::{
     AccessibilityDumpNode, AgentSession, BoundsDump, RuntimeAgentSession,
@@ -110,14 +110,10 @@ fn hovered_settings_page_paints_the_overlay_thumb() {
         context.advance_animations(deadline + std::time::Duration::from_secs(2));
     }
     session.flush().expect("淡入后的布局");
-    let Some(ComponentGeometry::Scrollbar {
+    let Some(ScrollbarBars {
         vertical: Some(bar),
         ..
-    }) = session
-        .document()
-        .context()
-        .world()
-        .component_geometry(scroll)
+    }) = session.document().context().world().scrollbar_bars(scroll)
     else {
         panic!("指针在设置页上时竖向滚动条要显示");
     };

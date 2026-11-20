@@ -11,6 +11,7 @@
 
 use std::sync::Arc;
 
+use nana_ui::TextureSlotName;
 use nana_ui::icons_tabler::{FILE, FILE_MUSIC, FOLDER, PHOTO, VIDEO};
 use nana_ui::runtime::view::fields::{self, HiddenWhenEmpty};
 use nana_ui::runtime::view::{
@@ -113,7 +114,7 @@ impl PreviewLook {
     }
 
     /// 缩略图槽；行没有缩略图时为空串。有缩略图、还没有纹理时节点藏着。
-    fn resource(&self) -> Arc<str> {
+    fn resource(&self) -> TextureSlotName {
         self.slot
             .as_deref()
             .map(super::super::thumbs::thumbnail_slot)
@@ -611,7 +612,7 @@ fn list_content(cell: &CardCell, item: CardItem, current: &CardView) -> AnyView 
             .align(AlignSpec::Center)
             .grow(1.0)
             .shrink(1.0)
-            .min_width(LengthSpec::Min2(
+            .min_width(LengthSpec::min2(
                 LengthAtom::Px(LIST_META_MIN),
                 LengthAtom::CalcPercent {
                     percent: 100.0,
@@ -667,11 +668,11 @@ fn title(label: String, list: bool) -> Text {
     let mut node = style::text(label, 14.0, 700, SemanticColorRole::Text, 14.0 * 1.35);
     {
         let layout = Arc::make_mut(&mut node.style.layout);
-        layout.line_clamp = Some(2);
+        layout.text_ext.line_clamp = Some(2);
         layout.text_overflow_ellipsis = true;
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
+        layout.text_ext.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
         if !list {
             layout.min_height = Some(LengthSpec::Px(38.0));
         }
@@ -709,7 +710,7 @@ where
     }
     let thumb = widget(thumb)
         .visible(move || thumb_look().texture.is_some())
-        .prop::<Arc<str>, fields::thumbnail::resource>(move || resource_look().resource())
+        .prop::<TextureSlotName, fields::thumbnail::resource>(move || resource_look().resource())
         .prop::<f32, fields::thumbnail::aspect>(move || look().aspect);
     let frame = Stack::column(0.0).style(preview_frame_style(
         &current, width, height, icon_size, radius,

@@ -212,7 +212,7 @@ fn labeled_center(window: &ApplicationWindow, label: &str) -> (f32, f32) {
         .document
         .context()
         .world()
-        .project_accessibility(document)
+        .project_accessibility_in_viewport(document)
         .into_iter()
         .find(|node| node.label.as_deref() == Some(label))
         .unwrap_or_else(|| panic!("没有 {label}"));
@@ -228,7 +228,7 @@ fn has_label(window: &ApplicationWindow, label: &str) -> bool {
         .document
         .context()
         .world()
-        .project_accessibility(document)
+        .project_accessibility_in_viewport(document)
         .iter()
         .any(|node| node.label.as_deref() == Some(label))
 }
@@ -544,7 +544,7 @@ fn preview_page_keeps_its_own_player_bar_without_a_trailing_slot() {
     let context = window.document.context();
     let world = context.world();
     let bars = world
-        .project_accessibility(document)
+        .project_accessibility_in_viewport(document)
         .into_iter()
         .filter(|node| node.label.as_deref() == Some("播放进度"))
         .collect::<Vec<_>>();
@@ -582,7 +582,7 @@ fn has_value(window: &ApplicationWindow, value: &str) -> bool {
         .document
         .context()
         .world()
-        .project_accessibility(document)
+        .project_accessibility_in_viewport(document)
         .iter()
         .any(|node| {
             node.value

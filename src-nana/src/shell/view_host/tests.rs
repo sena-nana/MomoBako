@@ -357,7 +357,7 @@ fn every_mount_shapes_text_in_simplified_chinese() {
     let language = |document: &nana_ui::runtime::RuntimeDocument| {
         let world = document.context().world();
         let label = world
-            .project_accessibility(document.document())
+            .project_accessibility_in_viewport(document.document())
             .into_iter()
             .find(|node| node.label.as_deref() == Some("默认资源库"))
             .expect("侧栏的仓库名")
@@ -399,7 +399,7 @@ fn mount_shell_tells_live_documents_apart() {
     let query = |document: &nana_ui::runtime::RuntimeDocument| {
         let world = document.context().world();
         world
-            .project_accessibility(document.document())
+            .project_accessibility_in_viewport(document.document())
             .into_iter()
             .find(|node| node.label.as_deref() == Some("全局搜索"))
             .and_then(|node| {

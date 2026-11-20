@@ -1203,11 +1203,11 @@ fn text_plugin(
         .line_height(21.45);
     {
         let layout = std::sync::Arc::make_mut(&mut body.style.layout);
-        layout.font_family = Some("monospace".into());
+        layout.text_ext.font_family = Some("monospace".into());
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.line_break = Some(nana_ui_core::LineBreakSpec::Anywhere);
-        layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
+        layout.text_ext.line_break = Some(nana_ui_core::LineBreakSpec::Anywhere);
+        layout.text_ext.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
         // `white-space: pre-wrap`：保留原文的换行和空格，长行在框内折行。
         layout.white_space = nana_ui_core::WhiteSpaceSpec::PreWrap;
     }
@@ -1217,7 +1217,7 @@ fn text_plugin(
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0))
             .surface(SemanticColorRole::Subtle)
-            .outline(SemanticColorRole::BorderSoft, 1.0)
+            .border(SemanticColorRole::BorderSoft, 1.0)
             .radius(RadiusTier::Md)
             .with_layout(|layout| {
                 layout.padding_top = Some(LengthSpec::Px(12.0));
@@ -1287,7 +1287,7 @@ fn chip(label: &str, emphasis: bool, key: &str) -> AnyView {
             .min_height(LengthSpec::Px(26.0))
             .padding_xy(8.0, 4.0)
             .surface(SemanticColorRole::Surface)
-            .outline(SemanticColorRole::Border, 1.0)
+            .border(SemanticColorRole::Border, 1.0)
             .radius(RadiusTier::Md)
             .grow(0.0)
             .shrink(0.0),
@@ -1503,7 +1503,7 @@ fn hud_chip(label: &str, key: &'static str) -> AnyView {
         .align(AlignSpec::Center)
         .min_height(LengthSpec::Px(26.0))
         .padding_xy(8.0, 4.0)
-        .outline(SemanticColorRole::Border, 1.0)
+        .border(SemanticColorRole::Border, 1.0)
         .radius(RadiusTier::Md);
     let frame = if key == "inspect-model-hud-size" {
         let style = frame
@@ -1590,8 +1590,8 @@ fn overlay_reason(message: &str) -> Text {
     {
         let layout = std::sync::Arc::make_mut(&mut reason.style.layout);
         layout.max_width = Some(LengthSpec::Px(520.0));
-        layout.line_break = Some(nana_ui_core::LineBreakSpec::Anywhere);
-        layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
+        layout.text_ext.line_break = Some(nana_ui_core::LineBreakSpec::Anywhere);
+        layout.text_ext.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
     }
     reason
 }
@@ -1618,10 +1618,7 @@ fn status_layer(pill: AnyView, toolbar: Option<AnyView>) -> AnyView {
         layout.position = nana_ui_core::PositionSpec::Absolute;
         layout.offset_left = Some(LengthSpec::Px(12.0));
         layout.offset_top = Some(LengthSpec::Px(top));
-        layout.max_width = Some(LengthSpec::CalcPercentOffset {
-            percent: 100.0,
-            offset_px: -24.0,
-        });
+        layout.max_width = Some(LengthSpec::percent_offset(100.0, -24.0));
     }))
     .children((pill,))
     .key("inspect-status-layer")
@@ -1649,7 +1646,7 @@ fn status_pill(title: &str, detail: &str, progress: bool) -> AnyView {
     let frame = Stack::row(8.0)
         .align(AlignSpec::Center)
         .padding_xy(8.0, 5.0)
-        .outline(SemanticColorRole::BorderSoft, 1.0)
+        .border(SemanticColorRole::BorderSoft, 1.0)
         .radius(RadiusTier::Md);
     let fill = nana_ui_core::SemanticColorMix::alpha(SemanticColorRole::Surface, 0.84);
     let style = frame.node_style().surface_mix(fill);

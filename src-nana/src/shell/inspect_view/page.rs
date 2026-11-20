@@ -37,7 +37,7 @@ pub(super) fn page_bitmap(raster: &Pixels) -> AnyView {
         .min_width(LengthSpec::Px(0.0))
         .grow(0.0)
         .shrink(0.0)
-        .outline(SemanticColorRole::BorderSoft, 1.0)
+        .border(SemanticColorRole::BorderSoft, 1.0)
         .with_layout(|layout| {
             layout.aspect_ratio = Some(aspect);
             // 纸张在深浅主题里都是白的，和 `.office-preview__viewer--pdf canvas` 一致。

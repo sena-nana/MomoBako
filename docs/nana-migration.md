@@ -5,7 +5,7 @@
 ## 入口和运行
 
 - 原生入口是 crate `momobako-nana`：`src-nana/src/main.rs` 调 `momobako_nana::run()`（`src-nana/src/lib.rs`）。
-- NanaUI 固定在提交 `da9b22bf72d16dd9674dcd2b17c4f50970ce613a`。`src-nana/Cargo.toml` 的 `nana-ui`、`nana-ui-core`、`nana-ui-platform` 和开发依赖 `nana-ui-devtools` 都按这个 `rev` 从 Git 取。仓库里没有 NanaUI 副本，根 `Cargo.toml` 也没有 `[patch]`。
+- NanaUI 固定在提交 `bf35e6e64924533a292938258dafbd42966d18a3`。`src-nana/Cargo.toml` 的 `nana-ui`、`nana-ui-core`、`nana-ui-platform` 和开发依赖 `nana-ui-devtools` 都按这个 `rev` 从 Git 取。仓库里没有 NanaUI 副本，根 `Cargo.toml` 也没有 `[patch]`。
 
 在仓库根目录运行：
 
@@ -74,7 +74,7 @@ cargo run -p momobako-nana                   # 原生窗口
   - 每一行进度条的宽度照 Vue `.progress-bar__fill` 按 0.18 s 过渡到新值，减少动态效果时直接跳到新值（`motion.rs` 的 `set_task_fills`）。
   - 出这一行的操作：加载资源库（换仓库、刷新）、挂载资源库、创建资源库、重定向资源库、刷新文件树、来源下载，复制、移动、导入、ZIP 和 Eagle 导入、多选删除和还原，以及非静默的读目录（「读取目录」「读取回收站」「读取文件树」：回收站和快捷访问、刷新时重读目录、仓库动作完成后的重读、搜索命中所在目录）。点文件夹、双击进入和面包屑在 Vue 里是静默读取，不出。见 `operation_row_tests.rs`、`workspace_switch_tests.rs`。
 - **键盘和焦点**：菜单按钮（仓库头、「导入」）上的 ArrowDown / ArrowUp，文件卡片和文件夹行上的菜单键和 Shift+F10 打开菜单，焦点落在首项或末项（`menu_focus.rs`、`menu_focus_view.rs`）；菜单项首尾相接，Enter 执行，Escape 关掉。对话框、弹层和菜单关掉以后按同一条规则交还焦点（`focus_return.rs`）：回到打开它的控件；它随菜单、弹层收起了，回到菜单、弹层的主人（文件条目、文件夹行、仓库头、「导入」）；被删掉了，回到它那一片里选中的项或第一个能聚焦的控件；自己弹出来的硬链接确认回到文件列表里的条目。对话框在刷新时才关上，每帧画完以后（`presented`）补还。各对话框和弹层还到哪见 [壳层绑定式视图](./nana-shell-view.md) 的「焦点归还」，和 Vue 的差别见 [对照](./nana-vue-parity.md)。
-- **宿主操作**：标题栏的最小化、最大化、关闭；关闭行为按设置确认、退出或最小化到托盘（`src-nana/src/window_host.rs`）；托盘在 Windows 上用 `tray-icon`（`src-nana/src/tray.rs`）；主窗口几何由 NanaUI 持久化，下次启动建窗前恢复；打开和定位启动系统程序；拖出文件在 Windows 上用 `drag` crate（`src-nana/src/drag_out.rs`）；剪贴板读写系统剪贴板（`src-nana/src/host_bridge.rs`）；文件区和空库页接收系统文件拖入（`input::accept_file_drops`）；Escape 由运行时交给激活的对话框，其余按 `escape_layer` 关最上面一层。
+- **宿主操作**：标题栏的最小化、最大化、关闭；关闭行为按设置确认、退出或最小化到托盘（`src-nana/src/window_host.rs`）；托盘用 NanaUI 的 `install_tray`，选中的菜单项经菜单激活队列转成壳层消息（`src-nana/src/tray.rs`）；主窗口几何由 NanaUI 持久化，下次启动建窗前恢复；打开和定位启动系统程序；拖出文件在 Windows 上用 `drag` crate（`src-nana/src/drag_out.rs`）；剪贴板读写系统剪贴板（`src-nana/src/host_bridge.rs`）；文件区和空库页接收系统文件拖入（`input::accept_file_drops`）；Escape 由运行时交给激活的对话框，其余按 `escape_layer` 关最上面一层。
 
 ## 还没做或要靠设备验证的部分
 
@@ -87,13 +87,13 @@ cargo run -p momobako-nana                   # 原生窗口
 - **IME**：输入法组合期间延后重挂和换块（`ShellPart::composing`），由单测覆盖；真窗口里的中文输入法没有验收。
 - **真窗口**：窗口几何恢复、关闭行为和托盘在真窗口里的效果没有验收；测试只断言排出的窗口命令和宿主请求，不开真窗口。
 - **拖放**：拖入的放置决定由输入归约测试覆盖，拖出调用系统拖放；和资源管理器之间的真实拖放没有验收。
-- **托盘**：只在 Windows 上建；点击和菜单没有在真窗口里验收。
+- **托盘**：Windows 是通知区图标，macOS 是菜单栏图标，其它平台没有托盘、最小化到托盘按失败报出；点击和菜单没有在真窗口里验收。
 - **出声**：暂停后继续、播放中改音量的出声位置和音量，测试只核对游标交给声卡的起点帧和音量（测试构建不开声卡）；多声道下混、24 位和浮点 WAV 在真声卡上的效果没有验收。媒体基础的音轨读取和截断说明有测试走真实的源读取器（WAV、AVI 当容器），m4a、mp4 这些真实容器没有验收；本机没有 Ogg 的字节流处理程序时 Opus 解不开。
 - **UIA/AccessKit**：`hosted` 带 AccessKit 平台适配器；测试只读 NanaUI 自己的无障碍树，读屏器看到的结果没有验收。
 - **发布包**：发布流程（`.github/workflows/release.yml`）改用 NanaUI 的 `nana-packager` 打 `momobako-nana`，不再调用 tauri-action：dist 配置编主程序，打安装版布局和便携版两个 zip，各自 `validate`，便携版再跑 `validate --run --tamper-suite`，发到草稿 Release。本地用 `yarn nana:build`、`yarn nana:package`，见 [Nana 发布包](./nana-packaging.md)。没有安装程序（NanaUI 还没有安装包后端）和代码签名；没在干净的 Windows 上验收：没装 VC++ 运行库时能不能启动、解压到只读目录（例如 `Program Files`）以后数据是不是都落在用户目录。CI（`ci.yml`）分开跑 `yarn test:backend`、`yarn verify`、插件 build/package、`yarn nana:build` 和 `yarn nana:package --dry-run`；不跑 Nana 单测，也不执行完整发布打包。
 - **全局快捷键**：没有实现。删掉的 Vue 和 Tauri 端（提交 `1948ed9` 的 `src/`、`src-tauri/src`）也没有注册全局快捷键，宿主请求里不留占位变体。
 - **插件不带界面**：插件前端（设置页、工具页、预览、播放器的 Vue 组件）已经删掉，插件只剩后端形态，见 [API 设计](./api-design.md) 的 Plugin API。插件设置只画清单 `contributes.settings.fields` 声明的字段；工具页来自清单的 `contributes.toolPages`，三个内置页面画原生页面，宿主没有的工具页只画页头和「MomoBako 没有这个工具页：插件只能打开内置的工具页，不能自带页面。」（`src-nana/src/shell/admin/tools.rs`）；预览由内置视图按扩展名绘制（`native_preview::builtin_view`），认不出的扩展名照 Vue 没有预览插件时一样只画缩略图或类型图标；只有播放器贡献、扩展名又不是音视频或图片的条目写「暂不支持播放 {扩展名} 文件」（`src-nana/src/shell/player/clip.rs`）。
-- **NanaUI 版本**：固定在 10 月 11 日的 `da9b22bf`。升到 11 月的 main（`bf35e6e`）时，API 层面的改名（`LayoutStyle` 的文字、网格、变换和分边框字段收进 `text_ext`、`grid`、`transforms`、`border_sides`；`outline` 改名 `border`；`LengthSpec` 的 `Min2`、`CalcPercentOffset`、`CalcViewportOffset` 换成构造函数；`HostTexture::new`、`SvgFonts`、`TextureSlotName`、`scrollbar_bars`）都能机械迁过去，但新的布局模型和浮层命中让 31 个单测失败（菜单项点到下面的收起层、播放条和卡片的尺寸、框选、进度条拖动、歌词点击、播放列表重排），要逐项对照新语义重做并在真窗口里验收，所以还没升。升级后托盘可以换成 NanaUI 的 `install_tray`，去掉 `tray-icon`。
+- **NanaUI 版本**：11 月 20 日的 main。从 10 月的版本升上来时，按 NanaUI 的新语义改过三处：绝对定位按最近的定位祖先和它的内边距盒算（NanaUI #200），所以盖在行和卡片上的点击层、角标、浮层的容器都写明 `position: relative`；无障碍树的 `bounds` 改成相对父节点，测试找点击位置用 `project_accessibility_in_viewport`；主区外框以借用（`WorkspaceRegionSlot::borrowed`）放进工作区，侧栏折叠时挪出来，写回自己的样式。
 
 逐项的设备验收要求见 [设备矩阵](./nana-device-matrix.md)。
 

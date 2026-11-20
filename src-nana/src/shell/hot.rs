@@ -333,12 +333,13 @@ impl FieldWrite<Stack, LayerPaint> for LayerPaintField {
     fn write(target: &mut Stack, value: LayerPaint) {
         let layout = Arc::make_mut(&mut <Stack as StyledComponent>::node_style_mut(target).layout);
         layout.opacity = Some(value.opacity);
-        layout.transform = Some(value.transform);
+        layout.transforms.transform = Some(value.transform);
     }
 
     fn differs(target: &Stack, value: &LayerPaint) -> bool {
         let layout = &<Stack as StyledComponent>::node_style(target).layout;
-        layout.opacity != Some(value.opacity) || layout.transform != Some(value.transform)
+        layout.opacity != Some(value.opacity)
+            || layout.transforms.transform != Some(value.transform)
     }
 }
 
@@ -369,11 +370,12 @@ impl FieldWrite<IconGlyph, f32> for SpinField {
     const FIELD: &'static str = "IconGlyph.style.layout.transform";
 
     fn write(target: &mut IconGlyph, degrees: f32) {
-        Arc::make_mut(&mut target.style.layout).transform = Some(spin_transform(degrees));
+        Arc::make_mut(&mut target.style.layout).transforms.transform =
+            Some(spin_transform(degrees));
     }
 
     fn differs(target: &IconGlyph, degrees: &f32) -> bool {
-        target.style.layout.transform != Some(spin_transform(*degrees))
+        target.style.layout.transforms.transform != Some(spin_transform(*degrees))
     }
 }
 

@@ -17,9 +17,6 @@ use super::super::super::player::{PlayerMessage, QueueItem};
 use super::super::paint::{HoverSurface, SliderTrack};
 use super::{BarProps, display_title};
 
-/// 卡片内边距：上 12、左右 16。浮层的绝对定位从内容盒算起。
-const CARD_PADDING_TOP: f32 = 12.0;
-const CARD_PADDING_X: f32 = 16.0;
 /// 浮层上限高度，和 Vue `max-height: 320px` 一致。
 const QUEUE_MAX_HEIGHT: f32 = 320.0;
 /// 浮层内边距和行距。
@@ -211,7 +208,7 @@ fn cover_image(
 /// 盖满父级的透明可点区域。名字只给无障碍；悬停、按下时铺底色，内容由兄弟节点画在上面。
 /// 要放在兄弟节点前面，绘制顺序才在下层。绝对定位从父级内容盒算起，`inset` 是父级内边距，
 /// 往外扩回去才盖住整块。
-pub(crate) fn hit_area(label: &str, disabled: bool, inset: f32, radius: f32) -> IconButton {
+pub(crate) fn hit_area(label: &str, disabled: bool, radius: f32) -> IconButton {
     let mut button = IconButton::new(super::icons::PLAY, label)
         .colors_from_style()
         .disabled(disabled);
@@ -220,16 +217,10 @@ pub(crate) fn hit_area(label: &str, disabled: bool, inset: f32, radius: f32) -> 
     button.style.painter = Some(HoverSurface { radius }.into());
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
     layout.position = nana_ui_core::PositionSpec::Absolute;
-    layout.offset_left = Some(LengthSpec::Px(-inset));
-    layout.offset_top = Some(LengthSpec::Px(-inset));
-    layout.width = Some(LengthSpec::CalcPercentOffset {
-        percent: 100.0,
-        offset_px: inset * 2.0,
-    });
-    layout.height = Some(LengthSpec::CalcPercentOffset {
-        percent: 100.0,
-        offset_px: inset * 2.0,
-    });
+    layout.offset_left = Some(LengthSpec::Px(0.0));
+    layout.offset_top = Some(LengthSpec::Px(0.0));
+    layout.width = Some(LengthSpec::Percent(100.0));
+    layout.height = Some(LengthSpec::Percent(100.0));
     button
 }
 
@@ -336,7 +327,7 @@ fn fit_switch(cover: bool) -> AnyView {
             .align(AlignSpec::Center)
             .padding(2.0)
             .surface(SemanticColorRole::Background)
-            .outline(SemanticColorRole::BorderSoft, 1.0)
+            .border(SemanticColorRole::BorderSoft, 1.0)
             .radius(RadiusTier::Md),
     )
     .children((
@@ -437,22 +428,19 @@ pub(super) fn queue_popover(props: &BarProps) -> AnyView {
         Stack::column(8.0)
             .padding(QUEUE_PADDING)
             .surface(SemanticColorRole::Surface)
-            .outline(SemanticColorRole::BorderStrong, 1.0)
+            .border(SemanticColorRole::BorderStrong, 1.0)
             .radius(RadiusTier::Xl)
             .with_layout(|layout| {
                 layout.position = nana_ui_core::PositionSpec::Absolute;
-                // Vue 相对卡片内边距盒：右 14、底边在卡片上沿再往上 10。这里换算到内容盒。
-                layout.offset_right = Some(LengthSpec::Px(14.0 - CARD_PADDING_X));
-                layout.offset_bottom = Some(LengthSpec::CalcPercentOffset {
-                    percent: 100.0,
-                    offset_px: 10.0 + CARD_PADDING_TOP,
-                });
+                // 相对卡片的内边距盒：右 14、底边在卡片上沿再往上 10。
+                layout.offset_right = Some(LengthSpec::Px(14.0));
+                layout.offset_bottom = Some(LengthSpec::percent_offset(100.0, 10.0));
                 layout.width = Some(LengthSpec::Px(360.0));
-                layout.max_width = Some(LengthSpec::CalcViewportOffset {
-                    axis: nana_ui_core::ViewportAxis::Width,
-                    value: 100.0,
-                    offset_px: -48.0,
-                });
+                layout.max_width = Some(LengthSpec::viewport_offset(
+                    nana_ui_core::ViewportAxis::Width,
+                    100.0,
+                    -48.0,
+                ));
                 layout.max_height = Some(LengthSpec::Px(QUEUE_MAX_HEIGHT));
                 layout.paint.box_shadows = vec![nana_ui_core::BoxShadowSpec {
                     paint_color: None,
@@ -481,7 +469,7 @@ fn queue_row(item: &QueueItem, media: &'static str, active: bool) -> AnyView {
             .unwrap_or_else(|| item.status.clone())
     };
     let id = item.id.clone();
-    let hit = widget(hit_area(&title, !ready, 8.0, 10.0))
+    let hit = widget(hit_area(&title, !ready, 10.0))
         .key(format!("player-queue-{}", super::super::key_part(&item.id)))
         .on_cx(move |_, _: &Activate, cx| {
             cx.dispatch_program_all(player_message(PlayerMessage::PlayItem {
@@ -519,7 +507,8 @@ fn queue_row(item: &QueueItem, media: &'static str, active: bool) -> AnyView {
         .padding(8.0)
         .min_height(LengthSpec::Px(56.0))
         .width(LengthSpec::Fill)
-        .radius(RadiusTier::Lg);
+        .radius(RadiusTier::Lg)
+        .with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative);
     widget(dim_surface(row, surface, dim))
         .children((hit, queue_cover(item, media, dim), meta))
         .into_any()

@@ -385,7 +385,7 @@ fn inline_field(
         .padding_xy(10.0, 0.0)
         .min_height(LengthSpec::Px(34.0))
         .surface(SemanticColorRole::Background)
-        .outline(SemanticColorRole::BorderSoft, 1.0)
+        .border(SemanticColorRole::BorderSoft, 1.0)
         .radius(RadiusTier::Lg);
     widget(style::meta_row(first))
         .key(format!("{key}-row"))
@@ -887,7 +887,7 @@ fn source_action(icon: Icon, key: &str, title: &'static str) -> El<IconButton> {
     button.style = button
         .style
         .clone()
-        .outline(SemanticColorRole::BorderSoft, 1.0);
+        .border(SemanticColorRole::BorderSoft, 1.0);
     let hover = SemanticPaint {
         foreground: Some(SemanticColorRole::Text),
         border: Some(SemanticColorRole::Accent),
@@ -1197,7 +1197,7 @@ mod tests {
         let nodes = document
             .context()
             .world()
-            .project_accessibility(document.document());
+            .project_accessibility_in_viewport(document.document());
         let labelled = |label: &str| {
             nodes
                 .iter()

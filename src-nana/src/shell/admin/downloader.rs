@@ -327,7 +327,9 @@ fn rows(items: &[(String, String)]) -> AnyView {
 
 fn field_label(text: &str) -> nana_ui::runtime::Text {
     let mut text = label(text.to_uppercase(), 11.0, 700, Role::Faint);
-    Arc::make_mut(&mut text.style.layout).letter_spacing = Some(0.4);
+    Arc::make_mut(&mut text.style.layout)
+        .text_ext
+        .letter_spacing = Some(0.4);
     text
 }
 

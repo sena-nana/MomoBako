@@ -203,7 +203,10 @@ mod tests {
                     .is_some(),
                 "{theme} 当前行投影还在"
             );
-            assert!(active.layout.transform.is_some(), "{theme} 当前行放大还在");
+            assert!(
+                active.layout.transforms.transform.is_some(),
+                "{theme} 当前行放大还在"
+            );
         }
     }
 

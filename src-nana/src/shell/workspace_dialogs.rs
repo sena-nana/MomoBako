@@ -271,7 +271,7 @@ fn hardlink_dialog(model: &ShellViewModel) -> Option<AnyView> {
             .width(LengthSpec::Fill)
             .padding(10.0)
             .surface(SemanticColorRole::Subtle)
-            .outline(SemanticColorRole::BorderSoft, 1.0)
+            .border(SemanticColorRole::BorderSoft, 1.0)
             .radius(RadiusTier::Md),
     )
     .children((

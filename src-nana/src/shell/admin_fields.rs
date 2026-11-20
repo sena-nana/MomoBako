@@ -168,7 +168,7 @@ fn field_row(item: FieldItem) -> AnyView {
     let grid =
         Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(move |layout| {
             layout.display = Some(nana_ui_core::DisplaySpec::Grid);
-            layout.grid_columns = Some(columns);
+            layout.grid.columns = Some(columns);
             layout.gap = Some(LengthSpec::Px(10.0));
             layout.width = Some(LengthSpec::Fill);
             layout.align_items = AlignSpec::Center;
@@ -274,7 +274,7 @@ fn control(
                 layout.height = None;
                 layout.min_height = Some(LengthSpec::Px(92.0));
                 layout.white_space_nowrap = false;
-                layout.font_family = Some(style::MONO_FAMILY.into());
+                layout.text_ext.font_family = Some(style::MONO_FAMILY.into());
                 layout.font_size = Some(13.0);
                 layout.padding_top = Some(LengthSpec::Px(10.0));
                 layout.padding_bottom = Some(LengthSpec::Px(10.0));

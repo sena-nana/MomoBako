@@ -270,7 +270,7 @@ fn toolbar_chip(label: &str, key: &str, emphasis: bool) -> AnyView {
             .align(AlignSpec::Center)
             .padding_xy(8.0, 4.0)
             .surface(SemanticColorRole::Surface)
-            .outline(SemanticColorRole::Border, 1.0)
+            .border(SemanticColorRole::Border, 1.0)
             .radius(RadiusTier::Md),
     )
     .children((widget(
@@ -794,7 +794,7 @@ fn stacked_value(
         let mut style = column.node_style();
         style.border = Some(SemanticColorRole::BorderSoft);
         let layout = std::sync::Arc::make_mut(&mut style.layout);
-        layout.border_top_width = Some(1.0);
+        layout.border_sides.top_width = Some(1.0);
         layout.padding_top = Some(LengthSpec::Px(12.0));
         column = column.style(style);
     }
@@ -803,7 +803,9 @@ fn stacked_value(
         .font_size(11.0)
         .font_weight(700)
         .line_height(17.05);
-    std::sync::Arc::make_mut(&mut name.style.layout).letter_spacing = Some(0.4);
+    std::sync::Arc::make_mut(&mut name.style.layout)
+        .text_ext
+        .letter_spacing = Some(0.4);
     let mut text = Text::new(untrack(&value))
         .color(SemanticColorRole::Text)
         .font_size(14.0)
@@ -811,7 +813,7 @@ fn stacked_value(
     {
         let layout = std::sync::Arc::make_mut(&mut text.style.layout);
         layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
+        layout.text_ext.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
     }
     widget(column)
         .visible(shown)

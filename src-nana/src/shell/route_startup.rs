@@ -264,7 +264,7 @@ fn step_row(item: StartupStepItem) -> AnyView {
     let badge = match item.state {
         StartupStepState::Current => badge
             .surface(SemanticColorRole::AccentSoft)
-            .outline(SemanticColorRole::Accent, 1.0)
+            .border(SemanticColorRole::Accent, 1.0)
             .radius_px(999.0),
         StartupStepState::Done => badge.painter(
             SoftFill::ok()
@@ -278,7 +278,7 @@ fn step_row(item: StartupStepItem) -> AnyView {
         ),
         StartupStepState::Pending => badge
             .surface(SemanticColorRole::Subtle)
-            .outline(SemanticColorRole::Border, 1.0)
+            .border(SemanticColorRole::Border, 1.0)
             .radius_px(999.0),
     };
     let copy = widget(
@@ -366,7 +366,7 @@ fn log_panel(logs: Signal<Vec<LogRow>>) -> AnyView {
         Stack::column(0.0)
             .width(LengthSpec::Fill)
             .surface(SemanticColorRole::Subtle)
-            .outline(SemanticColorRole::Border, 1.0)
+            .border(SemanticColorRole::Border, 1.0)
             .radius(RadiusTier::Sm)
             .with_layout(|layout| {
                 layout.max_height = Some(LengthSpec::Px(LOG_PANEL_MAX_HEIGHT));

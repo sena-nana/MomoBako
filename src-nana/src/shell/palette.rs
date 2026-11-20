@@ -241,7 +241,7 @@ fn swatch(
         return None;
     };
     let mut frame = super::files_view::style::fixed(Stack::row(0.0), width, height)
-        .outline(SemanticColorRole::BorderSoft, 1.0);
+        .border(SemanticColorRole::BorderSoft, 1.0);
     frame = match radius {
         Some(tier) => frame.radius(tier),
         None => frame.radius_px(999.0),

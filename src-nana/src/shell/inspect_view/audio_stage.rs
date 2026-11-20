@@ -345,7 +345,7 @@ pub(super) fn audio_stage(
     let shell = widget(
         Stack::fill_column(0.0)
             .surface(SemanticColorRole::Surface)
-            .outline(SemanticColorRole::BorderSoft, 1.0)
+            .border(SemanticColorRole::BorderSoft, 1.0)
             .radius(RadiusTier::Xl)
             .padding(if stacked { 18.0 } else { 22.0 })
             .min_height(LengthSpec::Px(0.0))
@@ -762,15 +762,12 @@ pub(super) fn loading_card(name: &str, video: bool) -> AnyView {
         Stack::column(10.0)
             .padding(14.0)
             .surface(SemanticColorRole::Surface)
-            .outline(SemanticColorRole::BorderSoft, 1.0)
+            .border(SemanticColorRole::BorderSoft, 1.0)
             .radius(RadiusTier::Md)
             .max_width(360.0)
             .painter(super::preview_paint::LoadingCardShadow)
             .with_layout(|layout| {
-                layout.width = Some(LengthSpec::CalcPercentOffset {
-                    percent: 100.0,
-                    offset_px: -32.0,
-                });
+                layout.width = Some(LengthSpec::percent_offset(100.0, -32.0));
             }),
     )
     .children((

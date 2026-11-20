@@ -25,14 +25,16 @@ struct Look {
 }
 
 /// `.smart-folder-dialog { width: min(720px, calc(100vw - 40px)) }`。
-const SMART_FOLDER: DialogSize = DialogSize::Width(LengthSpec::Min2(
-    LengthAtom::Px(720.0),
-    LengthAtom::CalcViewport {
-        axis: ViewportAxis::Width,
-        value: 100.0,
-        offset_px: -40.0,
-    },
-));
+fn smart_folder() -> DialogSize {
+    DialogSize::Width(LengthSpec::min2(
+        LengthAtom::Px(720.0),
+        LengthAtom::CalcViewport {
+            axis: ViewportAxis::Width,
+            value: 100.0,
+            offset_px: -40.0,
+        },
+    ))
+}
 
 /// 照 Vue 各对话框的模板和样式：`.modal-card` 520，导出 560，智能文件夹 720；处理文件夹、删除
 /// 智能文件夹、删除资源库和删除插件是危险口气；复制、硬链接、导出和删除插件标题前有图标。
@@ -63,7 +65,7 @@ fn vue_look(name: &str) -> Look {
             danger: false,
             icon: Some(DOWNLOAD),
         },
-        "smart-folder-dialog" => plain(SMART_FOLDER),
+        "smart-folder-dialog" => plain(smart_folder()),
         "folder-create-dialog" | "playlist-create-dialog" | "close-confirm" => plain(MODAL_CARD),
         other => panic!("没写 {other} 在 Vue 里的样子"),
     }

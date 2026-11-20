@@ -422,7 +422,7 @@ fn queue_item(
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
     if ruled {
-        layout.border_bottom_width = Some(1.0);
+        layout.border_sides.bottom_width = Some(1.0);
     }
     item = item.style(style);
     let mut children = vec![widget(queue_title(title)).into_any()];
@@ -612,7 +612,7 @@ fn queue_card(key: &str, rows: Vec<AnyView>) -> AnyView {
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0))
             .surface(SemanticColorRole::Surface)
-            .outline(SemanticColorRole::BorderSoft, 1.0)
+            .border(SemanticColorRole::BorderSoft, 1.0)
             .radius(RadiusTier::Md)
             .with_layout(|layout| {
                 layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;

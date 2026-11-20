@@ -136,7 +136,7 @@ pub(crate) fn resident_filter_bar(signals: FilterBarSignals) -> AnyView {
         Stack::column(10.0)
             .padding_xy(14.0, 12.0)
             .surface(SemanticColorRole::Surface)
-            .outline(SemanticColorRole::BorderSoft, 1.0)
+            .border(SemanticColorRole::BorderSoft, 1.0)
             .radius(RadiusTier::Lg)
             .grow(0.0)
             .shrink(0.0)
@@ -515,15 +515,18 @@ fn advanced_group(signals: FilterBarSignals) -> AnyView {
             .shrink(1.0)
             .with_layout(|layout| {
                 layout.display = Some(DisplaySpec::Grid);
-                layout.grid_columns_repeat = Some(GridRepeatAuto {
-                    kind: GridTrackListUnsupported::RepeatAutoFit,
-                    tracks: vec![GridTrack::MinMax {
-                        min_px: 132.0,
-                        fr: 1.0,
-                        max_px: None,
-                    }],
-                    ..GridRepeatAuto::default()
-                });
+                layout.grid.columns_repeat = Some(
+                    GridRepeatAuto {
+                        kind: GridTrackListUnsupported::RepeatAutoFit,
+                        tracks: vec![GridTrack::MinMax {
+                            min_px: 132.0,
+                            fr: 1.0,
+                            max_px: None,
+                        }],
+                        ..GridRepeatAuto::default()
+                    }
+                    .into(),
+                );
                 layout.row_gap = Some(LengthSpec::Px(6.0));
                 layout.column_gap = Some(LengthSpec::Px(6.0));
             }),
@@ -541,7 +544,7 @@ fn advanced_input(input: &AdvancedInput, draft: ModelField) -> AnyView {
     let field = input.field;
     let pill = widgets::input_pill(true).with_layout(|layout| {
         if input.wide {
-            layout.grid_placement.column_start = GridLine::Span(2);
+            layout.grid.placement.column_start = GridLine::Span(2);
         }
     });
     widget(pill)

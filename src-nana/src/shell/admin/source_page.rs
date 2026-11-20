@@ -292,7 +292,7 @@ fn repository_row(
         12.0,
     )
     .surface(Role::Subtle)
-    .outline(Role::BorderSoft, 1.0)
+    .border(Role::BorderSoft, 1.0)
     .radius(RadiusTier::Md);
     widget(frame)
         .children((
@@ -456,7 +456,7 @@ fn session_flow(plugin_id: &str, source: Signal<Option<SourceAuthView>>) -> AnyV
     ));
     let frame = pad(column(12.0), 12.0, 12.0, 12.0, 12.0)
         .surface(Role::Subtle)
-        .outline(Role::BorderSoft, 1.0)
+        .border(Role::BorderSoft, 1.0)
         .radius(RadiusTier::Md);
     widget(frame)
         .visible(move || {

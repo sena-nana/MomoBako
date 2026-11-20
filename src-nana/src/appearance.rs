@@ -120,6 +120,7 @@ fn scrollbar_recipe() -> ScrollbarRecipe {
             hide_delay_ms: SCROLLBAR_FADE_MS,
             ..ScrollbarMotion::DEFAULT
         },
+        ..ScrollbarRecipe::DEFAULT
     }
 }
 
@@ -186,6 +187,7 @@ fn dialog_recipe() -> DialogRecipe {
             enter_offset_y: DIALOG_ENTER_OFFSET,
             enter_scale: DIALOG_ENTER_SCALE,
         },
+        ..DialogRecipe::DEFAULT
     }
 }
 
@@ -558,7 +560,7 @@ mod tests {
     fn hovered_scroll_areas_fade_in_the_vue_overlay_thumb() {
         use crate::shell::view_harness::ShellHarness;
         use crate::shell::{ShellPage, ShellViewModel};
-        use nana_ui::runtime::ComponentGeometry;
+        use nana_ui::runtime::ScrollbarBars;
 
         let mut shell = ShellViewModel::for_page(ShellPage::Settings);
         shell.settings.theme = "dark".into();
@@ -573,13 +575,8 @@ mod tests {
         );
         harness.finish_motion();
         let scroll = harness.keyed("settings-scroll").expect("设置页的滚动区");
-        let world = |harness: &ShellHarness| {
-            harness
-                .document()
-                .context()
-                .world()
-                .component_geometry(scroll)
-        };
+        let world =
+            |harness: &ShellHarness| harness.document().context().world().scrollbar_bars(scroll);
         let content = |harness: &ShellHarness| {
             let document = harness.document();
             let world = document.context().world();
@@ -600,7 +597,7 @@ mod tests {
             nana_ui::InputModifiers::default(),
         );
         harness.finish_motion();
-        let Some(ComponentGeometry::Scrollbar {
+        let Some(ScrollbarBars {
             vertical: Some(bar),
             horizontal: None,
         }) = world(&harness)

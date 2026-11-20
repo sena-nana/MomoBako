@@ -295,7 +295,7 @@ fn state_box(label: String, error: bool, spinner: bool, hot: HotSignals) -> AnyV
         let mut glyph = nana_ui::runtime::IconGlyph::new(LOADER_2)
             .size(16.0)
             .role(color);
-        Arc::make_mut(&mut glyph.style.layout).transform =
+        Arc::make_mut(&mut glyph.style.layout).transforms.transform =
             Some(super::super::motion::spin_transform(degrees));
         // 旋转角逐帧走，绑在热信号上。
         widget(glyph)

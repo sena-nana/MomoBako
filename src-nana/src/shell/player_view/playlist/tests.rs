@@ -144,7 +144,7 @@ fn semantic_lines(document: &RuntimeDocument) -> Vec<String> {
     document
         .context()
         .world()
-        .project_accessibility(document.document())
+        .project_accessibility_in_viewport(document.document())
         .into_iter()
         .map(|node| {
             let bounds = node.bounds;

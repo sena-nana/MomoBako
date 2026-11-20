@@ -384,7 +384,8 @@ fn filter_chip(
                 ..Default::default()
             },
             ..Default::default()
-        },
+        }
+        .into(),
         text_horizontal_alignment: nana_ui::runtime::TextHorizontalAlignment::Center,
         text_vertical_alignment: nana_ui::runtime::TextVerticalAlignment::Center,
         ..Default::default()
@@ -468,7 +469,7 @@ fn log_item(item: LogItem) -> AnyView {
         .into_any();
     let card = pad(column(12.0), 14.0, 16.0, 14.0, 16.0)
         .surface(Role::Background)
-        .outline(Role::BorderSoft, 1.0)
+        .border(Role::BorderSoft, 1.0)
         .radius(RadiusTier::Xl);
     widget(card)
         .children((head, body, context_block(item, &id)))

@@ -112,7 +112,7 @@ impl ShellHarness {
         self.document()
             .context()
             .world()
-            .project_accessibility(self.document().document())
+            .project_accessibility_in_viewport(self.document().document())
     }
 
     /// 无障碍名正好是 `label` 的第一个节点。
@@ -550,7 +550,7 @@ impl ShellHarness {
             &fresh
                 .context()
                 .world()
-                .project_accessibility(fresh.document()),
+                .project_accessibility_in_viewport(fresh.document()),
         );
         assert_lines_match("无障碍树", &semantic_lines(&self.nodes()), &theirs);
         let ours = structure_lines(self.document());
@@ -617,7 +617,7 @@ fn structure_lines(document: &RuntimeDocument) -> Vec<String> {
     let context = document.context();
     let world = context.world();
     let states = world
-        .project_accessibility(document.document())
+        .project_accessibility_in_viewport(document.document())
         .into_iter()
         .map(|node| {
             let state = format!(

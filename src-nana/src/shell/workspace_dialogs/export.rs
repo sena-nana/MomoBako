@@ -235,7 +235,7 @@ fn repository_box(view: Signal<ExportView>) -> AnyView {
             .min_width(LengthSpec::Px(0.0))
             .padding_xy(10.0, 9.0)
             .surface(SemanticColorRole::Background)
-            .outline(SemanticColorRole::BorderSoft, 1.0)
+            .border(SemanticColorRole::BorderSoft, 1.0)
             .radius(RadiusTier::Sm),
     )
     .children((
@@ -270,7 +270,7 @@ fn segmented(view: Signal<ExportView>) -> AnyView {
             .padding(2.0)
             .height(LengthSpec::Px(34.0))
             .surface(SemanticColorRole::Background)
-            .outline(SemanticColorRole::Border, 1.0)
+            .border(SemanticColorRole::Border, 1.0)
             .radius(RadiusTier::Md),
     )
     .children((

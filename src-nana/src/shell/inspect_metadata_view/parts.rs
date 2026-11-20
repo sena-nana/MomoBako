@@ -359,7 +359,7 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
             .width(LengthSpec::Fill)
             .padding(12.0)
             .surface(SemanticColorRole::Surface)
-            .outline(SemanticColorRole::BorderSoft, 1.0)
+            .border(SemanticColorRole::BorderSoft, 1.0)
             .radius(RadiusTier::Xl),
     )
     .visible(move || tags.with(|view| view.menu_open))
@@ -428,7 +428,7 @@ fn option_chip(
     let outlined = button
         .style
         .clone()
-        .outline(SemanticColorRole::Border, 1.0)
+        .border(SemanticColorRole::Border, 1.0)
         .radius_px(999.0);
     let add = tag.to_string();
     widget(button.style(outlined))

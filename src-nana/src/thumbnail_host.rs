@@ -218,7 +218,7 @@ fn upload_texture(
             thumb.width.saturating_mul(4),
         )
         .map_err(|error| format!("像素写入失败：{error}"))?;
-    Ok(HostTexture::new(1, 1, &texture))
+    Ok(HostTexture::new(&texture))
 }
 
 /// 文件预览的图片或视频画面。预览框这一帧不从 `file-preview` 槽取画面（预览页藏着、预览的是幻灯片
@@ -270,7 +270,7 @@ pub(crate) fn publish_preview(
     }
     window.textures.register(
         "file-preview",
-        HostTexture::new(1, 1, &texture),
+        HostTexture::new(&texture),
         pixels.width,
         pixels.height,
         HostTextureAlphaMode::Premultiplied,

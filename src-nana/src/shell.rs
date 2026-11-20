@@ -161,6 +161,8 @@ pub enum ShellMessage {
     /// 宿主观察到的运行中任务（排队、运行、取消中），整份换上。
     TaskProgressLoaded(Vec<TaskProgressSnapshot>),
     WindowAction(WindowAction),
+    /// 托盘菜单选中的动作，宿主直接操作窗口，不进归约。
+    Tray(crate::tray::TrayAction),
     /// 带代次的仓库列表结果。代次不匹配时保留当前启动步骤。
     WorkspaceListLoaded {
         generation: u64,
@@ -758,7 +760,7 @@ impl ShellViewModel {
             | ShellMessage::SettingsSaved(_)
             | ShellMessage::TaskProgressLoaded(_)
             | ShellMessage::Admin(_) => {}
-            ShellMessage::WindowAction(_) => {}
+            ShellMessage::WindowAction(_) | ShellMessage::Tray(_) => {}
             ShellMessage::RepositorySynced { generation, result } => {
                 self.note_repository_synced(generation, result)
             }

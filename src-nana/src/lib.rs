@@ -31,7 +31,7 @@ mod sidebar_dispatch;
 mod sync_dispatch;
 mod task_guard;
 mod task_watch;
-mod tray;
+pub(crate) mod tray;
 mod window_host;
 mod window_state;
 use shell::{
@@ -275,6 +275,10 @@ impl ApplicationState for MomoBakoApplication {
     ) -> RuntimeProgramUpdate {
         if let ShellMessage::ThumbnailPixels(frames) = &mut message {
             self.queue_thumbnail_frames(frames);
+        }
+        if let ShellMessage::Tray(action) = message {
+            window_host::on_tray(context, action);
+            return RuntimeProgramUpdate::default();
         }
         let Some((id, window)) = windows.iter_mut().next() else {
             return RuntimeProgramUpdate::default();

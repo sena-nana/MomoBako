@@ -106,7 +106,7 @@ fn snapshot(count: usize) -> FileBrowserSnapshot {
 fn scroll_around(document: &RuntimeDocument, label: &str) -> StableNodeId {
     let world = document.context().world();
     let node = world
-        .project_accessibility(document.document())
+        .project_accessibility_in_viewport(document.document())
         .into_iter()
         .find(|node| {
             node.label
@@ -177,7 +177,7 @@ fn visible_rows(document: &RuntimeDocument, scroll: StableNodeId) -> Vec<String>
     let world = document.context().world();
     let viewport = world.layout_box(scroll).expect("滚动容器有布局盒");
     let mut rows = world
-        .project_accessibility(document.document())
+        .project_accessibility_in_viewport(document.document())
         .into_iter()
         .filter(|node| {
             node.bounds.y < viewport.y + viewport.height

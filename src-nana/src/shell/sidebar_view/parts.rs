@@ -99,7 +99,8 @@ pub(crate) fn row_style(
             ..hover
         },
         ..InteractionStyle::default()
-    };
+    }
+    .into();
     style.text_vertical_alignment = nana_ui::runtime::TextVerticalAlignment::Center;
     style
 }
@@ -233,7 +234,9 @@ pub(crate) fn group_header(title: AnyView, tools: Vec<AnyView>, key: &'static st
 /// 分组标题文字：11px、700、`--text-faint`、字距 0.4px。
 pub(crate) fn group_title(value: &str) -> Text {
     let mut node = label_text(value, 11.0, 700, Some(SemanticColorRole::Faint));
-    Arc::make_mut(&mut node.style.layout).letter_spacing = Some(0.4);
+    Arc::make_mut(&mut node.style.layout)
+        .text_ext
+        .letter_spacing = Some(0.4);
     node
 }
 
@@ -344,7 +347,8 @@ pub(crate) fn icon_button_style(
             ..hover_paint()
         },
         ..InteractionStyle::default()
-    };
+    }
+    .into();
     style.text_horizontal_alignment = nana_ui::runtime::TextHorizontalAlignment::Center;
     style.text_vertical_alignment = nana_ui::runtime::TextVerticalAlignment::Center;
     style
@@ -386,7 +390,7 @@ fn hint_text(copy: &str) -> Text {
     let layout = Arc::make_mut(&mut node.style.layout);
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
-    layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
+    layout.text_ext.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
     node
 }
 

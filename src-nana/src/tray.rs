@@ -1,49 +1,72 @@
-//! 系统托盘。
+//! 系统托盘，用 NanaUI 的 `install_tray`。
 //!
-//! 提示 MomoBako，左键或双击显示窗口，菜单是「打开 MomoBako」和「退出」。Windows 上用 `tray-icon` 的通知图标；
-//! 当前固定的 NanaUI 版本还没有托盘接口（之后的版本有 `install_tray`，升级后改用它）。
-//! 退出走窗口关闭，最后一扇窗口关掉后进程结束。最小化到托盘只隐藏窗口。
+//! 提示 MomoBako，左键显示窗口，菜单是「打开 MomoBako」和「退出」。Windows 上是通知区图标，macOS 上是
+//! 菜单栏图标；其它平台没有托盘，装不上时最小化到托盘按失败报出，不假装窗口已经收起来。
+//! 选中的菜单项经 NanaUI 的菜单激活队列取出，转成 [`ShellMessage::Tray`] 投递回事件循环，由宿主在
+//! `update` 里显示或关闭窗口（`window_host::on_tray`）。退出走窗口关闭，最后一扇窗口关掉后进程结束。
 
-#[cfg(windows)]
-use std::sync::{Arc, Mutex};
+use nana_ui::{MenuEntry, RuntimeProgramContext, Tray, TraySupport};
 
-pub const TRAY_OPEN_ID: &str = "tray-open";
-pub const TRAY_QUIT_ID: &str = "tray-quit";
+use crate::shell::ShellMessage;
+
+/// 「打开 MomoBako」，也是左键点图标时报的 id。
+const TRAY_OPEN: u32 = 0x4d42_0001;
+/// 「退出」。
+const TRAY_QUIT: u32 = 0x4d42_0002;
 const TOOLTIP: &str = "MomoBako";
 
+/// 托盘菜单选中的动作。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TrayAction {
     Show,
     Quit,
 }
 
-/// 菜单 id 对应的动作。其它 id 忽略。
-pub fn menu_action(id: &str) -> Option<TrayAction> {
+/// 菜单 id 对应的动作。别的 id（不是托盘的菜单项）忽略。
+fn menu_action(id: u32) -> Option<TrayAction> {
     match id {
-        TRAY_OPEN_ID => Some(TrayAction::Show),
-        TRAY_QUIT_ID => Some(TrayAction::Quit),
+        TRAY_OPEN => Some(TrayAction::Show),
+        TRAY_QUIT => Some(TrayAction::Quit),
         _ => None,
     }
 }
 
-/// 建立托盘。失败时调用方不能假装窗口已经收进托盘。
-pub fn install(window: nana_ui::WindowHandle) -> Result<TrayHost, String> {
-    #[cfg(windows)]
-    {
-        install_windows(window)
-    }
-    #[cfg(not(windows))]
-    {
-        let _ = window;
-        Err("当前平台没有系统托盘接口".into())
+fn tray() -> Tray {
+    Tray {
+        tooltip: TOOLTIP.into(),
+        icon_png: crate::app_icon::SMALL_PNG.to_vec(),
+        template_icon: false,
+        menu: vec![
+            MenuEntry::item(TRAY_OPEN, "打开 MomoBako"),
+            MenuEntry::item(TRAY_QUIT, "退出"),
+        ],
+        primary: Some(TRAY_OPEN),
     }
 }
 
-pub struct TrayHost {
-    #[cfg(windows)]
-    _icon: tray_icon::TrayIcon,
-    #[cfg(not(windows))]
-    _private: (),
+/// 建立托盘。选中的菜单项转成壳层消息投递回事件循环。平台没有托盘或图标建不起来时返回原因。
+pub fn install(context: &RuntimeProgramContext<ShellMessage>) -> Result<(), String> {
+    let events = std::sync::Mutex::new(context.clone());
+    let support = nana_ui::install_tray(&tray(), move || {
+        let Ok(events) = events.lock() else {
+            eprintln!("Nana 托盘消息通道锁已损坏");
+            return;
+        };
+        for id in nana_ui::take_menu_activations() {
+            if let Some(action) = menu_action(id) {
+                events.dispatch(ShellMessage::Tray(action));
+            }
+        }
+    });
+    match support {
+        TraySupport::Unavailable => Err("当前平台没有系统托盘，或托盘图标没有建起来".into()),
+        TraySupport::NotificationArea | TraySupport::MenuBarExtra => Ok(()),
+    }
+}
+
+/// 拿掉托盘图标。没装时什么都不做。
+pub fn remove() {
+    nana_ui::remove_tray();
 }
 
 /// 隐藏主窗口，进程继续运行。
@@ -51,88 +74,16 @@ pub fn hide(window: &nana_ui::WindowHandle) {
     let _request = window.set_visible(false);
 }
 
-/// 显示、取消最小化并聚焦。对应托盘左键、双击和「打开 MomoBako」。
+/// 显示、取消最小化并聚焦。对应托盘左键和「打开 MomoBako」。
 pub fn show(window: &nana_ui::WindowHandle) {
     let _visible = window.set_visible(true);
     let _minimized = window.set_minimized(false);
     let _focus = window.focus();
 }
 
-/// 关掉主窗口。Nana 在最后一扇窗口关闭后退出事件循环，从而结束进程。
+/// 关掉主窗口。NanaUI 在最后一扇窗口关闭后退出事件循环，从而结束进程。
 pub fn quit(window: &nana_ui::WindowHandle) {
     let _request = window.close();
-}
-
-#[cfg(windows)]
-fn install_windows(window: nana_ui::WindowHandle) -> Result<TrayHost, String> {
-    use tray_icon::menu::{Menu, MenuEvent, MenuItem};
-    use tray_icon::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-
-    let icon = app_icon()?;
-    let open = MenuItem::with_id(TRAY_OPEN_ID, "打开 MomoBako", true, None);
-    let quit_item = MenuItem::with_id(TRAY_QUIT_ID, "退出", true, None);
-    let menu = Menu::new();
-    menu.append(&open)
-        .map_err(|error| format!("托盘菜单没有挂上：{error}"))?;
-    menu.append(&quit_item)
-        .map_err(|error| format!("托盘菜单没有挂上：{error}"))?;
-
-    let shared = Arc::new(Mutex::new(window));
-    let clicks = Arc::clone(&shared);
-    TrayIconEvent::set_event_handler(Some(move |event| {
-        let show_window = matches!(
-            event,
-            TrayIconEvent::Click {
-                button: MouseButton::Left,
-                button_state: MouseButtonState::Up,
-                ..
-            } | TrayIconEvent::DoubleClick {
-                button: MouseButton::Left,
-                ..
-            }
-        );
-        if show_window {
-            dispatch(&clicks, TrayAction::Show);
-        }
-    }));
-    let menu_window = Arc::clone(&shared);
-    MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
-        if let Some(action) = menu_action(event.id().as_ref()) {
-            dispatch(&menu_window, action);
-        }
-    }));
-
-    let icon = TrayIconBuilder::new()
-        .with_id("main-tray")
-        .with_menu(Box::new(menu))
-        .with_tooltip(TOOLTIP)
-        .with_menu_on_left_click(false)
-        .with_icon(icon)
-        .build()
-        .map_err(|error| format!("托盘图标没有建起来：{error}"))?;
-    Ok(TrayHost { _icon: icon })
-}
-
-#[cfg(windows)]
-fn dispatch(window: &Mutex<nana_ui::WindowHandle>, action: TrayAction) {
-    let Ok(window) = window.lock() else {
-        eprintln!("Nana 托盘窗口句柄锁已损坏");
-        return;
-    };
-    match action {
-        TrayAction::Show => show(&window),
-        TrayAction::Quit => quit(&window),
-    }
-}
-
-#[cfg(windows)]
-fn app_icon() -> Result<tray_icon::Icon, String> {
-    let image = image::load_from_memory(crate::app_icon::SMALL_PNG)
-        .map_err(|error| format!("托盘图标解码失败：{error}"))?;
-    let rgba = image.to_rgba8();
-    let (width, height) = rgba.dimensions();
-    tray_icon::Icon::from_rgba(rgba.into_raw(), width, height)
-        .map_err(|error| format!("托盘图标无效：{error}"))
 }
 
 #[cfg(test)]
@@ -141,9 +92,17 @@ mod tests {
 
     #[test]
     fn menu_ids_map_to_tray_actions() {
-        assert_eq!(menu_action(TRAY_OPEN_ID), Some(TrayAction::Show));
-        assert_eq!(menu_action(TRAY_QUIT_ID), Some(TrayAction::Quit));
-        assert_eq!(menu_action("其他"), None);
-        assert_eq!(TOOLTIP, "MomoBako");
+        assert_eq!(menu_action(TRAY_OPEN), Some(TrayAction::Show));
+        assert_eq!(menu_action(TRAY_QUIT), Some(TrayAction::Quit));
+        assert_eq!(menu_action(7), None);
+    }
+
+    #[test]
+    fn tray_opens_the_window_on_a_primary_click() {
+        let tray = tray();
+        assert_eq!(tray.tooltip, "MomoBako");
+        assert_eq!(tray.primary, Some(TRAY_OPEN));
+        assert_eq!(tray.menu.len(), 2);
+        assert!(image::load_from_memory(&tray.icon_png).is_ok(), "托盘图标是 PNG");
     }
 }

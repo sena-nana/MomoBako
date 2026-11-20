@@ -437,10 +437,7 @@ fn display_mode_field(mode: Signal<DisplayMode>) -> AnyView {
         let layout = Arc::make_mut(&mut select.style.layout);
         layout.height = Some(LengthSpec::Px(34.0));
         layout.min_height = Some(LengthSpec::Px(34.0));
-        layout.width = Some(LengthSpec::CalcPercentOffset {
-            percent: 100.0,
-            offset_px: 2.0,
-        });
+        layout.width = Some(LengthSpec::percent_offset(100.0, 2.0));
         layout.min_width = Some(LengthSpec::Px(0.0));
         layout.margin_left = Some(LengthSpec::Px(-1.0));
         layout.margin_top = Some(LengthSpec::Px(-1.0));
@@ -551,7 +548,7 @@ fn field_box(min_width: f32, height: f32) -> Stack {
         .grow(0.0)
         .shrink(0.0)
         .surface(SemanticColorRole::Background)
-        .outline(SemanticColorRole::Border, 1.0)
+        .border(SemanticColorRole::Border, 1.0)
         .radius(RadiusTier::Lg)
 }
 
@@ -656,7 +653,7 @@ fn import_menu(tools: Signal<Tools>) -> AnyView {
         .min_width(LengthSpec::Px(184.0))
         .padding(8.0)
         .surface(SemanticColorRole::Surface)
-        .outline(SemanticColorRole::BorderSoft, 1.0)
+        .border(SemanticColorRole::BorderSoft, 1.0)
         .radius(RadiusTier::Xl)
         .with_layout(|layout| {
             layout.position = PositionSpec::Absolute;

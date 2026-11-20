@@ -39,7 +39,7 @@ pub(crate) fn note_accent(mode: ThemeAppearance) {
 pub(super) fn lift_active_line(button: &mut Button) {
     let mode = ACCENT.with(Cell::get);
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
-    layout.transform = Some(crate::shell::motion::shift_scale(0.0, ACTIVE_LYRIC_SCALE));
+    layout.transforms.transform = Some(crate::shell::motion::shift_scale(0.0, ACTIVE_LYRIC_SCALE));
     layout.paint.filter = Some(active_filter(mode));
 }
 
@@ -117,7 +117,7 @@ mod tests {
                     .context()
                     .world()
                     .node_style(harness.keyed("inspect-audio-lyric-active").expect("当前行"))
-                    .and_then(|style| style.layout.transform),
+                    .and_then(|style| style.layout.transforms.transform),
                 Some(crate::shell::motion::shift_scale(0.0, ACTIVE_LYRIC_SCALE)),
                 "{theme} 的放大还在"
             );

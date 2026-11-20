@@ -16,16 +16,25 @@ use crate::{MomoBakoApplication, host_api};
 
 /// 托盘和图标失败原因，以及跟这一扇主窗口走的帧时钟。窗口几何由 NanaUI 持久化（`window_state.rs`）。
 pub(crate) struct HostSession {
-    pub tray: Option<crate::tray::TrayHost>,
+    /// 托盘图标装上了没有。装上的托盘在会话结束时拿掉。
+    pub tray_installed: bool,
     pub tray_error: Option<String>,
     /// 准备帧的时钟：每帧的步长是两帧之间真实流逝的时间。
     pub frames: FrameClock,
 }
 
+impl Drop for HostSession {
+    fn drop(&mut self) {
+        if self.tray_installed {
+            crate::tray::remove();
+        }
+    }
+}
+
 impl Default for HostSession {
     fn default() -> Self {
         Self {
-            tray: None,
+            tray_installed: false,
             tray_error: None,
             frames: FrameClock::default(),
         }
@@ -37,15 +46,27 @@ pub(crate) fn install_tray(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
 ) {
-    if app.host.tray.is_some() || app.host.tray_error.is_some() {
+    if app.host.tray_installed || app.host.tray_error.is_some() {
         return;
     }
-    match crate::tray::install(context.window()) {
-        Ok(tray) => app.host.tray = Some(tray),
+    match crate::tray::install(context) {
+        Ok(()) => app.host.tray_installed = true,
         Err(error) => {
             eprintln!("Nana 托盘没有建起来：{error}");
             app.host.tray_error = Some(error);
         }
+    }
+}
+
+/// 托盘菜单选中的动作：显示窗口或退出。
+pub(crate) fn on_tray(
+    context: &RuntimeProgramContext<ShellMessage>,
+    action: crate::tray::TrayAction,
+) {
+    let window = context.window();
+    match action {
+        crate::tray::TrayAction::Show => crate::tray::show(&window),
+        crate::tray::TrayAction::Quit => crate::tray::quit(&window),
     }
 }
 
@@ -55,7 +76,7 @@ pub(crate) fn after_update(
     context: &RuntimeProgramContext<ShellMessage>,
 ) {
     let window = context.window();
-    let tray_ready = app.host.tray.is_some();
+    let tray_ready = app.host.tray_installed;
     let tray_error = app.host.tray_error.clone();
     crate::host_bridge::perform_live(&mut app.shell, &window, tray_ready, tray_error.as_deref());
     crate::shell::sync_media_session(&window, &app.shell);

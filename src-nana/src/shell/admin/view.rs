@@ -152,7 +152,7 @@ pub(crate) fn task_popover(model: &ShellViewModel) -> Option<AnyView> {
         .into_any();
     let popover = pad(column(10.0), 10.0, 10.0, 10.0, 10.0)
         .surface(Role::Surface)
-        .outline(Role::BorderStrong, 1.0)
+        .border(Role::BorderStrong, 1.0)
         .radius(RadiusTier::Md)
         .with_layout(|layout| {
             layout.width = Some(LengthSpec::Px(340.0));
@@ -302,7 +302,7 @@ fn task_item(
     widget(
         pad(column(6.0), 9.0, 9.0, 9.0, 9.0)
             .surface(Role::Background)
-            .outline(Role::BorderSoft, 1.0)
+            .border(Role::BorderSoft, 1.0)
             .radius(RadiusTier::Sm),
     )
     .children((
@@ -370,7 +370,7 @@ fn progress_bar(
     let track = widget(
         style::rounded(Stack::row(0.0), None)
             .surface(Role::Subtle)
-            .outline(Role::BorderSoft, 1.0)
+            .border(Role::BorderSoft, 1.0)
             .with_layout(|layout| {
                 layout.width = Some(LengthSpec::Fill);
                 layout.height = Some(LengthSpec::Px(6.0));

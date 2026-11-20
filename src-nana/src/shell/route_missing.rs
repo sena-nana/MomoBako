@@ -201,13 +201,13 @@ fn path_box(view: Signal<MissingView>) -> AnyView {
         SemanticColorRole::Text,
         18.0,
     );
-    Arc::make_mut(&mut node.style.layout).font_family = Some(MONO_FONTS.into());
+    Arc::make_mut(&mut node.style.layout).text_ext.font_family = Some(MONO_FONTS.into());
     widget(
         Stack::column(0.0)
             .width(LengthSpec::Fill)
             .padding_xy(12.0, 10.0)
             .surface(SemanticColorRole::Background)
-            .outline(SemanticColorRole::Border, 1.0)
+            .border(SemanticColorRole::Border, 1.0)
             .radius(RadiusTier::Sm),
     )
     .children((widget(node)

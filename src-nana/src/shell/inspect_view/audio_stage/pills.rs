@@ -36,7 +36,7 @@ pub(super) fn pill(label: &str, chip: bool, key: &'static str) -> AnyView {
         .align(nana_ui::runtime::AlignSpec::Center)
         .min_height(LengthSpec::Px(26.0))
         .padding_xy(8.0, 4.0)
-        .outline(border, 1.0)
+        .border(border, 1.0)
         .radius_px(999.0)
         .grow(0.0)
         .shrink(0.0);

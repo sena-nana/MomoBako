@@ -215,7 +215,7 @@ fn action_body(signals: ActionsSignals) -> AnyView {
     let list = widget(
         column(0.0)
             .surface(Role::Surface)
-            .outline(Role::BorderSoft, 1.0)
+            .border(Role::BorderSoft, 1.0)
             .radius(RadiusTier::Md),
     )
     .children((items,))
@@ -223,7 +223,7 @@ fn action_body(signals: ActionsSignals) -> AnyView {
     .into_any();
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
         layout.display = Some(nana_ui_core::DisplaySpec::Grid);
-        layout.grid_columns = Some(vec![
+        layout.grid.columns = Some(vec![
             style::capped(220.0, 300.0),
             nana_ui_core::GridTrack::MinMax {
                 min_px: 0.0,
@@ -252,7 +252,8 @@ fn action_row(item: ActionRow, detail: Signal<Option<ActionDetail>>) -> AnyView 
                 ..Default::default()
             },
             ..Default::default()
-        },
+        }
+        .into(),
         ..Default::default()
     };
     {
@@ -361,7 +362,7 @@ fn action_detail(detail: Signal<Option<ActionDetail>>) -> AnyView {
     widget(
         pad(column(0.0), 14.0, 14.0, 14.0, 14.0)
             .surface(Role::Surface)
-            .outline(Role::BorderSoft, 1.0)
+            .border(Role::BorderSoft, 1.0)
             .radius(RadiusTier::Md),
     )
     .visible(move || detail.with(Option::is_some))
@@ -392,7 +393,7 @@ fn step_view(step: &StepView) -> AnyView {
             10.0,
         )
         .surface(Role::Subtle)
-        .outline(Role::BorderSoft, 1.0)
+        .border(Role::BorderSoft, 1.0)
         .radius(RadiusTier::Sm),
     )
     .children(children)

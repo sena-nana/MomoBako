@@ -44,14 +44,18 @@ pub(crate) fn small_muted(label: impl Into<String>) -> Text {
 /// `asset-meta__row > span:first-child`：11px、700、最弱色，字距 0.4。
 pub(crate) fn row_label(label: impl Into<String>) -> Text {
     let mut node = text(label, 11.0, 700, SemanticColorRole::Faint, 11.0 * LINE_BODY);
-    std::sync::Arc::make_mut(&mut node.style.layout).letter_spacing = Some(0.4);
+    std::sync::Arc::make_mut(&mut node.style.layout)
+        .text_ext
+        .letter_spacing = Some(0.4);
     node
 }
 
 /// `asset-browser__eyebrow`：11px、600、最弱色，字距 0.4。
 pub(crate) fn eyebrow(label: impl Into<String>) -> Text {
     let mut node = text(label, 11.0, 600, SemanticColorRole::Faint, 11.0 * LINE_BODY);
-    std::sync::Arc::make_mut(&mut node.style.layout).letter_spacing = Some(0.4);
+    std::sync::Arc::make_mut(&mut node.style.layout)
+        .text_ext
+        .letter_spacing = Some(0.4);
     node.nowrap(true)
 }
 
@@ -87,7 +91,7 @@ pub(crate) fn wrapping(mut node: Text) -> Text {
     let layout = std::sync::Arc::make_mut(&mut node.style.layout);
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
-    layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
+    layout.text_ext.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
     node
 }
 
@@ -116,7 +120,7 @@ pub(crate) fn top_rule(stack: Stack, padding_top: f32) -> Stack {
     let mut style = stack.node_style();
     style.border = Some(SemanticColorRole::BorderSoft);
     let layout = std::sync::Arc::make_mut(&mut style.layout);
-    layout.border_top_width = Some(1.0);
+    layout.border_sides.top_width = Some(1.0);
     layout.padding_top = Some(LengthSpec::Px(padding_top));
     stack.style(style)
 }
@@ -125,7 +129,9 @@ pub(crate) fn top_rule(stack: Stack, padding_top: f32) -> Stack {
 pub(crate) fn bottom_rule(stack: Stack) -> Stack {
     let mut style = stack.node_style();
     style.border = Some(SemanticColorRole::BorderSoft);
-    std::sync::Arc::make_mut(&mut style.layout).border_bottom_width = Some(1.0);
+    std::sync::Arc::make_mut(&mut style.layout)
+        .border_sides
+        .bottom_width = Some(1.0);
     stack.style(style)
 }
 

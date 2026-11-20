@@ -60,8 +60,8 @@ pub(crate) fn wrapping_label(
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
     layout.white_space_nowrap = false;
-    layout.line_break = Some(nana_ui_core::LineBreakSpec::Anywhere);
-    layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
+    layout.text_ext.line_break = Some(nana_ui_core::LineBreakSpec::Anywhere);
+    layout.text_ext.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
     node
 }
 
@@ -74,7 +74,9 @@ pub(crate) fn margin_top(mut node: Text, px: f32) -> Text {
 /// 眉题：11px、600 字重、弱色，字距 0.4px。
 pub(crate) fn eyebrow(content: impl Into<String>) -> Text {
     let mut node = label(content, 11.0, 600, SemanticColorRole::Faint);
-    Arc::make_mut(&mut node.style.layout).letter_spacing = Some(0.4);
+    Arc::make_mut(&mut node.style.layout)
+        .text_ext
+        .letter_spacing = Some(0.4);
     node
 }
 
@@ -272,7 +274,7 @@ pub(crate) fn input_pill(fill: bool) -> Stack {
         .height(LengthSpec::Px(CONTROL_HEIGHT))
         .min_height(LengthSpec::Px(CONTROL_HEIGHT))
         .surface(SemanticColorRole::Background)
-        .outline(SemanticColorRole::Border, 1.0)
+        .border(SemanticColorRole::Border, 1.0)
         .radius_px(999.0)
         .grow(0.0)
         .shrink(0.0)
@@ -405,7 +407,7 @@ pub(crate) fn hint_chip(content: &str, key: String) -> AnyView {
             .height(LengthSpec::Px(28.0))
             .padding_xy(10.0, 0.0)
             .surface(SemanticColorRole::Background)
-            .outline(SemanticColorRole::Border, 1.0)
+            .border(SemanticColorRole::Border, 1.0)
             .radius_px(999.0)
             .grow(0.0)
             .shrink(0.0),

@@ -253,10 +253,12 @@ pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
     }
     let card = Stack::column(10.0)
         .surface(SemanticColorRole::Surface)
-        .outline(SemanticColorRole::BorderStrong, 1.0)
+        .border(SemanticColorRole::BorderStrong, 1.0)
         .radius(RadiusTier::Xxl)
         .min_height(LengthSpec::Px(124.0))
         .with_layout(|layout| {
+            // 队列浮层按卡片的内边距盒定位。
+            layout.position = nana_ui_core::PositionSpec::Relative;
             layout.padding_top = Some(LengthSpec::Px(12.0));
             layout.padding_right = Some(LengthSpec::Px(16.0));
             layout.padding_bottom = Some(LengthSpec::Px(16.0));
@@ -320,7 +322,8 @@ fn progress(props: &BarProps) -> AnyView {
             .width(LengthSpec::Fill)
             .height(LengthSpec::Px(8.0))
             .min_height(LengthSpec::Px(8.0))
-            .painter(ProgressTrack { ratio }),
+            .painter(ProgressTrack { ratio })
+            .with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative),
     )
     .prop::<f32, hot::TrackRatioField>(hot::prop(|signals| signals.progress, ratio))
     .children((seek,))
@@ -397,7 +400,7 @@ fn media(props: &BarProps) -> AnyView {
         SemanticColorRole::Surface,
         crate::theme_map::DISABLED_OPACITY,
     ));
-    let hit = widget(parts::hit_area(&title, !props.has_item(), 0.0, 6.0))
+    let hit = widget(parts::hit_area(&title, !props.has_item(), 6.0))
         .key("player-media")
         .on_cx(|_, _: &Activate, cx| {
             cx.dispatch_program_all(player_message(PlayerMessage::OpenPreview { item_id: None }))
@@ -432,7 +435,8 @@ fn media(props: &BarProps) -> AnyView {
         Stack::row(12.0)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0))
-            .min_height(LengthSpec::Px(58.0)),
+            .min_height(LengthSpec::Px(58.0))
+            .with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative),
     )
     .children((hit, cover(props, dim), meta))
     .key("player-media-row")
@@ -587,8 +591,9 @@ fn time(props: &BarProps) -> AnyView {
         .line_height(18.6)
         .with_min_width_zero();
     // `tnum` 是 tabular-nums 的 OpenType 特性，分秒进位时字宽不跳。
-    std::sync::Arc::make_mut(&mut node.style.layout).font_features =
-        Some(vec![nana_ui_core::FontFeatureSetting::new(*b"tnum", 1)]);
+    std::sync::Arc::make_mut(&mut node.style.layout)
+        .text_ext
+        .font_features = Some(vec![nana_ui_core::FontFeatureSetting::new(*b"tnum", 1)]);
     widget(node)
         .prop::<String, fields::text::value>(hot::prop(|signals| signals.time, text))
         .key("player-time")

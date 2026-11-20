@@ -258,7 +258,7 @@ fn note_chrome_hover(
 fn label_in(world: &UiWorld, id: StableNodeId, labels: &[&str]) -> bool {
     let mut current = Some(id);
     while let Some(node) = current {
-        if node_names(world, node).any(|name| labels.contains(&name)) {
+        if node_names(world, node).any(|name| labels.contains(&name.as_str())) {
             return true;
         }
         current = world.parent_id(node);
@@ -278,12 +278,12 @@ fn footer_task(world: &UiWorld, id: StableNodeId) -> bool {
 }
 
 /// 节点的文字和无障碍名称。图标按钮没有文字，名称只在无障碍状态里。
-fn node_names(world: &UiWorld, node: StableNodeId) -> impl Iterator<Item = &str> {
-    world.text(node).into_iter().chain(
-        world
-            .accessibility(node)
-            .and_then(|state| state.label.as_deref()),
-    )
+fn node_names(world: &UiWorld, node: StableNodeId) -> impl Iterator<Item = String> {
+    let text = world.text(node).map(str::to_string);
+    let label = world
+        .accessibility(node)
+        .and_then(|state| state.label.as_deref().map(str::to_string));
+    text.into_iter().chain(label)
 }
 
 /// 文件表面已经挂上时，行里应该有路径标记。
@@ -1304,7 +1304,7 @@ mod tests {
             .document
             .context()
             .world()
-            .project_accessibility(document)
+            .project_accessibility_in_viewport(document)
     }
 
     fn reduce_queued(model: &mut ShellViewModel, window: &mut ApplicationWindow) {

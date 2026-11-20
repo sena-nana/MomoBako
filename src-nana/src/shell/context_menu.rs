@@ -387,7 +387,7 @@ pub(crate) fn context_menu(view: Signal<MenuView>, x: f32, y: f32, chrome: MenuC
     let surface = Stack::column(0.0)
         .padding(MENU_PADDING)
         .surface(SemanticColorRole::Surface)
-        .outline(SemanticColorRole::BorderStrong, 1.0)
+        .border(SemanticColorRole::BorderStrong, 1.0)
         .radius(RadiusTier::Md)
         .with_layout(move |layout| layout.position = PositionSpec::Absolute);
     let surface = style::with_shadows(surface, vec![style::shadow(10.0, 28.0, -10.0, 0.55)]);
@@ -421,7 +421,7 @@ struct MenuPlacement;
 
 impl MenuPlacement {
     fn clamped(anchor: f32, extent: f32) -> LengthSpec {
-        LengthSpec::Min2(
+        LengthSpec::min2(
             LengthAtom::Px(anchor.max(EDGE)),
             LengthAtom::CalcPercent {
                 percent: 100.0,
@@ -518,7 +518,7 @@ fn submenu(view: Signal<MenuView>, entry: &MenuEntry, chrome: MenuChrome) -> Any
         .width(LengthSpec::Px(menu_width(&entry.children)))
         .padding(MENU_PADDING)
         .surface(SemanticColorRole::Surface)
-        .outline(SemanticColorRole::BorderStrong, 1.0)
+        .border(SemanticColorRole::BorderStrong, 1.0)
         .radius(RadiusTier::Md);
     let bridge = Stack::column(0.0).hittable().with_layout(|layout| {
         layout.position = PositionSpec::Absolute;

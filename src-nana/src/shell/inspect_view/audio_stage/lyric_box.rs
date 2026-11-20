@@ -39,7 +39,7 @@ pub(super) fn apply(layout: &mut LayoutStyle) {
     layout.white_space = WhiteSpaceSpec::Normal;
     layout.white_space_nowrap = false;
     layout.text_overflow_ellipsis = false;
-    layout.overflow_wrap = Some(OverflowWrapSpec::Anywhere);
+    layout.text_ext.overflow_wrap = Some(OverflowWrapSpec::Anywhere);
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(1.0);
 }
@@ -123,7 +123,7 @@ mod tests {
             assert!(!style.layout.white_space_nowrap, "{label} 不该锁成一行");
             assert!(!style.layout.text_overflow_ellipsis, "{label} 不该省略");
             assert_eq!(
-                style.layout.overflow_wrap,
+                style.layout.text_ext.overflow_wrap,
                 Some(OverflowWrapSpec::Anywhere),
                 "{label} 应能在任意位置断开"
             );

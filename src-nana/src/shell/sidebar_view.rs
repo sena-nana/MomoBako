@@ -130,7 +130,7 @@ fn sidebar_switcher(head: Signal<HeadView>) -> AnyView {
     });
     let top = Stack::column(0.0).with_layout(|layout| {
         layout.padding_bottom = Some(LengthSpec::Px(8.0));
-        layout.border_bottom_width = Some(1.0);
+        layout.border_sides.bottom_width = Some(1.0);
     });
     let mut top_style = top.node_style();
     top_style.border = Some(SemanticColorRole::BorderSoft);
@@ -193,7 +193,7 @@ fn notice_bar(status: Signal<StatusLine>, warning: bool) -> AnyView {
     {
         let layout = Arc::make_mut(&mut copy.style.layout);
         layout.width = Some(LengthSpec::Fill);
-        layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
+        layout.text_ext.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
     }
     let bar = Stack::column(0.0)
         .padding_xy(8.0, 6.0)
@@ -242,7 +242,7 @@ fn progress_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
     let mut glyph = nana_ui::runtime::IconGlyph::new(LOADER_2)
         .size(16.0)
         .role(SemanticColorRole::Muted);
-    Arc::make_mut(&mut glyph.style.layout).transform =
+    Arc::make_mut(&mut glyph.style.layout).transforms.transform =
         Some(super::motion::spin_transform(spin.get_untracked()));
     let mut text =
         parts::label_text(label, 12.0, 400, Some(SemanticColorRole::Muted)).line_height(18.0);
@@ -286,7 +286,7 @@ fn busy_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
     let mut glyph = nana_ui::runtime::IconGlyph::new(LOADER_2)
         .size(16.0)
         .role(SemanticColorRole::Muted);
-    Arc::make_mut(&mut glyph.style.layout).transform =
+    Arc::make_mut(&mut glyph.style.layout).transforms.transform =
         Some(super::motion::spin_transform(spin.get_untracked()));
     widget(
         Stack::row(8.0)
@@ -506,7 +506,9 @@ fn playlist_title(state: Signal<PlaylistGroup>) -> AnyView {
         700,
         Some(SemanticColorRole::Muted),
     );
-    Arc::make_mut(&mut count_text.style.layout).letter_spacing = Some(0.0);
+    Arc::make_mut(&mut count_text.style.layout)
+        .text_ext
+        .letter_spacing = Some(0.0);
     let content = widget(Stack::row(6.0).align(AlignSpec::Center)).children((
         widget(group_title("播放集")),
         widget(count_text).prop::<String, fields::text::value>(move || {

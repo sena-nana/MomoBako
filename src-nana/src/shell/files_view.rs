@@ -266,7 +266,7 @@ fn card_style(look: ColumnLook) -> NodeStyle {
         .radius(RadiusTier::Xxl)
         .with_layout(|layout| layout.position = PositionSpec::Relative);
     if look.dragging {
-        card = card.outline(SemanticColorRole::Accent, 1.0);
+        card = card.border(SemanticColorRole::Accent, 1.0);
     }
     card.node_style()
 }
@@ -276,7 +276,7 @@ fn drop_hint(look: Signal<ColumnLook>) -> AnyView {
     let frame = Stack::column(0.0)
         .align(AlignSpec::Center)
         .justify(nana_ui::runtime::JustifySpec::Center)
-        .outline(SemanticColorRole::Accent, 1.0)
+        .border(SemanticColorRole::Accent, 1.0)
         .radius(RadiusTier::Xl)
         .with_layout(|layout| {
             layout.position = PositionSpec::Absolute;

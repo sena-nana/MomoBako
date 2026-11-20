@@ -153,7 +153,7 @@ fn surface(
         Stack::column(gap)
             .padding(padding)
             .surface(SemanticColorRole::Surface)
-            .outline(SemanticColorRole::BorderStrong, 1.0)
+            .border(SemanticColorRole::BorderStrong, 1.0)
             .radius(RadiusTier::Md)
             .with_layout(|layout| {
                 layout.paint.box_shadows = vec![nana_ui_core::BoxShadowSpec {
@@ -662,7 +662,7 @@ fn popover_error(error: impl Fn() -> String + Send + Clone + 'static) -> AnyView
 fn top_divider(column: Stack, gap: f32) -> Stack {
     let column = column.with_layout(|layout| {
         layout.padding_top = Some(LengthSpec::Px(gap));
-        layout.border_top_width = Some(1.0);
+        layout.border_sides.top_width = Some(1.0);
     });
     let mut style = column.node_style();
     style.border = Some(SemanticColorRole::BorderSoft);

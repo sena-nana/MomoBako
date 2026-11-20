@@ -589,7 +589,7 @@ fn palette_slot(colors: &[String]) -> AnyView {
                     .height(LengthSpec::Px(12.0))
                     .grow(0.0)
                     .shrink(0.0)
-                    .outline(SemanticColorRole::BorderSoft, 1.0)
+                    .border(SemanticColorRole::BorderSoft, 1.0)
                     .radius_px(999.0)
                     .with_layout(move |layout| layout.background = Some(rgba)),
             )
@@ -725,7 +725,9 @@ fn action(
 /// 11px 半粗、弱色、字距 0.4 的眉题。
 pub(super) fn eyebrow(label: &str) -> Text {
     let mut node = text(label, 11.0, 600, SemanticColorRole::Faint, 17.05);
-    std::sync::Arc::make_mut(&mut node.style.layout).letter_spacing = Some(0.4);
+    std::sync::Arc::make_mut(&mut node.style.layout)
+        .text_ext
+        .letter_spacing = Some(0.4);
     node
 }
 
@@ -768,8 +770,8 @@ impl WrapAnywhere for Text {
     fn wrap_anywhere(mut self) -> Self {
         let layout = std::sync::Arc::make_mut(&mut self.style.layout);
         layout.width = Some(LengthSpec::Fill);
-        layout.line_break = Some(nana_ui_core::LineBreakSpec::Anywhere);
-        layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
+        layout.text_ext.line_break = Some(nana_ui_core::LineBreakSpec::Anywhere);
+        layout.text_ext.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
         self
     }
 }

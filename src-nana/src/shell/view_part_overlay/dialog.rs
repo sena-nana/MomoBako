@@ -438,7 +438,7 @@ pub(crate) fn wrapping_text(size: f32, line_height: f32, color: SemanticColorRol
     let layout = Arc::make_mut(&mut node.style.layout);
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
-    layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
+    layout.text_ext.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
     node
 }
 

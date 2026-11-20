@@ -20,7 +20,7 @@ use nana_ui::runtime::view::{
     AnyView, IntoView, NodeRef, Signal, css, dynamic, on_mount, signal, widget,
 };
 use nana_ui::runtime::{
-    AppContext, Entity, FrameworkError, LengthSpec, MountedView, MutationQueue, RadiusTier,
+    AppContext, FrameworkError, LengthSpec, MountedView, MutationQueue, RadiusTier,
     RuntimeDocument, SemanticColorRole, StableNodeId, Stack,
 };
 
@@ -379,10 +379,11 @@ impl PrimaryPart {
         if context.world().parent_id(stage) == Some(solo) {
             return Ok(());
         }
+        // 外框在工作区主区里时，工作区把区域布局盖在它身上；挪出来以后写回外框自己的样式。
         let mut mutations = MutationQueue::new();
         mutations.insert(solo, stage, None);
+        mutations.set_style(stage, stage_frame_stack().node_style());
         context.commit_mutations(mutations)?;
-        context.reproject_component(Entity::<Stack>::from_stable_id(stage))?;
         Ok(())
     }
 
@@ -539,15 +540,18 @@ fn stage_frame(signals: PrimarySignals, hot: HotSignals, id: u64) -> AnyView {
     })
     .key(ROUTE_CONTAINER)
     .css(css! { height: 100%; min-height: 0; flex-grow: 1; flex-shrink: 1; });
-    widget(
-        Stack::fill_column(0.0)
-            .min_height(LengthSpec::Px(0.0))
-            .surface(SemanticColorRole::Background)
-            .radius(RadiusTier::Lg),
-    )
-    .children((routes,))
-    .key("workspace-body")
-    .into_any()
+    widget(stage_frame_stack())
+        .children((routes,))
+        .key("workspace-body")
+        .into_any()
+}
+
+/// 主区外框本身：挂载和挪出工作区时写回的是同一份样式。
+fn stage_frame_stack() -> Stack {
+    Stack::fill_column(0.0)
+        .min_height(LengthSpec::Px(0.0))
+        .surface(SemanticColorRole::Background)
+        .radius(RadiusTier::Lg)
 }
 
 /// 主区独占时外框外面的壳层底色，圆角外露出 `--bg-elev`。外框由 [`PrimaryPart::hold_solo`] 放进来。

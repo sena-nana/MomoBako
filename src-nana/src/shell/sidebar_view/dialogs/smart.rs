@@ -18,14 +18,16 @@ use nana_ui::runtime::{LengthAtom, LengthSpec, ScrollAxes, ScrollView, Stack, Vi
 use nana_ui::{ButtonKind, DialogSize};
 
 /// `.smart-folder-dialog { width: min(720px, calc(100vw - 40px)) }`。
-const SMART_FOLDER_DIALOG: DialogSize = DialogSize::Width(LengthSpec::Min2(
-    LengthAtom::Px(720.0),
-    LengthAtom::CalcViewport {
-        axis: ViewportAxis::Width,
-        value: 100.0,
-        offset_px: -40.0,
-    },
-));
+fn smart_folder_dialog_size() -> DialogSize {
+    DialogSize::Width(LengthSpec::min2(
+        LengthAtom::Px(720.0),
+        LengthAtom::CalcViewport {
+            axis: ViewportAxis::Width,
+            value: 100.0,
+            offset_px: -40.0,
+        },
+    ))
+}
 
 /// 智能文件夹对话框要显示的东西。各输入框的草稿不在这里，见 [`Draft`]。
 #[derive(Clone, Debug, PartialEq)]
@@ -357,7 +359,7 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
             move || view.with(|view| view.title.to_string()),
             close,
         )
-        .size(SMART_FOLDER_DIALOG)
+        .size(smart_folder_dialog_size())
         .busy(busy)
         .dialog(scroll, footer(None, buttons)),
     )

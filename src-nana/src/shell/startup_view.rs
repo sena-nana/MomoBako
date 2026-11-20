@@ -21,11 +21,11 @@ pub(super) const ROOT_LINE_HEIGHT: f32 = 1.55;
 /// 撑高这一节，交给外层滚动。
 pub(crate) fn fill_section() -> Stack {
     Stack::column(0.0)
-        .min_height(LengthSpec::CalcViewportOffset {
-            axis: nana_ui_core::ViewportAxis::Height,
-            value: 100.0,
-            offset_px: -(TITLE_BAR_PX + PRIMARY_INSET_Y * 2.0),
-        })
+        .min_height(LengthSpec::viewport_offset(
+            nana_ui_core::ViewportAxis::Height,
+            100.0,
+            -(TITLE_BAR_PX + PRIMARY_INSET_Y * 2.0),
+        ))
         .padding(24.0)
         .justify(JustifySpec::Center)
         .align(AlignSpec::Center)
@@ -54,7 +54,7 @@ pub(super) fn wrapping(
     let layout = Arc::make_mut(&mut node.style.layout);
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
-    layout.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
+    layout.text_ext.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
     node
 }
 
@@ -67,7 +67,9 @@ pub(super) fn eyebrow(value: &str, key: &'static str) -> AnyView {
         SemanticColorRole::Faint,
         11.0 * ROOT_LINE_HEIGHT,
     );
-    Arc::make_mut(&mut node.style.layout).letter_spacing = Some(0.4);
+    Arc::make_mut(&mut node.style.layout)
+        .text_ext
+        .letter_spacing = Some(0.4);
     widget(node).key(key).into_any()
 }
 

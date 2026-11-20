@@ -268,7 +268,7 @@ fn section(title: &str, items: Vec<AnyView>) -> AnyView {
 fn section_with_body(title: &str, body: AnyView) -> AnyView {
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
         layout.display = Some(nana_ui_core::DisplaySpec::Grid);
-        layout.grid_columns = Some(vec![
+        layout.grid.columns = Some(vec![
             GridTrack::Px(56.0),
             GridTrack::MinMax {
                 min_px: 0.0,
@@ -322,7 +322,7 @@ fn execution_item(record: &ExecutionView) -> AnyView {
     );
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
         layout.display = Some(nana_ui_core::DisplaySpec::Grid);
-        layout.grid_columns = Some(vec![
+        layout.grid.columns = Some(vec![
             GridTrack::Auto,
             GridTrack::MinMax {
                 min_px: 0.0,

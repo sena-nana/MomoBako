@@ -77,7 +77,7 @@ pub(crate) fn mono_lh(
     line: f32,
 ) -> Text {
     let mut text = label_lh(value, size, weight, color, line);
-    Arc::make_mut(&mut text.style.layout).font_family = Some(MONO_FAMILY.into());
+    Arc::make_mut(&mut text.style.layout).text_ext.font_family = Some(MONO_FAMILY.into());
     text
 }
 
@@ -86,7 +86,7 @@ pub(crate) fn wrapping(mut text: Text) -> Text {
     let layout = Arc::make_mut(&mut text.style.layout);
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
-    layout.overflow_wrap = Some(OverflowWrapSpec::Anywhere);
+    layout.text_ext.overflow_wrap = Some(OverflowWrapSpec::Anywhere);
     text
 }
 
@@ -179,7 +179,8 @@ pub(crate) fn action(
                 ..SemanticPaint::default()
             },
             ..InteractionStyle::default()
-        },
+        }
+        .into(),
         text_horizontal_alignment: TextHorizontalAlignment::Center,
         text_vertical_alignment: nana_ui::runtime::TextVerticalAlignment::Center,
         ..NodeStyle::default()
@@ -300,10 +301,10 @@ pub(crate) fn bottom_rule(stack: Stack) -> Stack {
     {
         let layout = Arc::make_mut(&mut style.layout);
         layout.border_width = None;
-        layout.border_top_width = Some(0.0);
-        layout.border_left_width = Some(0.0);
-        layout.border_right_width = Some(0.0);
-        layout.border_bottom_width = Some(1.0);
+        layout.border_sides.top_width = Some(0.0);
+        layout.border_sides.left_width = Some(0.0);
+        layout.border_sides.right_width = Some(0.0);
+        layout.border_sides.bottom_width = Some(1.0);
     }
     stack.style(style)
 }
@@ -315,10 +316,10 @@ pub(crate) fn top_rule(stack: Stack) -> Stack {
     {
         let layout = Arc::make_mut(&mut style.layout);
         layout.border_width = None;
-        layout.border_top_width = Some(1.0);
-        layout.border_left_width = Some(0.0);
-        layout.border_right_width = Some(0.0);
-        layout.border_bottom_width = Some(0.0);
+        layout.border_sides.top_width = Some(1.0);
+        layout.border_sides.left_width = Some(0.0);
+        layout.border_sides.right_width = Some(0.0);
+        layout.border_sides.bottom_width = Some(0.0);
     }
     stack.style(style)
 }
@@ -349,7 +350,7 @@ pub(crate) fn hint_chip(
     widget(
         rounded(pad(body, 0.0, 10.0, 0.0, 10.0), None)
             .surface(Role::Background)
-            .outline(Role::Border, 1.0),
+            .border(Role::Border, 1.0),
     )
     .children((bound(label(String::new(), 12.0, 500, Role::Muted), text).key(key.into()),))
 }
@@ -459,7 +460,9 @@ pub(crate) fn workbench_header(
 /// `.asset-browser__eyebrow`：11/600 弱色、大写、字距 0.4。
 pub(crate) fn eyebrow_text(value: &str) -> Text {
     let mut text = label(value.to_uppercase(), 11.0, 600, Role::Faint);
-    Arc::make_mut(&mut text.style.layout).letter_spacing = Some(0.4);
+    Arc::make_mut(&mut text.style.layout)
+        .text_ext
+        .letter_spacing = Some(0.4);
     text
 }
 
@@ -484,7 +487,7 @@ pub(crate) fn state_notice(
     } else {
         (
             body.surface(Role::Background)
-                .outline(Role::Border, 1.0)
+                .border(Role::Border, 1.0)
                 .radius(RadiusTier::Xl),
             Role::Muted,
         )
@@ -512,7 +515,7 @@ pub(crate) fn dashed_empty(
     let frame = pad(Stack::fill_column(8.0), 24.0, 24.0, 24.0, 24.0)
         .justify(JustifySpec::Center)
         .surface(Role::Subtle)
-        .outline(Role::BorderStrong, 1.0)
+        .border(Role::BorderStrong, 1.0)
         .radius(RadiusTier::Xl)
         .with_layout(|layout| {
             layout.border_style = Some(nana_ui_core::BorderStyle::Dashed);
@@ -535,7 +538,7 @@ pub(crate) fn dashed_empty(
 pub(crate) fn field_frame() -> Stack {
     pad(Stack::fill_row(8.0), 0.0, 12.0, 0.0, 12.0)
         .surface(Role::Background)
-        .outline(Role::Border, 1.0)
+        .border(Role::Border, 1.0)
         .radius(RadiusTier::Lg)
         .with_layout(|layout| {
             layout.min_height = Some(LengthSpec::Px(38.0));
@@ -615,7 +618,8 @@ pub(crate) fn native_field_style(height: f32) -> NodeStyle {
                 ..SemanticPaint::default()
             },
             ..InteractionStyle::default()
-        },
+        }
+        .into(),
         text_vertical_alignment: nana_ui::runtime::TextVerticalAlignment::Center,
         ..NodeStyle::default()
     };
