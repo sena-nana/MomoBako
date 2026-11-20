@@ -189,7 +189,7 @@ fn open_online_preview(model: &mut ShellViewModel) -> Option<(String, u64)> {
 }
 
 /// 预览在线单曲，播放源还在准备（来源插件在下载）：预览框是准备卡，写文件名和「准备音频」，进度不定；
-/// 播放条还没被接管。和 Vue 经 Tauri 拿到进度时一样，准备期间看不到中间阶段。
+/// 播放条还没被接管。和旧版一样，准备期间看不到中间阶段。
 fn online_preview_preparing() -> ShellViewModel {
     let mut model = netease_base(vec![online_track()], true, false).model();
     open_online_preview(&mut model);

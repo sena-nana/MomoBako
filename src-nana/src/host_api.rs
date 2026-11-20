@@ -124,8 +124,7 @@ pub enum HostInputRequest {
 
 /// 网址能不能交给系统打开：只认 `http`、`https`、`mailto`、`tel` 四种协议。
 ///
-/// 和 Vue 实际能打开的范围一致：Vue 走 Tauri opener 插件的 `opener:default`，默认范围
-/// （`allow-default-urls`）只放行这四种。其余协议一律不开，例如 `file:`、`C:\…` 这样的盘符路径、
+/// 和旧版实际能打开的范围一致：旧版经系统 opener 的默认范围（`allow-default-urls`）只放行这四种。其余协议一律不开，例如 `file:`、`C:\…` 这样的盘符路径、
 /// 自定义协议，以及 `javascript:`、`data:`、`vbscript:`，免得元数据里的链接直接启动本地程序。
 pub fn openable_url(url: &str) -> bool {
     let Some((scheme, rest)) = url.trim().split_once(':') else {

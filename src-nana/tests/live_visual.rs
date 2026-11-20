@@ -313,7 +313,7 @@ fn assert_clicks() {
         "最大化没有排队宿主命令：{commands:?}"
     );
 
-    // 默认关闭行为和 Vue/Tauri 一致：没有未保存的修改时直接关窗，不弹确认。
+    // 默认关闭行为和旧版一致：没有未保存的修改时直接关窗，不弹确认。
     click_label(&mut session, "关闭");
     let commands = pump(&mut session, &mut model);
     assert!(

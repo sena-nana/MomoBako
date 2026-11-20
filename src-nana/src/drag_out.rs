@@ -1,7 +1,7 @@
 //! 把库内文件拖出窗口。
 //!
-//! Tauri 走 `plugin:drag|start_drag`，Windows 实现是 `drag` crate 的 `DoDragDrop`。
-//! Nana 没有对应窗口命令，所以在窗口线程上借用 HWND 再发起同样的复制拖放。
+//! Windows 上用 `drag` crate 的 `DoDragDrop`。NanaUI 没有把文件拖出窗口的命令，所以在窗口线程上借用 HWND
+//! 发起复制拖放。
 //! 取消拖放不算失败。拿不到句柄或系统调用失败才写错误。
 
 use std::cell::RefCell;

@@ -152,7 +152,7 @@ pub(super) fn cache_snapshot() -> CacheSnapshot {
 
 pub(super) fn api_design() -> ApiDesignSnapshot {
     ApiDesignSnapshot {
-        transport: "tauri-ipc".into(),
+        transport: "宿主进程内调用；外部客户端走本机回环 HTTP（/external/v1）".into(),
         endpoints: Vec::new(),
     }
 }

@@ -201,7 +201,7 @@ fn cache() -> CacheSnapshot {
 
 fn api_design() -> ApiDesignSnapshot {
     ApiDesignSnapshot {
-        transport: "tauri-ipc".into(),
+        transport: "宿主进程内调用；外部客户端走本机回环 HTTP（/external/v1）".into(),
         endpoints: Vec::new(),
     }
 }
@@ -1372,7 +1372,7 @@ fn api_playground_falls_back_and_sends_http_and_plugin_calls() {
     assert!(model.admin.api.error.starts_with("请求 JSON 无效"));
 
     model.admin.api_design = Some(ApiDesignSnapshot {
-        transport: "tauri-ipc".into(),
+        transport: "宿主进程内调用；外部客户端走本机回环 HTTP（/external/v1）".into(),
         endpoints: vec![crate::backend::services::repository::ApiDefinition {
             group: "插件".into(),
             transport: String::new(),

@@ -120,7 +120,7 @@ mod open_tests;
 #[cfg(test)]
 mod tests;
 
-/// Tauri `onDragDropEvent` 的四个阶段。
+/// 宿主文件拖入的四个阶段。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HostDragPhase {
     Enter,

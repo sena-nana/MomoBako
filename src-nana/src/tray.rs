@@ -1,9 +1,10 @@
 //! 系统托盘。
 //!
-//! 行为与 `src-tauri/src/app_shell.rs` 的托盘一致：提示 MomoBako，左键或双击显示窗口，
-//! 菜单是「打开 MomoBako」和「退出」。Nana 没有托盘组件，Windows 上用通知图标。
+//! 提示 MomoBako，左键或双击显示窗口，菜单是「打开 MomoBako」和「退出」。Windows 上用 `tray-icon` 的通知图标；
+//! 当前固定的 NanaUI 版本还没有托盘接口（之后的版本有 `install_tray`，升级后改用它）。
 //! 退出走窗口关闭，最后一扇窗口关掉后进程结束。最小化到托盘只隐藏窗口。
 
+#[cfg(windows)]
 use std::sync::{Arc, Mutex};
 
 pub const TRAY_OPEN_ID: &str = "tray-open";
@@ -139,7 +140,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn menu_ids_match_the_tauri_tray() {
+    fn menu_ids_map_to_tray_actions() {
         assert_eq!(menu_action(TRAY_OPEN_ID), Some(TrayAction::Show));
         assert_eq!(menu_action(TRAY_QUIT_ID), Some(TrayAction::Quit));
         assert_eq!(menu_action("其他"), None);

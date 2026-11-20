@@ -7,7 +7,7 @@
 //! - Nana 的解码只认本地文件：用响应里的 `localPath`，没有时用 `tempFilePath`（网易云插件两者相同，都在资源库
 //!   本地缓存的 `.momo/cache/netease-playback` 下）。来源只交回网址（`sourceUrl`）时不另去下载它，按失败交回。
 //! - 进度事件随结果一起交回（`docs/api-design.md`），准备期间看不到中间阶段，界面停在「准备音频」和不定进度，
-//!   和 Vue 当时经 Tauri 拿到的一样。
+//!   和旧版一样。
 //! - 切曲、停止、换仓库时不取消任务：`execute` 不交出任务编号，来源插件下载中途也不看取消。旧的结果按代次丢弃
 //!   （`player_clip::finish_load`、`inspect_support::note_media`）。
 //! - 后端在播放源准备好时写下访问时间，结果里带上 [`SourcePrep::prepared`]，归约当场改「最近使用」。
