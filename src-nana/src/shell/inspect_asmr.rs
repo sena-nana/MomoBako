@@ -1,6 +1,6 @@
 //! ASMR 资源库扩展：预览列下方的作品队列和播放列表，元数据列里的补全候选。
 //!
-//! 扩展只在 ASMR 资源库插件启用、当前文件是 ASMR 条目时出现（Vue 只给插件注册的扩展认得的条目挂面板）。
+//! 扩展只在 ASMR 资源库插件启用、当前文件是 ASMR 条目时出现（面板只挂在插件注册的扩展认得的条目上）。
 //! 作品队列认正在预览的列表条目，列表里没有再认播放集条目，不跟未保存草稿，也不跟详情叠层。
 //! 加入播放列表时写入的快照，以及播放列表卡片是否出现，同样认列表行或播放集条目自己的字段，不跟草稿。
 //! 已加入、还在当前列表里的条目，标题和状态按这一行自己的字段重算，不跟草稿。
@@ -158,7 +158,7 @@ pub(super) fn asmr_entry(model: &ShellViewModel, custom: &BTreeMap<String, Strin
     asmr_enabled(&model.admin.plugins) && matches_asmr(custom)
 }
 
-/// Vue `metadataText`：文字原样，数字、布尔转成文字，别的（数组、对象、没有）是空串。
+/// 元数据取文字：文字原样，数字、布尔转成文字，别的（数组、对象、没有）是空串。
 fn entry_text(metadata: &BTreeMap<String, Value>, key: &str) -> String {
     match metadata.get(key) {
         Some(Value::String(text)) => text.clone(),
@@ -168,14 +168,14 @@ fn entry_text(metadata: &BTreeMap<String, Value>, key: &str) -> String {
     }
 }
 
-/// Vue `isAsmrAudioEntry`：文件、条目类型是 audio，而且是 ASMR 条目。
+/// 是不是 ASMR 音频：文件、条目类型是 audio，而且是 ASMR 条目。
 fn is_asmr_audio(kind: &str, metadata: &BTreeMap<String, Value>) -> bool {
     kind == "file"
         && entry_text(metadata, "asmrEntryKind") == "audio"
         && super::inspect_shortcuts::matches_entry("asmr", metadata)
 }
 
-/// 作品队列认的当前条目（Vue `previewFileEntry`）：列表里有就用这一行的元数据，没有再读播放集条目。
+/// 作品队列认的当前条目：列表里有就用这一行的元数据，没有再读播放集条目。
 /// 不叠素材详情，也不并进 `draft_custom`。列表和播放集都没有时是空的，不拿草稿编一份。
 fn queue_entry_metadata(model: &ShellViewModel) -> Cow<'_, BTreeMap<String, Value>> {
     if let Some(row) = current_row(model) {
@@ -193,7 +193,7 @@ fn queue_entry_metadata(model: &ShellViewModel) -> Cow<'_, BTreeMap<String, Valu
     Cow::Owned(super::inspect_metadata_view::current_card_metadata(model))
 }
 
-/// Vue 只给 `previewFileEntry` 挂预览扩展：插件开着，而且这一条自己的元数据是 ASMR。
+/// 预览扩展只挂在正在预览的条目上：插件开着，而且这一条自己的元数据是 ASMR。
 /// 作品队列和播放列表卡片都先过这一关。不跟未保存草稿，也不跟详情叠层。
 fn preview_extension_matches(model: &ShellViewModel) -> bool {
     asmr_enabled(&model.admin.plugins)
@@ -205,7 +205,7 @@ fn queue_visible(model: &ShellViewModel) -> bool {
     preview_extension_matches(model)
 }
 
-/// 当前文件所在作品的音轨（Vue `workAudioEntries`）：同一个作品目录（`workRoot`）里的 ASMR 音频，按音轨路径的
+/// 当前文件所在作品的音轨：同一个作品目录（`workRoot`）里的 ASMR 音频，按音轨路径的
 /// 自然序排。作品目录和音轨字段都读列表行自己的元数据；当前文件不在列表里时，作品目录读播放集条目。
 /// 没有作品目录时只有当前这一行（它是 ASMR 音频、并且在列表里）。不跟草稿，也不跟详情叠层，没有的音轨不编。
 fn work_audio(model: &ShellViewModel) -> Vec<&FileRow> {
@@ -228,8 +228,8 @@ fn work_audio(model: &ShellViewModel) -> Vec<&FileRow> {
     rows.into_iter().map(|(_, row)| row).collect()
 }
 
-/// 作品队列或播放列表里点一条：像双击一样打开它的预览（Vue `previewEntry` 走 `previewFileEntryByDoubleClick`），
-/// 选中它、读素材详情、换掉预览，音频照常接管播放条。不在当前列表里的条目打不开（Vue 也只认当前列表），只记日志。
+/// 作品队列或播放列表里点一条：像双击一样打开它的预览，
+/// 选中它、读素材详情、换掉预览，音频照常接管播放条。不在当前列表里的条目打不开，只记日志。
 fn open_path(model: &mut ShellViewModel, path: &str) {
     if !visible_rows(model)
         .iter()
@@ -253,7 +253,7 @@ fn open_path(model: &mut ShellViewModel, path: &str) {
 struct QueueLine {
     path: String,
     title: String,
-    /// `listeningStatus` 的原文。没有这个字段、或是空串时，用 Vue 的占位 `unlistened`。
+    /// `listeningStatus` 的原文。没有这个字段、或是空串时，用占位 `unlistened`。
     status: String,
 }
 
@@ -276,9 +276,9 @@ pub(super) fn preview_panels(model: &ShellViewModel) -> Option<AsmrPanels> {
 }
 
 /// 作品队列：当前作品里别的音轨。标题是音轨名（没有时是文件名）。
-/// 状态是 `listeningStatus` 的原文（Vue `metadataText(entry, "listeningStatus") || "unlistened"`），不翻译。
+/// 状态是 `listeningStatus` 的原文（没有时是占位 `unlistened`），不翻译。
 /// 标题和状态读列表行自己的元数据，不读草稿，也不读详情叠层。没有的字段不另编。
-/// 正在预览的这一条不列进来，和 Vue `queueEntries` 一样；没有别的音轨时整张卡片不出现，不编造作品。
+/// 正在预览的这一条不列进来；没有别的音轨时整张卡片不出现，不编造作品。
 fn work_queue(model: &ShellViewModel) -> Option<(String, Vec<QueueLine>)> {
     if !queue_visible(model) {
         return None;
@@ -311,7 +311,7 @@ fn work_queue(model: &ShellViewModel) -> Option<(String, Vec<QueueLine>)> {
     Some((count, items))
 }
 
-/// 作品队列和播放列表两张卡片，间距 12，对应每张 `.files-preview-page__queue` 的上外边距。
+/// 作品队列和播放列表两张卡片，间距 12，即每张卡片的上外边距。
 pub(super) fn panels_view(panels: &AsmrPanels) -> AnyView {
     let mut rows = Vec::new();
     if let Some((count, items)) = &panels.queue {
@@ -335,7 +335,7 @@ pub(super) fn panels_view(panels: &AsmrPanels) -> AnyView {
     .into_any()
 }
 
-/// 作品队列有条目时的行。左右结构和播放列表相同，但 Vue 的作品队列按钮不加 `is-active`
+/// 作品队列有条目时的行。左右结构和播放列表相同，但作品队列不标当前项
 /// （当前音轨已经滤掉），所以不铺 `--accent-soft`，底保持透明。没有条目时不调用。
 fn work_queue_rows(items: &[QueueLine]) -> Vec<AnyView> {
     let last = items.len().saturating_sub(1);
@@ -358,7 +358,7 @@ fn work_queue_rows(items: &[QueueLine]) -> Vec<AnyView> {
         .collect()
 }
 
-/// 播放列表有条目时的行。正在预览的那一条铺 `--accent-soft`（Vue `.is-active`），悬停也留着这层底。没有条目时不调用。
+/// 播放列表有条目时的行。正在预览的那一条铺 `--accent-soft`，悬停也留着这层底。没有条目时不调用。
 fn playlist_lines(items: &[playlist::PlaylistLine]) -> Vec<AnyView> {
     let last = items.len().saturating_sub(1);
     items
@@ -380,7 +380,7 @@ fn playlist_lines(items: &[playlist::PlaylistLine]) -> Vec<AnyView> {
         .collect()
 }
 
-/// 队列里的一行，对齐 `.files-preview-page__queue-item`：左标题、右 11px 弱色状态，间距 12。
+/// 队列里的一行：左标题、右 11px 弱色状态，间距 12。
 /// 整行至少 36px，内边距 7×10，除最后一条外底边 border-soft。`current` 为真时铺 `--accent-soft`。
 /// 点了打开这个文件。
 fn queue_item(
@@ -464,7 +464,7 @@ fn queue_title(title: &str) -> Text {
     text
 }
 
-/// 行右的状态。对应 `.files-preview-page__queue-item small`：11px、弱色、不收缩。
+/// 行右的状态：11px、弱色、不收缩。
 fn queue_status(status: &str) -> Text {
     let mut text = Text::new(status.to_string())
         .color(SemanticColorRole::Muted)
@@ -495,7 +495,7 @@ fn playlist_view(playlist: &playlist::PlaylistPanel) -> AnyView {
     queue_card("inspect-asmr-playlist", rows)
 }
 
-/// 「加入作品」「随机」「清空」。对齐 `.files-preview-page__queue-actions`：间距 6、内边距 8×10、底边 border-soft。
+/// 「加入作品」「随机」「清空」：间距 6、内边距 8×10、底边 border-soft。
 fn playlist_actions(audio: bool, empty: bool) -> AnyView {
     let row = super::workbench::with_bottom_divider(
         Stack::row(6.0)
@@ -527,7 +527,7 @@ fn playlist_actions(audio: bool, empty: bool) -> AnyView {
         .into_any()
 }
 
-/// 队列操作钮：至少 28px 高，左右 8、上下 4，12px 字。对应 `.files-preview-page__queue-actions .ghost`。
+/// 队列操作钮：至少 28px 高，左右 8、上下 4，12px 字，幽灵按钮样式。
 fn queue_action(label: &str, disabled: bool) -> Button {
     let button = Button::new(label)
         .kind(ButtonKind::Ghost)
@@ -550,7 +550,7 @@ fn queue_action(label: &str, disabled: bool) -> Button {
     button.style(style)
 }
 
-/// 空队列。对齐 `.files-preview-page__queue-empty`：10px 内边距，12px 弱色。不编造条目。
+/// 空队列：10px 内边距，12px 弱色。不编造条目。
 fn queue_empty(label: &str, key: &str) -> AnyView {
     let copy = Text::new(label.to_string())
         .color(SemanticColorRole::Muted)
@@ -567,7 +567,7 @@ fn queue_empty(label: &str, key: &str) -> AnyView {
     .into_any()
 }
 
-/// 标题在左、计数在右，底边 border-soft。对齐 `.files-preview-page__queue-head` 的两端对齐。
+/// 标题在左、计数在右，底边 border-soft，两端对齐。
 fn queue_head(label: &str, count: &str, key: &str) -> AnyView {
     let row = super::workbench::with_bottom_divider(
         Stack::row(12.0)
@@ -605,7 +605,7 @@ fn queue_list(items: Vec<AnyView>, key: &str) -> AnyView {
     .into_any()
 }
 
-/// `.files-preview-page__queue`：bg-elev 底、border-soft 细边、中圆角，子项紧贴、不留段间距。
+/// 队列卡片：bg-elev 底、border-soft 细边、中圆角，子项紧贴、不留段间距。
 fn queue_card(key: &str, rows: Vec<AnyView>) -> AnyView {
     widget(
         Stack::column(0.0)

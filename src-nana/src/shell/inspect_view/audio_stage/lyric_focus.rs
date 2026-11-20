@@ -1,6 +1,6 @@
 //! 音频歌词行的键盘焦点下沿。
 //!
-//! Vue `.media-preview__audio-lyric:focus-visible:not(:disabled)` 关掉轮廓，字色和悬停同一档，
+//! 有时间的行在键盘焦点（`:focus-visible`）时关掉轮廓，字色和悬停同一档，
 //! 再画 `box-shadow: 0 2px 0 color-mix(in srgb, var(--accent) 60%, transparent)`。
 //! 这是行盒下移 2px、不模糊的一条阴影，不是当前行的 drop-shadow，也不是 Nana 按钮默认的焦点底。
 //! 鼠标点上得到的焦点不算 `:focus-visible`，不画。没有时间的行是禁用的，点不了，也不画。
@@ -18,7 +18,7 @@ const SHADOW_Y: f32 = 2.0;
 
 /// 有时间的歌词按钮：键盘焦点时字色改成悬停那一档，并挂上下沿阴影。
 ///
-/// 不改三档明暗、放大和当前行投影。Nana 按钮默认的焦点底是整块填充，这里清掉，只留 Vue 这一条阴影。
+/// 不改三档明暗、放大和当前行投影。Nana 按钮默认的焦点底是整块填充，这里清掉，只留这一条阴影。
 pub(super) fn mark(button: &mut Button) {
     button.style.interaction.focused = SemanticPaint {
         foreground_mix: super::lyric_mix(Some(super::LYRIC_HOVER_MIX)),
@@ -27,7 +27,7 @@ pub(super) fn mark(button: &mut Button) {
     button.style.painter = Some(LyricFocusUnderline.into());
 }
 
-/// 键盘焦点时在行盒下沿画 Vue 的 `box-shadow`。其余状态只画按钮自己的字。
+/// 键盘焦点时在行盒下沿画这条 `box-shadow`。其余状态只画按钮自己的字。
 struct LyricFocusUnderline;
 
 impl Painter for LyricFocusUnderline {
@@ -80,7 +80,7 @@ mod tests {
     use nana_ui::runtime::{PaintOp, PaintState};
     use nana_ui_core::{SemanticColorMix, SemanticColorRole, StyleModelRef, ThemeAppearance};
 
-    /// 有时间的行在键盘焦点时画出 Vue 的下沿阴影：偏移 (0, 2)、不模糊、强调色 60%。
+    /// 有时间的行在键盘焦点时画出下沿阴影：偏移 (0, 2)、不模糊、强调色 60%。
     /// 悬停、按下、禁用和没有焦点都不画。没有时间的行不是按钮，没有这层。浅色和深色各跟自己的强调色。
     #[test]
     fn timed_lyric_keyboard_focus_draws_the_vue_underline() {

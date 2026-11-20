@@ -2,7 +2,7 @@
 //!
 //! 清单里的对象直接登记。ASMR 官方插件的字符串 id 映射成筛选和排序。
 //! 没有筛选内容的字符串不进筛选栏。快捷方式只在当前文件或搜索结果里有该库类型的条目时
-//! 才显示，对应 Vue `activeLibrarySearchShortcuts` 用插件 `matchEntry` 过滤。
+//! 才显示，条目按插件的 `matchEntry` 过滤。
 
 use std::collections::BTreeMap;
 
@@ -116,7 +116,7 @@ fn parse_shortcut(kind: &str, item: &serde_json::Value) -> Option<SearchShortcut
     })
 }
 
-/// ASMR 官方清单只写了 id。筛选文案和 `register.js` 里的四条快捷方式一致。
+/// ASMR 官方清单只写了 id，四条快捷方式的筛选文案在这里补上。
 fn official_asmr(kind: &str, id: &str) -> Option<SearchShortcut> {
     if kind != "asmr" {
         return None;

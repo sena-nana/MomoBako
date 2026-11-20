@@ -92,7 +92,7 @@ enum LoadingRef<'a> {
     /// 压缩包：居中的两行。
     Archive { detail: String },
     /// 音视频：居中的准备卡，写文件名。
-    /// 音视频的准备卡。`video` 时写「准备媒体」（Vue `media-preview`），否则写「准备音频」（`audioPreview.js`）。
+    /// 音视频的准备卡。`video` 时写「准备媒体」，否则写「准备音频」。
     Media { name: &'a str, video: bool },
 }
 
@@ -418,7 +418,7 @@ pub(crate) fn shows_preview_sweep(model: &ShellViewModel) -> bool {
         )
 }
 
-/// 预览的正是播放列表当前的图片：和 Vue 的播放器挂载一样画幻灯片这一帧，按「适应 / 填充」铺。
+/// 预览的正是播放列表当前的图片：画播放器里幻灯片的这一帧，按「适应 / 填充」铺。
 /// 没有帧（读不到或解不开）时交回普通图片预览，由它写失败原因。
 fn current_still(model: &ShellViewModel) -> Option<ContentRef<'_>> {
     let still = model.player.still.as_ref()?;
@@ -452,10 +452,10 @@ fn image_ref(model: &ShellViewModel) -> ContentRef<'_> {
     }
 }
 
-/// 音视频读不出、解不开，或者播放器装不上同一个文件：照 Vue 预览插件的失败浮层（`.media-preview__overlay--error`）
-/// 替换唱片舞台，红色标题下一行原因。标题音频照 `audioPreview.js`「无法预览该音频」，视频照 `media-preview`
+/// 音视频读不出、解不开，或者播放器装不上同一个文件：用失败浮层
+/// 替换唱片舞台，红色标题下一行原因。标题音频写「无法预览该音频」，视频写
 /// 「无法预览该媒体」；原因是解码层或播放器写下的原文（没有原生解码器、某格式解码失败……），没有原文时用
-/// Vue 运行时的「音频无法播放」「视频无法播放」。这类失败就近显示，不进全局状态区。在线条目的播放源准备失败
+/// 「音频无法播放」「视频无法播放」。这类失败就近显示，不进全局状态区。在线条目的播放源准备失败
 /// （来源登录失效、网络不通、缓存不可用）时原因是来源交回的原话，下面多一个「重试」重新准备。
 fn media_failed_ref<'a>(model: &'a ShellViewModel, error: Option<&'a str>) -> ContentRef<'a> {
     let video = super::super::inspect::support::is_video_extension(&model.inspect.facts.extension);
@@ -1011,7 +1011,7 @@ pub(super) fn content_view(content: &PreviewContent) -> AnyView {
             extension,
         } => text_plugin(*markdown, text, *truncated_at, extension, scope),
         Body::ImageTexture => {
-            // `.media-preview { background: var(--bg) }`：留白处是 bg，不透出预览框的插件光晕。
+            // 底色是 bg：留白处是 bg，不透出预览框的插件光晕。
             widget(Stack::fill_column(0.0).surface(SemanticColorRole::Background))
                 .children((
                     widget(GpuTextureView::new("file-preview").contain()).key("inspect-image"),
@@ -1245,7 +1245,7 @@ fn text_plugin(
         widget(Stack::fill_column(0.0).min_height(LengthSpec::Percent(100.0))).children((sheet,)),
     ))
     .key(format!("preview-text-{scope}"));
-    // 插件根自带 bg 底，盖住预览框顶部的插件光晕，和 `.text-preview { background: var(--bg) }` 一致。
+    // 插件根自带 bg 底，盖住预览框顶部的插件光晕。
     widget(
         Stack::fill_column(0.0)
             .min_height(LengthSpec::Px(0.0))
@@ -1318,7 +1318,7 @@ pub(super) fn host_video(cover: bool) -> AnyView {
     .into_any()
 }
 
-/// 把一块像素编成内容图。`video` 时底色是视频画面的近黑（`.media-preview__video`），否则是 bg。
+/// 把一块像素编成内容图。`video` 时底色是视频画面的近黑，否则是 bg。
 /// 像素来自已经解出的缓冲区，编不成图时记日志并留空，不另涂一块同色矩形。
 fn frame_pixels(pixels: &Pixels, cover: bool, key: &'static str, video: bool) -> AnyView {
     let Some(url) =
@@ -1404,7 +1404,7 @@ fn document_view(
                 .into_any(),
         );
     }
-    // `.office-preview { background: var(--bg) }`：插件根自带 bg 底，盖住预览框的插件光晕。
+    // 插件根自带 bg 底，盖住预览框的插件光晕。
     widget(
         Stack::fill_column(0.0)
             .min_height(LengthSpec::Px(0.0))
@@ -1469,7 +1469,7 @@ fn model_view(
         .into_any()
 }
 
-/// 模型的旋转和缩放。Vue 用拖拽手势，这里给同样功能的按钮。
+/// 模型的旋转和缩放，用按钮操作。
 fn orbit_controls() -> AnyView {
     let buttons = [
         ("左转", -0.4, 1.0, "inspect-orbit-left"),
@@ -1528,7 +1528,7 @@ fn hud_chip(label: &str, key: &'static str) -> AnyView {
         .into_any()
 }
 
-/// 失败浮层铺满预览框。底是 Vue `.media-preview__overlay` 的 `color-mix(in srgb, var(--bg) 74%, transparent)`，失败时才画。
+/// 失败浮层铺满预览框。底是 `color-mix(in srgb, var(--bg) 74%, transparent)`，失败时才画。
 fn overlay(title: &str, message: &str, key: &'static str) -> AnyView {
     failed_mask(title, message, key, None)
 }
@@ -1656,7 +1656,7 @@ fn status_pill(title: &str, detail: &str, progress: bool) -> AnyView {
         .into_any()
 }
 
-/// 和 Vue `formatByteCount` 一致：1024 以下写字节，其余保留一位小数。
+/// 1024 以下写字节，其余换成 KB 或 MB，保留一位小数。
 pub(super) fn format_byte_count(value: u64) -> String {
     if value < 1024 {
         return format!("{value} B");

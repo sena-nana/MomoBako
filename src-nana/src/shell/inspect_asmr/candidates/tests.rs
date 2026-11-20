@@ -132,7 +132,7 @@ fn lookup_without_a_work_id_says_so() {
     );
 }
 
-/// 导入框的 JSON 照 Vue `parseCandidateJson` 检查：空、坏 JSON、不是对象、没有字段都报原因，不写入。
+/// 导入框的 JSON 检查：空、坏 JSON、不是对象、没有字段都报原因，不写入。
 #[test]
 fn import_rejects_bad_json_without_writing() {
     let files = [("voice.mp3", audio(None, &[]))];
@@ -281,7 +281,7 @@ fn candidate_shapes_follow_vue() {
     );
 }
 
-/// 补全候选跟 Vue `readMetadataCandidates(currentFileEntry.metadata)`：详情卡叠对得上的素材详情，
+/// 补全候选读叠层后的元数据：详情卡叠对得上的素材详情，
 /// 预览页只用列表条目。没保存的补丁不进卡片。正在输入时详情到达不冲掉作品 ID 和导入框。
 /// 两边都没有的候选不编造；详情没带的键留着列表上的。
 #[test]

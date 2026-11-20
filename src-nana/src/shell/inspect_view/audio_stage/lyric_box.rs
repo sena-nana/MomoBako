@@ -1,13 +1,13 @@
 //! 歌词行的盒子。
 //!
-//! Vue `.media-preview__audio-lyric` 写 `font-size: 16px`、`line-height: 1.72`、
+//! 歌词行是 `font-size: 16px`、`line-height: 1.72`、
 //! `padding: 7px 0`、`overflow-wrap: anywhere`，不把长句收成一行省略号。
-//! 轨道 `.media-preview__audio-lyrics-track` 的行距是 4px。
+//! 行与行的间距是 4px。
 //! 单行盒子只用来估算还没排出来的滚动；排出来以后按布局盒居中，折行的行可以更高。
 
 use nana_ui_core::{LayoutStyle, LengthSpec, LineHeightSpec, OverflowWrapSpec, WhiteSpaceSpec};
 
-/// `.media-preview__audio-lyric` 的字号。
+/// 歌词行的字号。
 pub(super) const FONT: f32 = 16.0;
 /// `line-height: 1.72`，按 16px 算成像素。
 pub(super) const LEADING: f32 = FONT * 1.72;
@@ -15,10 +15,10 @@ pub(super) const LEADING: f32 = FONT * 1.72;
 pub(super) const PAD_Y: f32 = 7.0;
 /// 单行盒子：行高加上上下 7px。折行以后布局盒会更高。
 pub(super) const LINE: f32 = LEADING + PAD_Y * 2.0;
-/// `.media-preview__audio-lyrics-track` 的 `gap`。
+/// 歌词行之间的间距。
 pub(super) const GAP: f32 = 4.0;
 
-/// 把一行歌词收成 Vue 的盒子。
+/// 把一行歌词收成上面这套盒子。
 ///
 /// 不写死高度，第二行才撑得开。长句在任意位置断开，和 `overflow-wrap: anywhere` 一样，
 /// 不再 `nowrap` 加省略号。
@@ -29,7 +29,7 @@ pub(super) fn apply(layout: &mut LayoutStyle) {
     layout.padding_bottom = Some(LengthSpec::Px(PAD_Y));
     layout.padding_left = Some(LengthSpec::Px(0.0));
     layout.padding_right = Some(LengthSpec::Px(0.0));
-    // Vue `border: 0`。按钮默认的 1px 边会把单行盒子撑高 2px。
+    // 歌词行不要边框。按钮默认的 1px 边会把单行盒子撑高 2px。
     layout.border_width = Some(0.0);
     layout.min_height = Some(LengthSpec::Px(LINE));
     layout.height = None;

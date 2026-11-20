@@ -24,8 +24,7 @@ pub(crate) use body::shows_preview_sweep;
 pub(crate) use body::wants_preview_texture;
 pub(crate) use frame::{PreviewSignals, seed_detail_card_editor, seed_preview_facts};
 
-/// 文件预览页：预览框架铺满文件列，播放条由框架贴在页底（Vue `files-preview-page` 里的
-/// `WorkspacePlayerBar`）。`bar` 是播放条的占位节点。
+/// 文件预览页：预览框架铺满文件列，播放条由框架贴在页底。`bar` 是播放条的占位节点。
 pub(super) fn preview_page(
     signals: PreviewSignals,
     metadata: MetadataSignals,

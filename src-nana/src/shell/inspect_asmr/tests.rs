@@ -372,7 +372,7 @@ fn work_info_lists_arrays_as_text() {
     );
 }
 
-/// L7：停用 ASMR 资源库插件以后，补全候选、作品队列和播放列表都不出现（Vue 里扩展跟着插件卸载）。
+/// L7：停用 ASMR 资源库插件以后，补全候选、作品队列和播放列表都不出现（扩展跟着插件卸载）。
 #[test]
 fn extension_panels_need_the_asmr_plugin() {
     let files = [
@@ -400,7 +400,7 @@ fn extension_panels_need_the_asmr_plugin() {
     );
 }
 
-/// L6：文件列表上的 ASMR 摘要（Vue `fileSummary`）：RJ 号、作品名、收听状态、进度和「歌词」用「 · 」连起来；
+/// L6：文件列表上的 ASMR 摘要：RJ 号、作品名、收听状态、进度和「歌词」用「 · 」连起来；
 /// 后端种下的标题就是文件名，不当作品名；不是 ASMR 条目没有。
 #[test]
 fn file_summary_joins_the_work_fields() {
@@ -515,8 +515,8 @@ fn work_queue_sorts_tracks_naturally() {
 }
 
 /// 作品队列行是左标题、右状态，不是「标题 状态」一整句。状态是 `listeningStatus` 原文，
-/// 没有这个字段时是 Vue 的占位 `unlistened`。正在预览的音轨不在队列里，
-/// 行底保持透明（Vue 作品队列不加 `is-active`）；没有别的音轨时不编造作品。
+/// 没有这个字段时是占位 `unlistened`。正在预览的音轨不在队列里，
+/// 行底保持透明（作品队列不标当前项）；没有别的音轨时不编造作品。
 #[test]
 fn work_queue_splits_the_title_from_the_status() {
     let files = [
@@ -617,10 +617,10 @@ fn work_queue_splits_the_title_from_the_status() {
     );
 }
 
-/// 作品队列跟 Vue `workAudioEntries(previewFileEntry, activeFileEntries)`：
+/// 作品队列按预览条目和当前列表取音轨：
 /// 当前文件在列表里就用这一行的元数据，不在列表里再用播放集条目。
 /// 详情叠层和还没保存的草稿不改分组、标题、状态。没有作品目录时不把别的音轨编进来。
-/// 列表行没有的标题不编，收听状态仍用 Vue 的占位 `unlistened`。
+/// 列表行没有的标题不编，收听状态仍用占位 `unlistened`。
 #[test]
 fn work_queue_follows_the_preview_list_not_the_draft() {
     let files = [

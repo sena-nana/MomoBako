@@ -1,7 +1,7 @@
 //! 预览右侧四行事实的测试。
 //!
-//! 类型、大小、硬链接和修改时间跟 Vue `previewFileEntry`：当前列表优先；列表里没有、
-//! 播放队列是空的，才用打开着的播放集页的扩展名。`selectAsset` 把素材详情写回来以后，
+//! 类型、大小、硬链接和修改时间跟预览条目：当前列表优先；列表里没有、
+//! 播放队列是空的，才用打开着的播放集页的扩展名。选中素材、详情写回来以后，
 //! 这四行仍是这一条，不换成素材摘要。
 
 use std::collections::BTreeMap;
@@ -70,7 +70,7 @@ fn preview_stats_follow_the_list_entry_before_the_detail() {
     assert_eq!(skipped.size, "未知");
 }
 
-/// 详情回来以后，四行仍是 Vue `previewFileEntry`：列表上的值不被素材摘要换掉；
+/// 详情回来以后，四行仍是预览条目：列表上的值不被素材摘要换掉；
 /// 播放集条目没有大小和修改时间，详情里的真实字段也不补上。
 #[test]
 fn preview_stats_stay_on_the_entry_after_the_detail() {
@@ -124,7 +124,7 @@ fn preview_stats_stay_on_the_entry_after_the_detail() {
     );
 }
 
-/// 预览页编辑器跟 Vue `previewFileEntry`：四个输入来自列表条目，不跟详情卡导语的叠层。
+/// 预览页编辑器跟预览条目：四个输入来自列表条目，不跟详情卡导语的叠层。
 ///
 /// 空 comment 退回 note。详情编号不同、注释和链接不同也不盖住。正在输入时详情再来一次，草稿留着。
 /// 单击这条只核对详情里的非空注释会进详情卡；叠层的其余规则另测。
@@ -217,7 +217,7 @@ fn preview_editor_draft_follows_the_list_entry_not_the_asset_detail() {
     );
 }
 
-/// 只读行：详情卡跟 Vue `currentFileEntry` 的叠层，预览页和播放集条目跟 `previewFileEntry`。
+/// 只读行：详情卡跟叠层后的条目，预览页和播放集条目跟预览条目。
 ///
 /// 编号对得上时详情盖住列表上的日期、尺寸、大小、色板和来源；对不上仍是列表。
 /// 预览页开着时详情再来也不换。列表没有的创建时间和原始大小不拿详情补。
@@ -340,11 +340,11 @@ fn recorded_rows_follow_the_detail_overlay_and_the_preview_list() {
     assert!(from_item.origin_title.is_empty());
 }
 
-/// 作品信息和自定义行跟只读行同一条叠层：详情卡用 `currentFileEntry`，预览页和播放集只用条目。
+/// 作品信息和自定义行跟只读行同一条叠层：详情卡用叠层后的条目，预览页和播放集只用条目。
 ///
 /// 编号对得上时详情盖住同名字段，详情没有的键留着列表的，两边都没有的不编造。
 /// 正在输入和还没保存的补丁不写进这两块，详情到达也不冲掉输入框里的草稿。
-/// 索引标签和多归属位置仍只读列表条目（Vue `withActiveAssetMetadata` 只换 metadata）。
+/// 索引标签和多归属位置仍只读列表条目（叠层只换元数据）。
 #[test]
 fn work_info_and_custom_rows_follow_the_detail_overlay() {
     let path = "voice/a.mp3";

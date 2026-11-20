@@ -1,4 +1,4 @@
-//! 文件预览页的外框，对齐 Vue `FilePreviewPane` 和 `.files-preview-page`。
+//! 文件预览页的外框。
 //!
 //! bg-elev 圆角面板，自上而下：页头（返回、眉题和文件名、已保存的注释与链接、打开与定位）、正文两栏（左边预览框加色板，
 //! 右边 300px 的文件事实和元数据卡），最底下贴着播放条。正文在窗口不宽于 900px 时上下排。
@@ -26,7 +26,7 @@ use super::super::player_view::icons;
 use super::super::{ShellMessage, ShellViewModel};
 use super::body::{self, PreviewSnapshot};
 
-/// Vue `@media (max-width: 900px)`：正文和页头改成单列。
+/// 窗口不宽于 900px 时，正文和页头改成单列。
 const STACK_BREAKPOINT: f32 = 900.0;
 /// 右侧文件事实卡宽度，对应 `--workspace-file-detail-width`。
 const DETAIL_WIDTH: f32 = 300.0;
@@ -37,7 +37,7 @@ const DETAIL_GAP: f32 = 18.0;
 #[derive(Clone, Debug, Default, PartialEq)]
 struct HeadView {
     stacked: bool,
-    /// 照 Vue `entryDisplayTitle` 取的标题。目录保留原名，文件只在名称以条目扩展名结尾时去掉。
+    /// 显示标题。目录保留原名，文件只在名称以条目扩展名结尾时去掉。
     name: String,
     /// 和文件名不同时的完整路径，否则为空。
     path: String,
@@ -138,7 +138,7 @@ fn head_view(model: &ShellViewModel) -> HeadView {
     let repository = model.workspace.active_repository();
     let absolute = super::super::input::resolve_entry_absolute(model, &path);
     let can_open = !path.is_empty() && !absolute.trim().is_empty();
-    // Vue 页头读列表条目的 metadata，不读编辑器草稿。草稿要等保存写回这一行才出现。
+    // 页头读列表条目的元数据，不读编辑器草稿。草稿要等保存写回这一行才出现。
     let (comment, link) = saved_lead(model);
     HeadView {
         stacked: model.viewport_width <= STACK_BREAKPOINT,
@@ -157,7 +157,7 @@ fn head_view(model: &ShellViewModel) -> HeadView {
 
 /// 页头的注释和链接。
 ///
-/// Vue `FilePreviewPane` 读的是列表条目的 `entry.metadata`，编辑器草稿要等保存写回这一行才出现。
+/// 读的是列表条目的元数据，编辑器草稿要等保存写回这一行才出现。
 /// 注释是空字符串时改用 `note`。当前列表里没有这条时，用已经读回或保存过的素材详情，同样不读草稿。
 fn saved_lead(model: &ShellViewModel) -> (String, String) {
     let path = model.inspect.open_path().map(str::trim).unwrap_or("");
@@ -178,7 +178,7 @@ fn saved_lead(model: &ShellViewModel) -> (String, String) {
     )
 }
 
-/// Vue `metadataString`：不是字符串的值当成空。
+/// 取字符串：不是字符串的值当成空。
 fn metadata_string(
     metadata: &std::collections::BTreeMap<String, serde_json::Value>,
     key: &str,
@@ -190,7 +190,7 @@ fn metadata_string(
         .to_string()
 }
 
-/// Vue `metadataComment`：`comment` 是空字符串时用 `note`。显示时去掉首尾空白。
+/// 注释：`comment` 是空字符串时用 `note`。显示时去掉首尾空白。
 fn entry_comment(metadata: &std::collections::BTreeMap<String, serde_json::Value>) -> String {
     let comment = metadata_string(metadata, "comment");
     let chosen = if comment.is_empty() {
@@ -778,7 +778,7 @@ impl WrapAnywhere for Text {
 
 /// 页头标题和它下面的路径。
 ///
-/// Vue `previewFileEntry` 再 `entryDisplayTitle`：当前列表里的这条优先（目录保留原名，文件只在名称以条目扩展名结尾时去掉）。
+/// 当前列表里的这条优先（目录保留原名，文件只在名称以条目扩展名结尾时去掉）。
 /// 列表里没有时，正在播放的播放集里有这条就用它的文件名和扩展名，预览临时插进去的条目不算。
 /// 播放集是空的再用打开着的播放集页。都没有时才按路径最后一段去掉扩展名。
 /// 路径和条目名称不同时，标题下面仍写出完整路径。
@@ -801,7 +801,7 @@ fn preview_heading(model: &ShellViewModel, path: &str) -> (String, String) {
     (title, shown)
 }
 
-/// 当前列表、正在播放的播放集、打开着的播放集页，按 Vue 的顺序找这条的名称和标题。
+/// 按当前列表、正在播放的播放集、打开着的播放集页的顺序找这条的名称和标题。
 fn preview_entry_title(model: &ShellViewModel, path: &str) -> Option<(String, String)> {
     if path.is_empty() {
         return None;
@@ -859,9 +859,9 @@ fn extension_of(name: &str) -> String {
         .unwrap_or_default()
 }
 
-/// 预览右侧的类型、大小、硬链接和修改时间按 Vue `previewFileEntry` 填。
+/// 预览右侧的类型、大小、硬链接和修改时间按预览条目填。
 ///
-/// `selectAsset` 只写入 `activeAssetDetail`，不改这条预览条目。详情回来以后四行仍是它，
+/// 选中素材只写入素材详情，不改这条预览条目。详情回来以后四行仍是它，
 /// 不用素材摘要换掉。当前面板的列表优先，再看目录、智能文件夹和分类视图。都没有时：
 /// 正在播放的队列非空就只在队列里找这条；队列是空的才用打开着的播放集页。
 /// 播放集条目只有扩展名，大小、硬链接和修改时间留空，不拿详情里的字段补，也不编造。
@@ -871,7 +871,7 @@ pub(crate) fn seed_preview_facts(model: &mut ShellViewModel, path: &str) {
         eprintln!("Nana 预览事实没有路径，不从列表填");
         return;
     }
-    // Vue `previewFileEntry` 不经 `withActiveAssetMetadata`。预览页开着时，编辑器四个输入跟这一条列表元数据。
+    // 预览条目不叠素材详情。预览页开着时，编辑器四个输入跟这一条列表元数据。
     if super::super::files_view::previewing(model) {
         let metadata = list_fact_row(model, path).map(|row| row.metadata.clone());
         if let Some(metadata) = metadata {
@@ -894,9 +894,9 @@ pub(crate) fn seed_preview_facts(model: &mut ShellViewModel, path: &str) {
     }
 }
 
-/// 单击选中时，详情卡编辑器的四个输入跟 Vue `currentFileEntry`。
+/// 单击选中时，详情卡编辑器的四个输入跟叠层后的条目。
 ///
-/// `withActiveAssetMetadata`：素材 id 对得上时，详情元数据盖到当前列表条目上，同键以详情为准，
+/// 叠层：素材 id 对得上时，详情元数据盖到当前列表条目上，同键以详情为准，
 /// 详情没有的键留着列表的。对不上或详情还没回来时只用列表。空 `comment` 退回 `note`。
 /// 列表里没有这一条时四个输入留着已经记下的素材详情。正在输入时不盖。预览页开着时不进这里。
 pub(crate) fn seed_detail_card_editor(model: &mut ShellViewModel, path: &str) {
@@ -930,7 +930,7 @@ pub(crate) fn seed_detail_card_editor(model: &mut ShellViewModel, path: &str) {
     crate::shell::inspect::support::adopt_preview_entry(&mut model.inspect, &metadata);
 }
 
-/// Vue `withActiveAssetMetadata` 的元数据：没有对得上的详情时原样返回列表。
+/// 叠层后的元数据：没有对得上的详情时原样返回列表。
 fn merged_list_metadata(
     row: &std::collections::BTreeMap<String, serde_json::Value>,
     overlay: Option<&std::collections::BTreeMap<String, serde_json::Value>>,
@@ -1096,7 +1096,7 @@ mod lead_tests {
 
     /// 页头注释和链接跟着列表里已经保存的条目走。编辑器草稿变了不提前出现；
     /// 保存写回这一行以后才换。列表里没有这条时用已保存的素材详情，仍不读草稿。
-    /// 注释字段是空的时候用 note，和 Vue `metadataComment` 一样。
+    /// 注释字段是空的时候用 note。
     #[test]
     fn preview_header_lead_stays_on_the_saved_entry_while_the_draft_changes() {
         let path = "voice/a.mp3";
@@ -1152,7 +1152,7 @@ mod lead_tests {
         assert_eq!(model.inspect.draft_comment(), "还是草稿");
     }
 
-    /// 页头标题照 Vue `entryDisplayTitle`，不按路径最后一段猜扩展名。
+    /// 页头标题按条目的扩展名去掉后缀，不按路径最后一段猜扩展名。
     ///
     /// 当前列表优先：扩展名对不上时保留原名，目录保留带点的名字。列表里没有时用正在播放的播放集；
     /// 播放集是空的再用打开着的播放集页。正在播放的队列里没有这条时，不用另一页的文件名。

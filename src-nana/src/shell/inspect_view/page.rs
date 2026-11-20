@@ -1,4 +1,4 @@
-//! PDF / Office 的页纸，对齐 office-preview 的 `office-preview__viewer`。
+//! PDF / Office 的页纸。
 //!
 //! 滚动区 18px 内边距，底部一层 bg-subtle 渐变；上面一行翻页（上一页、页码、下一页），
 //! 下面是一张白纸：border-soft 细边、大投影，宽度铺满滚动区，高度按页面比例。一次只显示一页。
@@ -40,7 +40,7 @@ pub(super) fn page_bitmap(raster: &Pixels) -> AnyView {
         .border(SemanticColorRole::BorderSoft, 1.0)
         .with_layout(|layout| {
             layout.aspect_ratio = Some(aspect);
-            // 纸张在深浅主题里都是白的，和 `.office-preview__viewer--pdf canvas` 一致。
+            // 纸张在深浅主题里都是白的。
             layout.background = Some([1.0, 1.0, 1.0, 1.0]);
             layout.margin_bottom = Some(LengthSpec::Px(14.0));
             layout.paint.box_shadows = vec![nana_ui_core::BoxShadowSpec {
@@ -81,7 +81,7 @@ pub(super) fn page_scroller(page: AnyView, nav: Option<(usize, usize)>, key: Str
     }))
     .key(key)
     .children((sheet,));
-    // 滚动区背后一层 `office-preview__viewer--pdf` 的底：bg 上从底边往上 34% 淡出的 bg-subtle。
+    // 滚动区背后一层底：bg 上从底边往上 34% 淡出的 bg-subtle。
     widget(
         Stack::fill_column(0.0)
             .min_height(LengthSpec::Px(0.0))

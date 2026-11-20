@@ -1,8 +1,8 @@
 //! 音频舞台两列（窄窗口改成上下两行）的分法。
 //!
-//! Vue `.media-preview__audio-layout` 写
+//! 两列是
 //! `grid-template-columns: minmax(240px, 0.92fr) minmax(320px, 1.08fr)`。
-//! `@media (max-width: 820px)` 改成一列，
+//! 窗口不宽于 820px 时改成一列，
 //! `grid-template-rows: minmax(112px, 0.44fr) minmax(0, 1fr)`。
 //! 最小像素先占住，多出来的空间再按 `fr` 分。不是把整段宽高按 0.92:1.08 切开。
 

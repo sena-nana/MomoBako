@@ -1,7 +1,7 @@
 //! 预览读取中的状态胶囊。
 //!
-//! Vue `.media-preview__status` / `.text-preview__status` 的底是 `color-mix(in srgb, var(--bg-elev) 84%, transparent)`。
-//! 图片读取还带 `.media-preview__download-progress--indeterminate`：轨道宽 132，色条宽 42%，
+//! 胶囊的底是 `color-mix(in srgb, var(--bg-elev) 84%, transparent)`。
+//! 图片读取还带不定进度条：轨道宽 132，色条宽 42%，
 //! 按 `media-preview-progress-sweep 1.05s ease-in-out infinite` 从 `translateX(-120%)` 扫到 250%。
 //! 文本读取是同一枚胶囊，没有进度条。音视频准备卡不走这里。
 
@@ -17,7 +17,7 @@ const FILL: f32 = TRACK * 0.42;
 /// `color-mix(in srgb, var(--bg-elev) 84%, transparent)` 里表面色的比例。
 const PILL_FILL: f32 = 0.84;
 
-/// 图片读取胶囊用 Vue 的 84% 底，色条按可控时间停在扫动的起点、中点和循环起点。
+/// 图片读取胶囊用 84% 底，色条按可控时间停在扫动的起点、中点和循环起点。
 /// 文本读取是同一层底，不画进度，也不要扫动帧。图已经画出以后胶囊收掉，扫动停下。
 #[test]
 fn image_status_capsule_sweeps_on_the_vue_fill() {

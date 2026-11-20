@@ -1,8 +1,8 @@
 //! 音频舞台上的胶囊底色。
 //!
-//! Vue 的唱片中间「音频」和标题下的「音频 / 专辑」不是同一块不透明底：
-//! `.media-preview__audio-chip` 是 `color-mix(in srgb, var(--bg-elev) 88%, transparent)`，
-//! `.media-preview__audio-meta span` 是 `color-mix(in srgb, var(--bg) 24%, transparent)`。
+//! 唱片中间的「音频」和标题下的「音频 / 专辑」不是同一块不透明底：
+//! 唱片中间那枚是 `color-mix(in srgb, var(--bg-elev) 88%, transparent)`，
+//! 标题下的是 `color-mix(in srgb, var(--bg) 24%, transparent)`。
 //! 标题下那一层很透，卡片上的浅光能从胶囊后面透出来。
 
 use nana_ui::runtime::view::{AnyView, IntoView, widget};
@@ -62,7 +62,7 @@ mod tests {
     use nana_ui::runtime::SemanticColorRole;
     use nana_ui_core::SemanticColorMix;
 
-    /// 唱片中间的「音频」和标题下的胶囊各用 Vue 的那一层透明底。
+    /// 唱片中间的「音频」和标题下的胶囊各用自己那一层透明底。
     /// 没有专辑时不编第三枚；有封面时中间那枚收掉，标题下的底色不变。
     #[test]
     fn audio_stage_pills_use_the_vue_fills() {
@@ -210,7 +210,7 @@ mod tests {
         );
     }
 
-    /// 外框底色是这一层混合，不再另铺不透明表面。边框角色跟着 Vue 的 chip / meta。
+    /// 外框底色是这一层混合，不再另铺不透明表面。边框角色跟着唱片中间那枚 / 标题下的胶囊。
     fn assert_fill(
         harness: &ShellHarness,
         key: &str,

@@ -1,7 +1,7 @@
 //! 音频舞台的内边距。
 //!
-//! Vue `.media-preview__audio-stage` 在窗口宽于 820px 时写
-//! `padding: clamp(12px, 3vh, 30px)`，`@media (max-width: 820px)` 时改成 0。
+//! 窗口宽于 820px 时是
+//! `padding: clamp(12px, 3vh, 30px)`，不宽于 820px 时改成 0。
 //! `vh` 相对窗口高度。NanaUI 解析 padding 时不把视口传进去，视口单位会落成 0，
 //! 所以四边做成独立的宽高，由布局按窗口视口解析。高度还没量到时不落成 12 或 30。
 
@@ -61,10 +61,10 @@ pub(super) fn stage_pad_spec() -> LengthSpec {
 
 /// 唱片和标题所在的舞台。
 ///
-/// Vue 写成两行网格：`grid-template-rows: var(--audio-record-size) minmax(0, auto)`，
+/// 舞台是两行网格：`grid-template-rows: var(--audio-record-size) minmax(0, auto)`，
 /// `align-items: center`，行距 18px。第一行高就是唱片直径，唱片钉在内容顶。
 /// 第二行吃掉剩下的高度，标题在这一行里居中，不和唱片捆成一组再垂直居中。
-/// `@media (max-width: 820px)` 只改直径和 `padding: 0`，顶对齐是同一套。
+/// 窗口不宽于 820px 时只改直径和 `padding: 0`，顶对齐是同一套。
 /// 窗口宽于 820px 时，四边各留一条 [`stage_pad_spec`]。不宽于 820px 时不留这四边。
 pub(super) fn stage_view(
     stacked: bool,
@@ -137,7 +137,7 @@ pub(super) fn stage_view(
 
 /// 标题所在的第二行。
 ///
-/// 行高是唱片下面的剩余空间（Vue 第二行 `minmax(0, auto)` 在默认 `align-content` 下被拉高）。
+/// 行高是唱片下面的剩余空间（第二行 `minmax(0, auto)` 在默认 `align-content` 下被拉高）。
 /// 标题作为这一行的内容居中。行本身从唱片下沿再隔 18px 排起，所以标题不会回到唱片旁边。
 fn caption_row(caption: AnyView) -> AnyView {
     widget(

@@ -66,7 +66,7 @@ fn a_failed_page_still_offers_the_next_page() {
 
 const MODEL_VIEW: &str = "momobako.preview.model";
 
-/// 一个三角形：x、y 跨度都是 1，z 是 0，尺寸按 Vue 收到 0.01。
+/// 一个三角形：x、y 跨度都是 1，z 是 0，尺寸下限收到 0.01。
 const TRIANGLE_OBJ: &[u8] = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
 
 /// 打开模型预览并装上解析结果。扩展名写进文件事实，左下角标签才有字。
@@ -119,7 +119,7 @@ fn model_hud_shows_the_mesh_bounding_box() {
     );
 }
 
-/// 有包围盒时，左下角尺寸标签的底是 Vue `.model-preview__hud span` 的抬升表面 88%。
+/// 有包围盒时，左下角尺寸标签的底是抬升表面 88%。
 /// 没有网格就不画这枚标签，也不编 `1.00 x 1.00 x 0.01`。文案仍是三轴尺寸。
 #[test]
 fn model_size_label_uses_the_vue_fill() {
@@ -208,7 +208,7 @@ fn chip_text(harness: &ShellHarness, key: &str) -> String {
         .unwrap_or_else(|| panic!("{key} 没有文字"))
 }
 
-/// Office 顶栏种类照 Vue `officeKindLabel`：Word、Excel、PowerPoint。
+/// Office 顶栏种类写 Word、Excel、PowerPoint。
 /// 还没有页数时第三项是条目大小，没有大小写「准备文档」。有页的 PDF 第三项仍是「N 页 PDF」。
 #[test]
 fn office_toolbar_uses_vue_kind_labels() {
@@ -280,7 +280,7 @@ fn office_toolbar_uses_vue_kind_labels() {
     assert!(pdf.find("准备文档").is_none());
 }
 
-/// 失败浮层铺 Vue `.media-preview__overlay` 的遮罩：`color-mix(in srgb, var(--bg) 74%, transparent)`，铺满预览框。
+/// 失败浮层铺遮罩：`color-mix(in srgb, var(--bg) 74%, transparent)`，铺满预览框。
 /// 能预览或还在读取时不画。标题和原因仍是原来的原文。
 #[test]
 fn failure_overlay_masks_with_the_vue_background() {

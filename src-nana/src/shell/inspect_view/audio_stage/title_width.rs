@@ -1,6 +1,6 @@
 //! 音频舞台标题的宽度。
 //!
-//! Vue `.media-preview__audio-caption` 写 `width: min(var(--audio-record-size), 100%)`。
+//! 标题宽度是 `width: min(var(--audio-record-size), 100%)`。
 //! `--audio-record-size` 就是唱片直径，没有再减一截。`100%` 是标题所在格子。
 //! 格子不比直径窄时，宽度等于直径。
 //! 这里用唱片已经在用的那条直径，不另写一套夹取。

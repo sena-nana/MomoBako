@@ -1,7 +1,7 @@
 //! 同一个仓库刷新以后重读素材详情。
 //!
-//! 对照 Vue `selectRepository` 原地分支：摘要一到，当前素材还在这份摘要里就重读它，否则改记第一个。
-//! 先清掉详情卡上叠着的元数据（`activeAssetDetail = null`），再请求 `getAssetDetail`。
+//! 同一仓库原地刷新时，摘要一到，当前素材还在这份摘要里就重读它，否则改记第一个。
+//! 先清掉详情卡上叠着的元数据，再请求 `getAssetDetail`。
 //! 选中的路径、预览页和播放都不换。编辑器有未保存的改动时不覆盖草稿。
 
 use crate::backend::services::repository::{AssetDetail, RepositorySnapshot};
@@ -31,7 +31,7 @@ impl ShellViewModel {
         self.inspect.queue_refresh_asset(repo_id, asset_id);
     }
 
-    /// 重读的结果。别的仓库丢掉。失败只记日志：Vue 写进全局错误、文件列整页变红，这里不照抄。
+    /// 重读的结果。别的仓库丢掉。失败只记日志，不写进全局错误，免得文件列整页变红。
     pub(in crate::shell) fn note_refresh_asset(&mut self, result: Result<AssetDetail, String>) {
         let detail = match result {
             Ok(detail) => detail,

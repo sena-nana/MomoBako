@@ -134,7 +134,7 @@ fn the_playlist_survives_a_restart() {
     assert!(missing.playlist.items.is_empty());
 }
 
-/// 已加入条目的标题重算跟 Vue `resolveActivePlaylist`：还在当前列表里的，用这一行自己的
+/// 已加入条目的标题重算：还在当前列表里的，用这一行自己的
 /// `trackTitle`（没有就用文件名）和收听状态，不跟未保存草稿，也不跟详情叠层。
 /// 不在列表里的保留存下的标题，不拿草稿或作品名编一个。
 #[test]
@@ -289,9 +289,9 @@ fn added_playlist_titles_follow_the_list_row_not_the_draft() {
     );
 }
 
-/// 加入时写入的快照跟 Vue `createPlaylistItem(previewFileEntry)`：列表行用这一行自己的元数据；
+/// 加入时写入的快照：列表行用这一行自己的元数据；
 /// 没有作品目录、又不在列表里时，用播放集条目自己的元数据和文件名。
-/// 卡片是否出现跟 `isAsmrAudioEntry(previewFileEntry)` 或这个资源库已经有条目，先要预览条目自己是 ASMR。
+/// 卡片是否出现看预览条目是不是 ASMR 音频，或这个资源库已经有条目，先要预览条目自己是 ASMR。
 /// 详情叠层和未保存草稿不改快照，也不决定卡片出不出现。已加入条目的标题重算仍读列表行。
 #[test]
 fn playlist_snapshot_and_card_follow_the_entry_not_the_draft() {

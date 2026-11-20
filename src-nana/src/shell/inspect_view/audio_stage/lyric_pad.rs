@@ -1,8 +1,8 @@
 //! 歌词列的上下留白。
 //!
-//! Vue `.media-preview__audio-info` 写 `padding: clamp(6px, 2vh, 24px) 0`：
+//! 歌词列的内边距是 `padding: clamp(6px, 2vh, 24px) 0`：
 //! 上下是这一截，左右是 0。`vh` 相对窗口高度，不相对预览区。
-//! `@media (max-width: 820px)` 把整圈改成 0。
+//! 窗口不宽于 820px 时整圈改成 0。
 //! NanaUI 解析 padding 时不把视口传进去，视口单位会落成 0，
 //! 所以上下做成独立的高度，由布局按窗口视口解析。高度还没量到时不落成 6 或 24。
 
@@ -63,7 +63,7 @@ pub(super) fn column_pad_spec() -> LengthSpec {
 /// 歌词列。`lyrics` 是歌词面板。
 ///
 /// 窗口宽于 820px 时，上下各留一条 [`column_pad_spec`]，左右不留。
-/// 不宽于 820px 时不留这上下两条。列宽和行高按 Vue 的 minmax，见 [`super::split`]。
+/// 不宽于 820px 时不留这上下两条。列宽和行高按 minmax 分，见 [`super::split`]。
 pub(super) fn info_view(stacked: bool, gap: f32, measured: bool, lyrics: AnyView) -> AnyView {
     let children = if stacked {
         vec![lyrics]

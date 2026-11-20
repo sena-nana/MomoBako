@@ -1,6 +1,6 @@
 //! 音频舞台卡片的径向浅光和落影。
 //!
-//! Vue `.media-preview--audio` 在圆角卡片上画
+//! 圆角卡片上画
 //! `radial-gradient(circle at 28% 32%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 28%)`，
 //! 以及 `box-shadow: 0 18px 40px color-mix(in srgb, var(--bg) 84%, transparent)`。
 //! 圆心按 1px 边框内侧的内边距盒定位。圆的半径是到该盒最远角的像素距离，格子不是正方形时仍是正圆。
@@ -15,7 +15,7 @@ use nana_ui_core::{
     RadiusTier, SemanticColorMix, SemanticColorRole, StyleModelRef, ThemeAppearance,
 };
 
-/// 卡片上有 Vue 的浅光和落影。落影在底色下面，浅光在底色上面、内容下面。
+/// 卡片上有浅光和落影。落影在底色下面，浅光在底色上面、内容下面。
 /// 浅色和深色各跟自己的背景色、强调色。800×240 不是正方形，圆仍按像素最远角。
 /// 没有面积时不编阴影，也不编浅光。
 #[test]

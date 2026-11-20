@@ -1,6 +1,6 @@
 //! 音频歌词当前行的放大和投影。
 //!
-//! Vue `.media-preview__audio-lyric.is-active` 在完整正文之外还有 `transform: scale(1.025)`
+//! 当前行在完整正文之外还有 `transform: scale(1.025)`
 //! （`transform-origin: center`）和
 //! `filter: drop-shadow(0 8px 20px color-mix(in srgb, var(--accent) 16%, transparent))`。
 //! 放大和投影只画在当前行上。已经唱过、还没唱到、没有时间的行保持原大，也不加阴影。
@@ -14,7 +14,7 @@ use nana_ui_core::{
     ThemeAppearance,
 };
 
-/// `.is-active { transform: scale(1.025) }`。
+/// 当前行放大到 1.025 倍。
 const ACTIVE_LYRIC_SCALE: f32 = 1.025;
 /// `color-mix(in srgb, var(--accent) 16%, transparent)` 里强调色的比例。
 const ACCENT_MIX: f32 = 0.16;
@@ -22,11 +22,11 @@ const ACCENT_MIX: f32 = 0.16;
 const SHADOW_X: f32 = 0.0;
 /// `drop-shadow` 的垂直偏移。
 const SHADOW_Y: f32 = 8.0;
-/// `drop-shadow` 的模糊半径。Vue 写 20px；画进 Nana 的滤镜字段，不另画一层字。
+/// `drop-shadow` 的模糊半径，20px；画进 Nana 的滤镜字段，不另画一层字。
 const SHADOW_BLUR: f32 = 20.0;
 
 thread_local! {
-    /// 这一次舞台投影用的主题。没记下以前按深色，和 Vue 跟随系统却读不到宿主时一样。
+    /// 这一次舞台投影用的主题。没记下以前按深色，和跟随系统却读不到宿主主题时一样。
     static ACCENT: Cell<ThemeAppearance> = const { Cell::new(ThemeAppearance::Dark) };
 }
 
@@ -35,7 +35,7 @@ pub(crate) fn note_accent(mode: ThemeAppearance) {
     ACCENT.with(|slot| slot.set(mode));
 }
 
-/// 当前行绕自身中心放大到 1.025，并加上 Vue 的 drop-shadow。旁边的行不调用。
+/// 当前行绕自身中心放大到 1.025，并加上 drop-shadow。旁边的行不调用。
 pub(super) fn lift_active_line(button: &mut Button) {
     let mode = ACCENT.with(Cell::get);
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
@@ -71,7 +71,7 @@ mod tests {
     use crate::shell::{ShellViewModel, inspect_lyrics};
     use nana_ui_core::{SemanticColorMix, SemanticColorRole, StyleModelRef, ThemeAppearance};
 
-    /// 当前行有 Vue 的 drop-shadow：偏移 (0, 8)、模糊 20、强调色 16% 透明度。
+    /// 当前行有 drop-shadow：偏移 (0, 8)、模糊 20、强调色 16% 透明度。
     /// 已经唱过、还没唱到、没有时间的行没有这层投影。浅色和深色各跟自己的强调色。
     #[test]
     fn active_lyric_line_drops_the_vue_shadow() {

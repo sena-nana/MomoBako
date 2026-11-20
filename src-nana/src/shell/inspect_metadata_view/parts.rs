@@ -168,7 +168,7 @@ fn tag_panel(signals: MetadataSignals) -> AnyView {
     .into_any()
 }
 
-/// 菜单打开时铺满窗口。点在菜单和「+」外面就关掉，和 Vue 文档上的 pointerdown 一样。
+/// 菜单打开时铺满窗口。点在菜单和「+」外面就关掉，按下指针时就关。
 /// 菜单层的 z 序更高，点菜单本身不会打到这一层。
 fn tag_menu_closer(signals: MetadataSignals) -> AnyView {
     let tags = signals.tags;
@@ -368,7 +368,7 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
     .into_any()
 }
 
-/// 一个仓库标签分组（Vue `file-metadata-card__tag-group`）：11px 半粗的分组名，下面是可加的标签片，行距 5。
+/// 一个仓库标签分组：11px 半粗的分组名，下面是可加的标签片，行距 5。
 fn tag_group(group: TagGroupOption, locked: impl Fn() -> bool + Send + Clone + 'static) -> AnyView {
     let key = format!("inspect-tag-group-{}", style::key_part(&group.id));
     let chips = group
@@ -407,8 +407,8 @@ fn tag_group(group: TagGroupOption, locked: impl Fn() -> bool + Send + Clone + '
     .into_any()
 }
 
-/// `workspace-filter-chip`：26 高的描边药丸，12px 弱化色，点一下加进草稿。键是 `{prefix}-{标签}`。
-/// Vue 的全局 `button { height: 32px }` 会把它顶到 32，这里按组件声明的 26 画。
+/// 可加的标签片：26 高的描边药丸，12px 弱化色，点一下加进草稿。键是 `{prefix}-{标签}`。
+/// 高度固定 26，不用按钮通用的 32。
 fn option_chip(
     prefix: &str,
     tag: &str,
@@ -480,7 +480,7 @@ pub(super) fn candidate_section(signals: MetadataSignals) -> AnyView {
 }
 
 /// 导入框：来源、作品 ID 和「抓取候选」，候选 JSON 和「导入候选」，出错时多一行原因。
-/// 抓取进行中，来源、作品 ID 和抓取按钮不能动，按钮写「抓取中」（Vue `lookup.isLoading`）。
+/// 抓取进行中，来源、作品 ID 和抓取按钮不能动，按钮写「抓取中」。
 fn import_form(signals: MetadataSignals) -> AnyView {
     let view = signals.candidates;
     let locked = move || view.with(|view| view.locked);

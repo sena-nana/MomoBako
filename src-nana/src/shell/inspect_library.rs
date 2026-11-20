@@ -1,13 +1,13 @@
 //! 压缩包列表和 ASMR 作品信息。
 //!
 //! 列表来自已经读出的压缩包条目。目录单击只选中，400 毫秒内再点同一目录才进入下一层，用的仍是这些名字。
-//! 文件单击仍打开这一条。行首照 Vue `fileKindLabel`：目录写 DIR，文件用扩展名前四位大写，没有扩展名写 FILE。
+//! 文件单击仍打开这一条。行首种类：目录写 DIR，文件用扩展名前四位大写，没有扩展名写 FILE。
 //! 点开文件以后名单留在左边，右边舞台用现有预览画这一条。再点另一条，舞台换成那一条。
 //! 没打开文件时舞台写提示：没在取文件时写当前目录和「选择内部文件进行预览」；正在取写「准备内部文件」；
 //! 不能内联写文件名和「无法内联预览该文件类型」；取出失败写「无法预览内部文件」和原因。
 //! 没有条目时工具条仍写「0 项」，列表里只写「空目录」。
 //! 作品信息只画元数据里已有的歌词状态和收听进度，没有歌词正文就不造一段歌词。有 http(s) 封面地址时
-//! 标题下多一枚「保存封面」（正在保存写「保存中」）。行的顺序和文案照 Vue `library-asmr` 的元数据面板；
+//! 标题下多一枚「保存封面」（正在保存写「保存中」）。行的顺序和文案按 ASMR 资源库插件的元数据面板；
 //! 只有 ASMR 资源库扩展开着（[`asmr_enabled`]）、条目是 ASMR 条目时才有。
 
 use std::cell::RefCell;
@@ -67,7 +67,7 @@ const MODEL_VIEW: &str = "momobako.preview.model";
 const PDF_VIEW: &str = "momobako.preview.pdf";
 const OFFICE_VIEW: &str = "momobako.preview.office";
 
-/// 作品信息的行：键和标签，顺序照 Vue。值由 [`work_value`] 按键取（有的键有后备键），取不到的行不画。
+/// 作品信息的行：键和标签，按显示顺序排。值由 [`work_value`] 按键取（有的键有后备键），取不到的行不画。
 const WORK_ROWS: &[(&str, &str)] = &[
     ("workId", "作品 ID"),
     ("workTitle", "标题"),
@@ -93,7 +93,7 @@ const WORK_ROWS: &[(&str, &str)] = &[
 const LYRIC_BODY_KEYS: &[&str] = &["lyrics", "lyric", "lyricText", "lyricBody"];
 
 /// ASMR 资源库扩展开着没有：有启用、状态可用、声明了 `libraryExtension.libraryKind = "asmr"` 的插件。
-/// Vue 里扩展由这个插件的前端注册，停用插件以后作品信息、补全候选、作品队列和文件列表摘要都不出现。
+/// 扩展属于这个插件，停用插件以后作品信息、补全候选、作品队列和文件列表摘要都不出现。
 pub(super) fn asmr_enabled(plugins: &[PluginManifest]) -> bool {
     plugins.iter().any(|plugin| {
         plugin.enabled
@@ -164,7 +164,7 @@ pub(super) fn is_pdf(view_id: &str) -> bool {
     view_id == PDF_VIEW
 }
 
-/// Vue 预览数出页以后的第三项。翻页控件才写「当前 / 总数」。
+/// 预览数出页以后的第三项。翻页控件才写「当前 / 总数」。
 pub(super) fn ready_page_label(total: usize) -> String {
     format!("{total} 页 PDF")
 }
@@ -178,7 +178,7 @@ pub(super) struct DocumentBar {
 }
 
 /// 预览列上方的种类、扩展名和第三项。
-/// 已经数出页时第三项是「N 页 PDF」。还没有页数时照 Vue `statusDetail` 写条目上的大小；
+/// 已经数出页时第三项是「N 页 PDF」。还没有页数时写条目上的大小；
 /// 大小是空的写「准备文档」，不编数字。Nana 不跑 office-convert，没有转换器名字可写。
 pub(super) fn document_bar(model: &ShellViewModel, kind: &str) -> Option<DocumentBar> {
     let detail = model
@@ -283,7 +283,7 @@ fn toolbar_chip(label: &str, key: &str, emphasis: bool) -> AnyView {
     .into_any()
 }
 
-/// 右边舞台上的提示。文案照 Vue `renderInternalPreview` 的空闲、准备、不能内联和失败。
+/// 右边舞台上的提示，分空闲、准备、不能内联和失败四种。
 pub(super) struct ArchiveStage<'a> {
     pub title: &'a str,
     pub detail: &'a str,
@@ -303,7 +303,7 @@ pub(super) fn archive_stage(inspect: &InspectState) -> (&str, &str, bool) {
     }
 }
 
-/// 当前层的目录名。根上写「根目录」，和 Vue `directoryLabel` 一样。
+/// 当前层的目录名。根上写「根目录」。
 fn directory_label(inspect: &InspectState) -> &str {
     let directory = match inspect.archive_nests.last() {
         Some(nest) => nest.directory.as_str(),
@@ -325,8 +325,8 @@ fn request_entry(key: &str) -> &str {
 }
 
 /// 把压缩包摘要画成计数和条目。目录行单击只选中，连点才进入；文件行单击打开这一条。面包屑回到上层。
-/// 没有条目时仍写「0 项」和「空目录」，和 Vue 工具条的 `entries.length` 一样，不另编一句说明。
-/// 名单在左、舞台在右，和 Vue `archive-preview__body` 一样。`opened` 有值时舞台是这一条的预览；
+/// 没有条目时仍写「0 项」和「空目录」，工具条照常按条目数计数，不另编一句说明。
+/// 名单在左、舞台在右。`opened` 有值时舞台是这一条的预览；
 /// 否则 `stage` 写空闲、准备、不能内联或失败。
 pub(super) fn archive_list(
     content: &str,
@@ -387,7 +387,7 @@ pub(super) fn archive_list(
     .into_any()
 }
 
-/// 工具条：面包屑在左，项数在右。和 Vue `archive-preview__toolbar` 一样把计数和路径分开。
+/// 工具条：面包屑在左，项数在右，计数和路径分开。
 fn archive_toolbar(crumbs: AnyView, count: &str) -> AnyView {
     widget(
         Stack::row(12.0)
@@ -406,7 +406,7 @@ fn archive_toolbar(crumbs: AnyView, count: &str) -> AnyView {
     .into_any()
 }
 
-/// 左边名单、右边舞台。宽度比照 Vue `minmax(220px, 0.42fr)` 和 `minmax(260px, 1fr)`。
+/// 左边名单、右边舞台。宽度按 `minmax(220px, 0.42fr)` 和 `minmax(260px, 1fr)` 分。
 fn archive_split(list: AnyView, stage: AnyView) -> AnyView {
     widget(
         Stack::row(0.0)
@@ -478,7 +478,7 @@ fn archive_stage_view(stage: ArchiveStage) -> AnyView {
     .into_any()
 }
 
-/// 面包屑照 Vue `breadcrumbs`：第一段是 `entry.name`（带扩展名的文件名），后面是已经进入的目录名。当前段不可再点。
+/// 面包屑：第一段是带扩展名的文件名，后面是已经进入的目录名。当前段不可再点。
 fn archive_breadcrumbs(directory: &str, archive_name: &str) -> AnyView {
     let mut path = String::new();
     let root = archive_root_label(archive_name);
@@ -513,7 +513,7 @@ fn archive_breadcrumbs(directory: &str, archive_name: &str) -> AnyView {
         .into_any()
 }
 
-/// 面包屑第一段。Vue 用 `props.entry.name`：带扩展名的文件名，也就是路径最后一段。空白或没有名字时仍写「压缩包」，不编一个假名字。
+/// 面包屑第一段：带扩展名的文件名，也就是路径最后一段。空白或没有名字时仍写「压缩包」，不编一个假名字。
 fn archive_root_label(name: &str) -> &str {
     let name = name.trim();
     if name.is_empty() { "压缩包" } else { name }
@@ -570,7 +570,7 @@ fn archive_row(
     }
 }
 
-/// zip/7z 的文件行单击就打开，点开的这一行标成当前项，和 Vue `is-selected` 一样。
+/// zip/7z 的文件行单击就打开，点开的这一行标成当前项。
 /// rar 的整路径列表没有目录头，行不可点。行首种类不改大小。
 fn archive_file_row(
     key: String,
@@ -629,7 +629,7 @@ fn archive_kind_mark(label: &str, key: &str) -> AnyView {
     .into_any()
 }
 
-/// 照 Vue `fileKindLabel`：扩展名前四位转成大写。空扩展名、只有前导点、或点后面是空的，都写「FILE」。
+/// 行首种类：扩展名前四位转成大写。空扩展名、只有前导点、或点后面是空的，都写「FILE」。
 fn file_kind_label(name: &str) -> String {
     let extension = path_extension(name);
     let raw = if extension.is_empty() {
@@ -735,7 +735,7 @@ impl FactsView {
 }
 
 /// 预览右侧的类型、大小、硬链接和修改时间。标签在上，数值在下，数值按字段绑定。
-/// Vue 统计没有「文件」标题，页数在翻页控件里，尺寸只留在标签组后面。
+/// 统计没有「文件」标题，页数在翻页控件里，尺寸只留在标签组后面。
 pub(super) fn fact_column(facts: Signal<FactsView>) -> AnyView {
     let read = move |pick: fn(&FactsView) -> String| move || facts.with(|view| pick(view));
     widget(
@@ -777,7 +777,7 @@ pub(super) fn fact_column(facts: Signal<FactsView>) -> AnyView {
     .into_any()
 }
 
-/// Vue `asset-meta__row`：标签在上（11px 粗体弱色、字距 0.4），数值在下（14px 正文色，长值随处折行），
+/// 一行统计：标签在上（11px 粗体弱色、字距 0.4），数值在下（14px 正文色，长值随处折行），
 /// 两者间距 6。`divided` 时行顶一条 border-soft 发丝线，线下留 12px；`shown` 为假时不占位。
 fn stacked_value(
     label: &str,
@@ -827,7 +827,7 @@ fn stacked_value(
         .into_any()
 }
 
-/// 与 Vue `formatBytes` 相同。无效数字记日志并写「未记录」。
+/// 1024 以下写 B，其余换成 KB、MB、GB、TB，10 以上取整、以下留一位小数。无效数字记日志并写「未记录」。
 pub(super) fn format_original_size(value: Option<f64>) -> String {
     let Some(value) = value else {
         return "未记录".into();
@@ -891,8 +891,8 @@ pub(super) enum LibraryRow {
     Body(String),
 }
 
-/// ASMR 条目的作品信息，有歌词正文时再加一块歌词。不是 ASMR 条目（Vue `matchAsmrEntry` 不认）时没有：
-/// Vue 的这一块是 ASMR 扩展的元数据面板，只挂在 ASMR 条目上。歌词状态没有时写「未检测」，不补歌词正文。
+/// ASMR 条目的作品信息，有歌词正文时再加一块歌词。不是 ASMR 条目时没有：
+/// 这一块是 ASMR 扩展的元数据面板，只挂在 ASMR 条目上。歌词状态没有时写「未检测」，不补歌词正文。
 /// `custom` 是按 [`super::inspect::support::display_value`] 画成文字的元数据，数组已经连成「甲，乙」。
 pub(super) fn library_sections(custom: &BTreeMap<String, String>) -> Vec<LibrarySection> {
     if !matches_asmr(custom) {
@@ -975,15 +975,15 @@ fn cover_button(cover: CoverButton) -> AnyView {
     .into_any()
 }
 
-/// 和 Vue `matchAsmrEntry` 一样：库类型、作品 ID 或 RJ 号任一存在。
+/// 是不是 ASMR 条目：库类型、作品 ID 或 RJ 号任一存在。
 pub(super) fn matches_asmr(custom: &BTreeMap<String, String>) -> bool {
     present(custom, "libraryKind").as_deref() == Some("asmr")
         || present(custom, "workId").is_some()
         || present(custom, "rjCode").is_some()
 }
 
-/// 作品信息一行的值，照 Vue 元数据面板逐键取：作品 ID 没有时用 RJ 号，标签没有时用 `tags`，销量、评分各有后备键；
-/// 歌词状态没有时是「未检测」；时长、价格和计数按 Vue 的格式化，解析不出数字时这行不画，不把原文当成数字。
+/// 作品信息一行的值，逐键取：作品 ID 没有时用 RJ 号，标签没有时用 `tags`，销量、评分各有后备键；
+/// 歌词状态没有时是「未检测」；时长、价格和计数各按自己的格式写，解析不出数字时这行不画，不把原文当成数字。
 fn work_value(custom: &BTreeMap<String, String>, key: &str) -> Option<String> {
     let value = match key {
         "workId" => present(custom, "workId").or_else(|| present(custom, "rjCode")),
@@ -1007,7 +1007,7 @@ fn work_value(custom: &BTreeMap<String, String>, key: &str) -> Option<String> {
     value.filter(|value| !value.is_empty())
 }
 
-/// Vue `toLocaleString("zh-CN")`：整数部分按千分位分组，小数最多三位、去掉末尾的 0。
+/// zh-CN 数字写法：整数部分按千分位分组，小数最多三位、去掉末尾的 0。
 fn format_measure(number: f64) -> String {
     let rounded = (number * 1000.0).round() / 1000.0;
     let fixed = format!("{:.3}", rounded.abs());
@@ -1028,7 +1028,7 @@ fn format_measure(number: f64) -> String {
     }
 }
 
-/// 数字字段：数字或数字文字（Vue `metadataNumber`）。解析不出或不是有限数时记日志、当作没有。
+/// 数字字段：数字或数字文字。解析不出或不是有限数时记日志、当作没有。
 fn number(custom: &BTreeMap<String, String>, key: &str) -> Option<f64> {
     let text = present(custom, key)?;
     match text.parse::<f64>() {
@@ -1051,7 +1051,7 @@ fn present(custom: &BTreeMap<String, String>, key: &str) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-/// 文件列表上一行的 ASMR 摘要（Vue `fileSummary(entry).inline`）：RJ 号（没有时是作品 ID）、作品名（没有时是标题）、
+/// 文件列表上一行的 ASMR 摘要：RJ 号（没有时是作品 ID）、作品名（没有时是标题）、
 /// 收听状态、进度、有歌词状态时「歌词」，用「 · 」连起来。不是 ASMR 条目时是空串；扩展插件开没开由调用方看。
 ///
 /// 标题和文件名一样时不算作品名：后端给每个素材种下的 `title` 就是文件名，卡片上已经有了，不再重复一遍。
@@ -1100,7 +1100,7 @@ pub(super) fn file_summary(row: &super::files::FileRow) -> String {
     .join(" · ")
 }
 
-/// 收听状态的标签（Vue `listeningStatusLabel`）：认得的三种翻成中文，别的原样。
+/// 收听状态的标签：认得的三种翻成中文，别的原样。
 pub(super) fn listening_label(status: &str) -> String {
     match status {
         "unlistened" => "未收听".into(),
@@ -1110,7 +1110,7 @@ pub(super) fn listening_label(status: &str) -> String {
     }
 }
 
-/// 「收听状态」一行：标签，进度大于 0 时再接「· N%」（四舍五入到整数，Vue `formatListeningStatus`）。
+/// 「收听状态」一行：标签，进度大于 0 时再接「· N%」（四舍五入到整数）。
 fn listening_line(custom: &BTreeMap<String, String>) -> Option<String> {
     let label = present(custom, "listeningStatus")
         .map(|status| listening_label(&status))
@@ -1178,7 +1178,7 @@ mod tests {
         assert_eq!(format_measure(4.5), "4.5");
     }
 
-    /// 作品字段、歌词状态和收听进度都不让非 ASMR 条目长出「作品信息」：Vue 的这一块只挂在 ASMR 条目上。
+    /// 作品字段、歌词状态和收听进度都不让非 ASMR 条目长出「作品信息」：这一块只挂在 ASMR 条目上。
     #[test]
     fn non_asmr_entries_have_no_work_section() {
         let mut custom = BTreeMap::new();
@@ -1189,7 +1189,7 @@ mod tests {
         assert!(library_sections(&custom).is_empty());
     }
 
-    /// 行的顺序和文案照 Vue 元数据面板；数组连成「甲，乙」以后原样显示，数字字段解析不出时这行不画。
+    /// 行的顺序和文案按元数据面板；数组连成「甲，乙」以后原样显示，数字字段解析不出时这行不画。
     #[test]
     fn work_rows_follow_vue_order_and_formats() {
         let custom = asmr(&[

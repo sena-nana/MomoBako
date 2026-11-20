@@ -1,6 +1,6 @@
 //! 音视频准备卡的落影和扫动进度。
 //!
-//! Vue `.media-playlist-runtime__loading` 的 `box-shadow: 0 12px 32px color-mix(in srgb, var(--bg) 70%, transparent)`。
+//! 准备卡的落影是 `box-shadow: 0 12px 32px color-mix(in srgb, var(--bg) 70%, transparent)`。
 //! 色条宽 42%，`media-preview-progress-sweep 1.05s ease-in-out infinite` 把 `translateX` 从 -120% 扫到 250%。
 //! 百分比相对色条自己的宽度。时间由动效时钟给出，不依赖真窗口。
 
@@ -16,7 +16,7 @@ use nana_ui_core::{
 const TRACK: f32 = 200.0;
 const FILL: f32 = TRACK * 0.42;
 
-/// 准备卡有 Vue 的落影，色条按可控时间停在扫动的起点、中点、四分之一程和循环回到起点。
+/// 准备卡有落影，色条按可控时间停在扫动的起点、中点、四分之一程和循环回到起点。
 #[test]
 fn loading_card_sweeps_and_drops_the_vue_shadow() {
     let mut harness = ShellHarness::mount(scene("online-preview-preparing"));

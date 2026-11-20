@@ -18,7 +18,7 @@ pub(crate) use bridge::frame_at;
 pub(crate) use bridge::orbit_drag;
 pub(super) use bridge::rgba_png_data_url;
 
-/// 元数据编辑器自己画的通用字段，即 Vue `FileMetadataEditor.vue` 读的键，覆盖 `docs/api-design.md` 的
+/// 元数据编辑器自己画的通用字段，覆盖 `docs/api-design.md` 的
 /// Generic file metadata keys：评分、注释（含旧键 note）、链接和标签组四个输入，以及入库、创建、修改时间、
 /// 尺寸、原始大小、调色板、来源标题和来源链接的只读行。自定义行不再重复画这些键。
 const EDITOR_METADATA: &[&str] = &[
@@ -172,7 +172,7 @@ pub enum InspectEffect {
         generation: u64,
         request: SearchRequestDraft,
     },
-    /// 预览的音视频接管了播放条，宿主派发后开始播放（Vue 预览页挂载即播放）。
+    /// 预览的音视频接管了播放条，宿主派发后开始播放（预览页一打开就播放）。
     Autoplay {
         path: String,
         generation: u64,
@@ -297,7 +297,7 @@ pub(super) struct FileFacts {
     pub original_size_bytes: Option<f64>,
 }
 
-/// 压缩包名单还在时，旁边那一块内部文件提示。照 Vue `renderInternalPreview`。
+/// 压缩包名单还在时，旁边那一块内部文件提示。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum ArchiveFileNotice {
     /// 扩展名不能在名单旁画出来。里面是文件名。
@@ -431,7 +431,7 @@ impl InspectState {
         self.saving
     }
 
-    /// 选中了文件、详情还没读回（Vue `isLoadingAssetDetail`）。
+    /// 选中了文件、详情还没读回。
     pub(super) fn detail_loading(&self) -> bool {
         self.loading && self.kind.is_none() && self.target_path.is_some()
     }
@@ -1154,7 +1154,7 @@ pub(super) fn reduce_message(
             model.request_entry_access(&repo, &path);
         }
     }
-    // 标签变了：静默重读仓库摘要，侧栏计数、筛选栏和标签菜单的候选跟着换（Vue `applyAssetResponse` 换掉摘要里这项素材）。
+    // 标签变了：静默重读仓库摘要，侧栏计数、筛选栏和标签菜单的候选跟着换（摘要里这项素材换成新的）。
     // 文件行上的元数据和索引标签由文件表面就地换（`shell/files/reduce.rs`）。
     if let Some(repo_id) = retagged
         .filter(|repo_id| model.workspace.active_repo_id.as_deref() == Some(repo_id.as_str()))

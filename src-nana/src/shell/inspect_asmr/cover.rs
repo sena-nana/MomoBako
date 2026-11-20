@@ -1,6 +1,6 @@
 //! ASMR 作品信息的「保存封面」，以及候选卡片上的「封面」。
 //!
-//! 对齐 `library-asmr` 的 `saveCover`：元数据或候选字段里有 http(s) 的 `coverUrl`（没有时用 `cover`）
+//! 元数据或候选字段里有 http(s) 的 `coverUrl`（没有时用 `cover`）
 //! 才出现按钮。点了用 `thumbnails:ensure` 的 `save + sourceUrl` 把这张图存成自定义缩略图。
 //! 不是 http(s)、回收站、没有素材，或地址不是当前文件和它的候选上的那一个，都不下载，也不编造封面。
 //! 同一时间只保存一张；进行中作品信息的按钮写「保存中」，候选上的「封面」停用。
@@ -138,7 +138,7 @@ fn offer(model: &ShellViewModel) -> Option<CoverButton> {
     })
 }
 
-/// Vue `canEdit`：文件，而且有素材 id。目录和还没读到素材的条目不能保存。
+/// 能不能保存：文件，而且有素材 id。目录和还没读到素材的条目不能保存。
 pub(super) fn editable_for_button(model: &ShellViewModel) -> bool {
     if model.inspect.current_asset_id().is_none() {
         return false;

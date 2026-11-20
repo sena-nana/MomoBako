@@ -1,10 +1,10 @@
-//! 已选文件的元数据编辑，对应 Vue `FileMetadataEditor.vue`。
+//! 已选文件的元数据编辑。
 //!
-//! 顺序和 Vue 一致：注释、链接两行带图标的输入，评分五颗星，可折叠的标签组，然后是
+//! 顺序：注释、链接两行带图标的输入，评分五颗星，可折叠的标签组，然后是
 //! 添加到资源库、创建时间、文件修改时间、尺寸、原始大小、调色板、索引标签、多归属位置、
-//! 来源标题和来源链接。详情卡这几行跟 `currentFileEntry`：素材编号对得上才把详情叠到列表上。
+//! 来源标题和来源链接。详情卡这几行：素材编号对得上才把详情叠到列表上。
 //! 作品信息、自定义行和补全候选跟这几行同一份元数据，不跟编辑器里还没保存的草稿。
-//! 预览页跟 `previewFileEntry`，不拿素材详情补列表里没有的值。索引标签和多归属位置仍只读列表条目。
+//! 预览页只读预览条目，不拿素材详情补列表里没有的值。索引标签和多归属位置仍只读列表条目。
 //! 改动先进草稿，260ms 后自动保存；画面上不放保存按钮。
 //! 自动保存撞上服务器的新版本时，注释前面先写出冲突和「采用服务器版本」，草稿留在输入框里。
 //! 文件详情和预览页共用这一块。
@@ -42,7 +42,7 @@ use super::{ShellMessage, ShellViewModel};
 
 mod parts;
 
-/// Vue `.file-metadata-card__star.is-active` 的金色。浅色深色主题同一个值。
+/// 点亮的星的金色。浅色深色主题同一个值。
 const STAR_GOLD: [f32; 4] = [212.0 / 255.0, 166.0 / 255.0, 61.0 / 255.0, 1.0];
 
 /// 冲突说明和能不能编辑。
@@ -60,10 +60,10 @@ struct TagsView {
     tags: Vec<String>,
     expanded: bool,
     menu_open: bool,
-    /// 仓库的标签分组里还没加进草稿的标签，空的分组不列（Vue `groupedTagOptions`，不按输入过滤）。
+    /// 仓库的标签分组里还没加进草稿的标签，空的分组不列，不按输入过滤。
     groups: Vec<TagGroupOption>,
     /// 整个资源库（仓库摘要）和搜索结果里用过、还没加进草稿的标签，按 zh-CN 排序、按输入过滤，最多 18 个
-    /// （Vue `availableTags` 即筛选栏的标签候选）。
+    /// （和筛选栏的标签候选同一批）。
     options: Vec<String>,
     /// 输入的新标签不空、也不重复时才能添加。
     can_create: bool,
@@ -513,7 +513,7 @@ impl Painter for StarPainter {
     }
 }
 
-/// Vue `aliasPaths`：去掉和当前路径相同的位置，用「，」连起来。
+/// 多归属位置：去掉和当前路径相同的位置，用「，」连起来。
 /// 读列表行上保存的那一份。继续加载会换掉上一页目录快照，智能文件夹结果也不在那一页里。
 fn alias_locations(row: &FileRow) -> String {
     row.alias_paths
@@ -588,8 +588,8 @@ fn recorded_metadata(
 
 /// 详情卡作品信息、自定义行和只读行共用的元数据。封面按钮也读这一份。
 ///
-/// 预览页照 Vue `previewFileEntry`：当前列表优先，没有再看播放集条目，不叠素材详情，也不读编辑草稿。
-/// 详情卡照 `currentFileEntry`（`withActiveAssetMetadata`）：素材 id 对得上时详情盖到列表上，同键以详情为准；
+/// 预览页：当前列表优先，没有再看播放集条目，不叠素材详情，也不读编辑草稿。
+/// 详情卡：素材 id 对得上时详情盖到列表上，同键以详情为准；
 /// 对不上或还没读回时只用列表。没有的键不补。
 fn card_entry_metadata(model: &ShellViewModel, row: Option<&FileRow>) -> BTreeMap<String, Value> {
     if super::files_view::previewing(model) {
@@ -653,7 +653,7 @@ fn playlist_entry_metadata(model: &ShellViewModel, path: &str) -> BTreeMap<Strin
     }
 }
 
-/// Vue `metadataString`：只有字符串算数，别的类型当成空，不退回另一份元数据。
+/// 取字符串：只有字符串算数，别的类型当成空，不退回另一份元数据。
 fn metadata_string(metadata: &BTreeMap<String, Value>, key: &str) -> String {
     match metadata.get(key) {
         Some(Value::String(value)) => value.clone(),
@@ -665,7 +665,7 @@ fn metadata_string(metadata: &BTreeMap<String, Value>, key: &str) -> String {
     }
 }
 
-/// Vue `metadataRawNumber`：只认有限数字。键在但类型不对时记日志，不当成列表上的旧值。
+/// 取数字：只认有限数字。键在但类型不对时记日志，不当成列表上的旧值。
 fn raw_number(metadata: &BTreeMap<String, Value>, key: &str) -> Option<f64> {
     match metadata.get(key) {
         Some(Value::Number(number)) => {
@@ -810,7 +810,7 @@ fn right_fact(
 }
 
 /// 来源链接：右对齐的地址，后面是「打开链接」「复制链接」两个 26 方的描边按钮。
-/// 悬停提示和 Vue `title` 一样。只有 http、https、mailto、tel 才能打开（`host_api::openable_url`）。
+/// 悬停提示就是按钮名。只有 http、https、mailto、tel 才能打开（`host_api::openable_url`）。
 /// 点下时现读地址。没有地址时不占位。
 fn source_link_row(
     recorded: Signal<RecordedView>,
@@ -869,11 +869,11 @@ fn source_link_row(
         .into_any()
 }
 
-/// 来源链接旁的 26 方按钮。`title` 是无障碍名和悬停提示，对应 Vue `title`。
+/// 来源链接旁的 26 方按钮。`title` 是无障碍名和悬停提示。
 ///
-/// 平时弱色图标、`--bg` 底、`--border-soft` 细边。悬停时图标改正文色、边框改强调色
-/// （`.file-metadata-card__source-action:hover`）。打不开的链接停用时，图标和边框按 0.45
-/// 盖在按钮底色上，和 Vue `opacity: 0.45` 同一深浅，不再整枚淡一层。
+/// 平时弱色图标、`--bg` 底、`--border-soft` 细边。悬停时图标改正文色、边框改强调色。
+/// 打不开的链接停用时，图标和边框按 0.45 盖在按钮底色上，
+/// 深浅等同整枚 `opacity: 0.45`，但不再整枚淡一层。
 fn source_action(icon: Icon, key: &str, title: &'static str) -> El<IconButton> {
     let mut button = IconButton::new(icon, title)
         .with_tooltip(title)
@@ -1003,7 +1003,7 @@ fn repository_tag_groups(
 }
 
 /// 整个资源库用过的标签（仓库摘要里每项素材的索引标签）加上搜索结果的标签，去空白、去重，按 zh-CN 排序。
-/// 和筛选栏的标签候选同一来源（Vue `rebuildFilterOptions` 的 `tagFilterOptions`），不只看当前目录读到的那一批。
+/// 和筛选栏的标签候选同一来源，不只看当前目录读到的那一批。
 fn available_tags(model: &ShellViewModel) -> Vec<String> {
     let search = &model.inspect.search_ui;
     let active = model.workspace.active_repo_id.as_deref();
@@ -1259,7 +1259,7 @@ mod tests {
         assert_eq!(recorded.aliases, "albums/cover.png，sets/cover.png");
     }
 
-    /// 来源链接两个按钮照 Vue `title`：悬停提示是「打开链接」「复制链接」。
+    /// 来源链接两个按钮的悬停提示是「打开链接」「复制链接」。
     /// 能开的地址点「打开链接」交给系统，点「复制链接」写入剪贴板。
     /// `javascript:` 打不开，按钮停用，点下去不发打开。
     #[test]

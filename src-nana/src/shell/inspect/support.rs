@@ -1,8 +1,8 @@
 //! 预览扩展名分派、文本字节上限和可解码音频的预览会话。搜索条件解析在 `shell/inspect/search/request.rs`。
 //!
 //! Markdown 先于普通文本。压缩包、PDF、文档和模型走内置绘制（`shell/inspect/native_preview.rs`）。插件清单声明的预览
-//! 贡献在 Vue 里要运行插件前端的 Vue 组件，Nana 不运行；随附插件声明的扩展名都已经在这几张表里。
-//! 认不出的扩展名照 Vue 没有预览插件时的样子：缩略图或类型图标，不写字。
+//! 贡献要运行插件的前端组件，Nana 不运行；随附插件声明的扩展名都已经在这几张表里。
+//! 认不出的扩展名不预览：显示缩略图或类型图标，不写字。
 //! 能解出的 WAV、mp3、flac、ogg 同时带上 PCM，供预览和播放条共用同一出声游标。
 
 mod video_preview;
@@ -214,7 +214,7 @@ pub(super) fn note_media(
             state.error.clear();
             state.media_retry = false;
             super::bridge::install_video(state, frames);
-            // Vue `loadLyrics` 在播放源就绪、舞台已经画出来以后才读歌词。读的时候先写「读取歌词...」。
+            // 播放源就绪、舞台已经画出来以后才读歌词。读的时候先写「读取歌词...」。
             if prep.lyrics_pending {
                 state.lyrics.clear();
                 state.lyrics_pending = true;
@@ -244,8 +244,7 @@ pub(super) fn note_media(
     }
 }
 
-/// 预览内容读好以后要记的访问（Vue 的预览插件都先 `preparePreviewFileSource` / 准备播放源，再发
-/// `emitRepositoryEntryAccess`）。
+/// 预览内容读好以后要记的访问（先准备好预览文件或播放源，再记访问）。
 pub(super) enum PreviewAccess {
     None,
     /// 在线条目的播放源准备好了，后端已经写下访问时间：当场改「最近使用」。结果过期了也改。
@@ -432,7 +431,7 @@ fn normalize_extension(extension: &str) -> String {
         .to_ascii_lowercase()
 }
 
-/// 扩展名是不是视频容器（Vue `isVideoExtension`）。音视频预览失败时按它选标题。
+/// 扩展名是不是视频容器。音视频预览失败时按它选标题。
 pub(crate) fn is_video_extension(extension: &str) -> bool {
     VIDEO_EXTENSIONS.contains(&normalize_extension(extension).as_str())
 }
@@ -458,7 +457,7 @@ pub(super) fn metadata_rating(metadata: &[MetadataEntry]) -> i64 {
         .unwrap_or(0)
 }
 
-/// 元数据 `tagGroups` 展平成标签，和 Vue `metadataTagGroups` 一样：字符串项直接用；旧格式的对象项
+/// 元数据 `tagGroups` 展平成标签：字符串项直接用；旧格式的对象项
 /// `{ label, tags }` 取它 `tags` 里的字符串，`tags` 里没有字符串时取 `label`。去空白、去重，保持原顺序。
 /// 不是数组时返回 `None`，由调用方退回索引标签。
 pub(super) fn metadata_tags(metadata: &[MetadataEntry]) -> Option<Vec<String>> {
@@ -470,7 +469,7 @@ pub(super) fn metadata_tags(metadata: &[MetadataEntry]) -> Option<Vec<String>> {
     Some(flatten_tag_groups(value))
 }
 
-/// Vue `FileMetadataEditor` 的 `sourcePayload`，从预览条目的元数据取出四个输入。
+/// 从预览条目的元数据取出编辑器的四个输入。
 ///
 /// 评分不是有限数字时是 0。`comment` 是空字符串时用 `note`，不去掉首尾空白。
 /// `tagGroups` 不是数组时是空列表，不退回索引标签。
@@ -522,7 +521,7 @@ fn json_string(metadata: &BTreeMap<String, Value>, key: &str) -> String {
         .to_string()
 }
 
-/// Vue `metadataNumber`：只有有限数字才四舍五入并夹到 0–5。
+/// 评分：只有有限数字才四舍五入并夹到 0–5。
 fn preview_rating(metadata: &BTreeMap<String, Value>) -> i64 {
     let Some(Value::Number(number)) = metadata.get("rating") else {
         return 0;
@@ -578,7 +577,7 @@ fn tag_group_item(item: &Value) -> Vec<String> {
     }
 }
 
-/// 元数据值画成一行字：字符串去掉首尾空白；数字、布尔原样；全是标量的数组照 Vue `formatList` 用「，」连起来
+/// 元数据值画成一行字：字符串去掉首尾空白；数字、布尔原样；全是标量的数组用「，」连起来
 /// （空的项跳过）；含对象的数组和对象写紧凑 JSON；null 是空串。
 pub(in crate::shell) fn display_value(value: &Value) -> String {
     match value {
@@ -602,7 +601,7 @@ pub(in crate::shell) fn display_value(value: &Value) -> String {
     }
 }
 
-/// 把 Vue 详情卡里的只读行从元数据抄进事实。缺字段留空，不补当前时间。
+/// 把详情卡里的只读行从元数据抄进事实。缺字段留空，不补当前时间。
 pub(super) fn fill_recorded_facts(facts: &mut super::FileFacts, metadata: &[MetadataEntry]) {
     facts.added_to_library_at = metadata_string(metadata, "addedToLibraryAt").unwrap_or_default();
     facts.file_created_at = metadata_string(metadata, "fileCreatedAt").unwrap_or_default();

@@ -1,4 +1,4 @@
-//! 音频预览的歌词。对齐 `player-audio` 的 `audioPreview.js` / `lyrics.js`。
+//! 音频预览的歌词。
 //!
 //! 播放源带回本地歌词路径时读那个文件；没有时读同级 `.lrc`。解析成 LRC 行以后画在唱片右边，
 //! 播放头走到的那一行加重。没有文件、读失败或正文空时写「暂无歌词」，不编造歌词。音频舞台出来以后、文件还在读时写「读取歌词...」。
@@ -43,7 +43,7 @@ pub(crate) fn sibling_lrc_path(path: &str) -> String {
 }
 
 /// 音频解出来以后记下还要读的歌词。舞台先出来，读的时候写「读取歌词...」。
-/// 视频、解不开、只有网址不排这次读取，也不下载。
+/// 视频和解不开的音频不排这次读取。
 pub(crate) fn schedule_lyrics(prep: &mut SourcePrep, hint: LyricHint, playable_audio: bool) {
     if !playable_audio {
         return;

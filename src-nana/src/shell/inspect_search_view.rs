@@ -1,4 +1,4 @@
-//! 搜索结果面板，对应 Vue `pages/workspace/SearchPanel.vue`。
+//! 搜索结果面板。
 //!
 //! 页头是范围眉题、「搜索结果」、摘要和仓库数、结果数两个计数胶囊。下面依次是错误行、搜索中提示、
 //! 空状态（没有资源库 / 等待搜索条件 / 跑完没有命中）和结果列表。结果行左边是文件图标块，中间是
@@ -37,11 +37,10 @@ pub(crate) use panel_state::{SearchPanelSignals, SearchPanelView};
 /// 结果行在 Store 里的句柄。
 type HitItem = Item<Store<Vec<HitRow>>, String, HitRow>;
 
-/// 常驻搜索面板（`.search-workbench__panel`，`--radius-2xl`）：只读 `signals`，高度随内容，内容更高时
+/// 常驻搜索面板（`--radius-2xl`）：只读 `signals`，高度随内容，内容更高时
 /// 随页面主体一起滚动。
 ///
-/// Vue 的样式写了面板 `min-height: 100%`、空状态 `flex: 1`，但父级高度不定，实际渲染是内容高度。
-/// 撑满整页的大虚线框违背 DESIGN.md「避免装饰面板」的克制原则，这里保留实际的内容高度。
+/// 面板不撑满整页：撑满整页的大虚线框违背 DESIGN.md「避免装饰面板」的克制原则，这里保留实际的内容高度。
 pub(crate) fn resident_search_panel(signals: SearchPanelSignals) -> AnyView {
     let status = signals.status;
     let results = signals
@@ -126,7 +125,7 @@ fn header(head: Signal<SearchHead>) -> AnyView {
     .into_any()
 }
 
-/// Vue `.asset-browser__state`：搜索进行中的一行提示。
+/// 搜索进行中的一行提示。
 fn searching_state(status: Signal<SearchStatus>) -> AnyView {
     widget(
         state_box()
@@ -148,8 +147,7 @@ fn searching_state(status: Signal<SearchStatus>) -> AnyView {
     .into_any()
 }
 
-/// 搜索失败。Vue 只把错误写进全局状态、面板里不显示；这里用 `.asset-browser__state--error`
-/// 的危险色写出真实错误，不让失败看起来像「没有结果」。
+/// 搜索失败。面板里用危险色写出真实错误，不让失败看起来像「没有结果」。
 fn error_state(status: Signal<SearchStatus>) -> AnyView {
     widget(state_box().border(SemanticColorRole::Danger, 1.0))
         .visible(move || status.with(|status| !status.error.is_empty()))
@@ -176,7 +174,7 @@ fn state_box() -> Stack {
         })
 }
 
-/// Vue `.search-workbench__empty`：虚线框，`--bg-subtle` 底，标题 18px、说明 14px。
+/// 空状态：虚线框，`--bg-subtle` 底，标题 18px、说明 14px。
 fn empty_state(status: Signal<SearchStatus>) -> AnyView {
     let text = move |pick: fn(&(String, String)) -> &String| {
         move || {

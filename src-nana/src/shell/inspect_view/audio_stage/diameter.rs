@@ -1,8 +1,8 @@
 //! 音频舞台唱片的直径。
 //!
-//! Vue `.media-preview__audio-stage` 在窗口宽于 820px 时写
-//! `--audio-record-size: clamp(220px, min(32vw, 48vh), 380px)`。
-//! `@media (max-width: 820px)` 时改成 `clamp(140px, min(34vh, 56vw), 230px)`。
+//! 窗口宽于 820px 时是
+//! `clamp(220px, min(32vw, 48vh), 380px)`。
+//! 不宽于 820px 时改成 `clamp(140px, min(34vh, 56vw), 230px)`。
 //! `vw` / `vh` 相对窗口视口，不相对预览区。宽或高还没量到时不给出像素。
 
 use nana_ui::runtime::LengthSpec;
@@ -27,7 +27,7 @@ const NARROW_VH: f32 = 34.0;
 
 /// 窗口视口上的唱片直径。
 ///
-/// 宽度不大于 [`super::STACK_BREAKPOINT`]（Vue `max-width: 820px`）时用窄公式，更宽用宽公式。
+/// 宽度不大于 [`super::STACK_BREAKPOINT`]（820px）时用窄公式，更宽用宽公式。
 /// 一边还没量到（非有限，或 ≤ 0）时返回 `None` 并记日志，不把结果说成 140、230、220 或 380。
 /// 唱片节点走 [`record_size`]，由布局视口解析；这条给已经拿到宽高的调用。
 #[cfg_attr(not(test), allow(dead_code))]
@@ -56,7 +56,7 @@ fn viewport_measured(side: f32) -> bool {
 /// 没有视口时解析是 `None`，宽窗口不落成 220 或 380，窄窗口不落成 140 或 230。
 pub(super) fn record_size(narrow: bool) -> LengthSpec {
     if narrow {
-        // `min(34vh, 56vw)`，和 Vue 的书写顺序一致。
+        // `min(34vh, 56vw)`，先高后宽，和公式的书写顺序一致。
         clamp_size(
             NARROW_MIN,
             ViewportAxis::Height,

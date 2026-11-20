@@ -1,8 +1,7 @@
 //! ASMR 补全候选：从素材元数据 `providerCandidates` 读出候选画成卡片；「应用」把候选字段按原始 JSON 类型
 //! 写回素材，「导入候选」和「抓取候选」把新候选追加进当前素材的 `providerCandidates` 并保存。
 //!
-//! 对应 Vue `library-asmr/src/asmrCandidates.js` 和 `register.js` 的元数据面板。候选从叠层后的
-//! `currentFileEntry.metadata` 读（`readMetadataCandidates(props.entry.metadata)`），不跟编辑器里还没保存的草稿。
+//! 候选从详情卡叠层后的元数据读，不跟编辑器里还没保存的草稿。
 //! 导入框和抓取只对着正在看的文件：写入经 [`InspectState::apply_metadata_patch`](super::super::inspect::InspectState::apply_metadata_patch)，
 //! 文件换了就不写，候选不会串到别的文件上。抓取经插件调用 `provider.lookupMetadataCandidate`（DLsite、ASMR One）。
 
@@ -23,7 +22,7 @@ const ASMR_ONE: &str = "momobako.service.provider.asmr-one";
 /// 元数据候选插件的方法（`docs/api-design.md` 的 Plugin API）。
 const LOOKUP_METHOD: &str = "provider.lookupMetadataCandidate";
 
-/// 候选不写的字段：注释、评分和收听进度归用户和播放器（Vue `protectedCandidateFields`）。
+/// 候选不写的字段：注释、评分和收听进度归用户和播放器。
 const PROTECTED: &[&str] = &[
     "comment",
     "rating",
@@ -34,7 +33,7 @@ const PROTECTED: &[&str] = &[
     "trackDurationMs",
 ];
 
-/// 候选能写的作品字段（Vue `providerCandidateFields`）。别的键列在「跳过」里。
+/// 候选能写的作品字段。别的键列在「跳过」里。
 const ALLOWED: &[&str] = &[
     "workId",
     "rjCode",
@@ -128,7 +127,7 @@ struct Candidate {
 }
 
 impl Candidate {
-    /// 元数据里存的一条（Vue `readMetadataCandidates`）：只认对象，来源缺省是 provider，没有字段的不算。
+    /// 元数据里存的一条：只认对象，来源缺省是 provider，没有字段的不算。
     fn read(value: &Value) -> Option<Self> {
         let Value::Object(object) = value else {
             return None;
@@ -141,7 +140,7 @@ impl Candidate {
         })
     }
 
-    /// 导入框里的 JSON（Vue `parseCandidateJson`）：必须是有字段的对象，来源和置信度缺省是 manual。
+    /// 导入框里的 JSON：必须是有字段的对象，来源和置信度缺省是 manual。
     fn imported(raw: &str) -> Result<Self, String> {
         let trimmed = raw.trim();
         if trimmed.is_empty() {
@@ -166,7 +165,7 @@ impl Candidate {
     }
 
     /// 插件抓回来的结果：`{ provider, id, sourceUrl, fetchedAt, candidate: { source, confidence, fields } }`，
-    /// 没有 `candidate` 时整个结果就是候选（Vue `response.payload.candidate ?? response.payload`）。
+    /// 没有 `candidate` 时整个结果就是候选。
     /// 来源缺省用结果里的 `provider`。没有字段时报错，不存一条空候选。
     fn looked_up(payload: &Value) -> Result<Self, String> {
         let candidate = payload
@@ -192,7 +191,7 @@ impl Candidate {
         })
     }
 
-    /// 存进 `providerCandidates` 的样子（Vue `appendMetadataCandidate`）：来源、置信度（有时）和字段。
+    /// 存进 `providerCandidates` 的样子：来源、置信度（有时）和字段。
     fn to_value(&self) -> Value {
         let mut object = Map::new();
         object.insert("source".into(), Value::String(self.source.clone()));
@@ -203,7 +202,7 @@ impl Candidate {
         Value::Object(object)
     }
 
-    /// 应用时写的字段和跳过的键（Vue `buildCandidateSummary`）。受保护和不认识的键跳过；没有内容的值
+    /// 应用时写的字段和跳过的键。受保护和不认识的键跳过；没有内容的值
     /// （null、空白文字、空数组）既不写也不列：写进去只会把文件上已有的值清掉。
     fn patch(&self) -> (BTreeMap<String, Value>, Vec<String>) {
         let mut patch = BTreeMap::new();
@@ -219,7 +218,7 @@ impl Candidate {
     }
 }
 
-/// Vue `normalizeCandidateFields`：字段在 `fields` 里，没有时在 `metadata` 里，都没有时就是候选对象本身；
+/// 候选的字段：在 `fields` 里，没有时在 `metadata` 里，都没有时就是候选对象本身；
 /// 去掉候选自己的四个键。
 fn candidate_fields(object: &Map<String, Value>) -> Map<String, Value> {
     let source = ["fields", "metadata"]
@@ -233,7 +232,7 @@ fn candidate_fields(object: &Map<String, Value>) -> Map<String, Value> {
         .collect()
 }
 
-/// Vue `normalizeProviderName`：去掉首尾空白的非空文字。
+/// 来源名：去掉首尾空白的非空文字。
 fn name(value: Option<&Value>) -> Option<String> {
     value
         .and_then(Value::as_str)
@@ -251,7 +250,7 @@ fn has_content(value: &Value) -> bool {
     }
 }
 
-/// 元数据里已存的候选列表，原样保留：读 `providerCandidates`，没有时读旧键 `asmrProviderCandidates`（Vue 的 `??`）。
+/// 元数据里已存的候选列表，原样保留：读 `providerCandidates`，没有时读旧键 `asmrProviderCandidates`。
 fn stored_candidates(metadata: &BTreeMap<String, Value>) -> Vec<Value> {
     let present = |key: &str| metadata.get(key).filter(|value| !value.is_null());
     match present("providerCandidates").or_else(|| present("asmrProviderCandidates")) {
@@ -331,7 +330,7 @@ fn form_mut(model: &mut ShellViewModel) -> &mut CandidateForm {
     model.asmr.candidates.form_mut(file.as_deref())
 }
 
-/// 补全候选读的元数据，和详情卡作品信息同一份（Vue `props.entry.metadata`，即叠层后的 `currentFileEntry`）。
+/// 补全候选读的元数据，和详情卡作品信息同一份（叠层后的条目元数据）。
 /// 详情卡在素材编号对得上时把详情盖到列表上；预览页和播放集只用条目自己的。没有的键不补，也不跟未保存草稿。
 fn card_metadata(model: &ShellViewModel) -> BTreeMap<String, Value> {
     super::super::inspect_metadata_view::current_card_metadata(model)
@@ -409,7 +408,7 @@ pub(in crate::shell) fn candidates_view(
 }
 
 /// 作品 ID 输入框里显示的值。手填过的留着，详情到达不冲掉。
-/// 没填过时取叠层里的 RJ 号或作品 ID（Vue 的 `workId`：`rjCode || workId`，只在输入还是空的时候填）。
+/// 没填过时取叠层里的 RJ 号或作品 ID（RJ 号优先，只在输入还是空的时候填）。
 pub(in crate::shell) fn lookup_id_shown(model: &ShellViewModel) -> String {
     let form = model
         .asmr

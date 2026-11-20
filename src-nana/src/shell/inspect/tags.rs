@@ -47,7 +47,7 @@ impl InspectState {
         self.tag_menu = false;
     }
 
-    /// 打开标签菜单。虚拟素材、保存中或没有素材时不开（Vue `openTagMenu` 的 `canEdit` 和 `isSaving`）。
+    /// 打开标签菜单。虚拟素材、保存中或没有素材时不开。
     pub fn open_tag_menu(&mut self) {
         if self.virtual_asset || self.saving || self.asset_id.is_none() {
             eprintln!("Nana 当前不能打开标签菜单");

@@ -1,8 +1,6 @@
 //! 搜索与筛选状态：查询、筛选条件、筛选栏输入草稿、搜索结果和仓库摘要候选。
 //!
-//! 对应 Vue `composables/workspace/search.ts`、`state.ts` 的筛选字段，以及
-//! `pages/workspace/search/useSearchUi.ts`、`useWorkspaceFilterShortcuts.ts` 和
-//! `files/useFileInteraction.ts` 的 `openSearchHit`。切换芯片、提交颜色形状、改评分、
+//! 也管打开搜索命中。切换芯片、提交颜色形状、改评分、
 //! 应用高级条件、库类型快捷方式和清除都会切到搜索面板并重新查询；仓库不可写时这些动作不生效。
 
 use std::collections::BTreeMap;
@@ -30,7 +28,7 @@ pub enum SortDirection {
 }
 
 impl SortDirection {
-    /// 下拉选项的值，和 Vue `<option value>` 一致。
+    /// 下拉选项的值。
     pub fn value(self) -> &'static str {
         match self {
             Self::Asc => "asc",
@@ -101,7 +99,7 @@ impl MetadataInput {
     }
 }
 
-/// 已生效的筛选条件，对应 Vue `WorkspaceFilterState`。
+/// 已生效的筛选条件。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SearchFilters {
     pub tags: Vec<String>,
@@ -190,7 +188,7 @@ pub struct DateBound {
     pub to: Option<String>,
 }
 
-/// 筛选栏输入框的草稿，对应 Vue `useSearchUi` 里的各个 ref。
+/// 筛选栏输入框的草稿。
 /// 只有「添加」「应用」或库类型快捷方式才把草稿写进条件。
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SearchDraft {
@@ -281,7 +279,7 @@ pub struct SearchUi {
     pub tag_groups: Vec<RepositoryTagGroup>,
     reveal_panel: bool,
     reveal_hit: Option<HitReveal>,
-    /// 命中在别的仓库：等换仓库走完再读它所在的目录（Vue `openSearchHit` 先 `await selectRepository`）。
+    /// 命中在别的仓库：等换仓库走完再读它所在的目录。
     /// 换仓库清空搜索时留着它。
     after_switch: Option<SearchRow>,
     /// 目录快照里的命中是文件。这份快照写进文件列以后立刻打开预览页，不等素材详情。
@@ -289,7 +287,7 @@ pub struct SearchUi {
 }
 
 impl SearchUi {
-    /// 这次命中是目录里的文件：快照落地后立刻打开预览，不等 `selectAsset`。
+    /// 这次命中是目录里的文件：快照落地后立刻打开预览，不等素材详情。
     pub(in crate::shell) fn arm_preview_after_browse(&mut self) {
         self.preview_after_browse = true;
     }
@@ -366,7 +364,7 @@ impl InspectState {
         }
     }
 
-    /// Vue `toggleSearchFilter`：切换芯片后切到搜索面板并重新查询。
+    /// 切换芯片后切到搜索面板并重新查询。
     fn toggle_search_filter(
         &mut self,
         writable: bool,
@@ -383,7 +381,7 @@ impl InspectState {
         self.run_filtered_search(active_repo);
     }
 
-    /// Vue `submitMetadataFilterInput`：去空白后按芯片切换，再清空输入框。
+    /// 提交元数据筛选输入：去空白后按芯片切换，再清空输入框。
     fn submit_metadata_input(
         &mut self,
         writable: bool,
@@ -402,7 +400,7 @@ impl InspectState {
         self.search_ui.draft.metadata_input_mut(key).clear();
     }
 
-    /// Vue `applyAdvancedSearchFilters`：把高级区草稿写进条件。
+    /// 把高级区草稿写进条件。
     fn apply_advanced(&mut self, writable: bool, active_repo: Option<&str>) {
         if !writable {
             eprintln!("Nana 当前资源库不可写，忽略高级筛选");
@@ -426,7 +424,7 @@ impl InspectState {
         self.run_filtered_search(active_repo);
     }
 
-    /// Vue `clearSearchFilters`：清空条件和全部输入框，查询保留。
+    /// 清空条件和全部输入框，查询保留。
     fn clear_filters(&mut self, writable: bool, active_repo: Option<&str>) {
         if !writable {
             eprintln!("Nana 当前资源库不可写，忽略清空筛选");
@@ -438,7 +436,7 @@ impl InspectState {
         self.run_filtered_search(active_repo);
     }
 
-    /// Vue `applyMetadataFilterShortcut`：快捷方式改写元数据和排序，
+    /// 库类型快捷方式：改写元数据和排序，
     /// 清掉排除标签、排除格式和数量，其余高级输入按草稿生效。
     fn apply_shortcut(
         &mut self,
@@ -476,7 +474,7 @@ impl InspectState {
         self.run_filtered_search(active_repo);
     }
 
-    /// Vue `runSearch`：按当前查询和筛选搜索。没有任何条件时清空结果，不发请求，结果区回到等条件。
+    /// 按当前查询和筛选搜索。没有任何条件时清空结果，不发请求，结果区回到等条件。
     fn run_search(&mut self, active_repo: Option<&str>) {
         self.search_generation += 1;
         let generation = self.search_generation;
@@ -496,7 +494,7 @@ impl InspectState {
         });
     }
 
-    /// Vue `runFilteredSearch`：筛选生效却没有活动仓库时只清空结果。
+    /// 筛选生效却没有活动仓库时只清空结果。
     fn run_filtered_search(&mut self, active_repo: Option<&str>) {
         if active_repo.is_none() && self.filters.has_active_filters() {
             eprintln!("Nana 筛选需要活动仓库");
@@ -548,8 +546,8 @@ impl InspectState {
         self.pending_open = Some(row);
     }
 
-    /// Vue `resetSearchState`：切换资源库时清空查询、结果和条件，收起筛选栏。
-    /// 筛选栏输入框的草稿属于组件，Vue 不清，这里也不清。
+    /// 切换资源库时清空查询、结果和条件，收起筛选栏。
+    /// 筛选栏输入框的草稿属于筛选栏，不清。
     pub(crate) fn reset_search(&mut self) {
         self.search_generation += 1;
         self.query.clear();
@@ -617,8 +615,8 @@ fn note_snapshot(inspect: &mut InspectState, snapshot: &RepositorySnapshot) {
     inspect.search_ui.tag_groups = snapshot.tag_groups.clone();
 }
 
-/// Vue `openSearchHit`：关掉预览、回到全部文件，必要时先切换资源库，再读命中所在目录。
-/// 目录读不了时直接读详情，和 Vue 读目录失败后仍然 `selectAsset` 一致。
+/// 打开搜索命中：关掉预览、回到全部文件，必要时先切换资源库，再读命中所在目录。
+/// 目录读不了时仍然选中命中、直接读详情。
 fn open_hit(model: &mut ShellViewModel, row: SearchRow) {
     model.workspace.library_category = LibraryCategory::All;
     model.workspace.panel = WorkspacePanel::Files;
@@ -675,7 +673,7 @@ pub(in crate::shell) fn drop_after_switch(model: &mut ShellViewModel) {
 fn reveal_in_current(model: &mut ShellViewModel, row: SearchRow) {
     let parent = parent_path(&row.path);
     let context = super::super::files::FileContext::from_model(model);
-    // Vue 读命中所在目录时带上目录树（`includeTree: true`），任务弹层是「读取文件树」。
+    // 读命中所在目录时带上目录树（`includeTree: true`），任务弹层是「读取文件树」。
     if model.files.request_browse_reporting(
         &context,
         &parent,
@@ -714,7 +712,7 @@ fn reveal_after_browse(model: &mut ShellViewModel, result: &Result<FileBrowserSn
     let Some(reveal) = model.inspect.search_ui.reveal_hit.take() else {
         return;
     };
-    // Vue 只在快照里找到文件时 `setPreviewFilePath`。目录、读失败或名单里没有这条都不在这里开预览。
+    // 只在快照里找到文件时才开预览。目录、读失败或名单里没有这条都不在这里开预览。
     let open_preview = result.as_ref().ok().is_some_and(|snapshot| {
         snapshot
             .entries

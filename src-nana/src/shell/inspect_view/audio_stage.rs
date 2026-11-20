@@ -1,6 +1,6 @@
-//! 音频预览的播放器挂载，对齐 player-audio 的唱片舞台和歌词面板。
-//! 标题和封面照 `audioDisplayMetadata`。歌词居中，当前行放大并带投影；有时间的行可点，焦点画下沿。
-//! 每一行按 Vue 的 16px 行盒折行，长句不收成省略号。
+//! 音频预览的播放器挂载：唱片舞台和歌词面板。
+//! 标题和封面按元数据取。歌词居中，当前行放大并带投影；有时间的行可点，焦点画下沿。
+//! 每一行按 16px 字号的行盒折行，长句不收成省略号。
 
 use std::collections::BTreeMap;
 
@@ -28,14 +28,14 @@ mod split;
 mod stage_pad;
 mod title_width;
 use lyric_box::{GAP as LYRIC_GAP, LINE as LYRIC_LINE};
-/// Vue `@media (max-width: 820px)`：舞台和歌词改成上下排。
+/// 窗口不宽于 820px 时，舞台和歌词改成上下排。
 const STACK_BREAKPOINT: f32 = 820.0;
-/// `.media-preview__audio-lyric`：正文先和 `--bg` 按 0.42 混，再盖不透明度。背景是 `--bg` 时收成一次混合。
+/// 歌词行：正文先和 `--bg` 按 0.42 混，再盖不透明度。背景是 `--bg` 时收成一次混合。
 const LYRIC_INK: f32 = 0.42;
 const LYRIC_AHEAD_MIX: f32 = LYRIC_INK * 0.46;
 const LYRIC_PASSED_MIX: f32 = LYRIC_INK * 0.62;
 const LYRIC_HOVER_MIX: f32 = 0.88 * 0.82;
-/// Vue `lyricsInset` 的初值。视口量出来以前，上下留白先用它。
+/// 歌词上下留白的初值。视口量出来以前，上下留白先用它。
 const LYRIC_INSET_INITIAL: f32 = 104.0;
 /// 唱片舞台上的三行字：标题、副标题，以及非空时画在「音频」旁边的专辑。
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -63,7 +63,7 @@ impl<'a> AudioMeta<'a> {
     }
 }
 
-/// 对照 Vue `audioDisplayMetadata` 和舞台上的标题、副标题、专辑胶囊。
+/// 舞台上的标题、副标题、专辑胶囊。
 ///
 /// 标题用去掉空白的 `title`，没有就用去掉扩展名的文件名。`artists` 是数组时只用其中的非空字符串，
 /// 用「 / 」连起来，不再看单个 `artist`；不是数组时才用 `artist`。副标题优先艺人，否则专辑，都没有写「通用音频」。
@@ -103,7 +103,7 @@ fn trimmed_text(value: Option<&Value>) -> Option<String> {
         .map(str::to_string)
 }
 
-/// 音频舞台读的这一条，对照 Vue `previewFileEntry`：先用文件列表里同一路径（当前目录、智能文件夹或分类），
+/// 音频舞台读的这一条：先用文件列表里同一路径（当前目录、智能文件夹或分类），
 /// 列表里没有时用播放集条目，再没有才用搜索命中。封面和标题、艺人、专辑用同一条，素材详情不另覆盖。
 pub(super) struct PreviewEntry<'a> {
     pub meta: AudioMeta<'a>,
@@ -176,7 +176,7 @@ fn entry_of<'a>(meta: AudioMeta<'a>, thumbnail: Option<&'a str>) -> PreviewEntry
     }
 }
 
-/// 对照 `audioPreview.js`：`thumbnailPath || coverArt`。去掉空白后是空的不算有图。
+/// 封面先用 `thumbnailPath`，没有再用 `coverArt`。去掉空白后是空的不算有图。
 /// `http` / `https` 还没落地成文件，这里不下载，交回空，唱片保持封面圆。
 pub(super) fn cover_file<'a>(
     thumbnail: Option<&'a str>,
@@ -224,7 +224,7 @@ pub(super) fn cover_data_url(path: &str) -> Option<String> {
 
 /// 标题下的「音频」和专辑。
 ///
-/// Vue `.media-preview__audio-meta` 是可折行的横排，间距 8，在标题宽度里居中。
+/// 胶囊是可折行的横排，间距 8，在标题宽度里居中。
 /// 两枚放不进这一宽时，专辑整枚换到下一行，字不收成省略号。
 /// 宽度和标题同一条；视口还没量到时这条长度解析不成像素，不另填 220 或 380。
 fn meta_row(chips: Vec<AnyView>, stacked: bool) -> AnyView {
@@ -335,7 +335,7 @@ pub(super) fn audio_stage(
     .children((lyric_body(lines, active, pending),))
     .key("inspect-audio-lyrics")
     .into_any();
-    // `.media-preview__audio-info`：宽窗口上下留白，空态的 18px 仍在歌词面板上。
+    // 歌词列：宽窗口上下留白，空态的 18px 仍在歌词面板上。
     let info = lyric_pad::info_view(stacked, gap, measured, lyrics);
     let layout = if stacked {
         Stack::fill_column(gap)
@@ -356,7 +356,7 @@ pub(super) fn audio_stage(
         layout
             .min_height(LengthSpec::Px(0.0))
             .with_layout(|layout| {
-                // Vue `.media-preview__audio-layout` 的 `overflow: hidden`：下限放不下时裁掉溢出，不把列撑出舞台。
+                // 舞台 `overflow: hidden`：下限放不下时裁掉溢出，不把列撑出舞台。
                 layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
                 layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
             }),
@@ -378,15 +378,15 @@ pub(super) fn audio_stage(
 
 /// 歌词面板的内容。没有行时是「暂无歌词」；有行时放进纵向滚动区。
 /// 有时间的行是按钮，点一下把播放头跳到这一行；没有时间的行只是文字。
-/// 上下留白跟 Vue `syncLyricsInset`：视口量出来以后改成 `max(96, floor(高 / 2))`，
-/// 上沿再减 1。当前行在这次布局里按 `centerActiveLyric` 滚到正中。
+/// 上下留白：视口量出来以后改成 `max(96, floor(高 / 2))`，
+/// 上沿再减 1。当前行在这次布局里滚到正中。
 fn lyric_body(
     lines: &[super::super::inspect_lyrics::LyricLine],
     active: Option<usize>,
     pending: bool,
 ) -> AnyView {
     if lines.is_empty() {
-        // Vue `lyricsPlaceholder`：`loading` 写「读取歌词...」，读完没有正文才写「暂无歌词」。
+        // 占位文案：`loading` 写「读取歌词...」，读完没有正文才写「暂无歌词」。
         let (label, key) = if pending {
             ("读取歌词...", "inspect-audio-lyrics-loading")
         } else {
@@ -449,7 +449,7 @@ fn lyric_body(
     .into_any()
 }
 
-/// 视口高度有了以后收成 Vue 的 inset，并按行号先滚一次。实测盒子由 [`follow_active_lyric`] 收口。
+/// 视口高度有了以后收成按视口算的留白，并按行号先滚一次。实测盒子由 [`follow_active_lyric`] 收口。
 fn center_lyric_viewport(
     event: &ScrollViewportChanged,
     active: Option<usize>,
@@ -476,7 +476,7 @@ fn center_lyric_viewport(
         .set_scroll_offset(id, ScrollOffset { x: 0.0, y });
 }
 
-/// Vue `syncLyricsInset`：至少 96，否则是视口高度的一半，向下取整。
+/// 歌词上下留白：至少 96，否则是视口高度的一半，向下取整。
 fn lyric_inset(viewport: f32) -> f32 {
     (viewport / 2.0).floor().max(96.0)
 }
@@ -508,7 +508,7 @@ pub(crate) struct LyricFollow {
     fade_key: Option<u64>,
 }
 
-/// 当前行滚到视口正中，再按 Vue 的上下遮罩给每行套不透明度。滚或淡出变了就再画一帧。
+/// 当前行滚到视口正中，再按上下遮罩给每行套不透明度。滚或淡出变了就再画一帧。
 pub(crate) fn follow_active_lyric(
     document: &mut RuntimeDocument,
     followed: &mut Option<LyricFollow>,
@@ -632,7 +632,7 @@ fn keyed(document: &RuntimeDocument, key: &str) -> Option<StableNodeId> {
 }
 
 /// 一行歌词。有时间时整行可点，跳到这一行的毫秒；没有时间时不可点。
-/// Vue `audioRuntime.js`：`currentTime = timeMs / 1000`，按钮在 `timeMs == null` 时禁用。
+/// 点击把 `currentTime` 设成 `timeMs / 1000`，按钮在 `timeMs == null` 时禁用。
 /// 当前项还没装好时，播放器的跳转自己拒绝并记日志，不把会话标成失败。
 fn lyric_line(
     index: usize,
@@ -801,7 +801,7 @@ mod tests {
     use crate::shell::ShellViewModel;
     use crate::shell::view_harness::ShellHarness;
 
-    /// 音频舞台按 Vue `audioDisplayMetadata` 写标题、艺人和专辑。
+    /// 音频舞台按元数据写标题、艺人和专辑。
     /// 文件列表里有这一条时用列表上的元数据，不用搜索命中覆盖；列表里没有时才用搜索命中。
     #[test]
     fn audio_stage_shows_metadata_title_artist_and_album() {
@@ -1037,7 +1037,7 @@ mod tests {
     }
 
     /// 有时间的歌词行点一下，播放头跳到这一行；没有时间的行点不了。暂停着的会话不被点成播放。
-    /// 对齐 Vue `audioRuntime.js`：按钮把 `currentTime` 设成 `timeMs / 1000`，`timeMs == null` 时禁用。
+    /// 按钮把 `currentTime` 设成 `timeMs / 1000`，`timeMs == null` 时禁用。
     #[test]
     fn timed_lyric_click_seeks_playback_and_untimed_lines_do_not() {
         let mut model = scene("preview-audio");

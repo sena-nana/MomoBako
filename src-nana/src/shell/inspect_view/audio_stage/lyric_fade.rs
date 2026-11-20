@@ -1,6 +1,6 @@
 //! 歌词视口上下的淡出。
 //!
-//! Vue `.media-preview__audio-lyrics` 写
+//! 歌词视口的遮罩是
 //! `mask-image: linear-gradient(180deg, transparent 0, #000 12%, #000 86%, transparent 100%)`。
 //! 锁定的 NanaUI 把渐变遮罩只套在节点自己的底色和 Painter 上，子节点和节点自己的文字都不进遮罩，
 //! 也没有把子树收成一层再罩的接口。这里按每一行中心在视口里的位置取样同一条遮罩，写进行的不透明度。
@@ -266,7 +266,7 @@ mod tests {
     use crate::shell::ShellViewModel;
     use crate::shell::view_harness::ShellHarness;
 
-    /// 歌词视口上下按 Vue 的遮罩淡出：顶上 12% 从透明收到实，底下从 86% 收到透明。
+    /// 歌词视口上下按遮罩淡出：顶上 12% 从透明收到实，底下从 86% 收到透明。
     /// 正中的当前行不写不透明度。滚开以后按新位置重算，不把已经滚开的当前行拉回去。
     /// 滚动区自己不挂遮罩，也不铺色块。
     #[test]

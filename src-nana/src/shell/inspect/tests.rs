@@ -1,6 +1,6 @@
 //! 预览和元数据状态机测试。搜索与筛选的测试在 `shell/inspect/search/tests.rs`。
 //!
-//! 这些分支来自 Vue 预览分派、元数据编辑和筛选栏。不启动仓库服务，也不写用户目录。
+//! 覆盖预览分派、元数据编辑和筛选栏的分支。不启动仓库服务，也不写用户目录。
 
 use serde_json::{Value, json};
 
@@ -94,9 +94,9 @@ fn source(path: &str) -> FilePreviewSourceResponse {
     }
 }
 
-/// 分派照 Vue `filePreviewExtensions.ts`：图片、Markdown（先于文本）、文本、音视频，再是内置的 PDF、
-/// Office、模型和压缩包（原来由 `office-preview`、`three-model-preview`、`preview-archive` 插件的前端绘制），
-/// 认不出的扩展名（例如 psd）照 Vue 没有预览插件时一样不预览。
+/// 分派顺序：图片、Markdown（先于文本）、文本、音视频，再是内置的 PDF、
+/// Office、模型和压缩包（由 Nana 自己绘制），
+/// 认不出的扩展名（例如 psd）不预览。
 #[test]
 fn extension_dispatch_prefers_markdown_and_native_preview() {
     assert_eq!(super::support::classify("PNG"), PreviewKind::Image);
@@ -297,7 +297,7 @@ fn media_without_a_decoder_never_reports_playing() {
     assert!(super::support::preview_media_session("repo", b"ID3").is_err());
 }
 
-/// 和 Vue `playEntry` 一样：预览的音频插成临时条目接管播放条，宿主派发自动播放后开始走时钟。
+/// 预览的音频插成临时条目接管播放条，宿主派发自动播放后开始走时钟。
 #[test]
 fn wav_preview_takes_over_the_bar_and_autoplays_once_dispatched() {
     let mut model = ShellViewModel::default();
@@ -574,7 +574,7 @@ fn saving_leaves_untouched_fields_alone() {
     }
 }
 
-/// 旧格式的标签组 `{ label, tags }` 照 Vue `metadataTagGroups` 展平进编辑器（有 tags 取 tags，没有取 label）；
+/// 旧格式的标签组 `{ label, tags }` 展平进编辑器（有 tags 取 tags，没有取 label）；
 /// 只改评分时标签组不回写，旧数据原样留着；改了标签才写展平后的字符串数组。
 #[test]
 fn legacy_tag_groups_show_their_tags_and_survive_unrelated_saves() {

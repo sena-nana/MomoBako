@@ -1,11 +1,11 @@
 //! ASMR 播放列表：从作品队列里加入的音轨，按资源库分开记。
 //!
-//! 对应 Vue `library-asmr/src/asmrLibrary.js` 的播放列表：加入作品、随机加一首、清空、点条目打开预览。
-//! Vue 存在本地存储 `momobako.library.asmr.playlist.v1`，这里存在设置目录的 `asmr-playlist.json`，
+//! 支持加入作品、随机加一首、清空、点条目打开预览。
+//! 列表存在设置目录的 `asmr-playlist.json`，
 //! 重启以后还在；归约只标脏，由宿主在更新末尾写文件（`lib.rs`）。条目还在当前列表里时，标题和收听状态
-//! 按这一行自己的元数据重算（Vue `resolveActivePlaylist` 读 `activeFileEntries`），不跟未保存草稿，也不跟详情叠层。
+//! 按这一行自己的元数据重算，不跟未保存草稿，也不跟详情叠层。
 //! 加入时写入的快照同样只读被加入那一条自己的字段：列表行用这一行的元数据；没有作品目录、又不在列表里时，
-//! 用播放集条目自己的元数据和文件名（Vue `createPlaylistItem`）。播放列表卡片是否出现认预览条目自己是不是
+//! 用播放集条目自己的元数据和文件名。播放列表卡片是否出现认预览条目自己是不是
 //! ASMR 音频，或者这个资源库已经有条目。没有音轨名时用文件名，不编造。作品里的音轨按自然序排，`2.mp3` 在 `10.mp3` 前面。
 
 use std::cmp::Ordering;
@@ -21,7 +21,7 @@ use super::super::inspect_library::listening_label;
 use super::super::search_collate::compare_zh;
 use super::{AsmrUi, entry_text, is_asmr_audio};
 
-/// 播放列表里的一项。存进文件的字段名和 Vue 存的一致（`repoId`、`workTitle` 这样的驼峰）。
+/// 播放列表里的一项。存进文件的字段名用驼峰（`repoId`、`workTitle` 这样）。
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct PlaylistItem {
     repo_id: String,
@@ -60,7 +60,7 @@ impl PlaylistItem {
         Value::Object(object)
     }
 
-    /// 从文件里的一项读回（Vue `parseStoredPlaylist`）：要有非空的路径；标题没有时取路径的最后一段，别的字段缺省为空。
+    /// 从文件里的一项读回：要有非空的路径；标题没有时取路径的最后一段，别的字段缺省为空。
     fn from_value(value: &Value) -> Option<Self> {
         let text = |key: &str| value.get(key).and_then(Value::as_str).map(str::to_string);
         let path = text("path").filter(|path| !path.trim().is_empty())?;
@@ -164,7 +164,7 @@ impl AsmrUi {
     }
 }
 
-/// 解析播放列表文件：JSON 数组，没有路径的项跳过（Vue `parseStoredPlaylist`）。
+/// 解析播放列表文件：JSON 数组，没有路径的项跳过。
 fn parse_items(raw: &str) -> Vec<PlaylistItem> {
     let Ok(Value::Array(values)) = serde_json::from_str::<Value>(raw) else {
         eprintln!("Nana ASMR 播放列表文件不是 JSON 数组，从空列表开始");
@@ -182,7 +182,7 @@ fn parse_items(raw: &str) -> Vec<PlaylistItem> {
         .collect()
 }
 
-/// 从一行建播放列表项（Vue `createPlaylistItem`）：只收 ASMR 音频；标题是音轨名，没有时是文件名。
+/// 从一行建播放列表项：只收 ASMR 音频；标题是音轨名，没有时是文件名。
 fn create_item(
     repo_id: &str,
     row: &FileRow,
@@ -237,8 +237,7 @@ fn repo_id(model: &ShellViewModel) -> String {
         .unwrap_or_default()
 }
 
-/// 这个资源库的条目：还在当前列表里、仍是 ASMR 音频的，按这一行自己的元数据重算标题和状态
-/// （Vue `resolveActivePlaylist`：`entriesByPath` 来自 `activeFileEntries`，再 `createPlaylistItem`）。
+/// 这个资源库的条目：还在当前列表里、仍是 ASMR 音频的，按这一行自己的元数据重算标题和状态。
 /// 不并进未保存草稿，也不叠素材详情。列表行没有音轨名时用文件名，不拿草稿或作品名编标题。
 /// 不在当前列表里的照存下的条目，只补上资源库 id。
 fn resolved(model: &ShellViewModel, repo: &str) -> Vec<PlaylistItem> {
@@ -266,7 +265,7 @@ fn resolved(model: &ShellViewModel, repo: &str) -> Vec<PlaylistItem> {
 }
 
 /// 「播放列表」卡片：当前预览条目自己是 ASMR 音频，或者这个资源库已经有条目时才有。
-/// 是不是音频看列表行或播放集条目自己的字段（Vue `isAsmrAudioEntry(previewFileEntry)`），不跟未保存草稿。
+/// 是不是音频看列表行或播放集条目自己的字段，不跟未保存草稿。
 pub(super) fn panel(model: &ShellViewModel) -> Option<PlaylistPanel> {
     let audio = preview_audio(model);
     let items = resolved(model, &repo_id(model));
@@ -295,7 +294,7 @@ pub(super) fn panel(model: &ShellViewModel) -> Option<PlaylistPanel> {
 }
 
 /// 当前预览是不是 ASMR 音频。列表里有就用这一行的种类和元数据；没有、并且正在预览时，用播放集条目自己的元数据。
-/// Vue `playlistItemToFileEntry` 把播放集条目的种类写成 `file`。不跟未保存草稿，也不跟详情叠层。
+/// 播放集条目的种类按 `file` 算。不跟未保存草稿，也不跟详情叠层。
 fn preview_audio(model: &ShellViewModel) -> bool {
     if let Some(row) = super::current_row(model) {
         return is_asmr_audio(&row.kind, &row.metadata);
@@ -307,7 +306,7 @@ fn preview_audio(model: &ShellViewModel) -> bool {
     !metadata.is_empty() && is_asmr_audio("file", &metadata)
 }
 
-/// 把几行加进播放列表，已经在的（同一资源库、同一路径）跳过（Vue `mergePlaylistEntries`）。
+/// 把几行加进播放列表，已经在的（同一资源库、同一路径）跳过。
 /// 快照用这一行自己的元数据，不并进未保存草稿。
 fn merge(model: &mut ShellViewModel, paths: Vec<String>) {
     let repo = repo_id(model);
@@ -334,7 +333,7 @@ fn merge(model: &mut ShellViewModel, paths: Vec<String>) {
     }
 }
 
-/// 没有作品目录、当前文件又不在列表里时，把播放集条目自己写成一条快照（Vue `workAudioEntries` 在没有 `workRoot` 时返回预览条目本身）。
+/// 没有作品目录、当前文件又不在列表里时，把播放集条目自己写成一条快照（这时作品音轨就是预览条目本身）。
 /// 元数据用作品队列认的那一份播放集元数据，文件名和素材 id 用播放集条目。已经在列表里、或带作品目录时不从这里加。
 /// 写成了、或本来就有这一条，返回真。没有这样的条目返回假，调用方再记「没有可加入」。
 fn merge_lone_preview(model: &mut ShellViewModel) -> bool {
@@ -417,7 +416,7 @@ pub(super) fn add_work(model: &mut ShellViewModel) {
     merge(model, paths);
 }
 
-/// 「随机」：从当前作品还没加入的音轨里随机挑一首，都加过时从全部音轨里挑（Vue `addRandom`）。
+/// 「随机」：从当前作品还没加入的音轨里随机挑一首，都加过时从全部音轨里挑。
 pub(super) fn add_random(model: &mut ShellViewModel) {
     add_random_with(model, random_index);
 }
@@ -457,7 +456,7 @@ fn random_index(len: usize) -> usize {
     (seed % len.max(1) as u64) as usize
 }
 
-/// 「清空」：只清当前资源库的条目（Vue `clearPlaylistForRepo`，没记资源库的旧条目一起清）。
+/// 「清空」：只清当前资源库的条目（没记资源库的旧条目一起清）。
 pub(super) fn clear(model: &mut ShellViewModel) {
     let repo = repo_id(model);
     if repo.is_empty() {
@@ -473,14 +472,14 @@ pub(super) fn clear(model: &mut ShellViewModel) {
     }
 }
 
-/// 音轨排序用的键：音轨路径，没有时是文件路径（Vue `sortAudioEntries`）。
+/// 音轨排序用的键：音轨路径，没有时是文件路径。
 pub(super) fn track_key(row: &FileRow, metadata: &BTreeMap<String, Value>) -> String {
     Some(entry_text(metadata, "trackPath"))
         .filter(|text| !text.is_empty())
         .unwrap_or_else(|| row.path.clone())
 }
 
-/// Vue `localeCompare(.., "zh-CN", { numeric: true })`：连续的数字按数值比，其余按 zh-CN 比。
+/// 自然序：连续的数字按数值比，其余按 zh-CN 比。
 ///
 /// 算法：两边都切成数字段和非数字段逐段比；都是数字段时去掉前导 0 先比位数再比字面，否则按 zh-CN 比这两段；
 /// 前面都相等时段少的在前，最后按整串的 zh-CN 顺序定（`01` 和 `1` 这类只差前导 0 的）。

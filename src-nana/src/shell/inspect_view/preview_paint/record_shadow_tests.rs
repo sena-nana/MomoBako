@@ -1,6 +1,6 @@
 //! 音频舞台唱片的落影。
 //!
-//! Vue `.media-preview__audio-record` 在正圆后面画
+//! 唱片正圆后面画
 //! `box-shadow: 0 22px 60px color-mix(in srgb, var(--bg) 78%, transparent)`。
 //! 舞台格子不是正方形时，阴影仍跟着较小边画出的圆，不铺成方块。
 
@@ -10,7 +10,7 @@ use crate::shell::view_harness::ShellHarness;
 use nana_ui::runtime::{LayoutBox, PaintOp, PaintRecording, PaintState, Painter};
 use nana_ui_core::{SemanticColorMix, SemanticColorRole, StyleModelRef, ThemeAppearance};
 
-/// 唱片正圆后面画出 Vue 的落影：下移 22、模糊 60、不扩展、背景色 78%。
+/// 唱片正圆后面画出落影：下移 22、模糊 60、不扩展、背景色 78%。
 /// 浅色和深色各跟自己的背景。没有图和有封面时都画，而且画在底色下面。
 /// 格子是 240×180 时圆的直径是 180，贴在左边留白 30，不是整块 240 宽的方阴影。
 #[test]
