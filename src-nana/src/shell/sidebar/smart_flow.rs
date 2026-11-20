@@ -1,12 +1,11 @@
 //! 智能文件夹增改删和查询的结果落到壳层上。
 //!
-//! 照 Vue `smartFolders.ts`：新建以后打开新建的那个，编辑以后重查正在看的结果，删掉正在看的（连同它的
-//! 祖先）以后回到文件面板。查询结果记下文件夹名、和祖先合并以后的筛选与条数，文件页头据此写标题和摘要行
-//! （Vue `useWorkspaceViewState.ts` 的 `virtualViewTitle`、`smartFolderSummary`）。
+//! 新建以后打开新建的那个，编辑以后重查正在看的结果，删掉正在看的（连同它的
+//! 祖先）以后回到文件面板。查询结果记下文件夹名、和祖先合并以后的筛选与条数，文件页头据此写标题和摘要行。
 //!
-//! 和 Vue 不同的地方（Vue 的缺陷不照抄）：编辑了正在看的文件夹的祖先（继承的条件跟着变）或者把它挪了位置
+//! 编辑了正在看的文件夹的祖先（继承的条件跟着变）或者把它挪了位置
 //! 也重查；只在智能文件夹面板开着时重查，不把在别的面板上的用户拉回来；删除以后只有正在看的被删了才回文件
-//! 面板，Vue 在没有打开的智能文件夹时删掉任何一个都会切到文件面板。
+//! 面板，没打开智能文件夹时删掉任何一个都不切面板。
 
 use crate::backend::services::repository::SmartFolderFilter;
 
@@ -16,7 +15,7 @@ use super::super::{ShellViewModel, WorkspacePanel};
 use super::smart::format_number;
 use super::{SidebarEffect, SidebarSmartFolder, SidebarState, smart_ancestor_ids};
 
-/// 没有打开的智能文件夹、也找不到名字时文件页头的标题（Vue `virtualViewTitle` 的回退）。
+/// 没有打开的智能文件夹、也找不到名字时文件页头的标题。
 const FALLBACK_TITLE: &str = "智能文件夹";
 
 /// 一次增改删改的是哪个智能文件夹。
@@ -65,7 +64,7 @@ impl SmartResultSummary {
     }
 }
 
-/// 摘要行，照 Vue `smartFolderSummary`：「N 条结果」，后面按关键词、路径、格式、标签、颜色、形状、最低评分、
+/// 摘要行：「N 条结果」，后面按关键词、路径、格式、标签、颜色、形状、最低评分、
 /// 元数据条件的顺序接上有值的几项，用「 · 」隔开。祖先和自己的关键词、路径合在一起时是多行，用「 + 」连。
 pub fn summary_text(count: usize, filter: &SmartFolderFilter) -> String {
     let text = |value: &Option<String>| {
@@ -149,8 +148,8 @@ impl SidebarState {
 }
 
 impl ShellViewModel {
-    /// 新建、编辑、删除的结果（Vue `createSmartFolderInWorkspace` / `updateSmartFolderInWorkspace` /
-    /// `deleteSmartFolderInWorkspace`）。换上整棵树、关掉对话框以后：新建的打开它，编辑的重查正在看的结果，
+    /// 新建、编辑、删除的结果。
+    /// 换上整棵树、关掉对话框以后：新建的打开它，编辑的重查正在看的结果，
     /// 删除的清掉被删的结果。失败和过期的结果留在对话框里；删除的确认框没有错误行，失败写进状态区。
     pub(crate) fn apply_smart_saved(
         &mut self,
@@ -198,7 +197,7 @@ impl ShellViewModel {
     }
 
     /// 删除以后：正在看的（删的是它或它的祖先）已经不在树里了，清掉它和它的结果；智能文件夹面板开着时回到
-    /// 文件面板，列表照旧是上一次读的目录（和 Vue 回到文件面板一样，不另读目录）。
+    /// 文件面板，列表照旧是上一次读的目录，不另读目录。
     fn leave_deleted_smart(&mut self, deleted: &str) {
         let Some(active) = self.sidebar.active_smart_folder_id.clone() else {
             return;
@@ -217,7 +216,7 @@ impl ShellViewModel {
         }
     }
 
-    /// 查询结果（Vue `selectSmartFolder`）：仓库或正在看的文件夹已经换了的不写；写下摘要，把行交给文件列表。
+    /// 查询结果：仓库或正在看的文件夹已经换了的不写；写下摘要，把行交给文件列表。
     /// 还停在智能文件夹面板时清掉选择。失败不把文件列换成错误，原因留在侧栏状态区。
     pub(crate) fn apply_smart_query(
         &mut self,

@@ -15,7 +15,7 @@ use super::support::{
 };
 use super::{MembershipAction, PlayerEffect, PlayerState};
 
-/// Vue `playlistDetailCacheKey`：仓库编号和播放集编号拼成一格。
+/// 详情缓存的键：仓库编号和播放集编号拼成一格。
 fn playlist_detail_cache_key(repo_id: &str, playlist_id: &str) -> String {
     format!("{repo_id}:{playlist_id}")
 }
@@ -128,7 +128,7 @@ impl PlayerState {
         }
         match result {
             Ok(memberships) => self.memberships = memberships,
-            // 和 Vue `syncPlaylistMemberships` 一样读不到就当没有成员，不提示。
+            // 读不到就当没有成员，不提示。
             Err(error) => {
                 eprintln!("Nana 读取播放列表成员失败：{error}");
                 self.memberships.clear();
@@ -184,7 +184,7 @@ impl PlayerState {
             .ok()
     }
 
-    /// 记下一份读回的播放集详情。键和 Vue `playlistDetailCacheKey` 一样，是 `仓库:播放集`。
+    /// 记下一份读回的播放集详情。键是 `仓库:播放集`。
     pub(super) fn remember_playlist_detail(&mut self, detail: &PlaylistDetail) {
         let key = playlist_detail_cache_key(&detail.playlist.repo_id, &detail.playlist.playlist_id);
         self.detail_cache.insert(key, detail.clone());
@@ -203,7 +203,7 @@ impl PlayerState {
 
     /// 播放集列表空了：丢掉这个仓库的详情缓存。
     ///
-    /// 照 Vue `clearPlaylistDetailCache`。下次再点开时没有旧缓存可画，页面停在空框，不把已经不在的那一份编回来。
+    /// 下次再点开时没有旧缓存可画，页面停在空框，不把已经不在的那一份编回来。
     pub(crate) fn forget_detail_cache(&mut self, repo_id: &str) {
         let prefix = format!("{repo_id}:");
         let before = self.detail_cache.len();

@@ -1,4 +1,4 @@
-//! 播放集页（常驻）：投影、信号和只建一次的视图，对齐 Vue `WorkspacePlaylistPage`。
+//! 播放集页（常驻）：投影、信号和只建一次的视图。
 //!
 //! [`PlaylistPageView`] 是投影；[`PlaylistPageSignals`] 里页眉一个信号，条目放进按编号对照的 Store，
 //! 另有条目顺序。页眉的标题、状态行、「播放」的禁用和面板圆角按字段绑定；条目行的文件名、路径或原因、
@@ -7,14 +7,14 @@
 //! 信号放在播放集路由的常驻信号里（`route_playlists.rs`），主区块同步时 [`PlaylistPageSignals::write`]；
 //! 播放条是那边登记的旧视图岛，这里只收它的占位节点。
 //!
-//! 行首 58px 方块照 Vue `playlist-page__preview`：条目有可读的本地 `thumbnailPath` 时按 cover 画这张图，
+//! 行首 58px 方块：条目有可读的本地 `thumbnailPath` 时按 cover 画这张图，
 //! 否则写大写扩展名。网址不下载，读失败或不是图片时记日志并留着扩展名，不编造像素。
 //!
 //! 条目列表放在 `ReorderList` 里：它按自己的直接子节点取行的盒子来拖动排序。条目用 Store 的
 //! `keyed(..).each(..)` 建，`.container(..)` 把行直接建进 `ReorderList`，不多一层容器：增删、重排时
 //! 按编号保留各行的节点，留下的行一个都不重建，焦点、按钮和行里的状态都还是原来的；当前播放、文件名
-//! 这类字段原地改。按在行里的按钮上不移动就松开是按钮自己的点击，移动超过 4px 才拖动这一行，和 Vue
-//! 整行都能拖一样。和 Vue 一样双击行（拖动柄、路径或文件名）从这一条播放，能不能播和行上的「播放」一样。
+//! 这类字段原地改。按在行里的按钮上不移动就松开是按钮自己的点击，移动超过 4px 才拖动这一行，
+//! 整行都能拖。双击行（拖动柄、路径或文件名）从这一条播放，能不能播和行上的「播放」一样。
 //! 文件名单击仍只打开预览；扩展名方块单击也只打开预览，400 毫秒内再点同一块再播，计时和文件名、行上的双击分开。
 //! 播放和移除按钮上的连点不另播。
 
@@ -259,8 +259,8 @@ pub(crate) fn view(signals: PlaylistPageSignals, player_bar: AnyView) -> AnyView
 /// 条目列表。整行都能拖动排序（按在按钮上要移动超过 4px 才拖），排序结果交回壳层持久化；行按编号建在
 /// `ReorderList` 里，增删、重排只动变了的行。列表的条目（拖动命中用的编号和名字、当前播放）跟着顺序和
 /// 字段原地换。在行上（播放、移除以外）单击是列表的选中，两下凑成双击就从这一条播放。文件名和扩展名方块的单击仍只打开预览，
-/// 连点第二下和整行的 `@dblclick` 一样再播；方块自己计时，不和文件名、行上的双击加在一起。条目不能播或者没有对应的播放插件时和行上禁用的「播放」一样什么也不做
-/// （Vue 的双击不看这些，会把不能播的条目也拿去播）。
+/// 连点第二下和整行双击一样再播；方块自己计时，不和文件名、行上的双击加在一起。条目不能播或者没有对应的播放插件时和行上禁用的「播放」一样什么也不做，
+/// 不把不能播的条目拿去播。
 fn item_list(signals: PlaylistPageSignals) -> AnyView {
     let PlaylistPageSignals {
         head,
@@ -397,7 +397,7 @@ fn header(head: Signal<PageHead>) -> AnyView {
         .into_any()
 }
 
-/// 文字上方留出 `margin`，对应 Vue 标题和状态行的上外边距。
+/// 文字上方留出 `margin`，标题和状态行用。
 fn spaced(mut text: Text, margin: f32) -> Text {
     Arc::make_mut(&mut text.style.layout).margin_top = Some(LengthSpec::Px(margin));
     text
@@ -507,7 +507,7 @@ fn entry_row(item: EntryItem, head: Signal<PageHead>) -> AnyView {
 
 /// 拖动柄：32px、`--radius-md`，16px 弱色竖握把。
 ///
-/// 读屏名是「拖动排序」，对应 Vue 按钮的 `aria-label`，不挂悬停提示。单击不打开预览；
+/// 读屏名是「拖动排序」，不挂悬停提示。单击不打开预览；
 /// 400 毫秒内再点同一柄，和整行双击一样从这一条播放。不能播或没有播放插件时第二下不播。
 fn drag_handle(id: &str, item: EntryItem, head: Signal<PageHead>) -> AnyView {
     let play_id = id.to_string();
@@ -553,7 +553,7 @@ fn drag_handle(id: &str, item: EntryItem, head: Signal<PageHead>) -> AnyView {
 /// 58px 方块：bg-subtle 底、`--radius-xl`、溢出裁切。有本地封面时按 cover 铺满、不写扩展名；
 /// 没有时居中写 11px 粗体弱色扩展名。单击打开预览，封面换了原地换，不重建这一行。
 ///
-/// 400 毫秒内再点同一块，照 Vue 整行 `@dblclick` 再从这一条播放。计时键是 `cover:{编号}`，
+/// 400 毫秒内再点同一块，和整行双击一样再从这一条播放。计时键是 `cover:{编号}`，
 /// 和文件名、拖动柄、路径的双击分开：先点文件名再点方块不算连点。不能播或没有播放插件时第二下只打开预览，并记日志。
 fn extension_mark(
     item: EntryItem,
@@ -656,8 +656,8 @@ fn cover_image(cover: &str) -> Option<nana_ui_core::BackgroundImage> {
 }
 
 /// 文件名按钮：整行 32px 高的可点区域，14px 半粗正文色字靠左。单击打开这一条的预览，不开始播放。
-/// 400 毫秒内再点同一行的文件名，照 Vue 整行 `@dblclick` 再从这一条播放；不能播或没有播放插件时只记日志，不播。
-/// Vue 的全局按钮把字居中，和下面靠左的路径错开，这里按设计意图靠左。
+/// 400 毫秒内再点同一行的文件名，和整行双击一样再从这一条播放；不能播或没有播放插件时只记日志，不播。
+/// 字不居中，按设计意图和下面的路径一起靠左。
 fn item_title(item: EntryItem, id: &str, title: &str, head: Signal<PageHead>) -> AnyView {
     let item_id = id.to_string();
     let play_id = id.to_string();
@@ -721,7 +721,7 @@ fn meta_line(label: &str, role: SemanticColorRole) -> Text {
 }
 
 /// 工具栏按钮：34px 高、14px 图标在字前、6px 间距。普通操作透明底，危险操作是红字，悬停铺淡红。
-/// 禁用时按 Vue 的整颗 0.45 不透明度处理：字色在 sRGB 里和按钮所在的底色 `base` 混。
+/// 禁用时按整颗 0.45 不透明度处理：字色在 sRGB 里和按钮所在的底色 `base` 混。
 fn toolbar_button(
     label: &str,
     icon: Icon,

@@ -1,7 +1,7 @@
 //! 播放消息归约。
 //!
 //! 播放集列表由壳层的 `apply_playlist_list` 同时交给侧栏和这里。过期详情在这里先跳过，避免播放条切到别的仓库。
-//! 播放集成员变了（右键加入、移出，按路径加入）以后，照 Vue `refreshPlaylists` 让侧栏重读播放集列表和成员索引；
+//! 播放集成员变了（右键加入、移出，按路径加入）以后，让侧栏重读播放集列表和成员索引；
 //! 页面上点开的那张受影响时跟着刷新。
 
 use super::super::files::repository_is_writable;
@@ -52,12 +52,11 @@ pub(crate) fn reduce_message(
 }
 
 /// 按路径加入（目录、虚拟条目）的结果。成功以后重读播放集列表和成员索引；页面上点开的正是加入的那张时，和读回
-/// 详情一样换上它（条目、项数、排序用的编号），返回读回详情的消息交给壳层接着归约；不是它时不动页面上点开的那张
-/// （Vue 会把页面换成加入的那张，不照抄）。
+/// 详情一样换上它（条目、项数、排序用的编号），返回读回详情的消息交给壳层接着归约；不是它时不动页面上点开的那张，
+/// 也不把页面换成加入的那张。
 /// 播放集页移除或排序的结果。
 ///
-/// 照 Vue `removePlaylistItemInWorkspace` / `reorderPlaylistItemsInWorkspace`：先换上交回的详情，
-/// 再 `refreshPlaylists` 重读播放集列表（侧栏项数）和成员索引。不另读这一张的详情，条目用这次交回的。
+/// 先换上交回的详情，再重读播放集列表（侧栏项数）和成员索引。不另读这一张的详情，条目用这次交回的。
 /// 别的仓库的结果不写、不重读。失败和点开详情失败一样写进状态区。
 fn items_changed(
     model: &mut ShellViewModel,
@@ -180,7 +179,7 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) -> Option<S
             let saved = result.is_ok();
             let changed = model.player.note_membership_saved(result);
             if saved {
-                // 点开的那张加入或移出了条目时连它的详情一起重读，页面条目和项数跟着变；Vue 只换页眉的摘要，条目不变。
+                // 点开的那张加入或移出了条目时连它的详情一起重读，页面条目和项数跟着变，不只换页眉的摘要。
                 let listed = model
                     .player
                     .listed
@@ -204,8 +203,7 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) -> Option<S
             );
         }
         PlayerMessage::OpenPreview { item_id } => {
-            // Vue `openPlaylistItemPreview` / `openCurrentPlayerPreview`：`setPreviewFilePath` 立刻换上预览页，
-            // 不等 `selectAsset` 回来。单击选中的同一条也要打开，不能把随后的详情当成「只在右侧看」。
+            // 立刻换上预览页，不等素材详情回来。单击选中的同一条也要打开，不能把随后的详情当成「只在右侧看」。
             if model.player.open_preview(
                 item_id.as_deref(),
                 &mut model.workspace.panel,
@@ -242,7 +240,7 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) -> Option<S
                 result,
                 prep.retryable,
             );
-            // 访问记录照 Vue：在线条目的播放源准备好时后端已经写下，当场改「最近使用」；本地文件直接读的字节，
+            // 访问记录：在线条目的播放源准备好时后端已经写下，当场改「最近使用」；本地文件直接读的字节，
             // 装上了才补一次访问记录。
             if let Some(access) = &prep.accessed {
                 model.note_entry_access(&access.repo_id, &access.path, &access.at);

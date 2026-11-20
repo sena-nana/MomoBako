@@ -1,7 +1,6 @@
 //! 智能文件夹新建和编辑的草稿。
 //!
-//! 字段和 Vue `WorkspaceSidebarSmartFolderDialogs.vue` 一一对应；文本字段的拆分和解析照
-//! `composables/workspace/filterInputs.ts`，提交时由 [`filter_from_draft`] 收成服务筛选。
+//! 字段和对话框一一对应；提交时由 [`filter_from_draft`] 把文本字段拆开、解析，收成服务筛选。
 //! 名称必填，其余留空时不写进筛选。加号只打开对话框，提交后把请求放进侧栏副作用。
 
 use crate::backend::services::repository::{
@@ -40,8 +39,8 @@ pub enum SmartFolderField {
 
 /// 智能文件夹草稿。匹配方式默认全部满足，排序默认升序。
 ///
-/// `submitted` 是点「创建 / 保存」那一刻的草稿。保存中界面上的字段仍可改（Vue 的输入框、
-/// 下拉和多行都没有 `disabled`），已经发出的请求按这一份收，不跟着后来的修改变。
+/// `submitted` 是点「创建 / 保存」那一刻的草稿。保存中界面上的字段仍可改（输入框、
+/// 下拉和多行都不禁用），已经发出的请求按这一份收，不跟着后来的修改变。
 #[derive(Clone, Debug)]
 pub struct SmartFolderDraft {
     pub open: bool,
@@ -113,7 +112,7 @@ impl Default for SmartFolderDraft {
 }
 
 impl SmartFolderDraft {
-    /// 编辑已有智能文件夹：把筛选写回文本，对应 Vue `openEditSmartFolderDialog`。
+    /// 编辑已有智能文件夹：把筛选写回文本。
     pub fn from_folder(folder: &SidebarSmartFolder) -> Self {
         let filter = &folder.filter;
         Self {
@@ -251,7 +250,7 @@ impl SidebarState {
         self.smart_draft = SmartFolderDraft::default();
     }
 
-    /// 改对话框里的一个字段。保存中也改：Vue 的输入框、下拉和多行都没有 `disabled`。
+    /// 改对话框里的一个字段。保存中也改：输入框、下拉和多行都不禁用。
     /// 已经发出的请求看 [`SmartFolderDraft::submitted`]，不看这份新文字。
     pub fn set_smart_field(&mut self, field: SmartFolderField, value: String) {
         *self.smart_draft.slot(field) = value;
@@ -371,7 +370,7 @@ impl SidebarState {
     }
 }
 
-/// 把对话框文本收成服务筛选，对应 Vue `buildSmartFolderFilter` 加 `normalizeSmartFolderFilter`。空白字段不写入。
+/// 把对话框文本收成服务筛选。空白字段不写入。
 ///
 /// 匹配方式只在选了「任一匹配」时写 `or`：「全部匹配」不写，子级继承父级的匹配方式（后端合并父子筛选时
 /// 子级没写才用父级），顶层没写按全部匹配查。写成 `and` 会把「任一匹配」父级下的子级改成全部匹配。
@@ -417,7 +416,7 @@ fn filled(value: &str) -> Option<String> {
     (!value.is_empty()).then(|| value.to_string())
 }
 
-/// 有限且大于 0 的数，对应 Vue `Number(x) > 0`。
+/// 有限且大于 0 的数。
 fn positive_number(value: &str) -> Option<f64> {
     value
         .trim()
@@ -426,7 +425,7 @@ fn positive_number(value: &str) -> Option<f64> {
         .filter(|number| number.is_finite() && *number > 0.0)
 }
 
-/// Vue `splitListInput`：按半角逗号、全角逗号和换行拆开，去空白、去重，保留顺序。
+/// 列表字段：按半角逗号、全角逗号和换行拆开，去空白、去重，保留顺序。
 fn split_list(value: &str) -> Option<Vec<String>> {
     let mut items: Vec<String> = Vec::new();
     for item in value
@@ -449,7 +448,7 @@ fn entries(value: &str) -> impl Iterator<Item = &str> {
         .filter(|item| !item.is_empty())
 }
 
-/// Vue `parseMetadataFiltersInput`：`key=value`，键和值都不能为空。
+/// 元数据条件：`key=value`，键和值都不能为空。
 fn parse_metadata(value: &str) -> Option<Vec<SearchMetadataFilter>> {
     let filters: Vec<_> = entries(value)
         .filter_map(|item| {
@@ -464,7 +463,7 @@ fn parse_metadata(value: &str) -> Option<Vec<SearchMetadataFilter>> {
     (!filters.is_empty()).then_some(filters)
 }
 
-/// Vue `parseNumberFiltersInput`：`key=min..max`，两端都可空但不能同时为空。
+/// 数值条件：`key=min..max`，两端都可空但不能同时为空。
 fn parse_numbers(value: &str) -> Option<Vec<SearchNumberFilter>> {
     let bound = |text: &str| {
         text.trim()
@@ -492,7 +491,7 @@ fn parse_numbers(value: &str) -> Option<Vec<SearchNumberFilter>> {
     (!filters.is_empty()).then_some(filters)
 }
 
-/// Vue `parseDateFiltersInput`：`key=from..to`，两端都可空但不能同时为空。
+/// 日期条件：`key=from..to`，两端都可空但不能同时为空。
 fn parse_dates(value: &str) -> Option<Vec<SearchDateFilter>> {
     let filters: Vec<_> = entries(value)
         .filter_map(|item| {
@@ -656,7 +655,7 @@ mod tests {
     }
 
     /// 后端合并父子筛选时子级没写匹配方式才继承父级（`child.match_mode.or(parent.match_mode)`）。
-    /// 「任一匹配」父级下的子级（Vue 建的，匹配方式留空）在对话框里显示「全部匹配」，原样保存不能把它
+    /// 「任一匹配」父级下的子级（早先建的，匹配方式留空）在对话框里显示「全部匹配」，原样保存不能把它
     /// 改写成 and；新建的子级默认也不写，照样继承父级。只有选了「任一匹配」才写 or。
     #[test]
     fn saving_a_child_keeps_inheriting_the_parent_match_mode() {

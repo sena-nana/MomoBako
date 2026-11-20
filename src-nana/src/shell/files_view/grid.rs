@@ -1,9 +1,8 @@
-//! 文件卡片的列表区，对应 Vue `.files-list` 和读取、处理、出错三种状态框。
+//! 文件卡片的列表区，以及读取、处理、出错三种状态框。
 //!
 //! 列表纵向滚动，内边距 16 / 20 / 20。文件夹一组、分隔线、文件一组，各段保持自身高度、段间距 14，
 //! 内容比列表高时由列表滚动。两组卡片都走虚拟列表（见 `shell/files_view/virtual_rows.rs`），只建视口附近的行。
-//! Vue 把这三段放进 CSS grid 的自动行，内容矮时行被拉伸、内容高时行被压扁让卡片盖到分隔线上，
-//! 这两种怪癖都不照抄。
+//! 内容矮时段不被拉伸，内容高时段也不被压扁，卡片不会盖到分隔线上。
 //!
 //! 常驻：状态框和列表之间、换了显示内容（目录、回收站、分类、智能文件夹）时整块换，列表滚动区的键
 //! 带上内容身份，所以换目录回到顶部；同一内容里滚动区一直留着，滚动位置自然保持。段的有无用
@@ -36,19 +35,18 @@ use super::virtual_rows::{self, GAP};
 
 /// 列表区左右内边距。
 pub(super) const LIST_PADDING_X: f32 = 20.0;
-/// Vue `loadMoreObserver` 的 `rootMargin`：哨兵进入视口下沿再往外这么远就续读。
+/// 续读的提前量：哨兵进入视口下沿再往外这么远就续读。
 const LOAD_MORE_MARGIN: f32 = 320.0;
 
 thread_local! {
     static LAST_ROW_CLICK: RefCell<Option<(String, Instant)>> = const { RefCell::new(None) };
-    /// 拖动已经起步的那一行。下一次点它时丢掉，对齐 Vue `suppressClickPath`。
+    /// 拖动已经起步的那一行。下一次点它时丢掉。
     static SUPPRESS_ROW_CLICK: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 /// 条目拖动越过 7px、会话真正开始以后，记下这一行。
 ///
-/// Vue `useFileBrowserPanelViewModel.ts` 在越过 `dragStartThreshold` 时把路径放进 `suppressClickPath`，
-/// 松手时浏览器还会对这一行发一次 click，那一下直接丢掉，不改选择。这里同样丢掉，并且不把它算进
+/// 松手时这一行还会收到一次点击，那一下直接丢掉，不改选择，并且不把它算进
 /// 400 毫秒连点：7px 已经是拖动，不是双击。拖不动（回收站、不可写、不是本地目录）时不记。
 pub(crate) fn suppress_row_click(path: &str) {
     if path.is_empty() {
@@ -157,8 +155,8 @@ impl ListSignals {
 
 /// 出错、读取中、处理中时只显示状态框，否则是分组列表。
 ///
-/// 智能文件夹面板的读取中是 Vue `isActiveBrowserLoading`：面板是智能文件夹时看
-/// `isLoadingSmartFolder`，文件列换成「正在读取目录」，不继续画上一个目录或上一个智能文件夹的行。
+/// 智能文件夹面板的读取中：面板是智能文件夹时看
+/// 智能文件夹查询是否在途，文件列换成「正在读取目录」，不继续画上一个目录或上一个智能文件夹的行。
 /// 目录自己的失败不属于这一页，不能盖住这次查询。
 fn frame(model: &ShellViewModel) -> ListFrame {
     let files = &model.files;
@@ -198,8 +196,8 @@ fn frame(model: &ShellViewModel) -> ListFrame {
 
 /// 目录还有下一页，或这一页还在续读时，列表末尾有「滚动继续加载」。
 ///
-/// Vue `hasMoreEntries` 在分类视图和智能文件夹上是 false，不因为底下的目录还有下一页就画出这一行。
-/// 续读进行中（`isLoadingFileBrowserMore`）这一行仍出现，文案是「继续读取目录...」。
+/// 分类视图和智能文件夹没有下一页，不因为底下的目录还有下一页就画出这一行。
+/// 续读进行中这一行仍出现，文案是「继续读取目录...」。
 fn sections(model: &ShellViewModel, groups: GroupPresence) -> Sections {
     let ctx = FileContext::from_model(model);
     let loading = model.files.loading_more;
@@ -214,7 +212,7 @@ fn sections(model: &ShellViewModel, groups: GroupPresence) -> Sections {
 /// 列表滚动区的键，按显示的内容取：仓库、面板或分类、所在目录或智能文件夹。
 ///
 /// 换目录、回收站或智能文件夹时键变了，列表从顶部开始；同一内容里滚动区常驻，位置保持。
-/// Vue 换目录时不主动回顶，只靠浏览器按新内容高度钳住偏移；文件管理器换目录从顶部开始更合理，这里按后者做。
+/// 不沿用上一个目录的滚动偏移：文件管理器换目录从顶部开始更合理。
 fn list_scroll_key(model: &ShellViewModel) -> String {
     let repo = model.workspace.active_repo_id.as_deref().unwrap_or("none");
     let view = match model.workspace.panel {
@@ -253,8 +251,7 @@ pub(super) fn body(signals: ListSignals, hot: HotSignals) -> AnyView {
     .into_any()
 }
 
-/// `.asset-browser__state`：圆角小框，白底描边；出错时是浅红底红字。它在 Vue 里是纵向 flex 容器的子项，
-/// `display: inline-flex` 也被拉满宽度，所以左右各留 20 的边距撑满列表宽，不随文字收窄。
+/// 状态框：圆角小框，白底描边；出错时是浅红底红字。左右各留 20 的边距撑满列表宽，不随文字收窄。
 fn state_box(label: String, error: bool, spinner: bool, hot: HotSignals) -> AnyView {
     let (fill, border, color) = if error {
         (None, SemanticColorRole::Danger, SemanticColorRole::Danger)
@@ -464,7 +461,7 @@ fn section(
         .into_any()
 }
 
-/// `.files-list__divider`：1px `--border-strong`，上下各 2px。
+/// 文件夹组和文件组之间的分隔线：1px `--border-strong`，上下各 2px。
 fn divider() -> AnyView {
     let line = Stack::column(0.0)
         .width(LengthSpec::Fill)
@@ -481,7 +478,7 @@ fn divider() -> AnyView {
 /// 还有下一页或正在续读时，跟在卡片后面的「滚动继续加载」。
 /// 滚到它上面 320px 以内会续读（`load_more_if_sentinel_near`），贴到底时滚轮也会续读，点一下也续读。
 ///
-/// Vue `.files-list__load-more` 没有自己的样式：列表网格里的一块普通文字，继承正文 14px、
+/// 「滚动继续加载」这一行没有自己的样式：列表里的一块普通文字，继承正文 14px、
 /// 行高 1.55，左对齐，高度就是这一行。没有下一页时调用方不画这一段。
 fn load_more(sections: Signal<Sections>) -> AnyView {
     let more = move || {

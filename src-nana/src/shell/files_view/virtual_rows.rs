@@ -20,11 +20,11 @@ use nana_ui::runtime::{AlignSpec, LengthSpec, Stack};
 use super::super::files::DisplayMode;
 use super::cards::{self, CardBox, CardCell, CardFace, Cards};
 
-/// 组内卡片的行列间距（`.files-list__files--grid` 等的 `gap: 14px`）。
+/// 组内卡片的行列间距。
 pub(super) const GAP: f32 = 14.0;
-/// 列表模式卡片之间的间距（`.files-list__files--list` 的 `gap: 8px`）。
+/// 列表模式卡片之间的间距。
 const LIST_GAP: f32 = 8.0;
-/// Vue 瀑布流的 `column-width`。
+/// 瀑布流的列宽。
 pub(super) const MASONRY_COLUMN: f32 = 164.0;
 /// 视口上下各多建 240px 的行，滚动时不露白，也不把视口以外太多的卡片建出来。
 const OVERSCAN: f32 = 240.0;
@@ -192,7 +192,7 @@ fn wrap_lines(
 }
 
 /// 瀑布流：和 CSS `column-width: 164px; column-gap: 14px` 一样定列数和列宽，条目按顺序装进各列。
-/// 卡片下面留 14（Vue 的 `margin-bottom: 14px`），最后一张也留。每列的估计行高是这一列的平均高。
+/// 卡片下面留 14，最后一张也留。每列的估计行高是这一列的平均高。
 fn masonry(faces: &[Arc<CardFace>], width: f32) -> (GroupShape, GroupLines) {
     let (count, column_width) = masonry_columns(width);
     let heights = faces

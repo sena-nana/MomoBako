@@ -401,7 +401,7 @@ fn permanent_delete_in_the_trash_menu_needs_a_second_click() {
 }
 
 /// 回收站「彻底删除」第一次换成确认句：菜单按这句撑开，开在窗口右边时往左让，右边仍留 4px。
-/// 再点确认句才彻底删除。对应 Vue `displayLabel` 和 `clampAnchoredMenuPosition`。
+/// 再点确认句才彻底删除。
 #[test]
 fn trash_delete_confirm_widens_the_menu_to_the_vue_label() {
     let mut model = scene("live-menu");
@@ -655,7 +655,7 @@ fn has_key(window: &ApplicationWindow, key: &str) -> bool {
         })
 }
 
-/// 音视频文件的素材详情：和 Vue 夹具 `file()` 一样只有基本字段。
+/// 音视频文件的素材详情：只有基本字段。
 fn media_detail(path: &str) -> AssetDetail {
     let filename = path.rsplit('/').next().unwrap_or(path).to_string();
     let extension = filename
@@ -744,8 +744,8 @@ fn loading_media_preview(path: &str) -> ShellViewModel {
 }
 
 /// 视频按文件类型画，不按有没有画面分出唱片：离屏没有宿主纹理时画解码出的那一帧，不画图标、不画唱片舞台；
-/// 清掉像素后才画视频图标。有宿主纹理时仍画纹理槽。准备卡视频写「准备媒体」（Vue `media-preview`），
-/// 音频写「准备音频」（`audioPreview.js`）。
+/// 清掉像素后才画视频图标。有宿主纹理时仍画纹理槽。准备卡视频写「准备媒体」，
+/// 音频写「准备音频」。
 #[test]
 fn video_previews_never_fall_into_the_audio_stage() {
     let mut model = scene("preview-no-player");
@@ -861,7 +861,7 @@ fn video_previews_never_fall_into_the_audio_stage() {
     ));
 }
 
-/// 音视频预览失败就近写在预览框里：照 Vue 预览插件的失败浮层替换唱片舞台，红色标题下一行原因。
+/// 音视频预览失败就近写在预览框里：失败浮层替换唱片舞台，红色标题下一行原因。
 /// Nana 自己的「没有原生解码器」和某格式「解码失败」都这样；视频的标题是「无法预览该媒体」。
 /// 这类失败不进侧栏的全局状态区。
 #[test]
@@ -903,8 +903,8 @@ fn media_preview_failures_show_their_reason_in_place() {
     }
 }
 
-/// 播放条装不上预览中的同一个文件、把失败会话写回预览页：唱片舞台换成失败浮层；会话没带原因时写 Vue
-/// 运行时的「音频无法播放」。
+/// 播放条装不上预览中的同一个文件、把失败会话写回预览页：唱片舞台换成失败浮层；会话没带原因时写默认的
+/// 「音频无法播放」。
 #[test]
 fn player_failures_written_back_replace_the_audio_stage() {
     let mut model = scene("preview-audio");
@@ -982,7 +982,7 @@ fn load_more_caption_follows_paging_and_stays_off_virtual_views() {
     absent(&smart, "智能文件夹");
 }
 
-/// 侧栏「未分类 / 全部」照 Vue `selectShortcut`：不重读目录，文件列换成分类或回到当前目录，选择不改。
+/// 侧栏「未分类 / 全部」：不重读目录，文件列换成分类或回到当前目录，选择不改。
 ///
 /// 分类视图不跟目录的「滚动继续加载」。不在这一类里的选择，详情回到「选择一个文件或文件夹」，路径仍留着，
 /// 回到「全部」再亮起来。从失败的回收站点「全部」是非静默读取：清掉文件列错误，换成「正在读取目录」，选择仍不在这一下清掉。

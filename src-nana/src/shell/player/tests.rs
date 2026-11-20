@@ -1,6 +1,6 @@
 //! 播放列表成员、回退、会话和共用播放条的状态机测试。
 //!
-//! 这些分支来自 Vue 播放列表和播放条。不启动仓库服务，也不写用户目录。
+//! 覆盖播放列表和播放条的各个分支。不启动仓库服务，也不写用户目录。
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -765,7 +765,7 @@ fn listed_playback_distinguishes_missing_plugin_upgrade_and_decoder_failure() {
             .contains("没有原生解码器")
     );
     let time = decoded.player.session.current_time_ms;
-    // 和 Vue 一样，音量先记下来留给下一项；跳转在没装好的条目上不动，也不改掉原来的错误。
+    // 音量先记下来留给下一项；跳转在没装好的条目上不动，也不改掉原来的错误。
     send(&mut decoded, PlayerMessage::SetVolume(0.2));
     send(&mut decoded, PlayerMessage::Seek(1_500));
     assert_eq!(decoded.player.session.volume, 0.2);
@@ -839,7 +839,7 @@ fn listed_playback_distinguishes_missing_plugin_upgrade_and_decoder_failure() {
     assert_eq!(decoded.player.mode_text(), "列表循环");
 }
 
-/// 预览里的音视频接管播放条（Vue `FilePreviewPane` 调 `playEntry`）：播放器正放着别的仓库时先停掉那边的
+/// 预览里的音视频接管播放条：播放器正放着别的仓库时先停掉那边的
 /// 运行时，但不删那个仓库存下的会话；预览的文件插成临时条目，临时条目不写会话文件。
 #[test]
 fn preview_takeover_keeps_the_other_repository_session() {
@@ -1077,7 +1077,7 @@ fn restore_accepts_a_ready_known_item_and_rejects_the_rest() {
 }
 
 /// 插件登记的播放器类型要先读回才认得：读回之前不读详情也不丢会话；读回了认得就读详情，
-/// 读回了还不认得就丢掉会话（Vue 找不到播放器时 `clearSession`）。顺序反过来也一样。
+/// 读回了还不认得就丢掉会话。顺序反过来也一样。
 #[test]
 fn restore_waits_for_plugin_player_types() {
     let stored = super::support::StoredSession {
@@ -1229,7 +1229,7 @@ fn preview_and_player_share_one_media_session() {
     assert!(!model.player.system_media_supported());
 }
 
-/// 播放条或播放集打开预览：照 Vue `setPreviewFilePath`，预览页立刻换上。
+/// 播放条或播放集打开预览：预览页立刻换上。
 ///
 /// 单击选中的同一条也要打开，不等素材详情回来；随后回来的详情留在预览页，不退回「只在右侧看」。
 #[test]
@@ -1398,7 +1398,7 @@ fn acceptance_pages_use_the_player_surface() {
     assert!(stale.player.listed.is_none());
 }
 
-/// 侧栏「播放」照 Vue `playPlaylist`：从第一条就绪条目自动播放，不把正在看的播放集页换成这一张。
+/// 侧栏「播放」：从第一条就绪条目自动播放，不把正在看的播放集页换成这一张。
 /// 没点开过播放集时也不打开页面。正在看的就是这一张时，页上的条目跟着读回的详情换。
 /// 之后刷新正在看的那张，不把已经在放的另一张队列换掉。
 #[test]
@@ -1541,7 +1541,7 @@ mod membership;
 mod playlist_cache;
 mod wav;
 
-/// 新建播放集默认选的播放类型：照 Vue `listRegisteredPlaylistPlayers` 按名称的 zh-CN 顺序排
+/// 新建播放集默认选的播放类型：按名称的 zh-CN 顺序排
 /// （拼音：视频 < 图片 < 音频），取第一项。宿主给的顺序不算数。
 #[cfg(windows)]
 #[test]

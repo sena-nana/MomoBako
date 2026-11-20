@@ -410,7 +410,7 @@ fn shift_range_follows_the_folders_then_files_on_screen() {
     );
 }
 
-/// Ctrl 点选照 Vue `selectWorkspaceEntry` 的 `toggle`，右侧详情跟着主选中项：拿掉别的项时主选中项和
+/// Ctrl 点选切换选择，右侧详情跟着主选中项：拿掉别的项时主选中项和
 /// 详情都不动；拿掉主选中项时由剩下的第一项接替，详情跟过去并读它的素材；全拿掉时不跟。
 #[test]
 fn toggling_rows_keeps_or_hands_over_the_primary_like_vue() {
@@ -1210,7 +1210,7 @@ fn import_with_a_prior_selection_selects_the_imported_entries() {
     );
 }
 
-/// 拖放移动照 Vue `moveWorkspaceEntries`：移到别的目录时，选择换成当前列表里第一个没被移走的条目
+/// 拖放移动：移到别的目录时，选择换成当前列表里第一个没被移走的条目
 /// （文件夹在文件前面）；移进正在看的目录时，重读对上以后按来源文件名改选。失败不改选。
 #[test]
 fn move_reselects_the_next_entry_or_the_arrived_file() {
@@ -1386,7 +1386,7 @@ fn delete_selected_for(state: &mut FilesState, ctx: &FileContext) -> bool {
     state.mutating
 }
 
-/// 点当前这一级面包屑，或侧栏再点正在看的文件夹：照 Vue `keepsCurrentViewVisible` 静默重读。
+/// 点当前这一级面包屑，或侧栏再点正在看的文件夹：静默重读。
 /// 列表和选择留着，不换成「正在读取目录」；这次读取失败也只记日志。换到别的目录仍显示读取中。
 #[test]
 fn reloading_the_open_directory_keeps_the_list_on_screen() {

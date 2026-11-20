@@ -1,8 +1,7 @@
 //! 文件浏览与变更状态（文件表面的 ViewModel）。
 //!
-//! 对应 Vue `workspace/files.ts`、`fileOperations.ts`、
-//! `useFileBrowserPanelViewModel.ts`、`CopyTargetDialog.vue` 和
-//! `HardlinkCandidateDialog.vue`。这里放列表行、对话框、服务请求、消息和状态本身，归约按功能分在子模块：
+//! 管目录读取、选择、文件变更、复制目标和硬链接候选确认。这里放列表行、对话框、服务请求、消息和状态本身，
+//! 归约按功能分在子模块：
 //! - `shell/files/reduce.rs`：壳层入口、消息分派和 Escape 分层；
 //! - `shell/files/browse.rs`：读目录、分页和静默重读；
 //! - `shell/files/selection.rs`：单击、双击、右键和框选的选择规则；
@@ -61,7 +60,7 @@ pub struct FileRow {
     pub kind: String,
     pub asset_id: Option<String>,
     pub is_virtual: bool,
-    /// 来源条目已经落在本机的文件。打开和定位优先用它，不拼仓库根（Vue `localAbsolutePath`）。
+    /// 来源条目已经落在本机的文件。打开和定位优先用它，不拼仓库根。
     pub local_absolute_path: Option<String>,
     pub thumbnail_path: Option<String>,
     pub hardlink_state: Option<String>,
@@ -79,7 +78,7 @@ pub struct FileRow {
     /// 修改时间原文。空字符串在详情里写成「未记录」。
     pub modified_at: String,
     pub tags: Vec<String>,
-    /// 这条还出现在哪些目录（Vue `aliasPaths`，含自身路径）。元数据「多归属位置」读这一份：
+    /// 这条还出现在哪些目录（含自身路径）。元数据「多归属位置」读这一份：
     /// 继续加载会换掉上一页目录快照，智能文件夹结果也不在那一页里。
     pub alias_paths: Vec<String>,
     pub thumbnail_custom: bool,
@@ -127,7 +126,7 @@ impl FileRow {
         }
     }
 
-    /// Vue `assetSummaryToFileEntry`：分类视图的一行来自仓库摘要。摘要里没有元数据，色板和尺寸等详情读回再补。
+    /// 分类视图的一行来自仓库摘要。摘要里没有元数据，色板和尺寸等详情读回再补。
     pub(super) fn from_asset(asset: &AssetSummary) -> Self {
         let extension = {
             let extension = asset.extension.trim();
@@ -163,7 +162,7 @@ impl FileRow {
         format!("{}:{}", self.kind, self.path)
     }
 
-    /// 与 Vue `entryDisplayTitle` 相同：文件去掉末尾的扩展名（不分大小写），目录保留原名。
+    /// 显示标题：文件去掉末尾的扩展名（不分大小写），目录保留原名。
     pub fn display_title(&self) -> String {
         entry_display_title(&self.kind, &self.name, self.extension.as_deref())
     }
@@ -354,7 +353,7 @@ pub enum FilesEffect {
         repo_id: String,
         epoch: u64,
     },
-    /// 启动和换仓库后在后台查一次候选（Vue `queueRepositoryBackgroundLoads`），确认以后也用它重读。失败只记日志。
+    /// 启动和换仓库后在后台查一次候选，确认以后也用它重读。失败只记日志。
     CheckHardlinks {
         repo_id: String,
         epoch: u64,
@@ -372,7 +371,7 @@ pub enum FilesEffect {
     DecodeThumbnails {
         paths: Vec<String>,
     },
-    /// 浏览时给还没有缩略图的条目要一张（Vue `loadThumbnailsForSnapshot`）。
+    /// 浏览时给还没有缩略图的条目要一张。
     /// `source_url` 为空是本地文件的 `ensure`；有值是来源封面的 `save + sourceUrl`，地址必须是条目上的真实 http(s)。
     /// 一次只有一条在途，结果回来再排下一条（`shell/files/ensure.rs`）。
     EnsureThumbnail {
@@ -380,7 +379,7 @@ pub enum FilesEffect {
         path: String,
         source_url: Option<String>,
     },
-    /// 来源目录还有下一页时，空闲后再读这一页，只为生成缩略图，不画进列表（Vue `queueVirtualThumbnailPrefetch`）。
+    /// 来源目录还有下一页时，空闲后再读这一页，只为生成缩略图，不画进列表。
     PrefetchVirtualPage {
         repo_id: String,
         path: String,
@@ -579,7 +578,7 @@ pub struct FilesState {
     pub(super) loading_more: bool,
     pub(super) error: String,
     pub(super) mutating: bool,
-    /// 多选还原成功后不采用变更快照，改为清空选择并非静默重读回收站（Vue `restoreTrashEntries`）。
+    /// 多选还原成功后不采用变更快照，改为清空选择并非静默重读回收站。
     reload_trash_on_success: bool,
     /// 刚采用的目录快照里的文件夹树（仓库 id，节点）。壳层取走后写入侧栏；没有树时不放。
     adopted_tree: Option<(String, Vec<FileTreeNode>)>,
@@ -601,14 +600,14 @@ pub struct FilesState {
     mounted_version: u64,
     /// 已经请求解码、还没送回像素的缩略图文件。解码失败的留在这里，不反复重试。
     decode_requested: std::collections::HashSet<String>,
-    /// 缩略图文件路径到取样色板。元数据没有色板时，详情预览和预览页用这一份（Vue `thumbnailPalettes`）。
+    /// 缩略图文件路径到取样色板。元数据没有色板时，详情预览和预览页用这一份。
     sampled_palettes: std::collections::HashMap<String, Vec<String>>,
     /// 浏览时生成缩略图的队列：排过哪些、在途的是哪条、列表换过没有（`shell/files/ensure.rs`）。
     ensure: ensure::EnsureQueue,
     /// 来源目录下一页的缩略图预取。不画进列表，见 `shell/files/virtual_prefetch.rs`。
     virtual_page: virtual_prefetch::VirtualPagePrefetch,
     pub(super) name_draft: String,
-    /// 工具栏里的新建文件名。不占用对话框草稿，建成以后才清空（Vue `handleCreateFile`）。
+    /// 工具栏里的新建文件名。不占用对话框草稿，建成以后才清空。
     pub(super) create_name: String,
     pub(super) target_draft: String,
     pub(super) import_draft: String,
@@ -620,7 +619,7 @@ pub struct FilesState {
     /// Eagle 的复制和剪切。收在「从 Eagle 导入」下面。
     pub(super) eagle_open: bool,
     pub(super) rename_path: Option<String>,
-    /// 这次重命名的新名字。成功快照里同名的那一条变成选择（Vue `renameWorkspaceEntry`）。
+    /// 这次重命名的新名字。成功快照里同名的那一条变成选择。
     rename_select: Option<String>,
     copy_sources: Vec<String>,
     hardlinks: Vec<HardlinkPrompt>,
@@ -634,7 +633,7 @@ pub struct FilesState {
     import_followup: Option<ImportFollowup>,
     /// 这次拖放移动成功以后怎么改选：被移走的路径，和目标目录。失败就丢掉，不改选择。
     move_reselect: Option<(Vec<String>, String)>,
-    /// 多选删除的路径。成功且当前列表里有文件夹时，另读侧栏树（Vue `deleteWorkspaceEntries` 的 `currentWithTree`）。
+    /// 多选删除的路径。成功且当前列表里有文件夹时，另读侧栏树。
     multi_delete_paths: Option<Vec<String>>,
     /// 移走或多项删除成功后要另读的侧栏树仓库。壳层取走后发一次目录树读取。
     folder_tree_reread: Option<String>,
@@ -642,7 +641,7 @@ pub struct FilesState {
     copy_reselect: Option<(Vec<String>, String)>,
     effects: Vec<FilesEffect>,
     pub(super) entry_menu: Option<EntryMenu>,
-    /// 单击选中、还没打开预览的文件。和 Vue 的 `selectedFilePath` 对 `previewFileEntry`：
+    /// 单击选中、还没打开预览的文件。选中和预览分开：
     /// 单击只在右侧详情里看，双击或「预览」才进入预览页。
     pub(super) select_only: Option<String>,
     /// 单击发起、还没回来的素材读取。回来时保持「只选中」；别处发起的读取回来就进入预览。
@@ -658,7 +657,7 @@ pub struct FilesState {
     /// 用户手动展开或收起标签组的那个文件。别的文件按「有标签就展开」。
     pub(super) tags_open: Option<(String, bool)>,
     /// 已经读回的素材详情的素材 id。空字符串表示还没有。详情卡只在和条目的素材 id 相同
-    /// 时叠下面那份元数据（Vue `withActiveAssetMetadata`），不改列表行。
+    /// 时叠下面那份元数据，不改列表行。
     detail_asset_id: String,
     /// 上面这份详情的元数据。同键后来的盖住先前的，和 `Object.fromEntries` 一样。
     detail_metadata: std::collections::BTreeMap<String, serde_json::Value>,
@@ -712,7 +711,7 @@ impl FilesState {
     }
 }
 
-/// 与 Vue `normalizeRepositoryRelativePath` 相同：去空白、反斜杠转正斜杠、去掉首尾斜杠。
+/// 规整仓库相对路径：去空白、反斜杠转正斜杠、去掉首尾斜杠。
 pub(in crate::shell) fn normalize_path(path: &str) -> String {
     path.trim().replace('\\', "/").trim_matches('/').to_string()
 }

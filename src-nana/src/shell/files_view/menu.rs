@@ -1,9 +1,9 @@
-//! 文件右键菜单，对应 Vue `useWorkspaceContextMenu.ts` 的 `fileEntryContextMenu`。
+//! 文件右键菜单。
 //!
 //! 外观、子菜单、键盘和常驻都是共用的右键菜单（`context_menu.rs`），这里只给条目：
 //! 「加入播放列表」「缩略图」是分组，回收站里的「彻底删除」要点两次。
-//! 来源插件的条目动作不能用时禁用，紧跟着一行弱色小字写原因（Vue 把原因放在禁用项的 `confirmLabel` 里，
-//! 禁用的按钮点不了，原因从来显示不出来）。
+//! 来源插件的条目动作不能用时禁用，紧跟着一行弱色小字写原因（原因不放进
+//! 点两次才出现的确认文字：禁用的按钮点不了，那样原因永远显示不出来）。
 
 use nana_ui::icons_tabler::{
     CLIPBOARD, EYE, FILES, FOLDER_OPEN, PENCIL, PHOTO, PHOTO_OFF, PHOTO_PLUS, REFRESH, ROTATE,
@@ -113,7 +113,7 @@ pub(crate) fn open_and_reveal_targets(
     Some((absolute("open")?, absolute("reveal")?))
 }
 
-/// 和 Vue `fileEntryContextMenu` 同样的条目、顺序和禁用规则。
+/// 文件右键菜单的条目、顺序和禁用规则。
 fn menu_entries(model: &ShellViewModel, row: &FileRow) -> Vec<MenuEntry> {
     let repository = model.workspace.active_repository();
     let repo_id = repository.map(|item| item.repo_id.clone());

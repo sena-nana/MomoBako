@@ -1,5 +1,5 @@
 //! 浏览时生成缩略图的队列：经产品的壳层归约（目录快照、收尾、生成结果）走，断言排下的 `EnsureThumbnail`
-//! 和写回的行。照 Vue `loadThumbnailsForSnapshot`：还没有缩略图的本地文件走 `ensure`；来源封面有真实
+//! 和写回的行：还没有缩略图的本地文件走 `ensure`；来源封面有真实
 //! http(s) 地址时走 `save + sourceUrl`；没有地址不预取。回收站不生成。
 
 use std::collections::BTreeMap;
@@ -235,7 +235,7 @@ fn browsing_generates_missing_thumbnails_one_at_a_time() {
     );
 }
 
-/// 主选中的文件先生成，和 Vue `thumbnailPriority` 一样。
+/// 主选中的文件先生成。
 #[test]
 fn the_selected_file_is_generated_first() {
     let mut model = browsing(root_entries());
@@ -247,7 +247,7 @@ fn the_selected_file_is_generated_first() {
     assert_eq!(ensures(&mut model), ["note.txt"], "选中的文件插到前面");
 }
 
-/// 回收站不生成缩略图（Vue 跳过 `specialLocation === "trash"`）。
+/// 回收站不生成缩略图。
 #[test]
 fn the_trash_generates_nothing() {
     let mut model = browsing(Vec::new());

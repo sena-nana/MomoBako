@@ -1,8 +1,7 @@
 //! 侧栏的对话框、右键菜单和弹层表单。
 //!
 //! 文件夹新建 / 重命名 / 处理对话框、文件夹右键菜单、智能文件夹编辑和删除、播放集播放和移除、
-//! 后端表单字段、拖放悬停和全局 Escape。文案与 Vue `useFolderSidebarUi`、
-//! `WorkspaceSidebarFolderDialogs.vue` 和 `useSmartFolderSidebarUi` 一致。
+//! 后端表单字段、拖放悬停和全局 Escape。
 //! 文件夹变更交给文件服务后对话框保持打开，等文件服务回报成功才关，失败把错误写在对话框里。
 
 use super::{SidebarEffect, SidebarSmartFolder, SidebarState};
@@ -65,7 +64,7 @@ impl FolderDialog {
     }
 }
 
-/// 处理文件夹时内部内容的去向，对应 Vue `FileDeleteMode`。
+/// 处理文件夹时内部内容的去向。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum FolderDeleteMode {
     /// 保留内部文件和子文件夹，只删除当前这一层目录。
@@ -174,7 +173,7 @@ pub(super) fn reduce(model: &mut super::super::ShellViewModel, message: GapMessa
         GapMessage::OpenFolderRename { path, label } => {
             model.sidebar.open_folder_rename(path, label, locked)
         }
-        // Vue 的文件夹名称输入框没有 disabled，处理中打的字照样进草稿。
+        // 文件夹名称输入框不禁用，处理中打的字照样进草稿。
         // 已经发出的那一次用的是提交当时的名字，这里只改对话框里还看着的这份。
         GapMessage::SetFolderValue(value) => model.sidebar.folder_dialog.value = value,
         GapMessage::CloseFolderDialog => model.sidebar.close_folder_dialog(mutating),
@@ -393,7 +392,7 @@ impl SidebarState {
         };
     }
 
-    /// 文件服务还在处理时不能关，和 Vue 的 `isMutatingFiles` 一致。
+    /// 文件服务还在处理时不能关。
     fn close_folder_dialog(&mut self, mutating: bool) {
         if mutating || self.folder_dialog.submitting {
             return;

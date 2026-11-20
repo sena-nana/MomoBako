@@ -1,9 +1,7 @@
 //! 文件右键菜单里子菜单的展开状态（ViewModel 一侧）。
 //!
-//! 照 Vue `ContextMenuHost.vue` 的 `.ctx-menu__slot:hover > .ctx-menu__submenu` 和
-//! `.ctx-menu__slot:focus-within > .ctx-menu__submenu`：指针在分组那一行或它的子菜单里，或者键盘焦点
-//! 在里面，子菜单就展开；都离开就收起，没有延迟。视图只报告进出（`shell/files_view/menu.rs`），这里记下指针和
-//! 焦点各自所在的分组，算出展开的是哪一个。
+//! 指针在分组那一行或它的子菜单里，或者键盘焦点在里面，子菜单就展开；都离开就收起，没有延迟。
+//! 视图只报告进出（`shell/files_view/menu.rs`），这里记下指针和焦点各自所在的分组，算出展开的是哪一个。
 
 /// 子菜单展开的来源。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,7 +22,7 @@ pub(crate) struct MenuBranch {
 impl MenuBranch {
     /// 展开着的分组：指针所在的优先，没有时是焦点所在的。
     ///
-    /// Vue 两处各在一个分组时两个子菜单叠着显示，这里只显示指针那一个。
+    /// 指针和焦点各在一个分组时只显示指针那一个，两个子菜单不叠着显示。
     pub(crate) fn open(&self) -> Option<&str> {
         self.hovered.as_deref().or(self.focused.as_deref())
     }

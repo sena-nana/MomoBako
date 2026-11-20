@@ -1,10 +1,10 @@
-//! 文件列表右侧的详情卡片，对应 Vue `FileBrowserPanel.vue` 的 `files-detail`。
+//! 文件列表右侧的详情卡片。
 //!
 //! 多选时写「N 个项目」和文件夹 / 文件数；单选时是缩略图、色板、标题、路径、注释和链接、
 //! 类型 / 大小 / 硬链接 / 受保护 / 修改时间各行，文件再接元数据编辑；没有选择时是当前目录的
 //! 直属计数；回收站和分类视图没有选择时是居中的提示。卡片自己纵向滚动，播放条不会盖住它。
 //!
-//! 注释、链接和回收站的删除时间照 Vue `withActiveAssetMetadata`：素材 id 对得上时，把已经读回的
+//! 注释、链接和回收站的删除时间：素材 id 对得上时，把已经读回的
 //! 详情元数据叠到列表条目上（同键以详情为准，详情没有的键留着列表的）。列表行本身不改，编辑器草稿
 //! 也不提前写进导语。单击选中时，编辑器的评分、注释、链接和标签读同一份叠层；正在输入时详情到达不盖草稿。
 //! 类型、大小、硬链接和修改时间仍只读列表条目。
@@ -286,7 +286,7 @@ fn entry_view(model: &ShellViewModel, ctx: &FileContext, row: &FileRow) -> Entry
     }
 }
 
-/// Vue `metadataString`：详情里有这个键就用详情的，不是字符串当成空；详情没有这个键才用列表上的。
+/// 元数据文字：详情里有这个键就用详情的，不是字符串当成空；详情没有这个键才用列表上的。
 fn overlaid_text(
     row: &BTreeMap<String, serde_json::Value>,
     overlay: Option<&BTreeMap<String, serde_json::Value>>,
@@ -303,7 +303,7 @@ fn overlaid_text(
         .to_string()
 }
 
-/// Vue `metadataComment`：`comment` 不是空字符串时用它，否则用 `note`。显示时去掉首尾空白，空白不占一行。
+/// 注释：`comment` 不是空字符串时用它，否则用 `note`。显示时去掉首尾空白，空白不占一行。
 fn overlaid_comment(
     row: &BTreeMap<String, serde_json::Value>,
     overlay: Option<&BTreeMap<String, serde_json::Value>>,
@@ -430,7 +430,7 @@ fn scroller(key: &DetailKey, signals: DetailSignals, metadata: MetadataSignals) 
     .into_any()
 }
 
-/// `files-detail__section`：标题 18px/700（上 4），路径 14px 弱化色（上 8，空时不占位）。
+/// 详情的标题段：标题 18px/700（上 4），路径 14px 弱化色（上 8，空时不占位）。
 fn section(
     title: impl Fn() -> String + Send + Clone + 'static,
     subline: impl Fn() -> String + Send + Clone + 'static,
@@ -682,7 +682,7 @@ fn empty_card(smart: bool, trash: bool) -> AnyView {
         .into_any()
 }
 
-/// `files-detail__card`：各块之间 16。
+/// 详情卡片：各块之间 16。
 fn card(parts: Vec<AnyView>, key: &'static str) -> AnyView {
     widget(
         Stack::column(16.0)

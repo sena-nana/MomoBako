@@ -1,13 +1,12 @@
 //! 硬链接候选：显式读取、启动和换仓库后的后台检查、结构更新后的静默重读，以及确认框里的确认和跳过。
 //!
-//! 对应 Vue `HardlinkCandidateDialog.vue` 和 `listHardlinkCandidates` / `confirmHardlinkCandidate`：
-//! 确认框显示第一个没跳过的候选，跳过只记在本地，不调用服务。确认成功以后照 Vue 重读候选、仓库摘要和
+//! 确认框显示第一个没跳过的候选，跳过只记在本地，不调用服务。确认成功以后重读候选、仓库摘要和
 //! 当前目录（[`finish_confirm`]）。
 //!
 //! 读取是并发的（宿主有多个任务线程），回来的先后不一定是发出的先后。候选列表因此带一个版本
 //! （`hardlink_epoch`）：确认结果回来、换仓库时加一，每次读取带着发出时的版本，回来时比现在旧就丢掉，
 //! 确认掉的候选不会被确认以前发出的读取写回来，别的仓库的候选也进不来。确认结果回来以后到重读的候选
-//! 回来之前，确认框照 Vue `isMutatingFiles` 一直处理中，不能对着要被换掉的旧列表再点。
+//! 回来之前，确认框一直处理中，不能对着要被换掉的旧列表再点。
 
 use super::super::ShellViewModel;
 use super::{FileContext, FileDialog, FilesEffect, FilesState};
@@ -132,8 +131,7 @@ impl FilesState {
         }
     }
 
-    /// 启动和换仓库后在后台查一次硬链接候选，和 Vue 后台读 `listHardlinkCandidates` 一致：
-    /// 启动同步刚建出来的候选要让用户确认。
+    /// 启动和换仓库后在后台查一次硬链接候选：启动同步刚建出来的候选要让用户确认。
     pub(in crate::shell) fn check_hardlinks(&mut self, repo_id: &str) {
         self.effects.push(FilesEffect::CheckHardlinks {
             repo_id: repo_id.to_string(),
@@ -155,7 +153,7 @@ impl FilesState {
     }
 
     /// 后台查到（启动、换仓库、确认以后）或刷新文件夹树同步以后重读的候选：换掉列表，跳过的留着；没有别的对话框
-    /// 开着时，有候选就弹出确认。Vue 的确认框按「第一个没跳过的候选」算出来，候选一到就出现。过期的结果丢掉。
+    /// 开着时，有候选就弹出确认。确认框按「第一个没跳过的候选」算出来，候选一到就出现。过期的结果丢掉。
     pub(in crate::shell) fn note_hardlinks_synced(
         &mut self,
         epoch: u64,
@@ -231,7 +229,7 @@ impl FilesState {
         true
     }
 
-    /// 确认框跟着列表走（Vue 的确认框就是 `currentHardlinkCandidate`）：没有可显示的候选时收起，不留一个画不出来的
+    /// 确认框跟着列表走（显示的就是当前第一个没跳过的候选）：没有可显示的候选时收起，不留一个画不出来的
     /// 打开状态。
     fn settle_hardlink_dialog(&mut self) {
         if self.dialog == FileDialog::Hardlink && self.current_hardlink().is_none() {
@@ -240,13 +238,13 @@ impl FilesState {
     }
 }
 
-/// 确认硬链接的结果到了（Vue `confirmWorkspaceHardlinkCandidate`）。先落到候选上；确认时的仓库还是活动仓库时：
-/// - 成功照 Vue `refreshWorkspace(repoId, { directory, hardlinkCandidates, repositorySnapshot })`：重读候选（换掉
+/// 确认硬链接的结果到了。先落到候选上；确认时的仓库还是活动仓库时：
+/// - 成功：重读候选（换掉
 ///   列表、跳过的留着，还有没跳过的就接着弹确认），静默重读仓库摘要，不在回收站和智能文件夹时非静默地重读当前
 ///   目录（任务弹层「读取目录」），新文件的硬链接状态和侧栏计数跟着更新；
-/// - 失败照 Vue 静默重读候选（读失败只记日志），确认框按最新的列表走，错误留在文件列。
+/// - 失败：静默重读候选（读失败只记日志），确认框按最新的列表走，错误留在文件列。
 ///
-/// 两种都照 Vue 在候选重读回来之前让确认框处理中：确认掉或已经失效的候选不会被再点一次。
+/// 两种都在候选重读回来之前让确认框处理中：确认掉或已经失效的候选不会被再点一次。
 pub(in crate::shell) fn finish_confirm(
     model: &mut ShellViewModel,
     repo_id: &str,

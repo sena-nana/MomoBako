@@ -1,4 +1,4 @@
-//! 点开播放集时先画详情缓存，再拉新的。对齐 Vue `selectPlaylist`。
+//! 点开播放集时先画详情缓存，再拉新的。
 //!
 //! 不打开声卡，也不建窗口。页面画什么以 `PlaylistPageView::project` 为准。
 
@@ -213,7 +213,7 @@ fn playing_night(model: &super::super::super::ShellViewModel) -> bool {
             .all(|item| item.playlist_id == "pl-b")
 }
 
-/// 侧栏播放集列表刷新。照 Vue `refreshPlaylists` / `syncPlaylistMemberships`：
+/// 侧栏播放集列表和成员索引刷新：
 /// 当前这张还在时只换页眉名称，条目和播放队列留着；不在了就清掉已画出的详情，再点没有缓存的另一张停在空框；
 /// 列表空了丢掉这个仓库的详情缓存，下次点开不先画出旧的那一份。
 #[test]

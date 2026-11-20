@@ -1,6 +1,6 @@
 //! 仓库切换弹层的状态：切换资源库、添加菜单、后端表单和系统文件夹附加。
 //!
-//! 对应 Vue `useRepositorySwitcherUi.ts`。添加菜单列出所有来源插件；本地文件夹和 Eagle
+//! 添加菜单列出所有来源插件；本地文件夹和 Eagle
 //! 先关掉弹层再打开系统文件夹对话框，需要登录的来源跳到插件设置，其余来源打开表单。
 //! 附加或创建失败时回到添加菜单并显示错误。
 
@@ -15,7 +15,7 @@ const LOCAL_FILESYSTEM_PLUGIN_ID: &str = "momobako.local-filesystem";
 const CLOUD_DRIVE_PLUGIN_ID: &str = "momobako.cloud-drive";
 const LOCAL_ROOT_CAPABILITY: &str = "localRootPath";
 const AUTHENTICATION_CAPABILITY: &str = "authentication";
-/// 旧版没有 `category` 的来源插件按 kind 归类，和 Vue `pluginCategoryForKind` 一致。
+/// 旧版没有 `category` 的来源插件按 kind 归类：这几种 kind 算来源。
 const LEGACY_SOURCE_KINDS: [&str; 3] = ["filesystem", "webdav", "cloud"];
 
 /// 添加菜单里的一个来源后端。
@@ -46,7 +46,7 @@ pub enum BackendRoute {
     Form,
 }
 
-/// 从插件清单收出来源后端，对应 Vue `repositoryBackendOptionsFromPlugins`。
+/// 从插件清单收出来源后端。
 pub fn backend_options(plugins: &[PluginManifest]) -> Vec<BackendOption> {
     plugins
         .iter()
@@ -77,7 +77,7 @@ fn is_source_plugin(plugin: &PluginManifest) -> bool {
     }
 }
 
-/// Vue `isRepositoryBackendRuntimeAvailable`：启用、后端 SDK、原生动态库，且状态不是不可用或出错。
+/// 后端能不能跑：启用、后端 SDK、原生动态库，且状态不是不可用或出错。
 fn runtime_available(plugin: &PluginManifest) -> bool {
     plugin.enabled
         && plugin.sdk == "backend"
@@ -246,7 +246,7 @@ impl SidebarState {
         self.effects.push(SidebarEffect::AttachRepository { path });
     }
 
-    /// Vue `attachRepository`：任务弹层「挂载资源库 · 检查文件夹并读取索引」8%。
+    /// 附加资源库：任务弹层「挂载资源库 · 检查文件夹并读取索引」8%。
     fn begin_attach(&mut self) {
         self.creating = false;
         self.operation.start(
@@ -255,7 +255,7 @@ impl SidebarState {
         );
     }
 
-    /// Vue `createNewRepository`（会做首次扫描）：任务弹层「创建资源库 · 初始化资源库并扫描文件」8%。
+    /// 新建资源库（会做首次扫描）：任务弹层「创建资源库 · 初始化资源库并扫描文件」8%。
     fn begin_create(&mut self) {
         self.creating = true;
         self.operation.start(

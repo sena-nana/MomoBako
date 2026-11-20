@@ -1,8 +1,8 @@
-//! 文件卡片的点选和框选读修饰键，和 Vue `selectionModeFromEvent`、框选的 `additive` 对齐。
+//! 文件卡片的点选和框选读修饰键。
 //!
 //! 运行时路由完输入以后宿主记下修饰键（`window_host::note_modifiers`），卡片发出的单击消息归约时
 //! 读它：Shift 是从锚点到这一张的范围，Ctrl / Meta 是切换，否则替换；按下时按着 Ctrl 的框选并进
-//! 原来的选择。测试挂完整壳层，从指针事件开始走，右侧详情跟着主选中项走（Vue `currentFileEntry`）。
+//! 原来的选择。测试挂完整壳层，从指针事件开始走，右侧详情跟着主选中项走。
 
 use nana_ui::runtime::{AccessibilityNode, AccessibilityRole, component_descriptors};
 use nana_ui::{InputModifiers, PointerPhase};

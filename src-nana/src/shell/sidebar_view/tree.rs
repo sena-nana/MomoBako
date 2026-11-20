@@ -1,8 +1,8 @@
 //! 文件夹树和智能文件夹树。
 //!
-//! 行结构照 Vue `FolderTreeNode.vue` / `SmartFolderTreeNode.vue`：最左 10px 的折叠三角，
+//! 行结构：最左 10px 的折叠三角，
 //! 然后是 24px 高的行卡片（文件夹图标、名称、右侧计数），子级每层缩进 20px，行距 3px。
-//! 深度大于 1 的行在缩进处画 `--border` 竖线，和 `.workspace-folder-tree__row::before` 一样；
+//! 深度大于 1 的行在缩进处画 `--border` 竖线；
 //! 有子级时三角背后的底色盖住当前这一层的线。当前目录的卡片是 `--bg-active` 灰底。
 //! 文件夹行右键打开「打开 / 新建子文件夹 / 重命名 / 删除」菜单，
 //! 菜单键和 Shift+F10 也打开它、焦点落在首项（和文件右键菜单同一份实现，`context_menu.rs`）；
@@ -63,7 +63,7 @@ type FolderItem = Item<Store<Vec<FolderRow>>, (String, u16, bool), FolderRow>;
 /// 智能文件夹树 Store 里的一行。
 type SmartItem = Item<Store<Vec<SmartRow>>, (String, u16, bool), SmartRow>;
 
-/// 文件夹分组：标题带「新建」和「刷新」，正文是树或空状态。对应 `WorkspaceSidebarFolders.vue`。
+/// 文件夹分组：标题带「新建」和「刷新」，正文是树或空状态。
 /// 虚拟条目来源不显示这一组，`visible` 现读信号。
 pub(super) fn folder_group(
     state: Signal<FolderGroup>,
@@ -232,7 +232,7 @@ fn owned_paths(paths: &[std::path::PathBuf]) -> Vec<String> {
 }
 
 /// 树行卡片：24px、左 4 右 6 内边距；悬停 `--bg-hover`，当前 `--bg-active`。
-/// 放下目标照 Vue `.workspace-folder-tree__row.is-drop-target`：强调色 14% 混进当前底，边是 55% 强调色。
+/// 放下目标：强调色 14% 混进当前底，边是 55% 强调色。
 fn card_style(drop_target: bool) -> NodeStyle {
     let mut style = parts::row_style(ROW_HEIGHT, 4.0, 6.0, 8.0, ActiveTone::Neutral, false);
     let layout = Arc::make_mut(&mut style.layout);
@@ -304,9 +304,9 @@ fn tree_row(
 
 /// 这一行要画的竖线横坐标。
 ///
-/// Vue 在行的 `::before` 上按缩进重复 1px 的 `--border`：第 i 条在 `20.5 + i * 20`。
-/// 有子级时三角的 `::before` 用侧栏底色盖住当前这一层（最后一条），祖先层的线留着；
-/// 没有子级时三角是 `visibility: hidden`，盖板一起藏掉，当前层的线也露出来。
+/// 每层缩进处画一条 1px 的 `--border`：第 i 条在 `20.5 + i * 20`。
+/// 有子级时三角背后用侧栏底色盖住当前这一层（最后一条），祖先层的线留着；
+/// 没有子级时三角不显示，盖板一起藏掉，当前层的线也露出来。
 /// 线高就是这一行的 24px，不伸进 3px 行距，和 `::before` 只盖住本行一样。
 fn guide_xs(depth: u16, has_children: bool) -> Vec<f32> {
     let levels = usize::from(depth.saturating_sub(1));
@@ -341,7 +341,7 @@ fn guide_line(x: f32) -> AnyView {
     .into_any()
 }
 
-/// 折叠三角：10×20，弱色，展开后朝下。对应 `.workspace-folder-tree__toggle-caret`。
+/// 折叠三角：10×20，弱色，展开后朝下。
 /// 图标和无障碍名跟着 `expanded` 原地换，`labels` 是展开时和收起时的说明。
 fn caret(
     expanded: impl Fn() -> bool + Copy + Send + 'static,
@@ -368,7 +368,7 @@ fn caret(
         layout.height = Some(LengthSpec::Px(20.0));
         layout.min_height = Some(LengthSpec::Px(20.0));
     }
-    // Vue 的三角悬停只变色，不铺底。
+    // 三角悬停只变色，不铺底。
     style.interaction.hovered.background = None;
     style.interaction.pressed.background = None;
     button.style = style;
@@ -379,7 +379,7 @@ fn caret(
         .into_any()
 }
 
-/// 智能文件夹分组：标题带「新建」，正文是树或空状态。对应 `WorkspaceSidebarSmartFolders.vue`。
+/// 智能文件夹分组：标题带「新建」，正文是树或空状态。
 pub(super) fn smart_group(state: Signal<SmartGroup>, rows: Store<Vec<SmartRow>>) -> AnyView {
     let tools = vec![
         tree_action(
@@ -495,7 +495,7 @@ const FOLDER_MENU: MenuChrome = MenuChrome {
 pub(crate) struct FolderMenuView;
 
 impl FolderMenuView {
-    /// 照 Vue `FolderTreeNode.vue` 的 `contextMenuItems`：打开、新建子文件夹、重命名和删除，
+    /// 文件夹右键菜单：打开、新建子文件夹、重命名和删除，
     /// 文件服务处理中时后三项禁用。
     pub(crate) fn project(model: &ShellViewModel) -> Option<MenuView> {
         let menu = model.sidebar.folder_menu.as_ref()?;

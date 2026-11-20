@@ -38,7 +38,7 @@ pub(crate) use wav_player::pcm_from_bytes;
 #[cfg(test)]
 pub(crate) use wav_player::sound_device_compiled_in;
 
-/// 列表循环、随机、单曲循环。和 Vue 的切换顺序一致。
+/// 列表循环、随机、单曲循环，循环按钮按这个顺序切换。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum PlaybackMode {
     #[default]
@@ -374,8 +374,7 @@ impl PlayerState {
 
     /// 播放条认播放器类别用的类型。
     ///
-    /// 有当前项时用这一项的类型。没有当前项时退回正在放的播放集的类型，和 Vue
-    /// `currentPlayer()` 在 `currentItem()` 为空时用 `activePlaylist.playerTypeId` 一样。
+    /// 有当前项时用这一项的类型。没有当前项时退回正在放的播放集的类型。
     /// 空字符串认不出播放器，封面写「媒体」。
     pub(crate) fn bar_player_type_id(&self) -> Option<&str> {
         if self.current_item().is_some() {
@@ -416,10 +415,10 @@ impl PlayerState {
         self.queue_restore();
     }
 
-    /// 照 Vue `AppShell.vue` 监听 `[activeRepoId, playlists]` 的恢复：存下的会话所在的播放集在列表里、
+    /// 活动仓库或播放集列表变了以后恢复会话：存下的会话所在的播放集在列表里、
     /// 播放器还没在放这个仓库时读它的详情，详情回来再由 [`Self::restore`] 决定恢复还是丢弃。
-    /// 播放器类型要先认得：内置候选当场认得，插件类型等播放器类型读回；读回了还不认得就丢掉会话，
-    /// 和 Vue 找不到播放器时 `clearSession` 一致。已经在读的详情不重复读。
+    /// 播放器类型要先认得：内置候选当场认得，插件类型等播放器类型读回；读回了还不认得就丢掉会话。
+    /// 已经在读的详情不重复读。
     fn queue_restore(&mut self) {
         let Some(repo_id) = self.playlists_repo_id.clone() else {
             return;
@@ -468,7 +467,7 @@ impl PlayerState {
     /// 记下读回的播放集。返回 `true` 表示这次走了会话恢复，调用方不要再从头播放。
     ///
     /// 播放队列只在它本来就是这一张时跟着换。正在放另一张时，刷新页面上的这一张不把播放队列换掉：
-    /// Vue 的播放队列跟播放器走，不跟点开的页面走。
+    /// 播放队列跟播放器走，不跟点开的页面走。
     fn note_detail(&mut self, detail: &PlaylistDetail) -> bool {
         // 读回的是真详情才进缓存。失败不会走到这里，不会把失败写成一份播放集。
         self.remember_playlist_detail(detail);
@@ -511,7 +510,7 @@ impl PlayerState {
             .map(|item| queue_item_from_playlist(item, &detail.playlist))
             .collect();
         self.play_item(&stored.current_item_id, stored.is_playing);
-        // Vue `setActivePlaylist(.., { restore: true })` 沿用存下的进度和时长，装好以后能跳转就跳过去；
+        // 恢复时沿用存下的进度和时长，装好以后能跳转就跳过去；
         // 装载期间播放条显示的也是存下的进度，会话文件不被装载清零。
         self.session.current_time_ms = stored.current_time_ms;
         self.session.duration_ms = (stored.duration_ms > 0).then_some(stored.duration_ms);
@@ -542,7 +541,7 @@ impl PlayerState {
 
     /// 侧栏行上的「播放」读回了详情。
     ///
-    /// 照 Vue `playPlaylist`：从第一条就绪条目自动播放，没有就绪的就用第一条，并且不调用 `selectPlaylist`。
+    /// 从第一条就绪条目自动播放，没有就绪的就用第一条，并且不点开这张播放集。
     /// 正在看的播放集页留在原地；没点开过播放集时也不因此打开一页。正在看的就是这一张时，用这份新详情换上页上的条目。
     /// 返回 `true` 表示播放的就是正在看的那张，壳层可以刷新它的条目编号。
     fn play_sidebar(&mut self, detail: &PlaylistDetail, inspect: &mut InspectState) -> bool {
@@ -626,9 +625,9 @@ impl PlayerState {
 
     /// 播放集一项也没有。
     ///
-    /// 照 Vue `setActivePlaylist` 再 `loadCurrentItem`：没有当前项时，播放器类型认得就在播放条次行写
+    /// 没有当前项时，播放器类型认得就在播放条次行写
     /// 「当前没有可播放条目」，认不得写「缺少对应播放插件」。进度归零，上一首不再接着放。
-    /// 没有当前项时 Vue 的 `currentSession()` 是空的，这里也不写会话文件。队列本来开着就留着。
+    /// 没有当前项就没有会话可存，不写会话文件。队列本来开着就留着。
     fn fail_empty_playlist(&mut self, detail: &PlaylistDetail) {
         let repo_id = detail.playlist.repo_id.clone();
         if self
@@ -850,7 +849,7 @@ impl PlayerState {
         let volume = volume.clamp(0.0, 1.0);
         if self.output() != Some(wav_player::Output::Cursor) {
             // 还没有装好的条目，或者装好的条目没有声音（只有画面的视频）：只记下音量，下一项有声音时沿用。没有声音
-            // 时不经控制器，它会按「不支持音量控制」把正在放的画面改成 failed；Vue 的播放条照样收下音量。
+            // 时不经控制器，它会按「不支持音量控制」把正在放的画面改成 failed；播放条照样收下音量。
             self.session.volume = volume;
             self.persist_if_needed();
             self.publish(inspect);
@@ -1174,8 +1173,8 @@ mod library;
 pub(crate) use reduce::reduce_message;
 
 impl ShellViewModel {
-    /// 文件浏览面板和播放集页才有底栏播放条。回收站和智能文件夹在 Vue 里仍是文件浏览面板
-    /// （`isFileBrowserPanel`），播放条留在列表下面，不因为换了面板藏起来。
+    /// 文件浏览面板和播放集页才有底栏播放条。回收站和智能文件夹也算文件浏览面板，
+    /// 播放条留在列表下面，不因为换了面板藏起来。
     pub(super) fn player_surface_visible(&self) -> bool {
         self.workspace.startup.status == StartupStatus::Ready
             && self.workspace.main_region() == MainRegion::HasRepository

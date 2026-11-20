@@ -1,6 +1,6 @@
 //! 播放集成员变了以后的刷新：右键加入、移出，以及按路径加入目录和虚拟条目。
 //!
-//! 照 Vue `refreshPlaylists` 重读播放集列表（侧栏项数）和成员索引；点开的那张受影响时页面跟着刷新，
+//! 重读播放集列表（侧栏项数）和成员索引；点开的那张受影响时页面跟着刷新，
 //! 不受影响时不换掉页面上点开的那张。辅助构造沿用上层 `tests` 模块，不启动仓库服务。
 
 use crate::backend::services::repository::PlaylistMembershipSnapshot;
@@ -209,7 +209,7 @@ fn adding_by_path_refreshes_without_switching_the_open_playlist() {
     assert!(playlist_loads(&mut model).is_empty());
 }
 
-/// 播放集页移除或排序交回详情以后，照 Vue `refreshPlaylists` 重读播放集列表和成员索引。
+/// 播放集页移除或排序交回详情以后，重读播放集列表和成员索引。
 /// 页面条目用这次交回的，不另读详情。点开别的播放集以后，侧栏项数仍是重读回来的数。
 /// 失败和过期的结果不重读。直接读详情（点开播放集）也不重读列表。
 #[test]

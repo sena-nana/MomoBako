@@ -1,8 +1,8 @@
-//! 仓库切换弹层：切换列表、添加菜单和后端表单。对应 Vue `RepositorySwitcherPopover.vue`。
+//! 仓库切换弹层：切换列表、添加菜单和后端表单。
 //!
-//! 位置照 `useRepositorySwitcherUi.getPopoverPosition`：左边和仓库头按钮对齐，顶边在按钮下方 6px；
-//! 切换列表和按钮同宽，添加菜单按 `.ctx-menu` 的最小宽 180px，表单 320px，左右夹在视口里。
-//! 弹层下面铺一层透明的点击层，点弹层外面关闭，和 Vue 的外部按下关闭一致；提交中归约不关。
+//! 位置：左边和仓库头按钮对齐，顶边在按钮下方 6px；
+//! 切换列表和按钮同宽，添加菜单按右键菜单的最小宽 180px，表单 320px，左右夹在视口里。
+//! 弹层下面铺一层透明的点击层，点弹层外面关闭；提交中归约不关。
 //! 切换列表和添加菜单是菜单：项在方向键焦点组里，键盘从仓库头打开时焦点落在首项或末项（`menu_focus.rs`）。
 //!
 //! 弹层常驻：三页（切换、添加、表单）各是一块，换页时浮层块按身份换块；同一页打开期间位置、
@@ -120,7 +120,7 @@ impl FieldWrite<Stack, Placement> for PlacementField {
     }
 }
 
-/// 弹层外的透明点击层。提交中归约不关，和 Vue 提交时不关弹层一致。
+/// 弹层外的透明点击层。提交中归约不关。
 fn dismiss_layer() -> AnyView {
     let mut style = nana_ui::runtime::NodeStyle::default();
     {
@@ -367,7 +367,7 @@ impl AddMenuView {
     }
 }
 
-/// 添加菜单：每个来源后端一项，不可用的禁用。对应 `.ctx-menu`。
+/// 添加菜单：每个来源后端一项，不可用的禁用。外观和右键菜单一样。
 fn add_menu(model: &ShellViewModel) -> AnyView {
     let Some(initial) = AddMenuView::project(model) else {
         return widget(Stack::column(0.0)).into_any();
@@ -491,7 +491,7 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
         .size(ControlSize::Small)
         .with_tooltip("关闭");
     close.style = parts::icon_button_style(22.0, RadiusTier::Sm, SemanticColorRole::Faint, None);
-    // 提交中停用：照 Vue `button:disabled` 的 0.45 和弹层底色（`--bg-elev`）在 sRGB 里混。
+    // 提交中停用：按 0.45 和弹层底色（`--bg-elev`）在 sRGB 里混。
     close.style.interaction.disabled =
         crate::theme_map::disabled_paint(SemanticColorRole::Faint, SemanticColorRole::Surface);
     let header = widget(

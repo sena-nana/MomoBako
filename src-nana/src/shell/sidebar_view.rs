@@ -1,6 +1,6 @@
 //! 侧栏视图：仓库头、文件管理分组和底部入口。
 //!
-//! 结构照 Vue `SecondaryPanel.vue`：仓库头 → 状态 → 快捷方式 → 快捷访问 → 动作 → 播放集 →
+//! 结构：仓库头 → 状态 → 快捷方式 → 快捷访问 → 动作 → 播放集 →
 //! 文件夹 → 智能文件夹，底部是设置、拓展、任务和日志。文件夹树、仓库弹层和对话框在子模块里。
 //! 状态是全局状态区（`status.rs`）：最近一次失败（要提醒的结果用警告色），没有时是忙碌行，再没有时是刷新文件夹树的
 //! 同步进度。
@@ -54,7 +54,7 @@ use parts::{
     tree_action, tree_action_titled,
 };
 
-/// 五个快捷方式，顺序同 Vue，也是 [`NavView::shortcuts`] 的顺序。
+/// 五个快捷方式，顺序也是 [`NavView::shortcuts`] 的顺序。
 const SHORTCUTS: [ShortcutId; 5] = [
     ShortcutId::All,
     ShortcutId::Uncategorized,
@@ -66,9 +66,9 @@ const SHORTCUTS: [ShortcutId; 5] = [
 /// 播放集 Store 里的一行。
 type PlaylistItem = Item<Store<Vec<PlaylistRow>>, String, PlaylistRow>;
 
-/// 实况侧栏。Vue `.workspace-sidebar` 的内边距是 10px 8px，各块之间没有额外间距。
+/// 实况侧栏。内边距是 10px 8px，各块之间没有额外间距。
 /// 资源区比侧栏宽度少一条发丝间隙（见 `render::workbench`），右内边距同样扣掉这一条，
-/// 内容盒仍是 Vue 的 8..宽度-8。
+/// 内容盒仍是 8..宽度-8。
 pub fn sidebar_frame() -> SidebarFrame {
     let mut frame = SidebarFrame::new().gap(0.0);
     let layout = Arc::make_mut(&mut frame.style.layout);
@@ -91,15 +91,15 @@ pub(crate) fn sidebar(signals: SidebarSignals, hot: HotSignals) -> AnyView {
         .into_any()
 }
 
-/// 仓库头的无障碍名：「资源库 · 仓库名」。Vue 的 `aria-label` 只有「资源库」，读屏听不到当前是哪个库，
-/// 这里把仓库名一起读出来。
+/// 仓库头的无障碍名：「资源库 · 仓库名」。只读「资源库」的话读屏听不到当前是哪个库，
+/// 所以把仓库名一起读出来。
 fn switcher_label(name: &str) -> String {
     format!("资源库 · {name}")
 }
 
-/// 仓库头：当前仓库名加上下箭头，点开切换弹层。对应 `WorkspaceSidebarRepoHeader.vue`。
+/// 仓库头：当前仓库名加上下箭头，点开切换弹层。
 ///
-/// 和 Vue 的 `aria-haspopup="menu"` 一样是菜单按钮：焦点在它上面时 ArrowDown / ArrowUp（还有菜单键）
+/// 它是弹出菜单的按钮：焦点在它上面时 ArrowDown / ArrowUp（还有菜单键）
 /// 打开弹层，焦点落在切换列表的首项或末项。
 fn sidebar_switcher(head: Signal<HeadView>) -> AnyView {
     let name = head.with_untracked(|head| head.name.clone());
@@ -160,9 +160,9 @@ fn sidebar_sections(signals: SidebarSignals, spin: Signal<f32>) -> AnyView {
     .into_any()
 }
 
-/// 侧栏顶部的全局状态区，对应 `WorkspaceSidebarStatus.vue`：有失败时是错误条（`.workspace-state--error`），
-/// 要提醒的结果是警告色的提醒条，没有这两样、在读资源库或素材详情时是忙碌行（`.workspace-state`：转圈加
-/// 「正在同步仓库状态」），再没有时是刷新文件夹树的同步进度（`.workspace-state--progress`），都没有时整块藏起来、
+/// 侧栏顶部的全局状态区：有失败时是错误条，
+/// 要提醒的结果是警告色的提醒条，没有这两样、在读资源库或素材详情时是忙碌行（转圈加
+/// 「正在同步仓库状态」），再没有时是刷新文件夹树的同步进度，都没有时整块藏起来、
 /// 不占间距。四块都留着，按投影互换。
 fn status_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
     (
@@ -174,7 +174,7 @@ fn status_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
         .into_any()
 }
 
-/// 失败条或提醒条：浅色语义底、同色 12px 字，文案可以折行。失败照 `.workspace-state--error`（`--err-soft` 底、
+/// 失败条或提醒条：浅色语义底、同色 12px 字，文案可以折行。失败是错误色（`--err-soft` 底、
 /// `--err` 字）；提醒是 DESIGN.md 8.1 的 Warning（`--warn-soft` 底、`--warn` 字，和添加资源库弹层的提示一样）。
 fn notice_bar(status: Signal<StatusLine>, warning: bool) -> AnyView {
     let message = move || {
@@ -229,8 +229,8 @@ fn notice_bar(status: Signal<StatusLine>, warning: bool) -> AnyView {
         .into_any()
 }
 
-/// 同步进度（`.workspace-state--progress`）：和忙碌行同一副底色和转圈，占满一行，左边是这一步的文案，
-/// 右边是弱色的百分比（`.workspace-state__percent` 的 `margin-left: auto`）。
+/// 同步进度：和忙碌行同一副底色和转圈，占满一行，左边是这一步的文案，
+/// 右边是弱色的百分比，靠右对齐。
 fn progress_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
     let progress = move || {
         status.with(|status| match status {
@@ -280,8 +280,7 @@ fn progress_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
     .into_any()
 }
 
-/// 忙碌行：`--bg-subtle` 底、弱色 12px 字，前面一个 16px 的转圈，撑满侧栏宽。Vue 的 `.workspace-state` 写的是
-/// `inline-flex`，但它是侧栏纵向 flex 容器的子项，照样被拉满宽度。转圈的角度读热信号。
+/// 忙碌行：`--bg-subtle` 底、弱色 12px 字，前面一个 16px 的转圈，撑满侧栏宽。转圈的角度读热信号。
 fn busy_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
     let mut glyph = nana_ui::runtime::IconGlyph::new(LOADER_2)
         .size(16.0)
@@ -318,7 +317,7 @@ fn busy_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
     .into_any()
 }
 
-/// `.workspace-state` 的 `margin: 2px 0`。
+/// 状态区上下各留 2px。
 fn state_margin(layout: &mut nana_ui_core::LayoutStyle) {
     layout.margin_top = Some(LengthSpec::Px(2.0));
     layout.margin_bottom = Some(LengthSpec::Px(2.0));
@@ -357,7 +356,7 @@ fn shortcut_group(nav: Signal<NavView>) -> AnyView {
         .into_any()
 }
 
-/// 快捷方式图标，对应 Vue 的 lucide：archive、folder-tree、tag、clock-3、trash-2。
+/// 快捷方式图标（lucide）：archive、folder-tree、tag、clock-3、trash-2。
 fn shortcut_icon(id: ShortcutId) -> Icon {
     match id {
         ShortcutId::All => ARCHIVE,
@@ -450,14 +449,14 @@ fn actions_group(nav: Signal<NavView>) -> AnyView {
     .into_any()
 }
 
-/// 一个侧栏分组：标题和正文，间距 4px。对应 `.workspace-group`。正文里藏起来的块不占间距。
+/// 一个侧栏分组：标题和正文，间距 4px。正文里藏起来的块不占间距。
 pub(super) fn group(header: AnyView, body: Vec<AnyView>) -> El<Stack, Vec<AnyView>> {
     let mut children = vec![header];
     children.extend(body);
     widget(Stack::column(4.0)).children(children)
 }
 
-/// 播放集分组。标题可点开合，默认收起；收起时只留标题。对应 `WorkspaceSidebarPlaylists.vue`。
+/// 播放集分组。标题可点开合，默认收起；收起时只留标题。
 fn playlist_group(state: Signal<PlaylistGroup>, rows: Store<Vec<PlaylistRow>>) -> AnyView {
     let tools = vec![
         tree_action(
@@ -576,7 +575,7 @@ fn playlist_row(item: PlaylistItem) -> AnyView {
     let play_id = id.clone();
     let remove_id = id.clone();
     let actions = widget(Stack::row(2.0).align(AlignSpec::Center)).children((
-        // Vue `title` 是「播放」，`aria-label` 是「播放播放集」。
+        // 悬停提示是「播放」，无障碍名是「播放播放集」。
         tree_action_titled(
             PLAYER_PLAY,
             "播放播放集",
@@ -608,7 +607,7 @@ fn playlist_row(item: PlaylistItem) -> AnyView {
     .into_any()
 }
 
-/// 危险的标题工具：悬停换浅红底。对应 `.workspace-tree-action--danger`。
+/// 危险的标题工具：悬停换浅红底。
 /// 悬停提示和无障碍名用同一句。
 pub(super) fn danger_tree_action(
     icon: Icon,
@@ -708,7 +707,7 @@ fn sidebar_footer(footer: Signal<FooterView>, rest: Signal<f32>) -> AnyView {
         .into_any()
 }
 
-/// 任务入口右上角的数量角标。对应 `.task-button__badge`：12px 高、强调色底、9px 粗体。
+/// 任务入口右上角的数量角标：12px 高、强调色底、9px 粗体。
 fn task_badge(footer: Signal<FooterView>) -> AnyView {
     let count = footer.with_untracked(|footer| footer.tasks);
     widget(

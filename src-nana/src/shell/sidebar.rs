@@ -1,7 +1,6 @@
 //! 侧栏导航状态。
 //!
-//! 对应 Vue `useSidebarShortcutsUi`、`useFolderSidebarUi`、`useSmartFolderSidebarUi`、
-//! `usePlaylistSidebarUi` 和 `useRepositorySwitcherUi` 里已经读过的导航分支。
+//! 管快捷方式、文件夹、智能文件夹、播放集和仓库切换的导航分支。
 //! 新建文件夹、智能文件夹筛选表单、播放集播放和系统文件夹对话框不在这里完成。
 
 use super::workspace::{LibraryCategory, WorkspacePanel, WorkspaceState};
@@ -107,7 +106,7 @@ pub use smart_flow::{
     SmartFolderChange, SmartFolderOutcome, SmartFolderResult, SmartResultSummary,
 };
 
-/// 一次目录树读取：树本身和每个目录的直属文件数（Vue `FileTreeNode.fileCount`）。
+/// 一次目录树读取：树本身和每个目录的直属文件数。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SidebarTree {
     pub folders: Vec<SidebarFolder>,
@@ -180,7 +179,7 @@ pub enum SidebarMessage {
     DeleteRepositoryFromSwitcher,
     RepositoryAttachPathChanged(String),
     SubmitRepositoryAttach,
-    /// 附加或新建资源库的结果：成功时是新仓库的摘要，照 Vue 放进列表并切过去。
+    /// 附加或新建资源库的结果：成功时是新仓库的摘要，放进列表并切过去。
     RepositoryAttachFinished(
         Result<crate::backend::services::repository::RepositorySummary, String>,
     ),
@@ -233,7 +232,7 @@ pub enum SidebarEffect {
         repo_id: String,
         playlist_id: String,
     },
-    /// 读一个目录。`progress` 是 Vue 的非静默读取（回收站、快捷访问、从回收站回到全部），任务弹层出
+    /// 读一个目录。`progress` 是非静默读取（回收站、快捷访问、从回收站回到全部），任务弹层出
     /// 「读取目录」（「读取回收站」）这一行；点文件夹是静默读取，不出。
     Browse {
         repo_id: String,
@@ -329,7 +328,7 @@ pub struct SidebarState {
     pub backend_plugin_id: String,
     /// 下一次系统文件夹对话框的结果按 Eagle Library 建仓，而不是附加本地文件夹。
     pub(crate) attach_eagle: bool,
-    /// 在途的提交是新建资源库（Vue `createNewRepository`），不是附加本地文件夹：成功以后进度行多一步
+    /// 在途的提交是新建资源库，不是附加本地文件夹：成功以后进度行多一步
     /// 「切换到新资源库」。
     pub(crate) creating: bool,
     /// 对任务弹层「仓库操作」行的请求（挂载、创建资源库），归约结束时交给壳层的槽位。
@@ -543,7 +542,7 @@ impl SidebarState {
             if !self.browse_folder(workspace, &parent, locked, true) {
                 return false;
             }
-            // Vue 等父目录读完才 `selectWorkspaceEntry`。这里先记下，快照回来再选。
+            // 等父目录读完才能选中它。这里先记下，快照回来再选。
             self.selected_path = Some(path.clone());
             self.pending_quick_file = Some(path);
             return true;
@@ -551,7 +550,7 @@ impl SidebarState {
         let Some(path) = shortcut.target_path else {
             return false;
         };
-        // 快捷访问在 Vue 里是非静默读取（`loadFileBrowserForDirectory` 不带 `silent`），任务弹层出「读取目录」。
+        // 快捷访问是非静默读取，任务弹层出「读取目录」。
         self.browse_folder(workspace, &normalize_workspace_path(&path), locked, true)
     }
 
@@ -559,7 +558,7 @@ impl SidebarState {
         toggle_id(&mut self.expanded_folders, path);
     }
 
-    /// 点文件夹（Vue `openFolder`，静默读取）：回到全部文件，展开到这一层并读它。
+    /// 点文件夹（静默读取）：回到全部文件，展开到这一层并读它。
     pub fn open_folder(
         &mut self,
         workspace: &mut WorkspaceState,
@@ -637,7 +636,7 @@ impl SidebarState {
         }
     }
 
-    /// 移走或删掉可见文件夹以后另读一次目录树（Vue `refreshRepositoryTree`）。
+    /// 移走或删掉可见文件夹以后另读一次目录树。
     ///
     /// 只发 `getRepositoryTree` 这一次。仓库对不上时记日志，已有文件夹不动。
     /// 读失败交给 `apply_tree` 记日志，不另编一棵树。
@@ -675,7 +674,7 @@ impl SidebarState {
         }
     }
 
-    /// 当前目录的每一级都展开，和文件夹侧栏对 `currentDirectoryPath` 的监听一致。
+    /// 当前目录的每一级都展开，换目录时跟着展开。
     pub fn note_directory(&mut self, path: &str, trash: bool) {
         self.browsing_trash = trash;
         self.current_directory = path.to_string();
@@ -1129,7 +1128,7 @@ pub(super) fn reduce_message(
         SidebarMessage::SubmitRepositoryAttach => {
             model.sidebar.submit_attach();
         }
-        // Vue `attachRepository` / `createNewRepository`：成功以后把新仓库放进列表，再 `selectRepository` 切过去。
+        // 附加或新建资源库：成功以后把新仓库放进列表，再切过去。
         SidebarMessage::RepositoryAttachFinished(result) => {
             let created = result.as_ref().ok().cloned();
             model.sidebar.note_attach_finished(result.map(|_| ()));

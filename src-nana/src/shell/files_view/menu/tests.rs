@@ -1,4 +1,4 @@
-//! 文件右键菜单的子菜单，照 Vue `.ctx-menu__slot:hover` / `:focus-within`：
+//! 文件右键菜单的子菜单，指针悬停或焦点在内时展开：
 //! 指针移到分组上展开、移开收起，没有延迟；从分组移进子菜单、在子菜单里移动不闪关；
 //! 点分组本身不收起，焦点留在分组里时指针移开也留着；Tab 进分组展开、再 Tab 走进子菜单；
 //! 禁用的分组不展开。
@@ -223,8 +223,7 @@ fn tab_opens_a_group_and_walks_into_its_submenu() {
     assert!(!submenu_open(&harness));
 }
 
-/// 回收站里「缩略图」是禁用的：指针移上去不展开子菜单。Vue 的 `:hover` 不看按钮禁用，照样弹出、
-/// 里面的项还能点。
+/// 回收站里「缩略图」是禁用的：指针移上去不展开子菜单，里面的项也就点不到。
 #[test]
 fn a_disabled_group_does_not_open() {
     let mut model = menu().model;
@@ -239,7 +238,7 @@ fn a_disabled_group_does_not_open() {
     assert!(!submenu_open(&harness), "禁用的分组展开了子菜单");
 }
 
-/// 在已经打开的菜单上再按右键：菜单自己没有提供者，Vue `installContextMenu` 的 `contextmenu` 收起，
+/// 在已经打开的菜单上再按右键：菜单自己没有提供者，右键只把菜单收起，
 /// 不执行这一项。文件菜单和文件夹菜单共用这一层。
 #[test]
 fn a_right_click_on_the_open_menu_closes_it() {
@@ -268,7 +267,7 @@ fn a_right_click_on_the_open_menu_closes_it() {
 }
 
 /// 点「刷新缩略图」请后端按源文件重新生成（`refresh`），不再把条目自己的路径当缩略图文件去解码；结果写回以后
-/// 重新解码同一个缓存文件，纹理跟着换。Vue `refreshWorkspaceEntryThumbnail` 也是调 `ensureThumbnail` 的 `refresh`。
+/// 重新解码同一个缓存文件，纹理跟着换。
 #[test]
 fn refreshing_a_thumbnail_asks_the_backend_to_regenerate_it() {
     let mut harness = menu();

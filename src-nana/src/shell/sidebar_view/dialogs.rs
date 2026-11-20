@@ -1,9 +1,7 @@
 //! 侧栏发起的对话框：新建 / 重命名文件夹、处理文件夹、删除智能文件夹、新建播放集和删除资源库。
 //! 智能文件夹的编辑对话框字段多，在 `shell/sidebar_view/dialogs/smart.rs`。
 //!
-//! 文案、字段和按钮照 Vue `WorkspaceSidebarFolderDialogs.vue`、`WorkspaceSidebarSmartFolderDialogs.vue`、
-//! `WorkspaceSidebarPlaylistDialog.vue` 和 `RepositoryDeleteDialog.vue`。外壳都走统一的对话框框架
-//! （`shell/view_part_overlay/dialog.rs`）：处理中三种关闭手势都不关，危险对话框标题用错误色。
+//! 外壳都走统一的对话框框架（`shell/view_part_overlay/dialog.rs`）：处理中三种关闭手势都不关，危险对话框标题用错误色。
 //!
 //! 每个对话框常驻：打开时按投影建一次，之后浮层同步只把新的投影写进信号，文字、禁用和错误这些
 //! 字段原地改；输入框用 `.model` 加草稿信号受控。按钮和选项卡片的事件只发意图消息。
@@ -67,7 +65,7 @@ impl FolderDialogView {
     }
 }
 
-/// 新建或重命名文件夹。名称输入框照 Vue 没有 `disabled`，文件变更进行中仍可改下一份名字。
+/// 新建或重命名文件夹。名称输入框不禁用，文件变更进行中仍可改下一份名字。
 /// 名称为空或文件服务忙时主按钮不可用，回车和主按钮都提交；处理中回车不再提交。提交后等结果再关。
 pub fn folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let view = signal(FolderDialogView::project(model)?);
@@ -155,7 +153,7 @@ impl FolderDeleteView {
     }
 }
 
-/// 处理文件夹：转移到上级目录，或移入回收站。对应 Vue 的 `folder-delete-dialog`。
+/// 处理文件夹：转移到上级目录，或移入回收站。
 pub fn folder_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let view = signal(FolderDeleteView::project(model)?);
     Projected::register(view, FolderDeleteView::project);
@@ -214,7 +212,7 @@ pub fn folder_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
     )
 }
 
-/// 带标题和说明的选项卡片。对应 `.folder-delete-dialog__option` / `.repository-delete-dialog__option`：
+/// 带标题和说明的选项卡片，处理文件夹和删除资源库共用：
 /// 内边距 14px、`--radius-xl`、`--bg` 底，悬停 `--bg-hover`；危险项描一圈浅红、悬停浅红底。
 /// `detail` 和 `disabled` 可以读信号；禁用时整张卡 0.45 透明度，框架不派发点击。
 fn option_card(
@@ -489,7 +487,7 @@ pub fn repository_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let view = signal(RepositoryDeleteView::project(model)?);
     Projected::register(view, RepositoryDeleteView::project);
     let deleting = move || view.with(|view| view.deleting);
-    // `.repository-delete-dialog__summary`：12px、行高 1.6，颜色继承正文。
+    // 删除资源库的摘要：12px、行高 1.6，颜色继承正文。
     let summary = widget(wrapping_text(12.0, 19.2, SemanticColorRole::Text))
         .key("delete-dialog-summary")
         .prop::<String, nana_ui::runtime::view::fields::HiddenWhenEmpty<

@@ -15,8 +15,8 @@ impl ShellViewModel {
                 .is_some_and(|repository| repository.status == "missing")
     }
 
-    /// 按当前活动仓库重新绑定侧栏。缺失和空仓库只清空，不发请求。换到可用的仓库时照 Vue
-    /// `queueRepositoryBackgroundLoads` 在后台再读仓库动作（侧栏「动作」入口要用）和硬链接候选。
+    /// 按当前活动仓库重新绑定侧栏。缺失和空仓库只清空，不发请求。换到可用的仓库时
+    /// 在后台再读仓库动作（侧栏「动作」入口要用）和硬链接候选。
     pub(crate) fn bind_sidebar_repository(&mut self) {
         let missing = self.navigation_locked();
         let repo_id = self.workspace.active_repo_id.clone();
@@ -60,7 +60,7 @@ impl ShellViewModel {
     /// 快照返回前，文件列表先停在正在打开的目录上。非静默的读取在任务弹层出「读取目录」这一行，
     /// 这时已经在归约之外，当场交给槽位。
     ///
-    /// 再点已经显示的这一层是 Vue 的静默重读（`keepsCurrentViewVisible`）：列表和选择留着，
+    /// 再点已经显示的这一层是静默重读：列表和选择留着，
     /// 不换成「正在读取目录」。请求仍由侧栏发出。
     pub(crate) fn note_sidebar_browse(&mut self, path: &str, trash: bool, progress: bool) {
         if !progress && self.files.shows_directory(path, trash) {
@@ -73,7 +73,7 @@ impl ShellViewModel {
         }
         self.files.current_path = path.to_string();
         self.files.loading = true;
-        // Vue 非静默读取（回收站、快捷访问、从回收站回到全部或分类）先把 `error` 清掉，
+        // 非静默读取（回收站、快捷访问、从回收站回到全部或分类）先把 `error` 清掉，
         // 文件列才能写成「正在读取目录」。静默换目录不清，旧错误仍盖住加载态。
         if progress {
             self.files.error.clear();
@@ -148,7 +148,7 @@ impl ShellViewModel {
 
     /// 点开侧栏里的一张播放集。
     ///
-    /// 照 Vue `selectPlaylist`：立刻切到播放集页并记下编号。这份详情若在缓存里，先把缓存画上；
+    /// 立刻切到播放集页并记下编号。这份详情若在缓存里，先把缓存画上；
     /// 没有缓存就不编一份，页面留着上一张或空框。随后仍请求新详情，点的就是当前这一张也重拉。
     pub(crate) fn apply_playlist(&mut self, playlist_id: String) {
         if self
@@ -175,8 +175,8 @@ impl ShellViewModel {
     }
 
     /// 仓库的一份新播放集列表（侧栏读取、新建或删除以后）。侧栏和播放器换上同一份：播放器据此读成员、
-    /// 恢复存下的会话，文件右键的「加入播放列表」也从这里来，和 Vue 共用一份 `playlists` 一样。
-    /// 换了仓库的旧结果不写。`open` 是新建出来的播放集，照 Vue `createPlaylistInWorkspace` 接着点开它。
+    /// 恢复存下的会话，文件右键的「加入播放列表」也从这里来，三处共用一份列表。
+    /// 换了仓库的旧结果不写。`open` 是新建出来的播放集，建好以后接着点开它。
     pub(crate) fn apply_playlist_list(
         &mut self,
         repo_id: &str,
@@ -202,7 +202,7 @@ impl ShellViewModel {
         }
     }
 
-    /// 播放集列表换上以后收口正在看的那一页。照 Vue `syncPlaylistMemberships` 和 `refreshPlaylists`。
+    /// 播放集列表换上以后收口正在看的那一页。
     ///
     /// 当前这张还在列表里：只把页眉上的名称和播放器换成列表里的新摘要，条目留着，播放队列不动。
     /// 当前这张不在了：清掉已经画上的详情，页面回到空框「选择一个播放集」；侧栏已把面板切回文件页。
@@ -247,7 +247,7 @@ impl ShellViewModel {
         self.playlist_item_status.clear();
     }
 
-    /// 侧栏「新建播放集」。和 Vue `openPlaylistDialog` 一样：没有仓库或仓库丢失时不开；
+    /// 侧栏「新建播放集」：没有仓库或仓库丢失时不开；
     /// 每次打开都清空名称，类型默认选第一个可用的播放器类型。
     pub(crate) fn open_playlist_dialog(&mut self) {
         if self.workspace.active_repo_id.is_none() || self.navigation_locked() {
@@ -273,8 +273,8 @@ impl ShellViewModel {
         self.playlist_dialog_error.clear();
     }
 
-    /// 新建播放集的「创建」和回车。名称为空或没有选类型时不建（Vue `playlistDialogDisabled`），
-    /// 请求在途时不重复提交；对话框等结果回来再关（Vue `submitPlaylistDialog` 等 `createPlaylistInWorkspace`）。
+    /// 新建播放集的「创建」和回车。名称为空或没有选类型时不建，
+    /// 请求在途时不重复提交；对话框等结果回来再关。
     pub(crate) fn submit_playlist_dialog(&mut self) {
         let name = self.new_playlist_name.trim().to_string();
         let Some(player_type_id) = self
@@ -302,8 +302,8 @@ impl ShellViewModel {
         });
     }
 
-    /// 新建播放集的结果。成功关掉对话框、换上整份列表并照 Vue 接着点开新建的那个；失败留着对话框，
-    /// 原因写在对话框里（Vue 这里的失败没有界面反馈）。
+    /// 新建播放集的结果。成功关掉对话框、换上整份列表并接着点开新建的那个；失败留着对话框，
+    /// 原因写在对话框里，不让失败没有反馈。
     pub(crate) fn note_playlist_created(
         &mut self,
         repo_id: &str,
@@ -333,7 +333,7 @@ impl ShellViewModel {
 
     /// 只在最近使用视图、有记录且未锁定时清空访问历史。
     ///
-    /// 请求在途时按钮写成「清空中...」。再点一次不重复发，和 Vue `isClearingRecentHistory` 一样。
+    /// 请求在途时按钮写成「清空中...」。再点一次不重复发。
     pub(crate) fn clear_recent_access(&mut self) {
         if self.navigation_locked() {
             eprintln!("Nana 当前不能清空最近使用");
@@ -362,7 +362,7 @@ impl ShellViewModel {
             .push(SidebarEffect::ClearRecent { repo_id });
     }
 
-    /// 清空成功后照 Vue `clearActiveSnapshotRecentAccess` 当场清掉素材的访问时间（计数归零、最近使用视图变空），
+    /// 清空成功后当场清掉素材的访问时间（计数归零、最近使用视图变空），
     /// 再静默重读仓库摘要。目录列表不在这里清空。
     pub(crate) fn note_recent_cleared(&mut self, repo_id: &str, result: Result<usize, String>) {
         // 结果回来就结束「清空中...」，过期仓库的结果也不把按钮留在处理中。

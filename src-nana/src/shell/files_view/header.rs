@@ -1,4 +1,4 @@
-//! 文件卡片头部，对应 Vue `FileBrowserPanel.vue` 的 `files-browser__header`。
+//! 文件卡片头部。
 //!
 //! 左边是眉题和面包屑药丸，右边是工具条：展示方式选择框、新建空文件输入、建文件和导入。
 //! 导入菜单是锚在「导入」按钮下方、右对齐的浮层，Eagle 的复制 / 剪切导入在菜单里展开；菜单项在方向键
@@ -253,7 +253,7 @@ fn location(signals: HeaderSignals) -> AnyView {
     .into_any()
 }
 
-/// `files-breadcrumbs__item`：高 28、左右 10、白底、弱化色 14px/500，单行不折。
+/// 面包屑项：高 28、左右 10、白底、弱化色 14px/500，单行不折。
 fn crumb(crumb: Crumb) -> AnyView {
     let look = ButtonLook {
         height: 28.0,
@@ -282,8 +282,7 @@ fn virtual_title(model: &ShellViewModel) -> String {
         .to_string()
 }
 
-/// 虚拟视图的说明行：智能文件夹是查询结果的摘要（Vue `smartFolderSummary`，查回来以前为空），分类视图是
-/// 条目说明（Vue `libraryCategorySummary`）。
+/// 虚拟视图的说明行：智能文件夹是查询结果的摘要（查回来以前为空），分类视图是条目说明。
 fn virtual_subline(model: &ShellViewModel, ctx: &FileContext) -> String {
     if model.workspace.panel == WorkspacePanel::SmartFolder {
         return model.sidebar.smart_summary();
@@ -317,7 +316,7 @@ fn category_label(category: LibraryCategory) -> Option<&'static str> {
 fn toolbar(signals: HeaderSignals) -> AnyView {
     let tools = signals.tools;
     let shown = move |pick: fn(&Tools) -> bool| move || tools.with(pick);
-    // Vue：有访问记录才能点；请求在途时改成「清空中...」并禁用，图标仍是垃圾桶。
+    // 有访问记录才能点；请求在途时改成「清空中...」并禁用，图标仍是垃圾桶。
     let clear_label = move || {
         if tools.with(|tools| tools.clear_recent.is_some_and(|item| item.clearing)) {
             "清空中...".to_string()
@@ -414,10 +413,10 @@ fn tool_button(
         .into_any()
 }
 
-/// `files-toolbar__select`：描边框里左边写「展示方式」，右边是当前值和下拉箭头，框宽 156、高 34。
+/// 展示方式选择框：描边框里左边写「展示方式」，右边是当前值和下拉箭头，框宽 156、高 34。
 ///
 /// Nana `Select` 总会画自己的底和边。这里让它四边各伸出 1px，放进一个裁剪层：边线被裁掉，
-/// 底色和外框同为 `--bg`，看上去就是 Vue 里框中直接放下拉的样子；角色和键盘行为仍是下拉框。
+/// 底色和外框同为 `--bg`，看上去就是框中直接放下拉的样子；角色和键盘行为仍是下拉框。
 fn display_mode_field(mode: Signal<DisplayMode>) -> AnyView {
     let options = [
         DisplayMode::Adaptive,
@@ -481,10 +480,10 @@ fn display_mode_field(mode: Signal<DisplayMode>) -> AnyView {
         .into_any()
 }
 
-/// `files-toolbar__field`：加号图标和不带边的输入，外面一圈 `--border`，至少 220 宽。
+/// 新建文件名输入框：加号图标和不带边的输入，外面一圈 `--border`，至少 220 宽。
 /// 窄到放不下 220 时跟着工具条收窄，不压到左边的面包屑上。
 ///
-/// 变更进行中只禁用「建文件」，这个输入框照 Vue 仍可改：下一份名字可以先写着。
+/// 变更进行中只禁用「建文件」，这个输入框仍可改：下一份名字可以先写着。
 /// 建成成功才清空，移动、导入这些变更不清。
 fn create_name_field(signals: HeaderSignals) -> AnyView {
     let tools = signals.tools;
@@ -585,7 +584,7 @@ fn import_anchor(tools: Signal<Tools>) -> AnyView {
     .into_any()
 }
 
-/// 菜单打开时铺满窗口的透明层：点在菜单外就收起，和 Vue 的全局 pointerdown 一样。
+/// 菜单打开时铺满窗口的透明层：点在菜单外就收起。
 fn outside_closer(tools: Signal<Tools>) -> AnyView {
     let mut style = NodeStyle::default();
     let layout = Arc::make_mut(&mut style.layout);
@@ -605,9 +604,9 @@ fn outside_closer(tools: Signal<Tools>) -> AnyView {
         .into_any()
 }
 
-/// `files-toolbar__menu`：至少 184 宽，内边距 8，项间距 6，圆角 12，主题浮层底和投影。
+/// 导入菜单：至少 184 宽，内边距 8，项间距 6，圆角 12，主题浮层底和投影。
 ///
-/// Vue 这里用了未定义的 `--panel-bg`，回退成 #15171a 深底、浅色主题下字看不清；这里按设计意图用浮层色。
+/// 底色按设计意图用浮层色，不用固定的深底，浅色主题下字也看得清。
 fn import_menu(tools: Signal<Tools>) -> AnyView {
     let rows = (
         menu_item(
@@ -672,11 +671,10 @@ fn import_menu(tools: Signal<Tools>) -> AnyView {
     .into_any()
 }
 
-/// `files-toolbar__menu-item`：撑满菜单宽，内边距上下 10、左右 12，文字靠左，圆角 10，悬停 `--bg-hover`。
+/// 导入菜单项：撑满菜单宽，内边距上下 10、左右 12，文字靠左，圆角 10，悬停 `--bg-hover`。
 /// 变更进行中时禁用并淡到 55%；点下时按当时的状态再判断一次，禁用时不发消息。
 ///
-/// Vue 里 Lilia 的全局 `button { height: 32px }` 把它压成 32 高，文字溢出内容盒；
-/// 这里按组件自己声明的内边距画：10 + 21.7 行高 + 10。
+/// 高度按自己的内边距算：10 + 21.7 行高 + 10，不压成 32 高，文字不溢出。
 fn menu_item(
     label: &'static str,
     key: &'static str,

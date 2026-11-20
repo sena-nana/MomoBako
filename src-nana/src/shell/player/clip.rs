@@ -32,7 +32,7 @@ pub enum LoadedItem {
     Still(super::super::PreviewPixels),
 }
 
-/// 这些扩展名已经能进预览用的音视频会话，不再要求把 Vue 播放器升级一遍。
+/// 这些扩展名能进预览用的音视频会话。
 pub(super) fn uses_media_session(extension: &str) -> bool {
     SESSION_EXTENSIONS
         .iter()
@@ -74,7 +74,7 @@ pub(super) fn load_item(player: &mut PlayerState, item: &QueueItem) {
             begin_load(player, item, false);
             return;
         }
-        // 登记了原生实现但没有解码器：和 Vue 一样先按设置写图片停留时长，再报缺解码器。
+        // 登记了原生实现但没有解码器：先按设置写图片停留时长，再报缺解码器。
         player.drop_clip_frames();
         player.wav.clear();
         if item.file_class == "image" {
@@ -123,7 +123,7 @@ pub(super) fn load_item(player: &mut PlayerState, item: &QueueItem) {
     player.fail_session(message);
 }
 
-/// 会话置为读取中，并留下读取请求。图片的停留时长先写进会话，和 Vue 运行时先配置时长一致。
+/// 会话置为读取中，并留下读取请求。图片的停留时长在装载前先写进会话。
 fn begin_load(player: &mut PlayerState, item: &QueueItem, still: bool) {
     player.drop_clip_frames();
     player.wav.clear();
@@ -271,7 +271,7 @@ fn install_clip(player: &mut PlayerState, parts: crate::shell::MediaParts) {
 }
 
 /// 恢复会话时等着的位置：正是装好的这一项、能跳转时取出来，夹在时长以内。用过或不适用都作废。
-/// 和 Vue `loadCurrentItem` 一样，播放器不支持跳转时从头放。
+/// 播放器不支持跳转时从头放。
 fn take_resume(player: &mut PlayerState) -> Option<u64> {
     let (item_id, position) = player.resume.take()?;
     if player.current_id.as_deref() != Some(item_id.as_str()) || !player.session.can_seek {
@@ -284,7 +284,7 @@ fn take_resume(player: &mut PlayerState) -> Option<u64> {
     (position > 0).then_some(position)
 }
 
-/// 解得出就留下真实宽高。图片幻灯片不能跳转，恢复会话时从头放，和 Vue 一样。
+/// 解得出就留下真实宽高。图片幻灯片不能跳转，恢复会话时从头放。
 fn install_still(player: &mut PlayerState, item: &QueueItem, pixels: super::super::PreviewPixels) {
     player.resume = None;
     player.session.status = if player.wants_playing {
@@ -301,7 +301,7 @@ fn install_still(player: &mut PlayerState, item: &QueueItem, pixels: super::supe
     });
 }
 
-/// 读不到或解不开：播放条和 Vue 一样只写「图片无法播放」，细节留在日志里。
+/// 读不到或解不开：播放条只写「图片无法播放」，细节留在日志里。
 fn fail_still(player: &mut PlayerState, item: &QueueItem, error: &str) {
     eprintln!("Nana 图片幻灯片没有可绘制的画面：{}：{error}", item.path);
     player.still = Some(StillShow {
@@ -343,7 +343,7 @@ impl PlayerState {
     }
 }
 
-/// 图片幻灯片扩展名。和 `media-preview` 的 `imagePreviewExtensions` 一致。
+/// 图片幻灯片扩展名，和媒体预览插件能预览的图片一致。
 pub(super) fn is_still_extension(extension: &str) -> bool {
     let extension = extension.trim();
     STILL_EXTENSIONS
@@ -351,7 +351,7 @@ pub(super) fn is_still_extension(extension: &str) -> bool {
         .any(|item| item.eq_ignore_ascii_case(extension))
 }
 
-/// 不在音视频会话、也不是图片幻灯片时写进播放条的说明。和 Vue 插件报错一样只写一句事实。
+/// 不在音视频会话、也不是图片幻灯片时写进播放条的说明。只写一句事实。
 pub(super) fn outside_session_contract(extension: &str) -> String {
     let extension = extension.trim();
     let shown = if extension.is_empty() {

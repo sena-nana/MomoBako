@@ -114,7 +114,7 @@ fn single_click_keeps_the_list_and_double_click_opens_the_preview() {
     assert!(!state.preview_open(None));
 }
 
-/// 预览页「返回」照 Vue `exitPreview`：收起预览，目录、选择和详情留在原地，不排目录读取。
+/// 预览页「返回」：收起预览，目录、选择和详情留在原地，不排目录读取。
 #[test]
 fn preview_back_keeps_the_directory_and_the_selected_file() {
     let mut model = ShellViewModel::default();
@@ -391,7 +391,7 @@ fn archive_export_without_a_path_asks_for_one_first() {
     assert!(model.files.export.error.is_empty());
 }
 
-/// 回收站里双击文件照 Vue `previewFileEntryByDoubleClick` 留在列表：预览页不换上，
+/// 回收站里双击文件留在列表：预览页不换上，
 /// 已经单击选中的那一条不再读一次详情。双击文件夹仍按回收站位置进入目录。
 #[test]
 fn double_clicking_a_trash_file_stays_on_the_list() {

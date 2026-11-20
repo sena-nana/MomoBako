@@ -1,7 +1,6 @@
 //! 文件表面的读目录：换目录读首页、继续加载下一页、静默重读当前目录，以及目录快照和读取失败的归约。
 //!
-//! 对应 Vue `workspace/files.ts` 的 `loadFileBrowserForDirectory`、`loadMoreFileBrowserEntries` 和结构
-//! 更新以后的静默重读。同一时间只有一次读取在途（`BrowsePending`），新的目录请求覆盖它；快照回来时
+//! 同一时间只有一次读取在途（`BrowsePending`），新的目录请求覆盖它；快照回来时
 //! 仓库、路径或回收站和在途的读取对不上就丢掉，不覆盖当前列表。
 
 use crate::backend::services::repository::FileBrowserSnapshot;
@@ -15,8 +14,7 @@ pub(in crate::shell::files) const APPEND_PAGE_SIZE: usize = 160;
 
 /// 导入成功且用户提交时已经有选择：这次重读的目录对上以后改选导入的条目。
 ///
-/// 文件夹和拖放照 Vue `finishFileTransfer` 按来源文件名选。ZIP 和 Eagle 照
-/// `finishWorkspaceImport` 选父目录下原先没有的直接子项。没有选择时不记。
+/// 文件夹和拖放按来源文件名选。ZIP 和 Eagle 选父目录下原先没有的直接子项。没有选择时不记。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) enum ImportFollowup {
     /// 来源路径的最后一段文件名。
@@ -48,12 +46,12 @@ impl FilesState {
     }
 
     /// 替换进行中的浏览。上一页还没回来时，新的目录请求覆盖 pending，而不是被丢掉。
-    /// 面包屑和双击进入目录在 Vue 里是静默读取，任务弹层不出进度行。
+    /// 面包屑和双击进入目录是静默读取，任务弹层不出进度行。
     pub(in crate::shell) fn request_browse(&mut self, ctx: &FileContext, path: &str) -> bool {
         self.queue_browse(ctx, path, false, false, ReadProgress::Silent)
     }
 
-    /// 同 [`Self::request_browse`]，但按 `read` 在任务弹层出「读取目录」这一行（Vue 的非静默读取）。
+    /// 同 [`Self::request_browse`]，但按 `read` 在任务弹层出「读取目录」这一行（非静默读取）。
     pub(in crate::shell) fn request_browse_reporting(
         &mut self,
         ctx: &FileContext,
@@ -64,8 +62,7 @@ impl FilesState {
     }
 
     /// 非静默地重读当前目录（回收站面板读回收站），选择留着、读完按新列表修剪，任务弹层出「读取目录」
-    /// 这一行。返回是否排下了读取：文件正在变更、虚拟视图或没有仓库时不读。刷新文件夹树同步以后用，
-    /// 对应 Vue `loadFileBrowserForDirectory`。
+    /// 这一行。返回是否排下了读取：文件正在变更、虚拟视图或没有仓库时不读。刷新文件夹树同步以后用。
     pub(in crate::shell) fn reload_current(&mut self, ctx: &FileContext) -> bool {
         let path = self.current_path.clone();
         self.queue_browse(ctx, &path, true, false, ReadProgress::Directory)
@@ -282,7 +279,7 @@ impl FilesState {
         };
         let path = normalize_path(path);
         let trash = ctx.trash;
-        // Vue `keepsCurrentViewVisible`：静默重读已经显示的这一层时，列表和选择留着，
+        // 静默重读已经显示的这一层时，列表和选择留着，
         // 不换成「正在读取目录」。面包屑点当前这一级、侧栏再点正在看的文件夹都是这种。
         let keep_visible =
             matches!(read, ReadProgress::Silent) && self.shows_directory(&path, trash);
@@ -356,11 +353,11 @@ impl FilesState {
         self.loading_more = false;
     }
 
-    /// 移动成功以后按 Vue `moveWorkspaceEntries` 改选。
+    /// 移动成功以后改选。
     ///
     /// 目标就是正在看的目录时，记下源文件名，等这次重读的快照对上再选同名条目。
     /// 目标是别的目录时，选择立刻换成当前列表里第一个没被移走的条目：先按列表顺序找文件夹，
-    /// 再找文件，和 Vue `visibleEntries` 一样；一个不剩就清空。单击只选中的那一条被移走时，
+    /// 再找文件；一个不剩就清空。单击只选中的那一条被移走时，
     /// 只选中跟着新的文件走，新的是文件夹就清掉，不因此打开预览。
     pub(super) fn prepare_move_selection(&mut self, sources: &[String], parent: &str) {
         let parent = normalize_path(parent);
@@ -419,7 +416,7 @@ impl FilesState {
         self.clear_rename_if_needed(previous_primary);
     }
 
-    /// 复制成功以后按 Vue `finishFileTransfer` 记下源文件名，等目标目录的快照对上再选同名条目。
+    /// 复制成功以后记下源文件名，等目标目录的快照对上再选同名条目。
     ///
     /// 来源没有文件名时不记。读回来只修剪已经不在列表里的选择，不挑一条凑数。
     pub(super) fn prepare_copy_selection(&mut self, sources: &[String]) {
@@ -513,7 +510,7 @@ impl FilesState {
     }
 }
 
-/// 来源路径的最后一段，照 Vue `entryNameFromPath`。反斜杠先收成斜杠，丢掉结尾的斜杠。
+/// 来源路径的最后一段。反斜杠先收成斜杠，丢掉结尾的斜杠。
 fn entry_leaf(path: &str) -> String {
     let normalized = path.replace('\\', "/");
     let trimmed = normalized.trim_end_matches('/');
@@ -524,7 +521,7 @@ fn entry_leaf(path: &str) -> String {
         .to_string()
 }
 
-/// 仓库相对路径的父目录。没有斜杠时是根目录，写成空串。照 Vue `parent_relative_path`。
+/// 仓库相对路径的父目录。没有斜杠时是根目录，写成空串。
 fn entry_parent(path: &str) -> String {
     let normalized = path.replace('\\', "/");
     match normalized.rfind('/') {

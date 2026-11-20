@@ -1,6 +1,6 @@
-//! 文件列表的框选矩形，对应 Vue `.files-list__selection-box` 和 `selectionBoxStyle`。
+//! 文件列表的框选矩形。
 //!
-//! 在列表空白处按下，任一轴拖过 3px（`didDrag`）以后画出圆角选框；松手选框消失，选择留下。
+//! 在列表空白处按下，任一轴拖过 3px 以后画出圆角选框；松手选框消失，选择留下。
 //! 选框盖在列表视口上，左上是指针范围相对列表视口的位置，并且不小于 0。指针事件穿透，卡片仍能被框住。
 //! 拖动进行中只同步热字段，选框的位置和显隐走热信号，不重挂列表。
 
@@ -41,7 +41,7 @@ impl SelectionBox {
         }
     }
 
-    /// 按 Vue `selectionBoxStyle` 把指针范围换成列表视口里的矩形。
+    /// 把指针范围换成列表视口里的矩形。
     ///
     /// `origin_x` / `origin_y` 是列表视口的左上角。左上夹到不小于 0，宽高是指针两端的距离。
     /// 坐标不是有限数时返回 `None`，调用方记日志并不画。
@@ -131,7 +131,7 @@ pub(crate) fn overlay(list: AnyView, selection: Signal<SelectionBox>) -> AnyView
         .into_any()
 }
 
-/// `.files-list__selection-box`：1px 强调色 82% 混白的描边，18% 强调色的底，圆角 lg，在卡片之上。
+/// 框选矩形：1px 强调色 82% 混白的描边，18% 强调色的底，圆角 lg，在卡片之上。
 fn rectangle(selection: Signal<SelectionBox>) -> AnyView {
     let initial = selection.get_untracked();
     let mut frame = Stack::column(0.0)

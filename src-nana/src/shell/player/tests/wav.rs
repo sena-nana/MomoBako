@@ -45,7 +45,7 @@ fn wav_queue_item(id: &str, path: &std::path::Path) -> QueueItem {
     item
 }
 
-/// 和 Vue 一样，点播放条目后装载完成就开始播放；暂停、跳转、音量都落在同一游标上。
+/// 点播放条目后装载完成就开始播放；暂停、跳转、音量都落在同一游标上。
 #[test]
 fn wav_session_loads_and_plays_then_pauses_seeks_and_sets_volume() {
     let dir = temp_dir("wav");
@@ -352,7 +352,7 @@ fn preview_play_drives_the_shared_cursor_without_opening_a_device() {
     send(&mut model, PlayerMessage::SetPlaying(true));
     assert!(model.player.cursor_playing());
 
-    // 离开预览页：临时条目留作当前项继续出声，和 Vue 离开预览页后继续播放一致。
+    // 离开预览页：临时条目留作当前项继续出声。
     model.reduce(ShellMessage::OpenDirectory(String::new()));
     assert!(!model.player.preview_owns_bar());
     assert!(model.player.cursor_playing());
@@ -707,7 +707,7 @@ fn changing_the_volume_while_playing_takes_effect_at_the_current_position() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// 存下的播放会话照 Vue `setActivePlaylist(.., { restore: true })` 恢复：装载期间播放条显示存下的进度，
+/// 存下的播放会话恢复：装载期间播放条显示存下的进度，
 /// 会话文件不被装载清零；装好以后能跳转就跳到存下的位置（超过时长时夹到结尾），不在播放就停在那里。
 #[test]
 fn restoring_a_session_resumes_at_the_stored_position() {
@@ -870,7 +870,7 @@ fn the_playback_clock_and_image_dwell_follow_real_time_at_any_frame_rate() {
     let _ = std::fs::remove_dir_all(dir);
 }
 
-/// 空播放集点「播放」：照 Vue `loadCurrentItem`，没有当前项时次行写「当前没有可播放条目」，
+/// 空播放集点「播放」：没有当前项时次行写「当前没有可播放条目」，
 /// 进度归零，不再接着放上一首。认不得的播放器类型写「缺少对应播放插件」。
 /// 队列本来开着就留着，不因为没有当前项收起。
 #[test]

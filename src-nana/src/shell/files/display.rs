@@ -1,6 +1,6 @@
 //! 素材展示方式（自适应、瀑布流、网格、列表）和它的持久化。
 //!
-//! 对应 Vue 文件面板的展示方式切换和它存下去的 `file-display.json`：文件缺失、损坏或值未知时一律
+//! 选择存在 `file-display.json`：文件缺失、损坏或值未知时一律
 //! 用自适应，不把错误带到页面上。
 
 use std::fs;
@@ -39,7 +39,7 @@ impl DisplayMode {
         }
     }
 
-    /// 只接受 Vue 存下去的值和中文标签。空串和其他值都是自适应。
+    /// 只接受英文值（`adaptive` 等）和中文标签。空串和其他值都是自适应。
     pub fn parse(raw: &str) -> Self {
         match raw.trim() {
             "adaptive" | "自适应" => Self::Adaptive,

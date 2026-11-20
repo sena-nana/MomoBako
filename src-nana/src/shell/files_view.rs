@@ -1,6 +1,6 @@
-//! 文件页工作区，对应 Vue `WorkspaceFilesSurface.vue` 和 `FileBrowserPanel.vue`。
+//! 文件页工作区：文件卡片、播放条和详情卡片。
 //!
-//! 版式和 `.files-workbench` 一致：左列 `.files-workbench__main` 竖排文件卡片和播放条（间距 18），
+//! 左列竖排文件卡片和播放条（间距 18），
 //! 右列是 300px 宽的详情卡片。双击或「预览」打开预览页时，整块换成预览页，播放条在预览页底部。
 //! 外边距由壳层主区统一给，这里只负责两列本身；面板固定高度，列表和详情各自滚动。
 //!
@@ -43,11 +43,11 @@ pub(crate) use menu::open_and_reveal_targets;
 
 use bind::StyleField;
 
-/// Vue `--workspace-file-detail-width`。
+/// 详情卡片宽。
 const DETAIL_WIDTH: f32 = 300.0;
-/// Vue `--workspace-file-detail-gap`：两列之间、文件卡片和播放条之间都是 18。
+/// 两列之间、文件卡片和播放条之间都是 18。
 const DETAIL_GAP: f32 = 18.0;
-/// Vue `@media (max-width: 900px)`：窗口再窄时详情排到文件卡片下面。
+/// 窗口窄于 900 时详情排到文件卡片下面。
 const STACKED_VIEWPORT_PX: f32 = 900.0;
 
 /// 文件右键菜单。没有目标时不占浮层。
@@ -188,7 +188,7 @@ fn fill() -> Stack {
         .min_height(LengthSpec::Px(0.0))
 }
 
-/// `.files-workbench`：文件卡片列和详情卡片列。窄窗口里详情排到下面。
+/// 工作台：文件卡片列和详情卡片列。窄窗口里详情排到下面。
 fn workbench(
     signals: ColumnSignals,
     player: NodeRef,
@@ -239,10 +239,10 @@ fn workbench_style(stacked: bool) -> NodeStyle {
         .node_style()
 }
 
-/// `.files-browser`：抬升底色、`--radius-2xl` 的大卡片。外部文件拖进来时描强调色边。
+/// 文件卡片：抬升底色、`--radius-2xl` 的大卡片。外部文件拖进来时描强调色边。
 ///
-/// Vue 给卡片 `overflow: hidden` 裁圆角，导入菜单也一起被裁，窗口矮时下面几项点不到。
-/// 这里卡片不裁：列表的滚动区自己裁内容，留在卡片里的内容都在圆角以内，导入菜单可以伸出卡片。
+/// 卡片自己不裁内容：裁的话导入菜单也会被裁掉，窗口矮时下面几项点不到。
+/// 列表的滚动区自己裁内容，留在卡片里的内容都在圆角以内，导入菜单可以伸出卡片。
 fn browser_card(signals: ColumnSignals, hot: HotSignals) -> AnyView {
     let look = signals.look;
     let initial = look.get_untracked();
@@ -271,7 +271,7 @@ fn card_style(look: ColumnLook) -> NodeStyle {
     card.node_style()
 }
 
-/// `.files-browser.is-dragging::after`：四周内缩 12 的虚线框，中间写「拖放到此处添加」。拖入时才显示。
+/// 拖入提示：四周内缩 12 的虚线框，中间写「拖放到此处添加」。拖入时才显示。
 fn drop_hint(look: Signal<ColumnLook>) -> AnyView {
     let frame = Stack::column(0.0)
         .align(AlignSpec::Center)

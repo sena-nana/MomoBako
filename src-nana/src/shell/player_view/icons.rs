@@ -1,7 +1,7 @@
 //! 预览与播放用到的 lucide 图标。
 //!
-//! Vue 端用 `@lucide/vue`，Nana 自带的是 Tabler。播放条、播放集页和预览页的
-//! 图标形状要和 Vue 一致，这里把 lucide 的 24×24 源登记成宿主图标
+//! Nana 自带的是 Tabler，播放条、播放集页和预览页的图标用 lucide 的形状：
+//! 这里把 lucide 的 24×24 源登记成宿主图标
 //! （`Icon::from_data`），由 Nana 按 `currentColor` 栅格化。几何只给外框，
 //! 绘制只读 SVG 源。
 

@@ -211,8 +211,8 @@ impl FilesState {
         }
     }
 
-    /// 「刷新缩略图」：请后端按源文件重新生成（`ensure_thumbnail` 的 `refresh`，对应 Vue
-    /// `refreshWorkspaceEntryThumbnail`），结果和自定义缩略图一样经 `ThumbnailSaved` 写回。
+    /// 「刷新缩略图」：请后端按源文件重新生成（`ensure_thumbnail` 的 `refresh`），
+    /// 结果和自定义缩略图一样经 `ThumbnailSaved` 写回。
     pub(in crate::shell) fn refresh_thumbnail(&mut self, ctx: &FileContext, path: &str) {
         let Some(repo_id) = ctx.repo_id.clone() else {
             eprintln!("Nana 刷新缩略图没有活动仓库：{path}");
@@ -238,7 +238,7 @@ impl FilesState {
     }
 
     /// 换上新列表时，同一个缩略图文件已经有纹理的行接着用它：重读目录、或分类视图按摘要重筛，都不让卡片闪回类型图标，
-    /// 也不重新解码（Vue 的 `<img>` 地址不变时同样不重新加载）。新条目的元数据没给宽高时沿用解码出的原始宽高。
+    /// 也不重新解码（缩略图文件没变）。新条目的元数据没给宽高时沿用解码出的原始宽高。
     /// 已经能画的图从目录、智能文件夹和分类视图三份里认。
     pub(in crate::shell) fn carry_thumbnails(&self, incoming: &mut [FileRow]) {
         let ready: HashMap<&str, (u32, u32)> = self

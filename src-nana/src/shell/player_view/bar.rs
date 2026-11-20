@@ -1,7 +1,7 @@
-//! 底部播放条，对齐 Vue `WorkspacePlayerBar`。
+//! 底部播放条。
 //!
 //! 卡片里自上而下是 8px 进度轨、「媒体 / 传输 / 时间与音量」三栏，以及图片、视频才有的
-//! 停留时长和适应 / 填充设置。只有窗口不宽于 1120px（`shell.css` 的 `@media (max-width: 1120px)`）
+//! 停留时长和适应 / 填充设置。只有窗口不宽于 1120px
 //! 才把三栏拆成三行。窗口更宽、卡片却窄于一行时，仍是这一行：音量滑杆按列的下限伸出卡片，
 //! 不把整条改成三行。当前队列浮在卡片右上方（`shell/player_view/bar/parts.rs`）。文件页、预览页和播放集页共用这一块。
 
@@ -80,9 +80,9 @@ impl BarProps {
             volume: session.volume.clamp(0.0, 1.0),
             image_seconds: (player.settings.image_duration_ms as f32 / 1000.0).round() as u32,
             cover: player.settings.object_fit_cover,
-            // Vue `WorkspacePlayerBar.vue` 有错误就写在次行，没有条目时也写。
+            // 有错误就写在次行，没有条目时也写。
             error,
-            // 队列跟 `queueOpen` 走，不因为当前项没了就收起（Vue `v-if="queueOpen"`）。
+            // 队列跟 `queue_open` 走，不因为当前项没了就收起。
             queue_open: player.queue_open,
             queue: player.queue.clone(),
             queue_key: format!(
@@ -189,7 +189,7 @@ pub(crate) fn media_type_label(class: &str) -> &'static str {
     }
 }
 
-/// 去掉扩展名后的标题，和 Vue `displayNameWithoutExtension` 一致。
+/// 去掉扩展名后的标题。
 pub(crate) fn display_title(filename: &str, extension: &str) -> String {
     let name = filename.trim();
     let extension = extension.trim().trim_start_matches('.');
@@ -225,13 +225,13 @@ pub(crate) fn clock_parts(current_ms: u64, duration_ms: u64) -> (f32, String, f6
     (ratio, time, current_ms.min(duration_ms.max(1)) as f64)
 }
 
-/// 宽排版里媒体栏的下限，对照 `.workspace-player__body` 的 `minmax(220px, 1fr)`。
+/// 宽排版里媒体栏的下限（`minmax(220px, 1fr)` 的 220）。
 /// 卡片放不下一行时音量伸出卡片，不因此改成三行。
 const MEDIA_MIN_WIDTH: f32 = 220.0;
 
-/// 三行只跟 `shell.css` 的 `@media (max-width: 1120px)` 走。
+/// 只有窗口不宽于 1120px 才排成三行。
 ///
-/// 窗口更宽时没有容器查询。`.workspace-player__body` 仍是
+/// 窗口更宽时不看卡片宽度，三栏仍是
 /// `grid-template-columns: minmax(220px, 1fr) max-content minmax(170px, 0.72fr)`：
 /// 卡片放不下一行时列停在下限，音量从卡片右边溢出去。媒体栏下限是 220px，
 /// 1200×800 标准文件页（卡片约 558）也会把音量挤出右内边距，传输仍和媒体同一行。
@@ -240,7 +240,7 @@ fn narrow_layout(model: &ShellViewModel) -> bool {
 }
 
 /// 播放条。窗口不宽于 1120px 时按 [`narrow_layout`] 拆成三行。卡片是 `--radius-2xl`，跟着主题变。
-/// 卡片不裁切：窗口仍宽、卡片放不下一行时，音量可以伸出右边，和 `.workspace-player` 一样。
+/// 卡片不裁切：窗口仍宽、卡片放不下一行时，音量可以伸出右边。
 pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
     let props = BarProps::from_model(model);
     let narrow = narrow_layout(model);
@@ -284,7 +284,7 @@ pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
         .into_any()
 }
 
-/// 8px 进度轨。上面盖一层透明拖动区，和 Vue 的透明 range 一样高 22px。
+/// 8px 进度轨。上面盖一层 22px 高的透明拖动区。
 fn progress(props: &BarProps) -> AnyView {
     let seekable = props.has_item() && props.duration_ms > 0 && props.supports_seek;
     let duration = props.duration_ms.max(1) as f64;
@@ -307,7 +307,7 @@ fn progress(props: &BarProps) -> AnyView {
     layout.padding_left = Some(LengthSpec::Px(0.0));
     layout.padding_right = Some(LengthSpec::Px(0.0));
     // 进度轨比例和拖动条位置随播放时钟逐帧走，绑在热信号上，播放推进不重挂播放条。
-    // Vue 进度条听的是 range 的 `input`：拖动时每一格都跳转，不等松手。
+    // 拖动时每一格都跳转，不等松手。
     // Nana 拖动中的取值是 `RangeInput`；`RangeChanged` 要等松手才提交。键盘步进也会先发出 `RangeInput`。
     let seek = widget(range)
         .prop::<f64, fields::slider::value>(hot::prop(|signals| signals.position, position))
@@ -355,7 +355,7 @@ fn body(props: &BarProps, narrow: bool) -> AnyView {
             .key("player-body")
             .into_any();
     }
-    // 宽排版对照 `.workspace-player__body`：媒体 1fr（至少 220）、传输 max-content、
+    // 宽排版：媒体 1fr（至少 220）、传输 max-content、
     // 时间音量 0.72fr（至少 170）。卡片比这些下限还窄时列不再缩短，音量从右边挤出卡片。
     let media = widget(
         Stack::row(0.0)
@@ -395,7 +395,7 @@ fn body(props: &BarProps, narrow: bool) -> AnyView {
 /// 封面和两行字是同一个可点区域：点它打开当前条目的预览。没有条目时整块变淡、不可点。
 fn media(props: &BarProps) -> AnyView {
     let title = props.title();
-    // 没有条目时整块按 Vue 的 0.45 淡化，在卡片底色上混出来。
+    // 没有条目时整块按 0.45 淡化，在卡片底色上混出来。
     let dim = (!props.has_item()).then_some((
         SemanticColorRole::Surface,
         crate::theme_map::DISABLED_OPACITY,
@@ -405,7 +405,7 @@ fn media(props: &BarProps) -> AnyView {
         .on_cx(|_, _: &Activate, cx| {
             cx.dispatch_program_all(player_message(PlayerMessage::OpenPreview { item_id: None }))
         });
-    // 两行字的宽度来自剩下的空间（基准 0、可伸缩），超出时省略号收尾，和 Vue 的 nowrap + ellipsis 一致。
+    // 两行字的宽度来自剩下的空间（基准 0、可伸缩），不换行，超出时省略号收尾。
     let meta = widget(
         Stack::column(3.0)
             .min_width(LengthSpec::Px(0.0))
@@ -443,7 +443,7 @@ fn media(props: &BarProps) -> AnyView {
     .into_any()
 }
 
-/// 58px 封面，对应 Vue `.workspace-player__thumb` 和 `resolveThumbnailSrc(item.thumbnailPath)`。
+/// 58px 封面。
 ///
 /// 当前条目的路径指向可读本地图片时按 `object-fit: cover` 画进去。路径空、只是 http(s)、
 /// 读失败、不是图片或编不成图时仍写类型字。不下载，也不等文件列表把纹理传上来。
@@ -461,8 +461,7 @@ fn cover(props: &BarProps, dim: Option<(SemanticColorRole, f32)>) -> AnyView {
 
 /// 循环模式、上一首、播放 / 暂停、下一首、当前队列。
 ///
-/// 提示照 Vue：只有循环模式写了 `title`（当前模式名）。Vue 另外四个按钮只有 `aria-hidden` 的图标，读屏
-/// 读不出名字；这里都给无障碍名，不加提示。
+/// 只有循环模式有悬停提示（当前模式名）。五个按钮都给无障碍名，读屏读得出名字；另外四个不加提示。
 fn transport(props: &BarProps) -> AnyView {
     let has_item = props.has_item();
     let skip_disabled = !has_item || !props.can_play;
@@ -540,11 +539,11 @@ fn transport(props: &BarProps) -> AnyView {
     .into_any()
 }
 
-/// 只有图标的传输按钮（Vue `.ui-icon-button`）：`label` 是无障碍名，图标按 Vue 的像素大小画，颜色是正文色，
+/// 只有图标的传输按钮：`label` 是无障碍名，图标按给定的像素大小画，颜色是正文色，
 /// 外框 `box_size` 见方。
 ///
 /// 外观全由 [`GlyphButton`] 画：它不调 `draw_default`，`IconButton` 的内建图标、悬停底和焦点底都不画；
-/// 停用时它按 `PaintState::disabled` 照 Vue 的 0.45 在 sRGB 里和卡片底色混。颜色照写的来
+/// 停用时它按 `PaintState::disabled` 以 0.45 在 sRGB 里和卡片底色混。颜色照写的来
 /// （`colors_from_style`），NanaUI 不再把停用的按钮整枚淡化，只淡自绘这一次。
 pub(crate) fn glyph_button(
     icon: Icon,
@@ -581,7 +580,7 @@ pub(crate) fn glyph_button(
 
 /// 12px 弱色时间。窄列里可以在「/」后面折行。
 ///
-/// 数字用等宽字形，对应 `.workspace-player__time { font-variant-numeric: tabular-nums }`。
+/// 数字用等宽字形。
 /// 没有在播曲目时仍是会话里的 `0:00 / 0:00`，不另写进度。
 fn time(props: &BarProps) -> AnyView {
     let text = props.time_text();
@@ -600,7 +599,7 @@ fn time(props: &BarProps) -> AnyView {
         .into_any()
 }
 
-/// 音量滑杆的首选宽度：`.workspace-player__volume input { width: min(120px, 18vw); min-width: 72px }`。
+/// 音量滑杆的首选宽度：`min(120px, 18vw)`，至少 72px。
 /// 窗口宽过约 667px 时仍是 120；再窄才按 18vw 缩短，最短 72。没有曲目时滑杆照样在，用会话里的音量。
 pub(super) fn volume_slider_width(viewport_width: f32) -> f32 {
     const PREFERRED: f32 = 120.0;
@@ -635,7 +634,7 @@ fn volume(props: &BarProps) -> AnyView {
     )
     .children((
         widget(parts::icon(icons::VOLUME_2, 15.0, SemanticColorRole::Muted)),
-        // Vue 音量 range 听 `@input`：拖动中每一格都改音量。只听 `RangeInput`。
+        // 拖动中每一格都改音量。只听 `RangeInput`。
         // 松手的 `RangeChanged` 是同一格的提交，再听一次会把这次拖动写两遍。键盘步进也会先发出 `RangeInput`。
         widget(slider)
             .key("player-volume")
@@ -726,7 +725,7 @@ mod narrow_card_layout_tests {
     }
 
     /// 窗口宽于 1120、卡片窄于一行：仍是一行，音量越过卡片右内边距。
-    /// `shell.css` 只有 `@media (max-width: 1120px)` 才把 `.workspace-player__body` 改成一列。
+    /// 只有窗口不宽于 1120px 才把三栏改成一列。
     #[test]
     fn a_wide_window_with_a_narrow_card_pushes_the_volume_out() {
         let mut harness = ShellHarness::mount_at(scene("files-multi-select"), 1180.0, 800.0);
@@ -841,7 +840,7 @@ mod seek_drag_tests {
             .collect()
     }
 
-    /// 拖进度条还没松手就要跳转。Vue `WorkspacePlayerBar` 的进度 range 听 `@input`，拖动中每一格都 seek。
+    /// 拖进度条还没松手就要跳转：拖动中每一格都 seek。
     #[test]
     fn dragging_the_seek_bar_seeks_before_release() {
         let mut harness = ShellHarness::mount(scene());
@@ -893,7 +892,7 @@ mod seek_drag_tests {
             .collect()
     }
 
-    /// 拖音量滑杆还没松手就要写入。Vue 音量 range 听 `@input`。松手不再把同一格写第二次。
+    /// 拖音量滑杆还没松手就要写入。松手不再把同一格写第二次。
     #[test]
     fn dragging_the_volume_slider_sets_volume_before_release() {
         // 1200 宽时音量滑杆伸出文件卡片，右端盖在详情上，点不到。放宽窗口让整条滑杆留在卡片里。
@@ -963,7 +962,7 @@ mod seek_drag_tests {
             .collect()
     }
 
-    /// 拖图片停留时长还没松手就要写入。Vue 停留 range 听 `@input`。松手不再把同一格写第二次。
+    /// 拖图片停留时长还没松手就要写入。松手不再把同一格写第二次。
     #[test]
     fn dragging_the_duration_slider_sets_duration_before_release() {
         let mut harness = ShellHarness::mount_at(scene(), 1800.0, 800.0);

@@ -316,7 +316,7 @@ fn reordering_adding_and_removing_keep_the_remaining_rows() {
     assert_eq!(harness.keyed("playlist-reorder"), Some(list));
 }
 
-/// 58px 方块照 Vue `playlistItemThumbnailSrc`：可读的本地 `thumbnailPath` 按 cover 画上，扩展名不再叠在图上；
+/// 58px 方块：可读的本地 `thumbnailPath` 按 cover 画上，扩展名不再叠在图上；
 /// 路径空、只有网址、读失败或不是图片时仍写大写扩展名，不下载、不编造像素。换封面不重建这一格，点它仍打开预览。
 #[test]
 fn playlist_row_draws_the_local_thumbnail_or_keeps_the_extension() {

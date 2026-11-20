@@ -1,6 +1,6 @@
 //! 文件页本地样式：字号、行高、行分隔、阴影和缩略图底色的自绘。
 //!
-//! 数值来自 Vue `workspace.css` 的 files-* / asset-* 与 `@lilia/theme` 令牌，颜色只用主题角色；
+//! 尺寸是固定数值或主题令牌，颜色只用主题角色；
 //! 缩略图占位底色随主题在 #d8dce2 与 #3a3a3a 间切换，文件夹是固定的棕色渐变，二者走自绘。
 //! `workbench.rs` 的公共小部件外观不改，文件卡片、详情和元数据编辑只用这里的辅助函数。
 
@@ -13,10 +13,10 @@ use nana_ui::runtime::{
 };
 use nana_ui_core::{BoxShadowSpec, Icon, ThemeAppearance};
 
-/// Vue 正文行高 1.55。
+/// 正文行高 1.55。
 const LINE_BODY: f32 = 1.55;
 
-/// 一段文字。行高按 CSS 的倍数折成像素，和 Vue 计算样式一致。
+/// 一段文字。行高按字号的倍数折成像素。
 pub(crate) fn text(
     label: impl Into<String>,
     size: f32,
@@ -41,7 +41,7 @@ pub(crate) fn small_muted(label: impl Into<String>) -> Text {
     text(label, 12.0, 400, SemanticColorRole::Muted, 12.0 * LINE_BODY)
 }
 
-/// `asset-meta__row > span:first-child`：11px、700、最弱色，字距 0.4。
+/// 元数据行的标签：11px、700、最弱色，字距 0.4。
 pub(crate) fn row_label(label: impl Into<String>) -> Text {
     let mut node = text(label, 11.0, 700, SemanticColorRole::Faint, 11.0 * LINE_BODY);
     std::sync::Arc::make_mut(&mut node.style.layout)
@@ -50,7 +50,7 @@ pub(crate) fn row_label(label: impl Into<String>) -> Text {
     node
 }
 
-/// `asset-browser__eyebrow`：11px、600、最弱色，字距 0.4。
+/// 眉题：11px、600、最弱色，字距 0.4。
 pub(crate) fn eyebrow(label: impl Into<String>) -> Text {
     let mut node = text(label, 11.0, 600, SemanticColorRole::Faint, 11.0 * LINE_BODY);
     std::sync::Arc::make_mut(&mut node.style.layout)
@@ -59,7 +59,7 @@ pub(crate) fn eyebrow(label: impl Into<String>) -> Text {
     node.nowrap(true)
 }
 
-/// 详情标题 `files-detail__section h2`：18px、700，行高 27.9。
+/// 详情标题：18px、700，行高 27.9。
 pub(crate) fn heading(label: impl Into<String>) -> Text {
     wrapping(text(
         label,
@@ -70,7 +70,7 @@ pub(crate) fn heading(label: impl Into<String>) -> Text {
     ))
 }
 
-/// `files-detail__subline`：14px 弱化色，长路径按列宽断行。
+/// 详情副行：14px 弱化色，长路径按列宽断行。
 pub(crate) fn subline(label: impl Into<String>) -> Text {
     wrapping(text(
         label,
@@ -81,7 +81,7 @@ pub(crate) fn subline(label: impl Into<String>) -> Text {
     ))
 }
 
-/// 值文本 `asset-meta__value`：14px 主文本色，长值按列宽断行。
+/// 值文本：14px 主文本色，长值按列宽断行。
 pub(crate) fn value(label: impl Into<String>) -> Text {
     wrapping(body(label))
 }
@@ -95,7 +95,7 @@ pub(crate) fn wrapping(mut node: Text) -> Text {
     node
 }
 
-/// 上外边距，对应 Vue 里 `h2` / `p` 的 `margin-top`。
+/// 上外边距，标题和段落用。
 pub(crate) fn margin_top(mut node: Text, px: f32) -> Text {
     std::sync::Arc::make_mut(&mut node.style.layout).margin_top = Some(LengthSpec::Px(px));
     node
@@ -107,7 +107,7 @@ pub(crate) fn centered(mut node: Text) -> Text {
     node
 }
 
-/// `asset-meta__row`：标签在上、值在下，间距 6；除第一行外上边一条 1px 分隔，上内边距 12。
+/// 元数据行：标签在上、值在下，间距 6；除第一行外上边一条 1px 分隔，上内边距 12。
 pub(crate) fn meta_row(first: bool) -> Stack {
     let row = Stack::column(6.0)
         .width(LengthSpec::Fill)
@@ -164,7 +164,7 @@ pub(crate) fn fixed(stack: Stack, width: f32, height: f32) -> Stack {
         .shrink(0.0)
 }
 
-/// 有自己 BEM 类的按钮外观（`files-toolbar__btn`、`files-breadcrumbs__item` 一类），照 Vue 实际样式画。
+/// 文件页专用按钮的外观（工具栏按钮、面包屑项一类）。
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ButtonLook {
     pub height: f32,
@@ -180,7 +180,7 @@ pub(crate) struct ButtonLook {
 }
 
 impl ButtonLook {
-    /// `.ghost.files-toolbar__btn`：高 34，左右 10，14px/500，常态透明，悬停 `--bg-hover`。
+    /// 工具栏按钮：高 34，左右 10，14px/500，常态透明，悬停 `--bg-hover`。
     pub(crate) const TOOLBAR: Self = Self {
         height: 34.0,
         padding_x: 10.0,
@@ -253,7 +253,7 @@ pub(crate) enum Tone {
 
 /// 缩略图盒的自绘：底色、已有像素（cover 铺满）或居中的白色类型图标。
 ///
-/// 对应 Vue `.files-list__preview` / `.files-detail__preview`：底是 `fileTone`，图标是
+/// 列表和详情的缩略图盒都用它：底是 `Tone`，图标是
 /// `rgba(255, 255, 255, 0.92)`。占位灰随主题切换，主题切换时运行时会重录。
 #[derive(Clone, Debug)]
 pub(crate) struct PreviewPainter {
@@ -263,7 +263,7 @@ pub(crate) struct PreviewPainter {
     pub radius: RadiusTier,
 }
 
-/// Vue `--thumbnail-placeholder-bg`：浅色 #d8dce2，深色 #3a3a3a。
+/// 缩略图占位底色：浅色 #d8dce2，深色 #3a3a3a。
 fn placeholder_rgba(appearance: ThemeAppearance) -> [f32; 4] {
     if crate::theme_map::is_dark(appearance) {
         [58.0 / 255.0, 58.0 / 255.0, 58.0 / 255.0, 1.0]

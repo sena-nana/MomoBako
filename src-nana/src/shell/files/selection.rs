@@ -1,8 +1,7 @@
 //! 文件表面的选择归约：单击、双击、右键和框选怎么改选择，替换、切换、范围选择，按新列表修剪选择，
 //! 以及单击选中、标签组展开和列表宽度这类只影响画面的状态。
 //!
-//! 对应 Vue `useFileBrowserPanelViewModel.ts` 的选择规则和 `handleEntryClick`；预览打开与否对应
-//! `previewFileEntry`。
+//! 单击只改选择，预览只由双击、「预览」这些显式入口打开。
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -38,7 +37,7 @@ impl FilesState {
         self.anchor = anchor;
     }
 
-    /// 单击一行（Vue `handleEntryClick`）：按选择方式改选择，记下详情跟去的那一项是单击只选中。
+    /// 单击一行：按选择方式改选择，记下详情跟去的那一项是单击只选中。
     /// 返回详情要跟去的那一项。
     pub(in crate::shell) fn activate_row(
         &mut self,
@@ -51,7 +50,7 @@ impl FilesState {
         Some(follow)
     }
 
-    /// 单击只改选择，目录不进入。右侧详情跟着主选中项走（Vue `currentFileEntry`），返回它跟去的那一项：
+    /// 单击只改选择，目录不进入。右侧详情跟着主选中项走，返回它跟去的那一项：
     /// 点中的这一行成了主选中项就是它；Ctrl 点掉主选中项、接替的是文件时是接替的那一项；主选中项
     /// 没变、接替的是目录或选择空了时不跟，详情原样留着。跟去的是文件时顺便读取素材。
     pub(in crate::shell) fn select_row(
@@ -88,7 +87,7 @@ impl FilesState {
         Some(primary)
     }
 
-    /// 双击一行。回收站里的文件照 Vue `previewFileEntryByDoubleClick` 留在列表：
+    /// 双击一行。回收站里的文件留在列表：
     /// 已经是单击选中的那一条就不再读详情，也清不掉「只在右侧看」；还没选中才按单击选上。
     /// 其余情况和 [`Self::open_row`] 一样：目录进入，文件打开预览。
     pub(in crate::shell) fn open_row_message(&mut self, ctx: &FileContext, path: &str) {
@@ -166,7 +165,7 @@ impl FilesState {
     /// 单击选中的是文件时记下它：素材详情回来后仍留在列表，不切到预览页。
     ///
     /// 单击文件夹两项都不动：右侧详情停在哪个文件、还在读哪个文件都照旧，列表不会因此换成那个文件的
-    /// 预览页。Vue 单击只改选择，预览只由双击、「预览」这些显式入口打开（`previewFileEntry`）。
+    /// 预览页。单击只改选择，预览只由双击、「预览」这些显式入口打开。
     pub(in crate::shell) fn note_selected_only(&mut self, path: &str) {
         let file = self
             .rows
@@ -190,7 +189,7 @@ impl FilesState {
         self.select_only = None;
     }
 
-    /// 清掉详情卡上叠着的素材元数据。同一个仓库刷新时照 Vue 先把 `activeAssetDetail` 设成 null。
+    /// 清掉详情卡上叠着的素材元数据。同一个仓库刷新时先清掉，等详情重新读回。
     pub(in crate::shell) fn clear_detail_metadata(&mut self) {
         if self.detail_asset_id.is_empty() && self.detail_metadata.is_empty() {
             return;
@@ -250,7 +249,7 @@ impl FilesState {
         self.list_width = Some(width);
     }
 
-    /// 标签组是否展开：用户在这个文件上点过就照点的来，否则有标签才展开（Vue 的 `tagsExpanded`）。
+    /// 标签组是否展开：用户在这个文件上点过就照点的来，否则有标签才展开。
     pub(in crate::shell) fn tags_expanded(&self, path: &str, has_tags: bool) -> bool {
         match &self.tags_open {
             Some((open_path, open)) if open_path == path => *open,
@@ -258,7 +257,7 @@ impl FilesState {
         }
     }
 
-    /// 播放条或播放集显式打开预览（Vue `setPreviewFilePath` + `selectWorkspaceEntry`）。
+    /// 播放条或播放集显式打开预览，并选中这一条。
     ///
     /// 预览页立刻换上，不等这次素材详情回来。单击选中的同一条也要打开：清掉「只在右侧详情里看」
     /// 和还没回来的单击读取，选择换成这一条。路径是空的只记日志，选择不动。
@@ -275,12 +274,12 @@ impl FilesState {
         self.clear_rename_if_needed(previous);
     }
 
-    /// 预览页是否该替换文件列表。单击选中的文件只在右侧详情里看，和 Vue 的 `previewFileEntry` 一致。
+    /// 预览页是否该替换文件列表。单击选中的文件只在右侧详情里看。
     pub(in crate::shell) fn preview_open(&self, target: Option<&str>) -> bool {
         target.is_some() && self.select_only.as_deref() != target
     }
 
-    /// 预览页「返回」（Vue `exitPreview`）：把正在看的文件记成单击选中，预览页让位给文件列表。
+    /// 预览页「返回」：把正在看的文件记成单击选中，预览页让位给文件列表。
     /// 不改目录、不改多选、不排目录读取。没有正在看的文件时记日志，选择不动。
     pub(in crate::shell) fn close_preview(&mut self, target: Option<&str>) {
         let Some(path) = target.map(str::trim).filter(|path| !path.is_empty()) else {
@@ -327,7 +326,7 @@ impl FilesState {
         self.anchor = Some(path.to_string());
     }
 
-    /// Vue `selectWorkspaceEntry` 的 `toggle`：没选中的加进来并成为主选中项和锚点；选中的拿掉，
+    /// 切换选择：没选中的加进来并成为主选中项和锚点；选中的拿掉，
     /// 拿掉的是主选中项时由剩下的第一项接替，否则主选中项不变；锚点被拿掉时跟主选中项。
     pub(in crate::shell) fn toggle_selection(&mut self, path: &str) {
         let Some(index) = self.selected.iter().position(|item| item == path) else {
@@ -351,7 +350,7 @@ impl FilesState {
 
     /// 范围选择用的顺序，和卡片画出来的顺序一样。
     ///
-    /// 普通目录和回收站照 Vue `createDerivedStateFromSnapshot` 的 `visibleEntries`：文件夹保持
+    /// 普通目录和回收站：文件夹保持
     /// 原来的先后，整组排在文件前面。快照把两种穿插着给时，画面已经先画文件夹，Shift 也按这个顺序拉。
     /// 分类视图和智能文件夹不拆成两组，仍按列表本身的顺序。
     fn screen_order(ctx: &FileContext, rows: &[FileRow]) -> Vec<FileRow> {
@@ -398,7 +397,7 @@ impl FilesState {
         self.primary = Some(path.to_string());
     }
 
-    /// 智能文件夹查回来以后照 Vue `selectSmartFolder` 清掉选择。
+    /// 智能文件夹查回来以后清掉选择。
     ///
     /// 查询期间列表已经换成「正在读取目录」，选择留到这一份结果对上再清；
     /// 用户已经离开智能文件夹面板时不清，免得把目录里的选择一起抹掉。

@@ -1,4 +1,4 @@
-//! 智能文件夹对话框在真实视图里的回归：名称框按回车提交（Vue 名称输入框的 `@keydown.enter.prevent`）。
+//! 智能文件夹对话框在真实视图里的回归：名称框按回车提交。
 //! 保存进行中名称和筛选仍可改，「创建」和「取消」禁用，回车不再另发一次。
 
 use nana_ui::runtime::StableNodeId;
@@ -66,7 +66,7 @@ fn settle_typed(harness: &mut ShellHarness) {
     harness.settle(typed);
 }
 
-/// 「创建」已经发出、服务还没回来时，名称和关键词照 Vue 仍可改。
+/// 「创建」已经发出、服务还没回来时，名称和关键词仍可改。
 /// 「创建」和「取消」禁用；再按回车或再点「创建」不另发一次，已经发出的请求仍用提交当时的名字。
 #[test]
 fn smart_folder_name_stays_editable_while_the_save_is_in_flight() {

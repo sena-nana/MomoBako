@@ -1,6 +1,5 @@
 //! 文件表面在任务弹层「仓库操作」行上的那部分：文件变更和非静默的读目录。
 //!
-//! 对应 Vue `fileOperations.ts` 和 `files.ts` 里的 `startOperationProgress` / `updateOperationProgress`：
 //! 复制、导入、多选删除这些变更各有自己的种类和阶段；非静默、非追加的读目录出「读取目录」
 //! （读回收站「读取回收站」，带目录树「读取文件树」）。请求排进 `FilesState::operation`，
 //! 归约结束时由壳层交给槽位（`repo_operation.rs`）。换仓库时清掉上一个仓库的文件表面也在这里。
@@ -12,13 +11,13 @@ use super::{FileContext, FileDialog, FilesState, MenuBranch};
 #[derive(Clone, Debug, PartialEq)]
 pub(in crate::shell) struct FileOperation {
     pub start: OperationStart,
-    /// 协议完成、等着目录读回来时 Vue「刷新文件索引」那一步的百分比（复制、导入）。没有这一步的变更
-    /// （删除、还原、移动）重读目录时进度行换成「读取目录」，和 Vue 刷新目录时的非静默读取一样。
+    /// 协议完成、等着目录读回来时「刷新文件索引」那一步的百分比（复制、导入）。没有这一步的变更
+    /// （删除、还原、移动）重读目录时进度行换成「读取目录」，和刷新目录时的非静默读取一样。
     pub refresh_value: Option<f64>,
 }
 
 impl FileOperation {
-    /// Vue 文件变更开始以后的第一步：种类、阶段说明和百分比。
+    /// 文件变更开始以后的第一步：种类、阶段说明和百分比。
     pub(in crate::shell) fn step(
         label: impl Into<String>,
         detail: impl Into<String>,
@@ -31,7 +30,7 @@ impl FileOperation {
         }
     }
 
-    /// 从文件夹导入，对话框和拖入都是（Vue `importEntriesToWorkspace`）。
+    /// 从文件夹导入，对话框和拖入都是。
     pub(in crate::shell) fn import() -> Self {
         Self::step("导入文件", "导入文件到当前资源库", 24.0, Some(84.0))
             .runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_ENTRY_IMPORT])
@@ -51,8 +50,8 @@ pub(super) enum FilesOperation {
     Read,
 }
 
-/// 读目录时任务弹层出不出进度行：Vue `loadFileBrowserForDirectory` 只有非静默、非追加的读取才出，
-/// 标题看读的是回收站、带不带目录树。侧栏点文件夹、双击进入目录和面包屑在 Vue 里都是静默读取，
+/// 读目录时任务弹层出不出进度行：只有非静默、非追加的读取才出，
+/// 标题看读的是回收站、带不带目录树。侧栏点文件夹、双击进入目录和面包屑都是静默读取，
 /// 不出这一行。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(in crate::shell) enum ReadProgress {
@@ -130,13 +129,13 @@ impl FilesState {
         }
     }
 
-    /// 刷新资源库时重读目录（Vue `selectRepository` 同一个仓库的 `loadFileBrowserForDirectory`）：非静默，
+    /// 刷新资源库时重读目录：非静默，
     /// 选择留着，分类视图也读。
     pub(in crate::shell) fn request_refresh_read(&mut self, ctx: &FileContext, path: &str) -> bool {
         self.queue_browse(ctx, path, true, true, ReadProgress::Directory)
     }
 
-    /// 换仓库：清掉上一个仓库的条目、选择、对话框和进行中的读取（Vue `resetActiveRepositoryContent`）。
+    /// 换仓库：清掉上一个仓库的条目、选择、对话框和进行中的读取。
     /// 展示方式、列表宽、导出草稿和工具栏里的新文件名这些和仓库无关的留着；文件表面占着的进度行取消。
     pub(in crate::shell) fn reset_for_repository(&mut self) {
         self.rows.clear();

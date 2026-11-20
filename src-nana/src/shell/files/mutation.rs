@@ -1,7 +1,7 @@
 //! 文件变更：变更守卫，对话框的打开、草稿和提交，工具栏建文件，删除和回收站，拖放的移动和导入，
 //! 以及变更结果（快照或协议完成）的归约。
 //!
-//! 对应 Vue `fileOperations.ts`、`CopyTargetDialog.vue` 和文件面板工具栏。同一时间只有一次变更
+//! 同一时间只有一次变更
 //! （`mutating`）；空白名称和空白来源直接返回，不会把状态标成进行中。变更在任务弹层里的进度行见
 //! `shell/files/operation.rs`，硬链接确认见 `shell/files/hardlink.rs`。
 
@@ -35,7 +35,7 @@ impl FilesState {
             eprintln!("Nana 拖放移动缺少仓库");
             return;
         }
-        // 成功以后按 Vue `moveWorkspaceEntries` 改选。失败的结果会把这份丢掉。
+        // 成功以后按移动的规则改选。失败的结果会把这份丢掉。
         self.move_reselect = Some((sources.clone(), parent.clone()));
         self.begin(Some(
             FileOperation::step("移动文件", "移动到目标文件夹", 36.0, Some(82.0))
@@ -292,7 +292,7 @@ impl FilesState {
         let repo_id = ctx.repo_id.clone().unwrap_or_default();
         let parent = parent_path(&normalize_path(&self.target_draft));
         let sources = self.copy_sources.clone();
-        // 成功以后按 Vue `finishFileTransfer` 改选。失败的结果会把这份丢掉。
+        // 成功以后按源文件名改选。失败的结果会把这份丢掉。
         self.copy_reselect = Some((sources.clone(), parent.clone().unwrap_or_default()));
         self.begin(Some(
             FileOperation::step("复制文件", "创建硬链接或复制文件", 32.0, Some(84.0))
@@ -440,7 +440,7 @@ impl FilesState {
         true
     }
 
-    /// 用工具栏里的文件名在当前目录建空文件（Vue `handleCreateFile`）。回收站和虚拟视图不建；
+    /// 用工具栏里的文件名在当前目录建空文件。回收站和虚拟视图不建；
     /// 输入框等结果回来、建成了才清空，失败时名字留着。
     pub(in crate::shell) fn submit_inline_file(&mut self, ctx: &FileContext) -> bool {
         if self.mutating {
@@ -482,7 +482,7 @@ impl FilesState {
         } else {
             None
         };
-        // Vue 只有多选删除走 `deleteWorkspaceEntries` 出进度行，单条删除不出。
+        // 只有多选删除出进度行，单条删除不出。
         let operation = (paths.len() > 1).then(|| {
             FileOperation::step(
                 "删除文件",
@@ -493,7 +493,7 @@ impl FilesState {
             .runs(&[PROTOCOL_ENTRY_DELETE])
         });
         self.begin(operation);
-        // 单条删除走 Vue `deleteWorkspaceEntry`，不另读侧栏树。多项才可能是 `currentWithTree`。
+        // 单条删除不另读侧栏树。多项删除且有可见文件夹时才另读。
         if paths.len() > 1 {
             self.multi_delete_paths = Some(paths.clone());
         }
@@ -509,7 +509,7 @@ impl FilesState {
         if self.selected.is_empty() {
             return false;
         }
-        // 和删除一样，Vue 只有多选还原（`restoreTrashEntries`）出进度行。
+        // 和删除一样，只有多选还原出进度行。
         // 多选成功后不采用变更快照，改去非静默重读回收站；单条还原仍采用快照。
         let count = self.selected.len();
         let operation = (count > 1).then(|| {
@@ -522,7 +522,7 @@ impl FilesState {
         started
     }
 
-    /// 回收站的还原、全部还原和清空。`operation` 是任务弹层里的进度行，Vue 不出的传 `None`。
+    /// 回收站的还原、全部还原和清空。`operation` 是任务弹层里的进度行，不出进度的传 `None`。
     pub(in crate::shell) fn mutate_trash(
         &mut self,
         ctx: &FileContext,
@@ -551,7 +551,7 @@ impl FilesState {
 
     /// 变更成功的快照。`created_name` 只有工具栏建文件带：建成了清空输入框，选择里有东西时选中新文件。
     ///
-    /// 多选还原不走这里的采用：Vue `restoreTrashEntries` 丢掉逐条 `mutateTrash` 的快照，清空选择后再非静默重读回收站。
+    /// 多选还原不走这里的采用：丢掉逐条还原的快照，清空选择后再非静默重读回收站。
     pub(in crate::shell) fn apply_mutation_snapshot(
         &mut self,
         ctx: &FileContext,
@@ -575,7 +575,7 @@ impl FilesState {
                 "Nana 分类视图快照路径不一致，保留当前列表：{} / {}",
                 self.current_path, snapshot.current_path
             );
-            // 列表不换，选择仍照 Vue 换成快照里的新名字。没有这个名字就留着原来的选择。
+            // 列表不换，选择仍换成快照里的新名字。没有这个名字就留着原来的选择。
             if let Some(name) = rename_name.as_deref() {
                 let incoming: Vec<FileRow> =
                     snapshot.entries.iter().map(FileRow::from_entry).collect();
@@ -658,9 +658,8 @@ impl FilesState {
 
     /// 复制、移动、删除的协议结果带着文件夹树时，只把树交给侧栏。
     ///
-    /// Vue `applyFileBrowserSnapshot` 在 `snapshot.tree` 有值时写 `fileTree`。复制的
-    /// `finishFileTransfer`、移进当前目录的 `moveWorkspaceEntries`、单条 `deleteWorkspaceEntry`
-    /// 都会调用它。移走和多选删除的协议 JSON 同样可能带树；这里也不改列表，选择仍走
+    /// 快照带 `tree` 时写入侧栏。复制、移进当前目录、单条删除都会调用它。移走和多选删除的协议 JSON
+    /// 同样可能带树；这里也不改列表，选择仍走
     /// `note_protocol_finished`。选中里有可见文件夹时，这两处成功后另外再读一次侧栏树。
     /// 没有树不记。分类视图里快照目录和当前目录不一致、仓库不一致、
     /// 在途读取和这份快照对不上时不写。
@@ -705,8 +704,8 @@ impl FilesState {
         self.adopted_tree = Some((tree.repo_id, tree.nodes));
     }
 
-    /// 协议变更的结果。成功且要重读目录时：复制和导入的进度行走到 Vue「刷新文件索引」那一步，目录读回来
-    /// 才完成；多选删除和移动在 Vue 里重读目录是一次非静默读取，进度行换成「读取目录」。
+    /// 协议变更的结果。成功且要重读目录时：复制和导入的进度行走到「刷新文件索引」那一步，目录读回来
+    /// 才完成；多选删除和移动重读目录是一次非静默读取，进度行换成「读取目录」。
     /// 复制成功改读复制进去的目录，快照对上以后按源文件名改选。文件夹树在这之前已经记下，这里不改选择。
     pub(in crate::shell) fn note_protocol_finished(
         &mut self,
@@ -717,7 +716,7 @@ impl FilesState {
     ) {
         self.mutating = false;
         // 另读与否要在丢掉移动来源和多选删除路径之前看：回收站不读；移走且来源里有可见文件夹，
-        // 或多选删除且来源里有可见文件夹，才对应 Vue `currentWithTree` → `refreshRepositoryTree`。
+        // 或多选删除且来源里有可见文件夹，才另读侧栏树。
         let reread_tree = result.is_ok() && self.folder_tree_reread_due(ctx);
         // 移动成功先改选（移进当前目录的那一支写进导入用的改选槽）。失败丢掉，选择不动。
         // 复制成功记下源文件名，并把这次重读指到目标目录。失败两份都丢掉，选择不动。
@@ -788,7 +787,7 @@ impl FilesState {
     }
 
     /// 开始一次文件变更：标进行中、清掉上一次的错误。`operation` 是这次变更在任务弹层里的进度行，
-    /// Vue 不出进度的变更（建文件、重命名、单条删除和还原、全部还原、清空回收站、确认硬链接）传 `None`。
+    /// 不出进度的变更（建文件、重命名、单条删除和还原、全部还原、清空回收站、确认硬链接）传 `None`。
     pub(super) fn begin(&mut self, operation: Option<FileOperation>) {
         self.mutating = true;
         self.error.clear();
@@ -804,8 +803,7 @@ impl FilesState {
 
     /// 这次成功要不要另读侧栏树。
     ///
-    /// Vue `defaultDirectoryRefreshPlan`：回收站是 `trash`，不调用 `refreshRepositoryTree`。
-    /// 其余只有移到别的目录、或多选删除，并且当前可见条目里有文件夹时，才是 `currentWithTree`。
+    /// 回收站不读。其余只有移到别的目录、或多选删除，并且当前可见条目里有文件夹时才读。
     /// 移进正在看的目录、单条删除、复制都不走这里。文件夹要在当前画出来的列表里，不在列表里的路径不算。
     fn folder_tree_reread_due(&self, ctx: &FileContext) -> bool {
         if ctx.trash {
@@ -823,7 +821,7 @@ impl FilesState {
         })
     }
 
-    /// 这些路径里有没有当前列表上的文件夹（Vue `visibleEntries` 里 `kind === "directory"`）。
+    /// 这些路径里有没有当前列表上的文件夹。
     fn paths_include_visible_directory(&self, ctx: &FileContext, paths: &[String]) -> bool {
         self.listed_rows(ctx)
             .into_iter()
@@ -841,7 +839,7 @@ impl FilesState {
         }
     }
 
-    /// 快照带着文件夹树时记下，交给壳层写入侧栏（Vue `applyFileBrowserSnapshot`）。
+    /// 快照带着文件夹树时记下，交给壳层写入侧栏。
     ///
     /// 没有 `tree` 时不记，侧栏保持原样。快照仓库和当前仓库不一致时只记日志，不写。
     fn note_adopted_tree(
@@ -904,7 +902,7 @@ impl FilesState {
     }
 }
 
-/// 快照条目里名字正好是 `name` 的路径。空白名字不算。同名时用第一条，和 Vue `find` 一样。
+/// 快照条目里名字正好是 `name` 的路径。空白名字不算。同名时用第一条。
 fn renamed_entry_path(rows: &[FileRow], name: &str) -> Option<String> {
     let name = name.trim();
     if name.is_empty() {

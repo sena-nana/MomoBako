@@ -1,6 +1,6 @@
 //! 播放条自绘：8px 进度轨，以及音量、停留时长两条细滑杆。
 //!
-//! Vue 用原生 range 输入，靠 webkit 伪元素画轨道和圆钮。Nana 的 `RangeField`
+//! 滑杆用 Nana 的 `RangeField`，
 //! 保留拖动、键盘和无障碍，外观由这里的 Painter 接管，颜色全部取主题角色。
 
 use std::hash::{DefaultHasher, Hash, Hasher};
@@ -94,8 +94,8 @@ impl Painter for SliderTrack {
     }
 }
 
-/// Vue 禁用控件整体 0.45 不透明（`theme_map::DISABLED_OPACITY`），盖在 bg-elev 卡片上。这里在 sRGB 里和
-/// 卡片底色直接混，和浏览器的合成结果一致；NanaUI 的线性合成会比 Vue 亮。
+/// 禁用控件整体 0.45 不透明（`theme_map::DISABLED_OPACITY`），盖在 bg-elev 卡片上。这里在 sRGB 里和
+/// 卡片底色直接混；NanaUI 的线性合成会偏亮。
 fn dim_on_surface(cx: &PaintContext<'_>, color: [f32; 4], dim: bool) -> [f32; 4] {
     if !dim {
         return color;
@@ -124,7 +124,7 @@ fn fill_circle(
 }
 
 /// 只有图标的按钮：悬停铺 bg-hover、按下铺 bg-active，图标按给定像素居中。
-/// 对应 Vue `.ui-icon-button` 和全局 `button:hover`。停用（`PaintState::disabled`）时不铺底，图标按 Vue 的
+/// 停用（`PaintState::disabled`）时不铺底，图标按
 /// 0.45 不透明度和卡片底色混；状态变了框架会重录，不进 `paint_key`。
 pub(super) struct GlyphButton {
     pub icon: Icon,
@@ -171,7 +171,7 @@ impl Painter for HoverSurface {
     }
 }
 
-/// Vue 全局按钮的圆角 `--radius-sm`。
+/// 按钮圆角 `--radius-sm`。
 const BUTTON_RADIUS: f32 = 6.0;
 
 /// 按交互状态铺底：按下 bg-active，悬停 bg-hover，其余透明。
@@ -201,7 +201,7 @@ fn state_fill(cx: &mut PaintContext<'_>, radius: f32) {
     }
 }
 
-/// 什么也不画。进度条上盖的透明拖动层用它，Vue 的进度 range 轨道和圆钮都是透明的。
+/// 什么也不画。进度条上盖的透明拖动层用它，只接拖动，轨道和圆钮都不显示。
 pub(super) struct Invisible;
 
 impl Painter for Invisible {

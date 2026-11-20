@@ -1,6 +1,6 @@
-//! 智能文件夹增改删和查询的结果落到壳层上（Vue `smartFolders.ts`）：新建以后打开新建的那个，编辑以后
+//! 智能文件夹增改删和查询的结果落到壳层上：新建以后打开新建的那个，编辑以后
 //! 重查正在看的（它或它的祖先被改了），删掉正在看的以后回到文件面板；文件页头写正在看的文件夹的名字（子级
-//! 也认得）和查询结果的摘要（Vue `smartFolderSummary`）。
+//! 也认得）和查询结果的摘要。
 
 use crate::backend::services::repository::{
     FileBrowserEntry, SearchMetadataFilter, SmartFolderFilter,
@@ -138,7 +138,7 @@ fn queried(model: &mut ShellViewModel, id: &str, result: SmartFolderResult) {
     ));
 }
 
-/// 新建以后打开新建的那个（Vue `createSmartFolderInWorkspace` 的 `selectSmartFolder`），在设置页上建的也
+/// 新建以后打开新建的那个，在设置页上建的也
 /// 离开设置页；服务没带回新文件夹时不打开。
 #[test]
 fn creating_opens_the_new_folder() {
@@ -242,7 +242,7 @@ fn deleting_the_folder_on_screen_returns_to_files() {
     );
 }
 
-/// 在回收站面板上删掉以前看过的智能文件夹：只清掉它的结果，面板不动（Vue 会切到文件面板）。
+/// 在回收站面板上删掉以前看过的智能文件夹：只清掉它的结果，面板不动，不切到文件面板。
 #[test]
 fn deleting_elsewhere_keeps_the_panel() {
     let mut model = with_tree();
@@ -262,7 +262,7 @@ fn deleting_elsewhere_keeps_the_panel() {
     assert_eq!(model.sidebar.active_smart_folder_id, None);
 }
 
-/// 摘要行照 Vue `smartFolderSummary`：条数打头，后面按顺序接上有值的条件。
+/// 摘要行：条数打头，后面按顺序接上有值的条件。
 #[test]
 fn the_summary_lists_the_inherited_conditions() {
     let filter = SmartFolderFilter {
@@ -364,7 +364,7 @@ fn list_has_file_row(harness: &ShellHarness) -> bool {
         })
 }
 
-/// 点侧栏智能文件夹：文件列照 Vue `isLoadingSmartFolder` 换成「正在读取目录」。
+/// 点侧栏智能文件夹：查询在途时文件列换成「正在读取目录」。
 /// 目录自己的错误不能盖住它，上一次的卡片也不留在画面上。查回来以后即使这一条还在结果里，选择也清掉。
 #[test]
 fn opening_a_smart_folder_shows_the_directory_loading_state() {

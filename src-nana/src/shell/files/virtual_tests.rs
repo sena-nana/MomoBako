@@ -369,7 +369,7 @@ fn box_select_includes_unmounted_rows_in_the_scroll_range() {
     );
 }
 
-/// 文件右键菜单或文件夹右键菜单开着时，列表一滚就收起，和 Vue 捕获阶段的 `scroll` 一样。
+/// 文件右键菜单或文件夹右键菜单开着时，列表一滚就收起。
 /// 刚打开只记下偏移；菜单关着时滚过的距离，重新打开后不拿来关。不开窗口。
 #[test]
 fn scrolling_closes_open_context_menus() {
@@ -464,7 +464,7 @@ fn scrolling_closes_open_context_menus() {
     );
 }
 
-/// 滚到「滚动继续加载」上方 320px 以内就续读下一页，和 Vue 的 IntersectionObserver 一样。
+/// 滚到「滚动继续加载」上方 320px 以内就续读下一页。
 /// 停在列表前半段不续读。贴到底时滚轮自己也会发出续读。不开窗口。
 #[test]
 fn scrolling_near_the_end_continues_the_directory() {
@@ -597,7 +597,7 @@ fn scrolling_near_the_end_continues_the_directory() {
     );
 }
 
-/// 窗口失焦时收起文件和文件夹右键菜单，和 Vue `installContextMenu` 的 `blur` 一样。
+/// 窗口失焦时收起文件和文件夹右键菜单。
 /// 窗口还聚焦时菜单留着，菜单项仍能点。失焦发出的只有关闭，不代替点菜单项。不开窗口。
 #[test]
 fn focus_loss_closes_open_context_menus() {
@@ -645,7 +645,7 @@ fn focus_loss_closes_open_context_menus() {
     );
 }
 
-/// 窗口尺寸变了收起文件和文件夹右键菜单，和 Vue `installContextMenu` 的 `resize` 一样。
+/// 窗口尺寸变了收起文件和文件夹右键菜单。
 /// 第一次只记下尺寸；同一像素（含不到 1px 的抖动）和无效尺寸不关，菜单留着，项仍能点。
 /// 只发关闭，不把内部拖动交给系统。不开窗口。
 #[test]

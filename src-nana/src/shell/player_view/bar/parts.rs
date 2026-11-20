@@ -1,6 +1,6 @@
 //! 播放条的零件：停留时长与画面适配设置行、当前队列浮层，以及几处共用的小部件。
 //!
-//! 浮层贴在卡片右上方，和 Vue `.workspace-player__queue` 一样右侧内缩 14px、
+//! 浮层贴在卡片右上方，右侧内缩 14px、
 //! 底边离卡片 10px。绝对定位相对父级内容盒，所以偏移要把卡片内边距算进去。
 //! 队列封面和播放条自己的封面都只认条目上的 `thumbnailPath`：读得到本地图片就按 cover 画进方块，否则仍写类型字。
 
@@ -17,7 +17,7 @@ use super::super::super::player::{PlayerMessage, QueueItem};
 use super::super::paint::{HoverSurface, SliderTrack};
 use super::{BarProps, display_title};
 
-/// 浮层上限高度，和 Vue `max-height: 320px` 一致。
+/// 浮层上限高度。
 const QUEUE_MAX_HEIGHT: f32 = 320.0;
 /// 浮层内边距和行距。
 const QUEUE_PADDING: f32 = 10.0;
@@ -105,7 +105,7 @@ pub(super) fn type_cover(
         .into_any()
 }
 
-/// 队列里的 40px 封面，对应 Vue `.workspace-player__queue-thumb`。
+/// 队列里的 40px 封面。
 /// 有可读的本地 `thumbnailPath` 时把那张图画满这一格；否则写当前播放器的类型字。
 fn queue_cover(
     item: &QueueItem,
@@ -288,7 +288,7 @@ pub(super) fn settings_row(props: &BarProps, narrow: bool) -> AnyView {
                             .line_height(18.6),
                     )
                     .key("player-duration-label"),
-                    // Vue 停留时长 range 听 `@input`：拖动中每一格都写入。只听 `RangeInput`。
+                    // 拖动中每一格都写入。只听 `RangeInput`。
                     // 松手的 `RangeChanged` 是同一格的提交，再听一次会把这次拖动写两遍。
                     widget(duration)
                         .key("player-duration")
@@ -350,7 +350,7 @@ fn fit_switch(cover: bool) -> AnyView {
     .into_any()
 }
 
-/// 一档适配按钮。Vue 组件声明的是 26px 高（全局按钮规则把它顶成 32px），这里按组件设计值画。
+/// 一档适配按钮。按组件设计值 26px 高画，不用全局按钮的 32px。
 fn fit_option(label: &str, active: bool) -> Button {
     let mut button = Button::new(label);
     button.style.background = active.then_some(SemanticColorRole::AccentSoft);
@@ -432,7 +432,7 @@ pub(super) fn queue_popover(props: &BarProps) -> AnyView {
             .radius(RadiusTier::Xl)
             .with_layout(|layout| {
                 layout.position = nana_ui_core::PositionSpec::Absolute;
-                // 相对卡片的内边距盒：右 14、底边在卡片上沿再往上 10。
+                // 设计值相对卡片的内边距盒：右 14、底边在卡片上沿再往上 10。
                 layout.offset_right = Some(LengthSpec::Px(14.0));
                 layout.offset_bottom = Some(LengthSpec::percent_offset(100.0, 10.0));
                 layout.width = Some(LengthSpec::Px(360.0));
@@ -481,7 +481,7 @@ fn queue_row(item: &QueueItem, media: &'static str, active: bool) -> AnyView {
     } else {
         SemanticColorRole::Text
     };
-    // 不可播放的条目整行按 Vue 的 0.52 淡化，在浮层底色上混出来。
+    // 不可播放的条目整行按 0.52 淡化，在浮层底色上混出来。
     let dim = (!ready).then_some((SemanticColorRole::Surface, 0.52));
     let meta = widget(
         Stack::column(2.0)
@@ -523,7 +523,7 @@ mod tests {
     use crate::shell::player::QueueItem;
     use crate::shell::view_harness::ShellHarness;
 
-    /// 队列封面照 Vue `queueItem.thumbnailPath`：有可读的本地图时画这张图，
+    /// 队列封面看条目的 `thumbnailPath`：有可读的本地图时画这张图，
     /// 路径空、只有网址、读失败或不是图片时仍写当前播放器的类型字，不编造像素。
     #[test]
     fn queue_draws_the_real_thumbnail_or_keeps_the_type_word() {
@@ -622,7 +622,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// 播放条自己的 58px 封面照 Vue `item.thumbnailPath`：可读本地图按 cover 画上，
+    /// 播放条自己的 58px 封面看条目的 `thumbnailPath`：可读本地图按 cover 画上，
     /// 路径空、只有网址、读失败或不是图片时仍写当前播放器的类型字。没有条目时写「媒体」。
     /// 点这张图仍打开预览。队列关着，不把队列封面算进来。
     #[test]

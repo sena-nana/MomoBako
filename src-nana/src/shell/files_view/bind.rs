@@ -66,7 +66,7 @@ pub(crate) fn fill_container() -> InlineStyle {
     css! { height: 100%; min-height: 0; flex-grow: 1; flex-shrink: 1; }
 }
 
-/// `asset-meta__row`：小标签和值，值按字段绑定。`first` 是组里的第一行，不画上边线；
+/// 元数据行：小标签和值，值按字段绑定。`first` 是组里的第一行，不画上边线；
 /// `shown` 为假时这一行不占位。详情卡片和元数据的只读行共用。
 pub(crate) fn fact_row(
     label: &str,

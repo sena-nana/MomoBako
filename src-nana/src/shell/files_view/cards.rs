@@ -1,4 +1,4 @@
-//! 文件列表里的一张条目卡片，对应 Vue `.files-list__item`。
+//! 文件列表里的一张条目卡片。
 //!
 //! 四种展示方式共用：白底、`Lg` 圆角、1px 边（常态透明），选中时底色混入 10% 强调色、
 //! 边线混入 34% 强调色；外部或内部拖到文件夹上时是放置态。网格固定 148×190，
@@ -61,7 +61,7 @@ pub(super) struct PreviewLook {
     pub texture: Option<String>,
     /// 没有纹理时画的类型图标。
     pub icon: Option<Icon>,
-    /// 缩略图宽高比，按 Vue 的范围夹过。
+    /// 缩略图宽高比，夹到 0.55–2.4。
     pub aspect: f32,
 }
 
@@ -141,7 +141,7 @@ pub(super) struct CardFace {
     pub size: String,
     /// 修改时间，没有记录时写「未记录」。
     pub modified: String,
-    /// 资源库扩展的一行摘要（ASMR 的 RJ 号、作品名、收听状态这些，Vue `fileSummary(entry).inline`），没有时为空。
+    /// 资源库扩展的一行摘要（ASMR 的 RJ 号、作品名、收听状态这些），没有时为空。
     pub library: String,
     /// 缩略图盒；宽高比也在这里，自适应和瀑布流按它算卡片尺寸。
     pub preview: PreviewLook,
@@ -193,8 +193,8 @@ impl CardFace {
 
     /// 排版用的宽高比。
     ///
-    /// Vue `fileItemStyle` 只写在文件卡片上，而且要等缩略图 `load` 才把 `--file-thumb-aspect`
-    /// 改成这张图的原始宽高（夹到 0.55–2.4）。文件夹按钮没有这个样式，封面再宽也保持 1。
+    /// 只有文件卡片跟着缩略图变宽，而且要等缩略图解码出来才改成这张图的原始宽高（夹到 0.55–2.4）。
+    /// 文件夹卡片封面再宽也保持 1。
     /// 文件在缩略图画出以前同样是 1，不用元数据里的宽高提前把卡片拉宽。
     pub(super) fn aspect(&self) -> f32 {
         if self.directory() || self.preview.texture.is_none() {
@@ -254,7 +254,7 @@ pub(super) struct CardCell {
     pub lines: usize,
 }
 
-/// Vue 的缩略图宽高比：已知原始宽高时夹到 0.55–2.4，否则按正方形。
+/// 缩略图宽高比：已知原始宽高时夹到 0.55–2.4，否则按正方形。
 pub(super) fn aspect(width: u32, height: u32) -> f32 {
     super::super::thumbs::content_aspect(width, height)
 }
@@ -504,7 +504,7 @@ fn tile_content(cell: &CardCell, mode: DisplayMode, item: CardItem, current: &Ca
     )
     .children(lines)
     .into_any();
-    // 网格卡片定高 190，内容比它矮。Vue 的按钮把内容竖直居中，这里同样居中。
+    // 网格卡片定高 190，内容比它矮，竖直居中。
     let mut column = Stack::column(8.0)
         .align(AlignSpec::Center)
         .width(LengthSpec::Fill)
@@ -532,7 +532,7 @@ fn tile_content(cell: &CardCell, mode: DisplayMode, item: CardItem, current: &Ca
 /// 三栏宽度按 `56px | minmax(0, 1.5fr) | minmax(220px, 1fr)` 分：标题列和元信息列 3:2 分剩余宽，
 /// 元信息列不足 220 时取 220，其余归标题列。
 ///
-/// 卡片窄到放不下 220 的元信息列时，Vue 的网格把标题列压成 0、内容溢出卡片；这里元信息列的下限
+/// 卡片窄到放不下 220 的元信息列时，标题列不压成 0、内容也不溢出卡片：元信息列的下限
 /// 改成 `min(220, 卡片内容宽 - 缩略图 - 两个间距 - 80)`，标题至少留 80 宽，元信息在自己的列里换行或截断。
 fn list_content(cell: &CardCell, item: CardItem, current: &CardView) -> AnyView {
     let face = &current.face;
@@ -649,7 +649,7 @@ fn list_content(cell: &CardCell, item: CardItem, current: &CardView) -> AnyView 
     .into_any()
 }
 
-/// 资源库摘要（`files-list__library-line`）：12px 强调色，一行放不下用省略号截断。
+/// 资源库摘要：12px 强调色，一行放不下用省略号截断。
 fn library_text(text: String) -> Text {
     style::text(text, 12.0, 400, SemanticColorRole::Accent, 12.0 * 1.55).truncating()
 }
@@ -755,7 +755,7 @@ fn preview_frame_style(
         .node_style()
 }
 
-/// Vue 的类型图标：文件夹、视频、音频、有预览插件的文件（Nana 是认得出预览的扩展名），其余是图片图标。
+/// 类型图标：文件夹、视频、音频、能预览的文件（认得出预览的扩展名），其余是图片图标。
 pub(super) fn entry_icon(row: &FileRow) -> Icon {
     if row.kind == "directory" {
         return FOLDER;

@@ -35,7 +35,7 @@ pub(crate) struct SidebarView {
 pub(crate) struct HeadView {
     /// 仓库头的名字，没有仓库时是「无资源库」。
     pub name: String,
-    /// 虚拟条目来源没有真实目录，不显示文件夹分组（Vue `showFolderSidebar`）。
+    /// 虚拟条目来源没有真实目录，不显示文件夹分组。
     pub folders_visible: bool,
 }
 
@@ -157,7 +157,7 @@ pub(crate) struct FooterView {
 const NO_REPOSITORY: &str = "先选择或添加一个资源库。";
 
 impl SidebarView {
-    /// 从 ViewModel 取侧栏的投影，算法和 Vue 侧栏各分组读取时一致。
+    /// 从 ViewModel 取侧栏的投影，各分组的取值规则都在这里。
     pub(crate) fn project(model: &ShellViewModel) -> Self {
         let workspace = &model.workspace;
         let sidebar = &model.sidebar;
@@ -170,10 +170,10 @@ impl SidebarView {
         let category = workspace.library_category;
         let counts = sidebar.counts;
         let no_players = model.playlist_players.is_empty();
-        // Vue `isTrashPanel` 只看当前面板。文件快照还可以停在回收站（Eagle 导入靠它写「当前目标不可导入。」），
+        // 回收站只看当前面板。文件快照还可以停在回收站（Eagle 导入靠它写「当前目标不可导入。」），
         // 面板已经离开时侧栏回到默认资源库，不留下「回收站条目在主视图中管理。」。
         let trash = panel == WorkspacePanel::Trash;
-        // 刷新按钮转圈：目录树在读，或者照 Vue `isLoadingFileBrowser` 在读目录、在刷新文件夹树。
+        // 刷新按钮转圈：目录树在读，或者在读目录、在刷新文件夹树。
         let loading = sidebar.tree_loading || super::super::tree_sync::loading_file_browser(model);
         Self {
             status: StatusLine::project(model),

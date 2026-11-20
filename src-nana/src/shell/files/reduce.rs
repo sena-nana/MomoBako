@@ -240,7 +240,7 @@ pub(in crate::shell) fn reduce_message(
         model.files.note_detail_metadata(detail);
     }
     // 元数据保存读回了服务器上的素材（成功或冲突都是服务器现在的样子）：文件行换上它的元数据和索引标签，
-    // 详情导语、只读行和作品信息不再是保存前的旧值（Vue `applyAssetResponse`）。
+    // 详情导语、只读行和作品信息不再是保存前的旧值。
     // 正在叠的就是这份素材时，详情卡改用服务器现在的元数据，不留保存前的旧键。
     if let ShellMessage::Inspect(InspectMessage::MetadataSaved(Ok((_, detail)))) = &message {
         model.files.note_saved_asset(detail);
@@ -268,7 +268,7 @@ pub(in crate::shell) fn reduce_message(
             false,
         );
         if reload {
-            // Eagle 导入走 `finishWorkspaceImport`，成功后同样重读摘要。
+            // Eagle 导入成功后同样重读摘要。
             queue_snapshot_after_file_change(model, false);
         }
         return None;
@@ -321,7 +321,7 @@ pub(in crate::shell) fn reduce_message(
             model.files.tag_draft.clear();
             return Some(ShellMessage::Inspect(InspectMessage::AddTag(tag)));
         }
-        // Vue `exitPreview` 只清掉预览路径。有声音的继续放，只有画面的停在当前位置。
+        // 返回只清掉预览路径。有声音的继续放，只有画面的停在当前位置。
         FilesMessage::ExitPreview => {
             let target = model.inspect.target_path.clone();
             model.files.close_preview(target.as_deref());
@@ -344,7 +344,7 @@ pub(in crate::shell) fn reduce_message(
             FileDialog::Import | FileDialog::ImportArchive | FileDialog::ImportEagle
         ) | FilesMessage::OpenEagle(_)
     );
-    // 成功才重读。回收站面板上的快照是还原、全部还原或清空，Vue 还重读仓库列表。
+    // 成功才重读。回收站面板上的快照是还原、全部还原或清空，还要重读仓库列表。
     let refresh_snapshot = match &message {
         FilesMessage::MutationSnapshot { result: Ok(_), .. } => {
             Some(model.workspace.panel == WorkspacePanel::Trash)
@@ -374,7 +374,7 @@ pub(in crate::shell) fn reduce_message(
             .sidebar
             .apply_tree(&repo_id, Ok(crate::shell::SidebarTree::from_nodes(&tree)));
     }
-    // 选中里有文件夹的移走和多选删除，再按 Vue `refreshRepositoryTree` 另读一次。失败不在这里编树。
+    // 选中里有文件夹的移走和多选删除，再另读一次侧栏树。失败不在这里编树。
     if let Some(repo_id) = model.files.take_folder_tree_reread() {
         model.sidebar.reload_folder_tree(&repo_id);
     }
@@ -412,7 +412,7 @@ pub(in crate::shell) fn reduce_message(
     None
 }
 
-/// 文件变更成功以后照 Vue `refreshAfterFileMutation` 静默重读仓库摘要。
+/// 文件变更成功以后静默重读仓库摘要。
 ///
 /// 侧栏「回收站」和分类计数都读这份摘要。`also_list` 时再静默重读仓库列表：还原、全部还原和清空
 /// 会带 `repositorySummary`，删除、复制、移动、导入、新建和重命名不带。失败不读。没有活动仓库或

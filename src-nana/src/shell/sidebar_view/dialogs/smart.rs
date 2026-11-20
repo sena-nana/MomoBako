@@ -1,8 +1,8 @@
-//! 新建或编辑智能文件夹的对话框，照 Vue `WorkspaceSidebarSmartFolderDialogs.vue`。
+//! 新建或编辑智能文件夹的对话框。
 //!
 //! 名称、父级和全部筛选字段。输入框和多行输入各有一份草稿信号，按 `ModelField` 的规矩回写；
 //! 父级候选、两个下拉框的当前值、错误、主按钮文案和禁用放在一个投影信号里。正文是纵向滚动区，
-//! 高度由 NanaUI 对话框按窗口限定，底栏始终露在外面（Vue 在 800 高的窗口里会把底栏裁掉）。
+//! 高度由 NanaUI 对话框按窗口限定，底栏始终露在外面，800 高的窗口里也不被裁掉。
 
 use std::sync::Arc;
 
@@ -17,7 +17,7 @@ use nana_ui::runtime::view::{AnyView, IntoView, Signal, fields, signal, widget};
 use nana_ui::runtime::{LengthAtom, LengthSpec, ScrollAxes, ScrollView, Stack, ViewportAxis};
 use nana_ui::{ButtonKind, DialogSize};
 
-/// `.smart-folder-dialog { width: min(720px, calc(100vw - 40px)) }`。
+/// 对话框宽：`min(720px, 窗口宽 - 40px)`。
 fn smart_folder_dialog_size() -> DialogSize {
     DialogSize::Width(LengthSpec::min2(
         LengthAtom::Px(720.0),
@@ -90,8 +90,8 @@ fn draft(model: &ShellViewModel, field: SmartFolderField) -> Signal<String> {
 }
 
 /// 新建或编辑智能文件夹：名称、父级和全部筛选字段。名称为空或保存中时主按钮不可用，取消也不可用。
-/// 这些输入框、下拉和多行照 Vue 没有 `disabled`，保存中仍可改下一份草稿；已经发出的请求用提交当时的草稿。
-/// 名称框里按回车和点主按钮一样提交（Vue 名称输入框的 `@keydown.enter.prevent`），保存中回车不再提交。
+/// 这些输入框、下拉和多行不禁用，保存中仍可改下一份草稿；已经发出的请求用提交当时的草稿。
+/// 名称框里按回车和点主按钮一样提交，保存中回车不再提交。
 /// 别的输入框不提交。
 pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let view = signal(SmartDialogView::project(model)?);
@@ -160,7 +160,7 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
             .map(|(value, text)| ((*value).to_string(), (*text).to_string()))
             .collect()
     };
-    // `.smart-folder-dialog__grid`：两列等宽，行列间距 12px。
+    // 筛选字段两列等宽，行列间距 12px。
     let body = vec![
         input(
             SmartFolderField::Name,
@@ -332,7 +332,7 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
             "smart-dialog-error",
         ),
     ];
-    // `.smart-folder-dialog__body`：竖排、间距 12，右边留 4 给滚动条。
+    // 正文竖排、间距 12，右边留 4 给滚动条。
     let column = Stack::column(12.0)
         .width(LengthSpec::Fill)
         .with_layout(|layout| layout.padding_right = Some(LengthSpec::Px(4.0)));
@@ -370,7 +370,7 @@ fn submit_message() -> ShellMessage {
     ShellMessage::Sidebar(SidebarMessage::SubmitSmartFolder)
 }
 
-/// 「创建 / 保存」：保存中转圈并标忙（Vue `primary` 按钮的 loading）。
+/// 「创建 / 保存」：保存中转圈并标忙。
 fn smart_submit(view: Signal<SmartDialogView>) -> AnyView {
     action_button(
         move || view.with(|view| view.action.to_string()),

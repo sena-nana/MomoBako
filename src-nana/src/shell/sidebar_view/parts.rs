@@ -1,10 +1,8 @@
 //! 侧栏零件：导航行、分组标题、标题工具、空状态说明和底部入口，以及常驻侧栏按信号改字段用的写入器。
 //!
-//! 尺寸、字号和状态色照 Vue `shell.css` 里 `workspace-*` 类声明的设计值：导航行 28px、
-//! 分组标题 24px、标题工具 22px、底部入口 26px。Lilia 全局 `button { height: 32px }` 会把
-//! 只写了 `min-height` 的导航行顶成 32px，这里按组件自己声明的 28px 画。
-//! 颜色只写语义角色，行里的图标和文字继承行的前景色，悬停和当前态由行的交互样式整体切换，
-//! 和 Vue 的 `color` 继承一致。
+//! 尺寸、字号和状态色按组件的设计值：导航行 28px、分组标题 24px、标题工具 22px、底部入口 26px。
+//! 导航行按自己的 28px 画，不被全局按钮高度顶成 32px。
+//! 颜色只写语义角色，行里的图标和文字继承行的前景色，悬停和当前态由行的交互样式整体切换。
 //!
 //! 侧栏常驻以后，导航行、标题工具和底部入口的当前态、禁用和计数都按信号绑定：建一次，之后只改
 //! 那几个字段。绑定的取值函数是可复制的闭包，同一行的几个字段各绑一份。
@@ -20,13 +18,13 @@ use nana_ui::{ControlSize, Icon};
 
 use crate::theme_map::{DISABLED_OPACITY, disabled_paint};
 
-/// 导航行高度：`.workspace-shortcuts__item` 的 `min-height: 28px`。
+/// 导航行高度。
 const NAV_ROW_HEIGHT: f32 = 28.0;
-/// 分组标题高度：`.workspace-group__header { height: 24px }`。
+/// 分组标题高度。
 const GROUP_HEADER_HEIGHT: f32 = 24.0;
-/// 标题工具：`.workspace-tree-action` 22×22。
+/// 标题工具：22×22。
 const TREE_ACTION_EDGE: f32 = 22.0;
-/// 底部入口：`.workspace-footer__btn` 26×26。
+/// 底部入口：26×26。
 const FOOTER_BUTTON_EDGE: f32 = 26.0;
 
 /// 侧栏行的状态色。`accent` 为 true 时当前态是强调色（快捷方式、底部入口），
@@ -37,7 +35,7 @@ pub(crate) enum ActiveTone {
     Neutral,
 }
 
-/// 侧栏行的节点样式。`height` 和左右内边距按 Vue 的类给，悬停和当前态换底色和前景。
+/// 侧栏行的节点样式。`height` 和左右内边距按行的种类给，悬停和当前态换底色和前景。
 pub(crate) fn row_style(
     height: f32,
     pad_left: f32,
@@ -90,7 +88,7 @@ pub(crate) fn row_style(
     style.interaction = InteractionStyle {
         hovered: hover,
         pressed: hover,
-        // Vue 的 `.is-active` 写在 `:hover` 之后、同优先级，悬停不改当前行的颜色。
+        // 当前态优先，悬停不改当前行的颜色。
         selected: current,
         selected_hovered: current,
         selected_pressed: current,
@@ -112,7 +110,7 @@ pub(crate) fn primary_button(label: impl Into<String>) -> Button {
     button
 }
 
-/// 不带固定颜色的图标：跟着行的前景色走（Vue 的 `currentColor`）。
+/// 不带固定颜色的图标：跟着行的前景色走。
 pub(crate) fn inherit_icon(icon: Icon, size: f32) -> IconGlyph {
     IconGlyph::new(icon).size(size).style(NodeStyle::default())
 }
@@ -155,7 +153,7 @@ pub(crate) struct NavLook {
     pub count: Option<usize>,
 }
 
-/// 快捷方式这类导航行：图标、名称，右侧计数。对应 `.workspace-shortcuts__item`。
+/// 快捷方式这类导航行：图标、名称，右侧计数。
 ///
 /// 行本身是可聚焦的列表项，无障碍名是行文字。`look` 现读信号，当前态、禁用（连同 0.45 透明度）
 /// 和计数各自绑定；有没有计数这一格按建行时的取值定。禁用的列表项收不到激活，处理器不再判断。
@@ -208,7 +206,7 @@ pub(crate) fn nav_row(
     .into_any()
 }
 
-/// 分组标题：11px 粗体弱色字，右侧工具。对应 `.workspace-group__header`。
+/// 分组标题：11px 粗体弱色字，右侧工具。
 /// `title` 可以是一段文字，也可以是播放集那样可点的标题按钮。
 pub(crate) fn group_header(title: AnyView, tools: Vec<AnyView>, key: &'static str) -> AnyView {
     let tools = (!tools.is_empty()).then(|| {
@@ -240,10 +238,10 @@ pub(crate) fn group_title(value: &str) -> Text {
     node
 }
 
-/// 分组标题右侧的小图标按钮。对应 `.workspace-tree-action`：22×22、`--radius-xs`、弱色 13px 图标。
+/// 分组标题右侧的小图标按钮：22×22、`--radius-xs`、弱色 13px 图标。
 /// 禁用按 `disabled` 绑定，常量也行。返回元素本身，调用方还能再绑图标。
 ///
-/// 停用时照 Vue `button:disabled` 的 0.45 把弱色和侧栏底色（`--bg-elev`）在 sRGB 里混成不透明色，
+/// 停用时按 0.45 把弱色和侧栏底色（`--bg-elev`）在 sRGB 里混成不透明色，
 /// 颜色照写的来（`colors_from_style`），NanaUI 不再整枚淡化。播放集行上的「播放」不走这一个底色，
 /// 选中时改和 `--accent-soft` 混，见 [`PlayBase`]。
 pub(crate) fn tree_action(
@@ -287,7 +285,7 @@ pub(crate) fn tree_action_titled(
 
 /// 播放集行「播放」的停用底色：这一行选中时是 `--accent-soft`，否则仍是侧栏底。
 ///
-/// Vue 里这个按钮底是透明的，字色 `--text-faint`，停用靠 `button:disabled { opacity: 0.45 }`。
+/// 这个按钮底是透明的，字色 `--text-faint`，停用时整颗 0.45 不透明。
 /// 选中行的底是 `--accent-soft`（深色主题约 0.14、浅色约 0.10 的强调色），半透明字形会透出那一点强调色；
 /// 没选中时行没有这层底，透出来的是侧栏 `--bg-elev`。这里不改 NanaUI 的混合，只按行换 `disabled_paint`
 /// 的底色。`--accent-soft` 自己带透明度，和它混出的字色也带着透明度，画上去会再叠一行底。
@@ -363,7 +361,7 @@ fn hover_paint() -> SemanticPaint {
     }
 }
 
-/// 分组里的空状态说明。对应 `.workspace-empty--compact` + `.workspace-empty__text`：
+/// 分组里的空状态说明：
 /// 内边距 6px 8px，12px 弱色，行高 1.5。
 pub(crate) fn empty_hint(copy: &str, key: impl Into<String>) -> AnyView {
     widget(Stack::column(0.0).padding_xy(8.0, 6.0))
@@ -394,14 +392,14 @@ fn hint_text(copy: &str) -> Text {
     node
 }
 
-/// 底部入口的状态：当前入口，以及任务入口有任务时的强调（Vue `.task-button.has-tasks`）。
+/// 底部入口的状态：当前入口，以及任务入口有任务时的强调。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct FooterLook {
     pub active: bool,
     pub highlight: bool,
 }
 
-/// 底部入口按钮。对应 `.workspace-footer__btn`：26×26、14px 图标、`--text-muted`；
+/// 底部入口按钮：26×26、14px 图标、`--text-muted`；
 /// 当前入口 `--accent-soft` 底、强调色，其余按 `rest` 透明度（悬停底栏时为 1）。
 ///
 /// 颜色按 `look` 绑定；平时的半透明随底栏悬停淡入淡出，绑在热信号 `rest` 上，当前入口和有任务时
@@ -438,8 +436,8 @@ pub(crate) fn footer_button(
         .into_any()
 }
 
-/// 底部入口的前景、底色和悬停按下的样子。当前入口悬停也保持强调色底，和 `.is-active` 压过
-/// `:hover` 一致。
+/// 底部入口的前景、底色和悬停按下的样子。当前入口悬停也保持强调色底：
+/// 当前态压过悬停。
 fn footer_paint(look: FooterLook) -> (SemanticColorRole, Option<SemanticColorRole>, SemanticPaint) {
     let foreground = if look.active || look.highlight {
         SemanticColorRole::Accent
@@ -482,7 +480,7 @@ impl FieldWrite<IconButton, FooterLook> for FooterPaint {
     }
 }
 
-/// 列表项的禁用：不可点，整行 0.45 透明度（Vue `button:disabled`）。
+/// 列表项的禁用：不可点，整行 0.45 透明度。
 pub(crate) struct DimmedRow;
 
 impl FieldWrite<ListItem, bool> for DimmedRow {
