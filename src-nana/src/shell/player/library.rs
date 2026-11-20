@@ -1,6 +1,6 @@
 //! 播放列表成员、按路径加入和排序。
 //!
-//! 这些只改播放器状态并留下副作用请求，真正的读写由 `player_dispatch` 交给仓库服务。成员写回以后要重读哪些
+//! 这些只改播放器状态并留下副作用请求，真正的读写由 `dispatch::player` 交给仓库服务。成员写回以后要重读哪些
 //! 播放集由 `shell/player/reduce.rs` 交给侧栏。
 
 use std::collections::BTreeMap;

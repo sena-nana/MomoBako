@@ -1,7 +1,7 @@
 //! 播放列表当前项的装载：音频、视频和图片幻灯片。
 //!
 //! 条目路径是仓库内相对路径，字节必须经仓库服务读取。归约只留下 `LoadItem` 请求并把会话
-//! 置为 loading；`player_dispatch` 读出字节、解码后用 `ItemLoaded` 送回，这里再装进同一游标。
+//! 置为 loading；`dispatch::player` 读出字节、解码后用 `ItemLoaded` 送回，这里再装进同一游标。
 //! 代次或当前项变了的结果直接丢弃。测试构建的出声仍不打开声卡。
 
 use super::super::inspect::{InspectState, PreviewBody};
@@ -369,7 +369,7 @@ fn is_clip_extension(extension: &str) -> bool {
         .any(|item| item.eq_ignore_ascii_case(extension))
 }
 
-/// 测试里代替 `player_dispatch`：按请求里的路径直接读文件、解码并送回。其它副作用原样放回。
+/// 测试里代替 `dispatch::player`：按请求里的路径直接读文件、解码并送回。其它副作用原样放回。
 #[cfg(test)]
 pub(crate) fn fulfill_loads(model: &mut super::super::ShellViewModel) {
     let effects = model.player.take_effects();

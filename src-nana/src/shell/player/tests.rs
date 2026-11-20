@@ -62,7 +62,7 @@ fn load_list(model: &mut ShellViewModel, playlists: Vec<PlaylistSummary>) {
     ));
 }
 
-/// 发一条播放消息。当前项的读取请求像 `player_dispatch` 一样当场读文件送回。
+/// 发一条播放消息。当前项的读取请求像 `dispatch::player` 一样当场读文件送回。
 fn send(model: &mut ShellViewModel, message: PlayerMessage) {
     model.reduce(ShellMessage::Player(message));
     super::fulfill_loads(model);

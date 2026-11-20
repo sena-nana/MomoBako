@@ -139,7 +139,7 @@ fn sidebar_reads_report_like_vue() {
     // 宿主的准备帧：交出侧栏排下的目录读取，记下文件列在读，再提交。
     fn prepare(model: &mut ShellViewModel) {
         model.stage_browses();
-        crate::sidebar_dispatch::dispatch_prepared_browses(model);
+        crate::dispatch::sidebar::dispatch_prepared_browses(model);
     }
     let mut model = files_page();
     model.reduce(ShellMessage::Sidebar(SidebarMessage::SelectShortcut(
@@ -905,7 +905,7 @@ fn snapshot_tree_replaces_the_sidebar_folders() {
 #[test]
 fn protocol_tree_replaces_the_sidebar_folders() {
     use crate::backend::services::repository::{FileBrowserSnapshot, FileTreeNode};
-    use crate::files_dispatch::protocol_folder_tree;
+    use crate::dispatch::files::protocol_folder_tree;
     let node = |path: &str, file_count: usize| FileTreeNode {
         path: path.into(),
         label: path.into(),

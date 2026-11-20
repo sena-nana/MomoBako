@@ -3,9 +3,6 @@
 //! 只在启动就绪时写入列表、名称和侧栏计数。
 //! 不改页面、不推进启动步骤，也不清空缺失仓库已经显示的内容。
 
-use nana_ui::RuntimeProgramContext;
-
-use crate::MomoBakoApplication;
 use crate::backend::services::repository::{RepositorySnapshot, RepositorySummary};
 
 use super::{ShellMessage, ShellViewModel, WorkspaceRepository};
@@ -108,51 +105,6 @@ pub(super) fn apply_snapshot(
     model.repository_name = snapshot.repository.name.clone();
     model.repository_id = Some(snapshot.repository.repo_id.clone());
     model.note_library_snapshot(&snapshot);
-}
-
-/// 后台读取仓库列表。失败（含服务没起来、任务排不进去和 panic，`task_guard.rs`）交回静默归约，不增加列表代次。
-pub(crate) fn dispatch_silent_list(
-    app: &MomoBakoApplication,
-    context: &RuntimeProgramContext<ShellMessage>,
-) {
-    let failed = |error| ShellMessage::SilentWorkspace(SilentMessage::Repositories(Err(error)));
-    crate::task_guard::spawn_service(
-        app.services.as_ref(),
-        context,
-        "静默资源库列表",
-        failed,
-        |services| {
-            let query = services.repository_query.clone();
-            move || {
-                ShellMessage::SilentWorkspace(SilentMessage::Repositories(
-                    query.list_repositories(),
-                ))
-            }
-        },
-    );
-}
-
-/// 后台读取仓库摘要。失败走静默消息，不把页面改成错误。
-pub(crate) fn dispatch_silent_snapshot(
-    app: &MomoBakoApplication,
-    context: &RuntimeProgramContext<ShellMessage>,
-    repo_id: String,
-) {
-    let failed = |error| ShellMessage::SilentWorkspace(SilentMessage::Snapshot(Err(error)));
-    crate::task_guard::spawn_service(
-        app.services.as_ref(),
-        context,
-        "静默资源库摘要",
-        failed,
-        |services| {
-            let query = services.repository_query.clone();
-            move || {
-                ShellMessage::SilentWorkspace(SilentMessage::Snapshot(
-                    query.get_repository_snapshot(repo_id),
-                ))
-            }
-        },
-    );
 }
 
 #[cfg(test)]

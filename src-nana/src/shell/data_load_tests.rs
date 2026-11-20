@@ -296,8 +296,8 @@ fn a_panicking_settings_bundle_task_still_finishes_the_startup() {
     let mut model = ShellViewModel::default();
     launch(&mut model, REPO);
     admin_effects(&mut model);
-    let failed = crate::admin_dispatch::failed_bundle_message;
-    model.reduce(crate::task_guard::tests::run_guarded(
+    let failed = crate::dispatch::admin::failed_bundle_message;
+    model.reduce(crate::dispatch::task_guard::tests::run_guarded(
         "设置页数据",
         failed,
         || panic!("插件宿主没有响应"),
@@ -330,8 +330,8 @@ fn a_panicking_player_type_task_still_finishes_the_startup() {
     launch(&mut model, REPO);
     admin_effects(&mut model);
     model.reduce(bundle(Vec::new()));
-    let failed = crate::admin_dispatch::players_failed;
-    model.reduce(crate::task_guard::tests::run_guarded(
+    let failed = crate::dispatch::admin::players_failed;
+    model.reduce(crate::dispatch::task_guard::tests::run_guarded(
         "播放器类型",
         failed,
         || panic!("播放器清单解析出错"),

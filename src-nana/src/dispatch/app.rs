@@ -1,19 +1,19 @@
 //! 按壳层消息派发领域服务任务。
 //!
-//! `MomoBakoApplication::update` 在归约之前调用 [`dispatch_services`]：播放集条目移除、
+//! `MomoBakoApplication::update` 在归约之前调用 [`on_message`]：播放集条目移除、
 //! 打开目录和读文件元数据这些消息各自提交一个后台任务，结果再作为新消息回到 `update`。页面数据的读取不在这里，
-//! 由归约排出副作用，再由各 `*_dispatch` 交给领域服务。任务都经 `task_guard` 派发：服务没起来、任务排不进去或
+//! 由归约排出副作用，再由 `dispatch` 下各表面的 `effects` 交给领域服务。任务都经 `task_guard` 派发：服务没起来、任务排不进去或
 //! panic 时按失败经事件循环送回，排在这条消息之后，不会先于它归约。
 
 use nana_ui::RuntimeProgramContext;
 
 use crate::MomoBakoApplication;
 use crate::backend::services::repository::FileBrowserRequest;
+use crate::dispatch::task_guard::spawn_service;
 use crate::shell::ShellMessage;
-use crate::task_guard::spawn_service;
 
 /// 归约前提交这条消息需要的服务任务。
-pub(crate) fn dispatch_services(
+pub(crate) fn on_message(
     app: &MomoBakoApplication,
     message: &ShellMessage,
     context: &RuntimeProgramContext<ShellMessage>,

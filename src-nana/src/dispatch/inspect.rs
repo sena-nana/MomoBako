@@ -13,18 +13,18 @@ use crate::backend::services::repository::{
     FilePreviewSourceResponse, FileReadRequest, MetadataUpdateRequest, SearchDateFilter,
     SearchMetadataFilter, SearchNumberFilter, SearchRequest, SearchSort,
 };
-use crate::playback_source::{Requester, prepare_and_read};
+use crate::dispatch::playback_source::{Requester, prepare_and_read};
+use crate::dispatch::task_guard::spawn_service;
 use crate::shell::inspect_lyrics::{self, LyricHint};
 use crate::shell::{
     DateBound, InspectEffect, InspectMessage, NumberBound, SearchRequestDraft, SearchRow,
     ShellMessage,
 };
 use crate::shell::{SourcePrep, is_video_extension};
-use crate::task_guard::spawn_service;
 use crate::{MomoBakoApplication, decode_preview_pixels, prepare_preview_text};
 
 /// 执行预览和搜索归约留下的请求。
-pub fn dispatch_inspect_effects(
+pub(crate) fn effects(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
 ) {
@@ -208,7 +208,7 @@ struct MediaRequest {
 }
 
 /// 读出音视频并解码。本地条目经仓库服务读字节；在线条目先经 `momobako.playback.prepare` 准备播放源、读准备好的
-/// 本地文件（`playback_source.rs`），准备失败时标成可以重试，预览框给「重试」。
+/// 本地文件（`dispatch/playback_source.rs`），准备失败时标成可以重试，预览框给「重试」。
 fn dispatch_media(
     app: &MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,

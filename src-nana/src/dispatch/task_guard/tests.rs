@@ -202,8 +202,8 @@ fn every_task_goes_through_the_guard() {
             .filter(|line| line.contains(".run_task("))
             .count();
         match name.as_str() {
-            "task_guard.rs" => guarded += count,
-            "task_guard/tests.rs" => {}
+            "dispatch/task_guard.rs" => guarded += count,
+            "dispatch/task_guard/tests.rs" => {}
             _ if count > 0 => offenders.push(format!("{}：{count} 处", path.display())),
             _ => {}
         }

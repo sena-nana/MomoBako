@@ -85,7 +85,7 @@ fn download_playlist(model: &mut ShellViewModel) -> DownloadRun {
 }
 
 /// 右键歌单目录「夜曲」→「下载歌单到其他资源库」→ 选第三资源库：交回场景和归约交给宿主的那次下载、载荷和导入到
-/// 的文件夹。宿主一侧的测试从这里接着跑（`download_dispatch/tests.rs`）。
+/// 的文件夹。宿主一侧的测试从这里接着跑（`dispatch::download/tests.rs`）。
 pub(crate) fn chosen_playlist_download() -> (
     ShellViewModel,
     DownloadRun,

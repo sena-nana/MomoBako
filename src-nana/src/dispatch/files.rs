@@ -6,11 +6,11 @@
 
 use nana_ui::RuntimeProgramContext;
 
-mod files_effect_dispatch;
-mod files_protocol_dispatch;
+mod effects;
+mod protocol;
 
 #[cfg(test)]
-pub(crate) use files_protocol_dispatch::protocol_folder_tree;
+pub(crate) use protocol::protocol_folder_tree;
 
 use crate::MomoBakoApplication;
 use crate::backend::services::mutsuki_runner::{
@@ -20,11 +20,11 @@ use crate::backend::services::repository::{
     EagleLibraryImportRequest, EntryDeleteRequest, FileArchiveImportRequest, FileCopyRequest,
     FileImportRequest, FileMoveRequest,
 };
+use crate::dispatch::task_guard::spawn_service;
 use crate::shell::{FilesEffect, FilesMessage, ShellMessage, display_mode_path};
-use crate::task_guard::spawn_service;
 
 /// 执行文件归约留下的请求。
-pub fn dispatch_files_effects(
+pub(crate) fn effects(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
 ) {
@@ -38,9 +38,7 @@ pub fn dispatch_files_effects(
                 limit,
                 ..
             } => {
-                files_effect_dispatch::dispatch_browse(
-                    app, context, repo_id, path, trash, offset, limit,
-                );
+                effects::dispatch_browse(app, context, repo_id, path, trash, offset, limit);
             }
             FilesEffect::PrefetchVirtualPage {
                 repo_id,
@@ -49,29 +47,27 @@ pub fn dispatch_files_effects(
                 offset,
                 limit,
             } => {
-                files_effect_dispatch::dispatch_virtual_page(
-                    app, context, repo_id, path, trash, offset, limit,
-                );
+                effects::dispatch_virtual_page(app, context, repo_id, path, trash, offset, limit);
             }
             FilesEffect::CreateDirectory {
                 repo_id,
                 parent,
                 name,
             } => {
-                files_effect_dispatch::dispatch_create(app, context, repo_id, parent, name, true);
+                effects::dispatch_create(app, context, repo_id, parent, name, true);
             }
             FilesEffect::CreateFile {
                 repo_id,
                 parent,
                 name,
             } => {
-                files_effect_dispatch::dispatch_create(app, context, repo_id, parent, name, false);
+                effects::dispatch_create(app, context, repo_id, parent, name, false);
             }
             FilesEffect::Rename {
                 repo_id,
                 path,
                 new_name,
-            } => files_effect_dispatch::dispatch_rename(app, context, repo_id, path, new_name),
+            } => effects::dispatch_rename(app, context, repo_id, path, new_name),
             FilesEffect::Copy {
                 repo_id,
                 sources,
@@ -83,18 +79,11 @@ pub fn dispatch_files_effects(
                     parent_path: parent,
                     mode: Some("hardlinkPreferred".into()),
                 };
-                files_protocol_dispatch::dispatch_protocol(
-                    app,
-                    context,
-                    "复制",
-                    true,
-                    true,
-                    move |tasks| {
-                        tasks
-                            .run::<EntryCopy>(request)
-                            .map(|output| Some(output.result))
-                    },
-                );
+                protocol::dispatch_protocol(app, context, "复制", true, true, move |tasks| {
+                    tasks
+                        .run::<EntryCopy>(request)
+                        .map(|output| Some(output.result))
+                });
             }
             FilesEffect::Move {
                 repo_id,
@@ -106,18 +95,11 @@ pub fn dispatch_files_effects(
                     source_paths: sources,
                     parent_path: parent,
                 };
-                files_protocol_dispatch::dispatch_protocol(
-                    app,
-                    context,
-                    "移动",
-                    false,
-                    true,
-                    move |tasks| {
-                        tasks
-                            .run::<EntryMove>(request)
-                            .map(|output| Some(output.result))
-                    },
-                );
+                protocol::dispatch_protocol(app, context, "移动", false, true, move |tasks| {
+                    tasks
+                        .run::<EntryMove>(request)
+                        .map(|output| Some(output.result))
+                });
             }
             FilesEffect::Import {
                 repo_id,
@@ -130,18 +112,11 @@ pub fn dispatch_files_effects(
                     source_paths: sources,
                     skip_existing: false,
                 };
-                files_protocol_dispatch::dispatch_protocol(
-                    app,
-                    context,
-                    "导入",
-                    false,
-                    false,
-                    move |tasks| {
-                        tasks
-                            .run::<EntryImport>(request)
-                            .map(|output| Some(output.result.snapshot))
-                    },
-                );
+                protocol::dispatch_protocol(app, context, "导入", false, false, move |tasks| {
+                    tasks
+                        .run::<EntryImport>(request)
+                        .map(|output| Some(output.result.snapshot))
+                });
             }
             FilesEffect::ImportArchive {
                 repo_id,
@@ -153,7 +128,7 @@ pub fn dispatch_files_effects(
                     parent_path: parent,
                     archive_path,
                 };
-                files_protocol_dispatch::dispatch_protocol(
+                protocol::dispatch_protocol(
                     app,
                     context,
                     "压缩包导入",
@@ -201,91 +176,71 @@ pub fn dispatch_files_effects(
                 paths,
                 mode,
             } => {
-                files_protocol_dispatch::dispatch_protocol(
-                    app,
-                    context,
-                    "删除",
-                    false,
-                    true,
-                    move |tasks| {
-                        if paths.is_empty() {
-                            return Ok(None);
-                        }
-                        tasks
-                            .run::<EntryDelete>(EntryDeleteRequest::Batch {
-                                repo_id,
-                                paths,
-                                mode,
-                            })
-                            .map(|output| output.result.snapshot)
-                    },
-                );
+                protocol::dispatch_protocol(app, context, "删除", false, true, move |tasks| {
+                    if paths.is_empty() {
+                        return Ok(None);
+                    }
+                    tasks
+                        .run::<EntryDelete>(EntryDeleteRequest::Batch {
+                            repo_id,
+                            paths,
+                            mode,
+                        })
+                        .map(|output| output.result.snapshot)
+                });
             }
             FilesEffect::MutateTrash {
                 repo_id,
                 action,
                 paths,
-            } => files_protocol_dispatch::dispatch_trash(app, context, repo_id, action, paths),
-            FilesEffect::LoadHardlinks { repo_id, epoch } => {
-                files_protocol_dispatch::dispatch_hardlinks(
-                    app,
-                    context,
-                    repo_id,
-                    files_protocol_dispatch::HardlinkRead::Load,
-                    epoch,
-                )
-            }
-            FilesEffect::RefreshHardlinks { repo_id, epoch } => {
-                files_protocol_dispatch::dispatch_hardlinks(
-                    app,
-                    context,
-                    repo_id,
-                    files_protocol_dispatch::HardlinkRead::Refresh,
-                    epoch,
-                )
-            }
-            FilesEffect::CheckHardlinks { repo_id, epoch } => {
-                files_protocol_dispatch::dispatch_hardlinks(
-                    app,
-                    context,
-                    repo_id,
-                    files_protocol_dispatch::HardlinkRead::Check,
-                    epoch,
-                )
-            }
+            } => protocol::dispatch_trash(app, context, repo_id, action, paths),
+            FilesEffect::LoadHardlinks { repo_id, epoch } => protocol::dispatch_hardlinks(
+                app,
+                context,
+                repo_id,
+                protocol::HardlinkRead::Load,
+                epoch,
+            ),
+            FilesEffect::RefreshHardlinks { repo_id, epoch } => protocol::dispatch_hardlinks(
+                app,
+                context,
+                repo_id,
+                protocol::HardlinkRead::Refresh,
+                epoch,
+            ),
+            FilesEffect::CheckHardlinks { repo_id, epoch } => protocol::dispatch_hardlinks(
+                app,
+                context,
+                repo_id,
+                protocol::HardlinkRead::Check,
+                epoch,
+            ),
             FilesEffect::ConfirmHardlink {
                 repo_id,
                 candidate_id,
             } => {
-                files_protocol_dispatch::dispatch_confirm_hardlink(
-                    app,
-                    context,
-                    repo_id,
-                    candidate_id,
-                );
+                protocol::dispatch_confirm_hardlink(app, context, repo_id, candidate_id);
             }
             FilesEffect::LoadAsset { repo_id, asset_id } => {
-                files_protocol_dispatch::dispatch_asset(app, context, repo_id, asset_id)
+                protocol::dispatch_asset(app, context, repo_id, asset_id)
             }
             FilesEffect::PersistDisplayMode => {
                 app.shell.files.save_display_mode_file(&display_mode_path())
             }
-            FilesEffect::DecodeThumbnails { paths } => {
-                files_effect_dispatch::dispatch_thumbnails(context, paths)
-            }
+            FilesEffect::DecodeThumbnails { paths } => effects::dispatch_thumbnails(context, paths),
             FilesEffect::EnsureThumbnail {
                 repo_id,
                 path,
                 source_url,
             } => {
-                files_effect_dispatch::dispatch_ensure(app, context, repo_id, path, source_url);
+                effects::dispatch_ensure(app, context, repo_id, path, source_url);
             }
             FilesEffect::SaveCover {
                 repo_id,
                 path,
                 source_url,
             } => {
-                files_effect_dispatch::dispatch_save_cover(app, context, repo_id, path, source_url);
+                effects::dispatch_save_cover(app, context, repo_id, path, source_url);
             }
             FilesEffect::MutateThumbnail {
                 repo_id,
@@ -295,7 +250,7 @@ pub fn dispatch_files_effects(
                 source_path,
                 image_bytes,
             } => {
-                files_effect_dispatch::dispatch_thumbnail(
+                effects::dispatch_thumbnail(
                     app,
                     context,
                     repo_id,
@@ -314,10 +269,10 @@ pub fn dispatch_files_effects(
                 encrypt,
                 password,
             } => {
-                files_protocol_dispatch::dispatch_export(
+                protocol::dispatch_export(
                     app,
                     context,
-                    files_protocol_dispatch::archive_export(
+                    protocol::archive_export(
                         repo_id,
                         format,
                         output_path,
@@ -333,10 +288,10 @@ pub fn dispatch_files_effects(
                 branch,
                 message,
             } => {
-                files_protocol_dispatch::dispatch_export(
+                protocol::dispatch_export(
                     app,
                     context,
-                    files_protocol_dispatch::git_export(repo_id, remote, branch, message),
+                    protocol::git_export(repo_id, remote, branch, message),
                 );
             }
             FilesEffect::CopyText(text) => {

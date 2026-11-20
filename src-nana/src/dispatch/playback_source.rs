@@ -1,7 +1,7 @@
 //! 在线条目的播放源：经 Mutsuki 协议 `momobako.playback.prepare` 让来源插件把音频准备到本地，再读这个本地文件。
 //!
 //! 网易云这类来源资源库里的单曲是虚拟条目（`is_virtual`），仓库里没有文件，`read_file` 读不到。预览页和播放条遇到
-//! 在线条目时在任务线程里跑一次这个协议（`inspect_dispatch.rs`、`player_dispatch.rs`），本地条目照旧直接读字节。
+//! 在线条目时在任务线程里跑一次这个协议（`dispatch/inspect.rs`、`dispatch/player.rs`），本地条目照旧直接读字节。
 //!
 //! - Nana 的解码只认本地文件：用响应里的 `localPath`，没有时用 `tempFilePath`（网易云插件两者相同，都在资源库
 //!   本地缓存的 `.momo/cache/netease-playback` 下）。来源只交回网址（`sourceUrl`）时不另去下载它，按失败交回。

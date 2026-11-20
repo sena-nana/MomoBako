@@ -9,12 +9,12 @@ use serde_json::json;
 
 use crate::MomoBakoApplication;
 use crate::backend::services::repository::EntryAccessRecordRequest;
+use crate::dispatch::task_guard::spawn_service;
 use crate::shell::ShellMessage;
 use crate::shell::library::LibraryEffect;
-use crate::task_guard::spawn_service;
 
 /// 执行资源库素材归约留下的请求。
-pub fn dispatch_library_effects(
+pub(crate) fn effects(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
 ) {

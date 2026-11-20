@@ -8,14 +8,14 @@ use crate::backend::services::mutsuki_runner::{RepositoryAttach, RepositoryCreat
 use crate::backend::services::repository::{
     FileBrowserRequest, RecentAccessHistoryClearRequest, RepositoryFolderRequest,
 };
+use crate::dispatch::task_guard::spawn_service;
 use crate::shell::{
     FileRow, ShellMessage, SidebarEffect, SidebarMessage, SidebarSmartFolder, SidebarTree,
     SmartFolderChange, SmartFolderOutcome, SmartFolderResult, VirtualQuery,
 };
-use crate::task_guard::spawn_service;
 
 /// 执行侧栏归约留下的请求。
-pub fn dispatch_sidebar_effects(
+pub(crate) fn effects(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
 ) {

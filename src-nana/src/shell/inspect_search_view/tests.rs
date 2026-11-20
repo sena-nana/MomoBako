@@ -293,8 +293,8 @@ fn search_failed_scene_shows_only_the_service_error() {
         .expect("search-failed 场景");
     assert!(!model.workspace.repositories.is_empty(), "场景里应有资源库");
     assert!(model.inspect.results.is_empty(), "失败不该编造命中");
-    let error =
-        crate::task_guard::failure_when_services_missing("搜索").expect("服务没起来应有失败原因");
+    let error = crate::dispatch::task_guard::failure_when_services_missing("搜索")
+        .expect("服务没起来应有失败原因");
     assert_eq!(model.inspect.search_error, error);
     assert_eq!(error, "领域服务未启动");
     let nodes = ShellHarness::mount(model).nodes();

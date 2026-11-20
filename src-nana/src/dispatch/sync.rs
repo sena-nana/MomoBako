@@ -1,18 +1,18 @@
 //! 把文件夹树「刷新」的服务请求交给领域服务：同步仓库走启动时同一个长任务 `RepositorySync`，
 //! 同步完以后在一个后台任务里重读仓库摘要、硬链接候选和目录树。结果作为 `ShellMessage::TreeSync`
-//! 回到 `update` 归约。服务没起来、任务排不进去或任务 panic 时按失败写回（`task_guard.rs`），刷新不会停在进行中。
+//! 回到 `update` 归约。服务没起来、任务排不进去或任务 panic 时按失败写回（`dispatch/task_guard.rs`），刷新不会停在进行中。
 
 use nana_ui::RuntimeProgramContext;
 
 use crate::MomoBakoApplication;
 use crate::backend::services::mutsuki_runner::RepositorySync;
 use crate::backend::services::repository::SyncRequest;
+use crate::dispatch::task_guard::spawn_service;
 use crate::shell::tree_sync::{TreeSyncEffect, TreeSyncMessage, TreeSyncRefresh};
 use crate::shell::{HardlinkPrompt, ShellMessage, SidebarTree};
-use crate::task_guard::spawn_service;
 
 /// 执行刷新文件夹树归约留下的请求。
-pub(crate) fn dispatch_tree_sync_effects(
+pub(crate) fn effects(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
 ) {

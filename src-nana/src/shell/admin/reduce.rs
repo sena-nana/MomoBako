@@ -1,7 +1,7 @@
 //! 设置、插件、日志、任务和来源登录的消息归约。
 //!
 //! 包括插件操作的提示文案、字段规范化、日志筛选、任务弹层的开关、
-//! 主题和圆角的即时保存。只改状态并排副作用，真正的服务调用在 `admin_dispatch`。
+//! 主题和圆角的即时保存。只改状态并排副作用，真正的服务调用在 `dispatch::admin`。
 
 use crate::backend::services::repository::{
     PluginConfigSnapshot, PluginManifest, RepositoryAction,

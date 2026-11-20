@@ -98,7 +98,7 @@ fn search_failed_scene() -> ShellViewModel {
         eprintln!("Nana 搜索失败场景没有等到搜索请求：{}", model.inspect.query);
         return model;
     };
-    let Some(error) = crate::task_guard::failure_when_services_missing("搜索") else {
+    let Some(error) = crate::dispatch::task_guard::failure_when_services_missing("搜索") else {
         eprintln!("Nana 搜索失败场景没有拿到服务未启动时的失败原因");
         return model;
     };

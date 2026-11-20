@@ -12,7 +12,7 @@ use super::{DownloadServices, run};
 use crate::backend::services::repository::{
     FileImportRequest, FileImportResponse, PluginCallRequest, SystemLogWriteRequest,
 };
-use crate::download_staging::tests::Scratch;
+use crate::dispatch::download::staging::tests::Scratch;
 use crate::shell::ShellMessage;
 use crate::shell::admin::AdminMessage;
 use crate::shell::admin::source_download::DownloadRun;

@@ -1,10 +1,12 @@
 //! 来源「下载到其他资源库」（目标 `writable-repository`）的宿主一侧。
 //!
-//! 给这次下载新建一个暂存目录（`download_staging.rs`），写进载荷的 `destination.stagingPath` 再调用插件；把下载回来
+//! 给这次下载新建一个暂存目录（`dispatch/download/staging.rs`），写进载荷的 `destination.stagingPath` 再调用插件；把下载回来
 //! 的文件（`paths` 和 `completed[].paths`）导入目标资源库，下载歌单时导入以歌单命名的文件夹，目标里还没有这个文件夹
 //! 就先建，不让导入报「directory not found」。导入带 `skipExisting`：目标里已有同名文件的保留原文件、不导入，
 //! 其余照常导入，不因为一个同名就整批失败。导入完成（包括跳过）以后清掉这次暂存的文件，再同步目标资源库；
 //! 导入失败时暂存的文件留着，位置写进系统日志。哪一步失败都把原因交回，不留在进行中。
+
+pub(crate) mod staging;
 
 use std::path::Path;
 
@@ -18,12 +20,12 @@ use crate::backend::services::repository::{
     FileCreateRequest, FileImportRequest, FileImportResponse, PluginCallRequest, SyncRequest,
     SystemLogLocationInput, SystemLogWriteRequest,
 };
-use crate::download_staging::{Cleanup, StagingDir, staging_root};
+use crate::dispatch::task_guard::spawn_service;
 use crate::shell::ShellMessage;
 use crate::shell::admin::AdminMessage;
 use crate::shell::admin::source_download::{DownloadOutcome, DownloadRun};
 use crate::shell::admin::source_target::{TargetCandidate, result_paths};
-use crate::task_guard::spawn_service;
+use staging::{Cleanup, StagingDir, staging_root};
 
 /// 下载到其他资源库要用的领域服务。产品里是 `NativeServices` 的 ViewModel（[`LiveServices`]），测试里换成假的。
 pub(crate) trait DownloadServices {
@@ -45,7 +47,7 @@ pub(crate) trait DownloadServices {
 }
 
 /// 来源下载到其他资源库：交给任务线程做完一整趟（[`run`]），结果回 [`AdminMessage::DownloadFinished`]。没有目标
-/// 资源库时当场按失败交回；服务没启动、任务排不进去或任务 panic 时也按失败交回（`task_guard.rs`）。
+/// 资源库时当场按失败交回；服务没启动、任务排不进去或任务 panic 时也按失败交回（`dispatch/task_guard.rs`）。
 pub(crate) fn download_to_repository(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,

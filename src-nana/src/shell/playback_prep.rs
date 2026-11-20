@@ -2,7 +2,7 @@
 //!
 //! 网易云这类来源资源库里的单曲是虚拟条目（`is_virtual`），本地没有文件。播放和预览它们之前要先经后端的
 //! Mutsuki 协议 `momobako.playback.prepare`，由来源插件把音频准备到资源库的本地缓存，再读这个本地文件解码
-//! （宿主派发在 `src-nana/src/playback_source.rs`）。本地条目照旧直接读字节，不走这一步。
+//! （宿主派发在 `src-nana/src/dispatch/playback_source.rs`）。本地条目照旧直接读字节，不走这一步。
 
 /// 播放源准备好时后端写下的一次访问：哪个资源库的哪一条、什么时候。
 #[derive(Clone, Debug, PartialEq, Eq)]

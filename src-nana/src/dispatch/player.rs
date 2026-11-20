@@ -2,23 +2,23 @@
 //!
 //! 成员、排序和按路径添加都没有替身。当前项的字节经仓库服务读取后在任务里解码，
 //! 条目里的相对路径不直接拿去读盘；在线条目先经 `momobako.playback.prepare` 准备播放源，读后端交回的本地文件
-//! （`playback_source.rs`）。任务都经 `task_guard` 派发：服务没起来、任务排不进去或任务 panic（解码器出错）
+//! （`dispatch/playback_source.rs`）。任务都经 `task_guard` 派发：服务没起来、任务排不进去或任务 panic（解码器出错）
 //! 时写回错误，避免界面停在“正在提交”或“读取中”。
 
 use nana_ui::RuntimeProgramContext;
 
 use crate::MomoBakoApplication;
 use crate::backend::services::repository::FileReadRequest;
-use crate::playback_source::{Requester, prepare_and_read};
+use crate::dispatch::playback_source::{Requester, prepare_and_read};
+use crate::dispatch::task_guard::spawn_service;
 use crate::shell::inspect_lyrics::LyricHint;
 use crate::shell::player::{
     PlayerEffect, PlayerMessage, decode_loaded, preferences_path, sessions_path, settings_path,
 };
 use crate::shell::{ShellMessage, SourcePrep};
-use crate::task_guard::spawn_service;
 
 /// 执行播放器归约留下的请求。
-pub fn dispatch_player_effects(
+pub(crate) fn effects(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
 ) {
@@ -196,7 +196,7 @@ struct LoadRequest {
 }
 
 /// 读出当前项，在任务里解码成会话、PCM 和画面，或图片帧。本地条目经仓库服务读字节；在线条目先经
-/// `momobako.playback.prepare` 准备播放源、读准备好的本地文件（`playback_source.rs`），失败时标成可以重试。
+/// `momobako.playback.prepare` 准备播放源、读准备好的本地文件（`dispatch/playback_source.rs`），失败时标成可以重试。
 fn dispatch_load_item(
     app: &MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,

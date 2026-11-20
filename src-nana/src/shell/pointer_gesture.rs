@@ -1034,7 +1034,7 @@ mod tests {
             photos.1,
         );
         prepare_motion(&mut model, &mut window);
-        let requests = crate::sidebar_dispatch::dispatch_prepared_browses(&mut model);
+        let requests = crate::dispatch::sidebar::dispatch_prepared_browses(&mut model);
         window
             .document
             .flush(
@@ -1099,7 +1099,7 @@ mod tests {
             photos.1,
         );
         prepare_motion(&mut model, &mut window);
-        let requests = crate::sidebar_dispatch::dispatch_prepared_browses(&mut model);
+        let requests = crate::dispatch::sidebar::dispatch_prepared_browses(&mut model);
         assert!(
             requests.is_empty(),
             "离开后再进入不应立刻打开：{requests:?}"

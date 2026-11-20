@@ -9,8 +9,8 @@ use crate::backend::services::repository::{
     RepositoryExportRequest, RepositoryExportResponse, RepositoryGitExportOptions,
     TrashMutationRequest,
 };
+use crate::dispatch::task_guard::spawn_service;
 use crate::shell::{FilesMessage, HardlinkPrompt, ProtocolFolderTree, ShellMessage};
-use crate::task_guard::spawn_service;
 
 use super::{files_message, snapshot_message};
 

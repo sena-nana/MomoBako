@@ -19,15 +19,15 @@ use crate::backend::services::repository::{
     RepositoryBackendConfigUpdateRequest, RepositoryMutationRequest, SyncRequest, SystemLogQuery,
     SystemLogWriteRequest,
 };
+use crate::dispatch::task_guard::{spawn, spawn_service};
 use crate::services::NativeServices;
 use crate::shell::admin::api::{self, ApiMessage, HttpRequest};
 use crate::shell::admin::source_download::DownloadOutcome;
 use crate::shell::admin::{AdminEffect, AdminMessage, PluginCallOrigin, SourceStep};
 use crate::shell::{AsmrMessage, ShellMessage};
-use crate::task_guard::{spawn, spawn_service};
 
 /// 执行管理归约留下的请求。同一次更新里新产生的请求会继续发出去。
-pub fn dispatch_admin_effects(
+pub(crate) fn effects(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
 ) {
@@ -172,7 +172,7 @@ fn dispatch_one(
             payload,
             parent_path,
         } => {
-            crate::download_dispatch::download_to_repository(
+            crate::dispatch::download::download_to_repository(
                 app,
                 context,
                 run,

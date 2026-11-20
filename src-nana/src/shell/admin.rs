@@ -1,7 +1,7 @@
 //! 设置、插件、日志、任务和仓库动作的状态。
 //!
 //! 覆盖设置页、插件管理、来源登录、系统日志、任务弹层、拓展页和仓库动作面板。
-//! 消息在 `admin_reduce` 里归约，副作用由 `admin_dispatch` 交给领域服务。
+//! 消息在 `admin_reduce` 里归约，副作用由 `dispatch::admin` 交给领域服务。
 
 use std::collections::BTreeMap;
 

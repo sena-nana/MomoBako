@@ -690,7 +690,7 @@ fn media_detail(path: &str) -> AssetDetail {
     }
 }
 
-/// 打开 `path` 的预览，宿主读完文件后解码以 `error` 失败，和 `inspect_dispatch` 送回的消息一样。
+/// 打开 `path` 的预览，宿主读完文件后解码以 `error` 失败，和 `dispatch::inspect` 送回的消息一样。
 fn failed_media_preview(path: &str, error: &str) -> ShellViewModel {
     let mut model = scene("live-files-plain");
     model.reduce(ShellMessage::SelectFile {
