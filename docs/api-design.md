@@ -145,7 +145,7 @@
   - Current scope supports `.zip` only and preserves the archive's internal directory structure under the target directory.
 - `POST /repositories/{repoId}/files:importEagleLibrary`
   - Request includes `repoId`, optional `parentPath`, `libraryPath`, and `mode: "copy" | "move"`.
-  - The backend uses the native `momobako.service.eagle-importer` plugin to merge EagleLibrary content directly into the active repository directory.
+  - Runs as the long task `momobako.eagle.import`; the host's built-in importer (`src-backend/src/services/repository/eagle_import/`) merges EagleLibrary content directly into the active repository directory. There is no separate importer plugin.
   - Response includes the refreshed file-browser snapshot plus `summary` and structured `warnings`; report data is delivered through the API payload.
 - `POST /repositories/{repoId}/files:move`
   - Request body includes repository-relative `sourcePaths` and target `parentPath`

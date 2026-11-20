@@ -1,8 +1,0 @@
-{
-  "pluginId": "momobako.service.eagle-importer",
-  "build": {
-    "type": "manifest-only",
-    "sourceDir": "src",
-    "outputDir": ".dist/service-eagle-importer"
-  }
-}

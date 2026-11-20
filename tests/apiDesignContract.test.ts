@@ -52,12 +52,11 @@ function manifestApiMethods(pluginDir: string) {
   ].filter((method): method is string => Boolean(method?.trim()));
 }
 
-function embeddedLocalFilesystemMethods() {
-  const source = readFileSync(resolve("src-backend/src/services/repository/mod.rs"), "utf-8");
-  const fallback = source.match(/fn call_builtin_local_filesystem\([\s\S]*?\n}\n\nfn list_backend_files/)?.[0] ?? "";
-  return [...fallback.matchAll(/"([^"]+)"\s*=>/g)]
-    .map((match) => match[1])
-    .filter((method) => method.startsWith("filesystem."));
+function manifestRuntime(pluginDir: string) {
+  const manifest = JSON.parse(
+    readFileSync(resolve("External/Plugins", pluginDir, "manifest.json"), "utf-8"),
+  ) as { runtime?: string };
+  return manifest.runtime;
 }
 
 describe("API design snapshot contract", () => {
@@ -79,19 +78,20 @@ describe("API design snapshot contract", () => {
   it("keeps every backend manifest API declaration represented by its dispatch table", () => {
     const missing = pluginDirs().flatMap((pluginDir) => {
       const dispatchMethods = new Set(backendPluginMethods(pluginDir));
-      // Manifest-only plugins have no dispatch table; their declarations are still
-      // surfaced by api_design.rs and are intentionally not treated as missing.
-      if (dispatchMethods.size === 0) return [];
       return manifestApiMethods(pluginDir)
         .filter((method) => !dispatchMethods.has(method))
         .map((method) => `${pluginDir}:${method}`);
     });
 
-    const localFilesystemCovered = new Set(manifestApiMethods("local-filesystem"));
-    const fallbackMissing = embeddedLocalFilesystemMethods()
-      .filter((method) => !localFilesystemCovered.has(method))
-      .map((method) => `embedded-local-filesystem:${method}`);
+    expect(missing).toEqual([]);
+  });
 
-    expect([...missing, ...fallbackMissing]).toEqual([]);
+  it("keeps manifest-only plugins free of callable API declarations", () => {
+    // manifest-only 插件没有可执行体，声明的方法谁也接不住，调用只会报插件不可用。
+    const callable = pluginDirs()
+      .filter((pluginDir) => manifestRuntime(pluginDir) === "manifest-only")
+      .flatMap((pluginDir) => manifestApiMethods(pluginDir).map((method) => `${pluginDir}:${method}`));
+
+    expect(callable).toEqual([]);
   });
 });

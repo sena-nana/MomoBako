@@ -1,7 +1,7 @@
 //! EagleLibrary 原生导入共享模块。
 //!
-//! 该模块承接 EagleLibrary -> 当前仓库 的直接导入逻辑，
-//! 供宿主与原生后端插件共用同一套实现。
+//! 该模块承接 EagleLibrary -> 当前仓库 的直接导入逻辑，由宿主内建的长任务执行；
+//! `source_adapter` 另供 `source-eagle-library` 插件读取 Eagle 资源库结构。
 
 use self::planner::{
     build_conversion_plan, flatten_folder_nodes, warning, AssetMembership, AssetPlan,
@@ -18,17 +18,9 @@ pub mod source_adapter;
 
 const EAGLE_IMPORTER_PLUGIN_SOURCE: &str = "eagle-importer";
 
-/// 供原生插件调用的共享 Eagle 导入入口。
-pub fn import_eagle_library_with_service_root(
-    service_root: &Path,
-    request: EagleLibraryImportRequest,
-) -> Result<EagleLibraryPluginImportResponse, String> {
-    let state = RepositoryState::from_root(service_root.to_path_buf());
-    import_eagle_library_with_state(&state, request)
-}
-
 /// 直接把 EagleLibrary 合并写入当前仓库，不再依赖临时转换仓库。
-pub fn import_eagle_library_with_state(
+/// 由长任务 `momobako.eagle.import`（`importing.rs`）调用；校验仓库、目标目录和资源库结构后执行转换计划。
+pub(in crate::services::repository) fn import_eagle_library(
     state: &RepositoryState,
     request: EagleLibraryImportRequest,
 ) -> Result<EagleLibraryPluginImportResponse, String> {

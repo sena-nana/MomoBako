@@ -70,26 +70,10 @@ pub(super) fn import_eagle_library_cancellable(
 ) -> Result<EagleLibraryImportResponse, String> {
     cancellation.checkpoint()?;
     state.ensure_initialized()?;
-    let repo = state.load_repository_record(&request.repo_id)?;
-    ensure_repository_supports_local_write_access(&repo, "importing Eagle libraries")?;
-
-    let repo_root = PathBuf::from(&repo.summary.path);
     let parent_path = normalize_directory_path(request.parent_path.as_deref().unwrap_or_default())?;
-    let target_dir = resolve_repository_relative_path(&repo_root, &parent_path)?;
-    if !target_dir.exists() || !target_dir.is_dir() {
-        return Err(format!("directory not found: {parent_path}"));
-    }
+    let imported = eagle_import::import_eagle_library(state, request.clone())?;
 
-    let response_value = plugin_catalog(&state.root).call(
-        "momobako.service.eagle-importer",
-        "eagleImporter.importLibrary",
-        serde_json::to_value(&request).map_err(json_error)?,
-    )?;
-    let plugin_response =
-        serde_json::from_value::<EagleLibraryPluginImportResponse>(response_value)
-            .map_err(json_error)?;
-
-    // 插件调用本身不可中断；返回后先恢复索引一致性，再对外观察取消。
+    // 导入按整份计划写入，中途不可中断；写完先恢复索引一致性，再对外观察取消。
     state.sync_repository(SyncRequest {
         repo_id: request.repo_id.clone(),
     })?;
@@ -104,8 +88,8 @@ pub(super) fn import_eagle_library_cancellable(
     })?;
     Ok(EagleLibraryImportResponse {
         snapshot,
-        summary: plugin_response.summary,
-        warnings: plugin_response.warnings,
+        summary: imported.summary,
+        warnings: imported.warnings,
     })
 }
 
