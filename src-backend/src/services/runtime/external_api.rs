@@ -1,6 +1,6 @@
 //! Loopback external API server and connection-file helpers.
 
-use super::PREVIEW_HOST;
+const LOOPBACK_HOST: &str = "127.0.0.1";
 use crate::services::repository::{
     backend_summary_supports_local_write_access, ExternalAddAssetRequest, RepositoryState,
     RepositorySummary,
@@ -71,12 +71,12 @@ pub(crate) fn start_external_api_server(
     write_lock: Arc<Mutex<()>>,
     token: String,
 ) -> Result<String, String> {
-    let server = Server::http(format!("{PREVIEW_HOST}:0")).map_err(|error| error.to_string())?;
+    let server = Server::http(format!("{LOOPBACK_HOST}:0")).map_err(|error| error.to_string())?;
     let addr = server
         .server_addr()
         .to_ip()
         .ok_or_else(|| "external API server did not bind to a TCP address".to_string())?;
-    let external_addr = format!("{PREVIEW_HOST}:{}", addr.port());
+    let external_addr = format!("{LOOPBACK_HOST}:{}", addr.port());
 
     thread::spawn(move || {
         for request in server.incoming_requests() {

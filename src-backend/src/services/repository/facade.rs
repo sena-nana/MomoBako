@@ -82,13 +82,6 @@ impl RepositoryState {
         playlist::create_playlist(self, request)
     }
 
-    pub fn update_playlist(
-        &self,
-        request: PlaylistUpdateRequest,
-    ) -> Result<PlaylistMutationResponse, String> {
-        playlist::update_playlist(self, request)
-    }
-
     pub fn delete_playlist(
         &self,
         repo_id: &str,
@@ -103,13 +96,6 @@ impl RepositoryState {
         playlist_id: &str,
     ) -> Result<PlaylistDetail, String> {
         playlist::get_playlist_detail(self, repo_id, playlist_id)
-    }
-
-    pub fn add_playlist_items(
-        &self,
-        request: PlaylistItemsAddRequest,
-    ) -> Result<PlaylistDetail, String> {
-        playlist::add_playlist_items(self, request)
     }
 
     pub fn add_playlist_items_by_paths(

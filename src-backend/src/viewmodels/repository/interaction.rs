@@ -3,13 +3,13 @@
 use crate::services::repository::{
     EntryAccessRecordRequest, EntryAccessRecordResponse, HardlinkCandidateResponse,
     HardlinkConfirmRequest, HardlinkConfirmResponse, PlaylistDetail, PlaylistItemRemoveRequest,
-    PlaylistItemsAddRequest, PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest,
-    PlaylistMembershipIndex, PlaylistMembershipRequest, PlaylistMembershipSnapshot,
-    PlaylistMutationRequest, PlaylistMutationResponse, PlaylistSummary,
-    RecentAccessHistoryClearRequest, RecentAccessHistoryClearResponse, RepositoryAction,
-    RepositoryActionEnabledRequest, RepositoryActionMutationResponse, RevisionActionRequest,
-    RevisionActionResponse, SmartFolderMutationRequest, SmartFolderMutationResponse,
-    SmartFolderResultSnapshot, SmartFolderTreeNode, SmartFolderUpdateRequest,
+    PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest, PlaylistMembershipIndex,
+    PlaylistMembershipRequest, PlaylistMembershipSnapshot, PlaylistMutationRequest,
+    PlaylistMutationResponse, PlaylistSummary, RecentAccessHistoryClearRequest,
+    RecentAccessHistoryClearResponse, RepositoryAction, RepositoryActionEnabledRequest,
+    RepositoryActionMutationResponse, RevisionActionRequest, RevisionActionResponse,
+    SmartFolderMutationRequest, SmartFolderMutationResponse, SmartFolderResultSnapshot,
+    SmartFolderTreeNode, SmartFolderUpdateRequest,
 };
 use crate::services::runtime::RepositoryRuntime;
 
@@ -94,15 +94,6 @@ impl RepositoryInteractionViewModel {
             .await
     }
 
-    pub async fn update_playlist(
-        &self,
-        request: crate::services::repository::PlaylistUpdateRequest,
-    ) -> Result<PlaylistMutationResponse, String> {
-        self.runtime
-            .run_write(move |state| state.update_playlist(request))
-            .await
-    }
-
     pub async fn delete_playlist(
         &self,
         repo_id: String,
@@ -120,15 +111,6 @@ impl RepositoryInteractionViewModel {
     ) -> Result<PlaylistDetail, String> {
         self.runtime
             .run_read(move |state| state.get_playlist_detail(&repo_id, &playlist_id))
-            .await
-    }
-
-    pub async fn add_playlist_items(
-        &self,
-        request: PlaylistItemsAddRequest,
-    ) -> Result<PlaylistDetail, String> {
-        self.runtime
-            .run_write(move |state| state.add_playlist_items(request))
             .await
     }
 

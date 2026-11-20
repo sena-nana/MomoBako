@@ -150,7 +150,6 @@ pub(super) fn prepare_preview_file_source(
         .extension()
         .map(|value| value.to_string_lossy().to_lowercase())
         .unwrap_or_default();
-    let source_path = file_path.clone();
     let media_type = preview_media_type_for_extension(&extension).to_string();
     let token = preview_file_token(
         &repo.summary.repo_id,
@@ -160,23 +159,10 @@ pub(super) fn prepare_preview_file_source(
         modified_at.as_deref().unwrap_or_default(),
     );
 
-    state
-        .preview_sources
-        .lock()
-        .map_err(|_| "preview source lock poisoned".to_string())?
-        .insert(
-            token.clone(),
-            PreviewFileSource {
-                path: source_path,
-                media_type: media_type.clone(),
-            },
-        );
-
     Ok(FilePreviewSourceResponse {
         repo_id: request.repo_id,
         path: entry_path,
         token,
-        source_url: None,
         local_path: Some(file_path.to_string_lossy().to_string()),
         media_type,
         size_bytes: metadata.len() as i64,
@@ -476,9 +462,7 @@ impl RepositoryState {
                     local_path: asset.local_absolute_path.clone(),
                     temp_file_path: None,
                     lyric_path: None,
-                    lyric_source_url: None,
                     word_lyric_path: None,
-                    word_lyric_source_url: None,
                     expires_at: None,
                     size_bytes: Some(preview.size_bytes),
                     modified_at: preview.modified_at,
@@ -647,12 +631,10 @@ impl RepositoryState {
                 .get("lyricPath")
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_string),
-            lyric_source_url: None,
             word_lyric_path: response
                 .get("wordLyricPath")
                 .and_then(serde_json::Value::as_str)
                 .map(str::to_string),
-            word_lyric_source_url: None,
             expires_at: response
                 .get("expiresAt")
                 .and_then(serde_json::Value::as_str)

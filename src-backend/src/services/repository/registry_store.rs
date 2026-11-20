@@ -94,7 +94,7 @@ pub(super) fn repository_local_cache_status(
     })
 }
 
-/// 仅公开 Source 认证的可用状态，不将后端配置或凭据引用返回给前端。
+/// 仅公开 Source 认证的可用状态，不把后端配置或凭据引用交给宿主界面。
 pub(super) fn repository_authentication_status(
     registry: &PluginCatalog,
     backend_plugin_id: &str,
@@ -1413,6 +1413,8 @@ pub(super) fn migrate_legacy_meta_dir_if_needed(
 
 /// 把 `.momo` 设成隐藏。已经隐藏就不动：每次打开存储都起 attrib 进程很慢，改属性还会触发一次文件监听事件。
 pub(super) fn hide_repository_meta_dir(path: &Path) {
+    #[cfg(not(target_os = "windows"))]
+    let _ = path;
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::fs::MetadataExt;

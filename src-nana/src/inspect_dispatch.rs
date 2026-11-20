@@ -686,7 +686,6 @@ fn empty_source(repo_id: &str, path: &str) -> FilePreviewSourceResponse {
         repo_id: repo_id.to_string(),
         path: path.to_string(),
         token: String::new(),
-        source_url: None,
         local_path: None,
         media_type: "application/octet-stream".into(),
         size_bytes: 0,

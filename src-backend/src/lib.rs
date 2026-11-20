@@ -1,9 +1,8 @@
 //! MomoBako 宿主无关领域服务库。
 //!
-//! models、services 与 ViewModel 住在这个 crate。Nana 宿主（`src-nana`）和 Eagle 来源插件依赖这里，
+//! 领域服务（services）和宿主调用的应用层接口（viewmodels）住在这个 crate。Nana 宿主（`src-nana`）和 Eagle 来源插件依赖这里，
 //! 不把窗口、界面框架或宿主的事件循环编进领域代码。
 
-pub mod models;
 pub mod services;
 pub mod viewmodels;
 

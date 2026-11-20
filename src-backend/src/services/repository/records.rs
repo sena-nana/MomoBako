@@ -41,9 +41,3 @@ pub(super) struct RepositoryStoragePaths {
     pub(super) metadata_dir: PathBuf,
     pub(super) database_path: PathBuf,
 }
-
-#[derive(Debug, Clone)]
-pub(super) struct PreviewFileSource {
-    pub(super) path: PathBuf,
-    pub(super) media_type: String,
-}

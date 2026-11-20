@@ -1,7 +1,6 @@
 //! Mutsuki 长任务到现有 RepositoryService 的领域调用适配。
 
 use std::{
-    path::PathBuf,
     sync::{Mutex, MutexGuard, TryLockError},
     thread,
     time::Duration,
@@ -14,8 +13,7 @@ use serde_json::json;
 use super::protocols::*;
 use crate::services::repository::{
     download_playlist_with_progress_cancellable, CancellationCheck, DownloaderPlaylistRequest,
-    EntryPlaybackProgressEvent, EntryPlaybackRequest, EntryPlaybackSourceResponse,
-    FileDeleteRequest,
+    EntryPlaybackProgressEvent, EntryPlaybackRequest, FileDeleteRequest,
 };
 use crate::services::runtime::{sync_watched_paths, RepositoryRuntime};
 
@@ -220,7 +218,7 @@ impl<'a> RepositoryTaskExecutor<'a> {
     ) -> Result<RunnerResult, RuntimeError> {
         let request = decode_request::<EntryPlaybackRequest>(task)
             .map_err(|error| operation_error(task, error))?;
-        let mut response = self
+        let response = self
             .write(|state| {
                 let mut emit = |progress: EntryPlaybackProgressEvent| {
                     self.cancellation.checkpoint()?;
@@ -234,8 +232,6 @@ impl<'a> RepositoryTaskExecutor<'a> {
             .map_err(|error| operation_error(task, error))?;
         self.cancellation
             .checkpoint()
-            .map_err(|error| operation_error(task, error))?;
-        self.attach_preview_urls(&mut response)
             .map_err(|error| operation_error(task, error))?;
         encode_result(task, response, events)
     }
@@ -260,41 +256,6 @@ impl<'a> RepositoryTaskExecutor<'a> {
         )
         .map_err(|error| operation_error(task, error))?;
         encode_result(task, response, events)
-    }
-
-    /// 为本地播放文件注册预览 URL，保持原 ViewModel 的返回契约。
-    fn attach_preview_urls(
-        &self,
-        response: &mut EntryPlaybackSourceResponse,
-    ) -> Result<(), String> {
-        self.cancellation.checkpoint()?;
-        if response.source_url.is_none() {
-            let path = response
-                .local_path
-                .as_deref()
-                .or(response.temp_file_path.as_deref())
-                .map(PathBuf::from);
-            if let Some(path) = path {
-                self.cancellation.checkpoint()?;
-                let token = self
-                    .runtime
-                    .repository_state
-                    .register_preview_source_path(path, &response.media_type)?;
-                response.source_url = Some(self.runtime.preview_source_url(&token));
-            }
-        }
-        attach_text_preview(
-            self.runtime,
-            self.cancellation,
-            &mut response.lyric_source_url,
-            response.lyric_path.as_deref(),
-        )?;
-        attach_text_preview(
-            self.runtime,
-            self.cancellation,
-            &mut response.word_lyric_source_url,
-            response.word_lyric_path.as_deref(),
-        )
     }
 }
 
@@ -367,26 +328,6 @@ fn push_progress_event(
             "progress": payload,
         }),
     });
-    Ok(())
-}
-
-fn attach_text_preview(
-    runtime: &RepositoryRuntime,
-    cancellation: &dyn CancellationCheck,
-    target_url: &mut Option<String>,
-    source_path: Option<&str>,
-) -> Result<(), String> {
-    if target_url.is_some() {
-        return Ok(());
-    }
-    let Some(source_path) = source_path else {
-        return Ok(());
-    };
-    cancellation.checkpoint()?;
-    let token = runtime
-        .repository_state
-        .register_preview_source_path(PathBuf::from(source_path), "text/plain; charset=utf-8")?;
-    *target_url = Some(runtime.preview_source_url(&token));
     Ok(())
 }
 

@@ -27,11 +27,6 @@ impl MutsukiTaskViewModel {
         self.runtime.execute(protocol_id, request).await
     }
 
-    /// 返回任务中心所需的活动和近期终态计数。
-    pub fn activity_snapshot(&self) -> (usize, usize) {
-        self.runtime.activity_snapshot()
-    }
-
     /// 返回当前可取消任务的稳定 ID 列表。
     pub fn active_task_ids(&self) -> Vec<String> {
         self.runtime.active_task_ids()

@@ -1,3 +1,5 @@
+//! 播放列表下载：逐项进度事件和部分失败的结果。
+
 use crate::services::repository as repository_service;
 use crate::services::repository::test_support::{create_test_state, playback_test_lock};
 use std::{

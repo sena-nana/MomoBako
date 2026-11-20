@@ -62,7 +62,6 @@ impl RuntimeFixture {
             repository_state,
             watcher_handle,
             write_lock,
-            preview_addr: "127.0.0.1:0".to_string(),
             external_connection: build_external_connection_status(
                 &root.join("state"),
                 "127.0.0.1:0",

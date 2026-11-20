@@ -9,11 +9,11 @@
 - External client transport: a loopback HTTP API bound to `127.0.0.1` with a startup-generated bearer token written to the service connection file. The external API is source-neutral; browser extensions, native tools and other local clients all call the same contract.
 - Rust backend layering (`src-backend`, crate `momobako-backend`):
   - `viewmodels/repository/{management,query,browser,interaction}.rs`, `viewmodels/plugin.rs`, `viewmodels/system.rs`, and `viewmodels/mutsuki_task.rs` act as the ViewModel layer for repository management, read/query flows, file browsing, repository interactions, plugin/cache operations, desktop-system helpers, and long-running tasks.
-  - `services/repository/mod.rs` now acts as a stable facade over feature modules and compatibility re-exports.
-  - `services/repository/state.rs` owns the `RepositoryState` shell, initialization, preview-source registration, and other cross-feature state entrypoints.
+  - `services/repository/mod.rs` is the facade over the repository feature modules.
+  - `services/repository/state.rs` owns the `RepositoryState` shell, initialization, and other cross-feature state entrypoints.
   - `services/repository/plugin.rs` now owns plugin manifest normalization, dependency resolution, plugin config storage, runtime plugin archive handling, native library loading, and plugin hook execution records.
   - `services/repository/test_support.rs` carries repository-domain test seams and shared fixture setup used by centralized backend tests.
-  - `services/runtime/` remains the runtime shell for execution, watcher refresh, preview hosting, and the loopback external API server.
+  - `services/runtime/` remains the runtime shell for execution, watcher refresh, and the loopback external API server.
 
 ## External Asset API
 
@@ -221,8 +221,8 @@
   - Response fields: `repoId`, `path`, `assetId`, `kind`, `thumbnailPath`, `thumbnailCustom`, optional `metadata`
 - `POST /repositories/{repoId}/files:preparePreviewSource`
   - Request body includes repository-relative `path`
-  - Response returns a session-scoped local preview `sourceUrl` backed by the in-process repository runtime, the `mediaType`, and may include `localPath`.
-  - `mediaType` follows the lowercase file extension, and the in-process preview server answers with the same `Content-Type`. Images are `image/png` (png), `image/jpeg` (jpg, jpeg), `image/webp`, `image/gif`, `image/bmp`, `image/tiff` (tif, tiff), `image/avif` and `image/svg+xml` (svg); video, audio, PDF, Office, Markdown, plain text, JSON and 3D formats map to their own types; any other extension is `application/octet-stream`. The desktop decodes a preview as an image only when `mediaType` starts with `image/`.
+  - Response returns `token` (a content key over repository, path, size and modification time), `mediaType`, `sizeBytes`, optional `modifiedAt` and `localPath`. The host reads the bytes in process; there is no preview URL.
+  - `mediaType` follows the lowercase file extension. Images are `image/png` (png), `image/jpeg` (jpg, jpeg), `image/webp`, `image/gif`, `image/bmp`, `image/tiff` (tif, tiff), `image/avif` and `image/svg+xml` (svg); video, audio, PDF, Office, Markdown, plain text, JSON and 3D formats map to their own types; any other extension is `application/octet-stream`. The desktop decodes a preview as an image only when `mediaType` starts with `image/`.
   - A successful preview-source preparation updates `assets.last_accessed_at` without creating a revision entry.
 - `POST /repositories/{repoId}/entries:preparePlayback`
   - Mutsuki protocol `momobako.playback.prepare`.
@@ -230,7 +230,7 @@
   - Real local assets reuse the existing local preview preparation path and may return a direct `localPath`.
   - Virtual assets delegate to their repository Source through `contributes.source.media.preparePlaybackMethod`; the Source may return `localPath`, optional `tempFilePath`, optional `expiresAt`, lyrics, and media metadata without exposing provider credentials to the player.
   - 网易云 virtual playback is rejected until `localCache.status === "ready"`. When ready, the core passes `managedCacheRoot` to `momobako.netease.source`, and all managed playback files are written under `{cacheRoot}/.momo/cache/netease-playback`.
-  - Response `sourceUrl` is a loopback playback URL served by the in-process preview runtime. Temporary audio files and lyric files are registered with that runtime; lyric files may also return `lyricSourceUrl` or `wordLyricSourceUrl`. The Nana host decodes local files only, so it plays `localPath` (or `tempFilePath`); a Source that returns only a remote `sourceUrl` cannot be played by the Nana host.
+  - Response carries `localPath`, optional `tempFilePath`, `lyricPath` and `wordLyricPath` as the Source returned them; `sourceUrl` is only set when the Source itself returns a remote address. The host decodes local files only, so it plays `localPath` (or `tempFilePath`); a Source that returns only a remote `sourceUrl` cannot be played.
   - A successful playback-source preparation updates `assets.last_accessed_at` without creating a revision entry. A failed preparation (the Source reports an error) leaves it unchanged.
   - The task reports `EntryPlaybackProgressEvent` phases for resolving the entry, downloading or reusing the temporary audio, preparing the preview source, and readiness; `MutsukiTaskViewModel::execute` returns these events with the result, so a player can start only after the temporary source is ready.
   - Playback and virtual-source preview flows should prefer this endpoint over `files:preparePreviewSource` when a file may not exist locally.

@@ -5784,8 +5784,8 @@ mod tests {
     }
 
     #[test]
-    fn open_preview_file_source_returns_registered_file() {
-        let (state, root, repo_root, _thumbnail_root) = create_test_state("preview-open");
+    fn prepare_preview_file_source_reports_local_path_and_media_type() {
+        let (state, root, repo_root, _thumbnail_root) = create_test_state("preview-prepare");
         let source_path = repo_root.join("model.glb");
         fs::write(&source_path, b"glb").expect("preview source should be written");
         let repo_id = create_repository_for_path(&state, &repo_root);
@@ -5796,55 +5796,14 @@ mod tests {
             })
             .expect("preview source should be prepared");
 
-        let (mut file, media_type) = state
-            .open_preview_file_source(&response.token)
-            .expect("registered preview token should open");
-        let mut body = Vec::new();
-        use std::io::Read;
-        file.read_to_end(&mut body)
-            .expect("preview file should be readable");
-
-        assert_eq!(body, b"glb");
-        assert_eq!(media_type, "model/gltf-binary");
-        fs::remove_dir_all(root).expect("test temp root should be removed");
-    }
-
-    #[test]
-    fn register_preview_source_path_serves_temporary_playback_files() {
-        let (state, root, repo_root, _thumbnail_root) = create_test_state("preview-register-temp");
-        let audio_path = repo_root.join("temp-track.mp3");
-        let lyric_path = repo_root.join("temp-track.lrc");
-        fs::write(&audio_path, b"audio").expect("temporary audio should be written");
-        fs::write(&lyric_path, "[00:01.00]line").expect("temporary lyric should be written");
-
-        let audio_token = state
-            .register_preview_source_path(audio_path, "audio/mpeg")
-            .expect("audio source should register");
-        let lyric_token = state
-            .register_preview_source_path(lyric_path, "text/plain; charset=utf-8")
-            .expect("lyric source should register");
-
-        let (mut audio_file, audio_media_type) = state
-            .open_preview_file_source(&audio_token)
-            .expect("registered audio source should open");
-        let mut audio_body = Vec::new();
-        use std::io::Read;
-        audio_file
-            .read_to_end(&mut audio_body)
-            .expect("audio source should read");
-        assert_eq!(audio_body, b"audio");
-        assert_eq!(audio_media_type, "audio/mpeg");
-
-        let (mut lyric_file, lyric_media_type) = state
-            .open_preview_file_source(&lyric_token)
-            .expect("registered lyric source should open");
-        let mut lyric_text = String::new();
-        lyric_file
-            .read_to_string(&mut lyric_text)
-            .expect("lyric source should read");
-        assert_eq!(lyric_text, "[00:01.00]line");
-        assert_eq!(lyric_media_type, "text/plain; charset=utf-8");
-
+        assert_eq!(response.media_type, "model/gltf-binary");
+        assert_eq!(response.size_bytes, 3);
+        assert!(!response.token.is_empty());
+        let local_path = response.local_path.expect("local path should be reported");
+        assert_eq!(
+            fs::read(local_path).expect("local path should read"),
+            b"glb"
+        );
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 
@@ -5936,36 +5895,21 @@ mod tests {
     }
 
     #[test]
-    fn open_preview_file_source_rejects_unknown_token() {
-        let (state, root, _repo_root, _thumbnail_root) = create_test_state("preview-unknown");
-
-        let error = state
-            .open_preview_file_source(&"0".repeat(64))
-            .expect_err("unknown preview token should fail");
-
-        assert!(error.contains("preview source not found"));
-        fs::remove_dir_all(root).expect("test temp root should be removed");
-    }
-
-    #[test]
-    fn open_preview_file_source_rejects_deleted_source_file() {
+    fn prepare_preview_file_source_rejects_deleted_source_file() {
         let (state, root, repo_root, _thumbnail_root) = create_test_state("preview-deleted");
         let source_path = repo_root.join("model.glb");
         fs::write(&source_path, b"glb").expect("preview source should be written");
         let repo_id = create_repository_for_path(&state, &repo_root);
-        let response = state
+        fs::remove_file(source_path).expect("preview source should be removed");
+
+        let error = state
             .prepare_preview_file_source(FileReadRequest {
                 repo_id,
                 path: "model.glb".to_string(),
             })
-            .expect("preview source should be prepared");
-        fs::remove_file(source_path).expect("preview source should be removed");
-
-        let error = state
-            .open_preview_file_source(&response.token)
             .expect_err("deleted preview source should fail");
 
-        assert!(error.contains("preview source file is no longer available"));
+        assert!(error.contains("file not found"), "{error}");
         fs::remove_dir_all(root).expect("test temp root should be removed");
     }
 

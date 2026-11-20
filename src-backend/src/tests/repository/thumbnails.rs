@@ -102,10 +102,6 @@ fn image_preview_sources_carry_an_image_media_type() {
             })
             .expect("preview source should be prepared");
         assert_eq!(response.media_type, media_type, "{name}");
-        let (_file, served) = state
-            .open_preview_file_source(&response.token)
-            .expect("prepared source should open");
-        assert_eq!(served, media_type, "{name} 的预览服务类型");
     }
 
     fs::remove_dir_all(root).expect("test temp root should be removed");

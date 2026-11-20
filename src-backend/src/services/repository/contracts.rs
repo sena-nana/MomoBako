@@ -372,15 +372,6 @@ pub struct PlaylistMutationRequest {
     pub player_type_id: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct PlaylistUpdateRequest {
-    pub repo_id: String,
-    pub playlist_id: String,
-    pub name: Option<String>,
-    pub player_type_id: Option<String>,
-}
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PlaylistMutationResponse {
@@ -565,9 +556,7 @@ pub struct EntryPlaybackSourceResponse {
     pub local_path: Option<String>,
     pub temp_file_path: Option<String>,
     pub lyric_path: Option<String>,
-    pub lyric_source_url: Option<String>,
     pub word_lyric_path: Option<String>,
-    pub word_lyric_source_url: Option<String>,
     pub expires_at: Option<String>,
     pub size_bytes: Option<i64>,
     pub modified_at: Option<String>,
@@ -1064,8 +1053,6 @@ pub struct FilePreviewSourceResponse {
     pub repo_id: String,
     pub path: String,
     pub token: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub source_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_path: Option<String>,
     pub media_type: String,

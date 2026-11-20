@@ -444,7 +444,6 @@ fn preview_image_scene() -> ShellViewModel {
             repo_id,
             path,
             token: "preview-image".into(),
-            source_url: None,
             local_path: None,
             media_type: "image/png".into(),
             size_bytes: COVER_SIZE,

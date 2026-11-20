@@ -80,7 +80,7 @@
   - query cache
 - Current UI surfaces capacities and recent entries
 - Thumbnail cache files use sha256 hex filenames. The backend generates thumbnails for images, videos and audio covers; custom thumbnails (local file, remote URL or image bytes) are saved through the thumbnail API.
-- The in-process repository runtime still serves session-scoped loopback URLs (`sourceUrl`) for prepared preview and playback sources. The Nana host reads file bytes in process through the query ViewModel and does not use these URLs.
+- Prepared preview and playback sources are local files; the Nana host reads their bytes in process through the query ViewModel. The runtime serves no preview URLs.
 
 ## Plugin Architecture
 

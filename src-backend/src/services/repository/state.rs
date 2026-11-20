@@ -20,7 +20,6 @@ pub struct RepositoryState {
     pub(super) root: PathBuf,
     pub(super) registry_path: PathBuf,
     pub(super) initialized: Mutex<bool>,
-    pub(super) preview_sources: Mutex<BTreeMap<String, PreviewFileSource>>,
     pub(super) structure_refresh_tx: Mutex<Option<Sender<RepositoryStructureRefreshRequest>>>,
     pub(super) refreshing_repo_ids: Mutex<BTreeSet<String>>,
     /// 在列表里降级显示的资源库和告警过的原因，原因没变就不重复告警。
@@ -36,7 +35,6 @@ impl RepositoryState {
             root,
             registry_path,
             initialized: Mutex::new(false),
-            preview_sources: Mutex::new(BTreeMap::new()),
             structure_refresh_tx: Mutex::new(None),
             refreshing_repo_ids: Mutex::new(BTreeSet::new()),
             degraded_listing_reasons: Mutex::new(BTreeMap::new()),
@@ -303,61 +301,6 @@ impl RepositoryState {
                 "reason": reason,
             })
         );
-    }
-
-    /// Opens a previously registered preview file source for the preview HTTP server.
-    pub fn open_preview_file_source(&self, token: &str) -> Result<(File, String), String> {
-        let source = self
-            .preview_sources
-            .lock()
-            .map_err(|_| "preview source lock poisoned".to_string())?
-            .get(token)
-            .cloned()
-            .ok_or_else(|| "preview source not found".to_string())?;
-        if !source.path.is_file() {
-            return Err("preview source file is no longer available".to_string());
-        }
-        let file = File::open(&source.path).map_err(io_error)?;
-        Ok((file, source.media_type))
-    }
-
-    /// Registers an on-disk file as a temporary preview source and returns the generated token.
-    pub fn register_preview_source_path(
-        &self,
-        source_path: PathBuf,
-        media_type: &str,
-    ) -> Result<String, String> {
-        if !source_path.is_file() {
-            return Err(format!(
-                "preview source file is not available: {}",
-                source_path.to_string_lossy()
-            ));
-        }
-        let metadata = fs::metadata(&source_path).map_err(io_error)?;
-        let modified_at = metadata
-            .modified()
-            .ok()
-            .map(system_time_to_rfc3339)
-            .transpose()
-            .map_err(time_error)?;
-        let token = preview_file_token(
-            "playback",
-            &source_path.to_string_lossy(),
-            media_type,
-            metadata.len(),
-            modified_at.as_deref().unwrap_or_default(),
-        );
-        self.preview_sources
-            .lock()
-            .map_err(|_| "preview source lock poisoned".to_string())?
-            .insert(
-                token.clone(),
-                PreviewFileSource {
-                    path: source_path,
-                    media_type: media_type.to_string(),
-                },
-            );
-        Ok(token)
     }
 
     /// Stops helper processes whose pid/status files live under plugin data directories.

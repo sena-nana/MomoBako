@@ -1,4 +1,4 @@
-//! Desktop-system orchestration for lightweight shell-facing helpers.
+//! 宿主调用的系统辅助接口：写入用户选定路径的文件、系统日志和外部 API 连接状态。
 
 use crate::services::logging::{clear_logs, list_logs, write_log};
 use crate::services::repository::{BinaryFileWriteRequest, BinaryFileWriteResponse};
@@ -18,7 +18,7 @@ impl SystemViewModel {
         Self { runtime }
     }
 
-    /// Writes arbitrary bytes to a desktop-selected path while preserving the existing command contract.
+    /// 把字节写到用户在宿主里选定的路径，失败时记日志并交回原因。
     pub async fn write_binary_file(
         &self,
         request: BinaryFileWriteRequest,
@@ -77,7 +77,7 @@ impl SystemViewModel {
         }
     }
 
-    /// Returns the latest external API connection payload without exposing runtime details to the command layer.
+    /// 外部 API 的连接信息（地址、令牌、是否就绪），不暴露 Runtime 内部细节。
     pub async fn get_external_api_connection_status(
         &self,
     ) -> Result<ExternalApiConnectionStatus, String> {

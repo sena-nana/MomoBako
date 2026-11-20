@@ -343,68 +343,6 @@ pub(super) fn replace_netease_directory_cache_page(
     Ok(())
 }
 
-#[allow(dead_code)]
-pub(super) fn delete_directory_record(
-    connection: &Connection,
-    repo_id: &str,
-    path: &str,
-) -> Result<(), rusqlite::Error> {
-    connection.execute(
-        "DELETE FROM directories WHERE repo_id = ?1 AND path = ?2",
-        params![repo_id, path],
-    )?;
-    Ok(())
-}
-
-#[allow(dead_code)]
-pub(super) fn rename_directory_records(
-    tx: &Transaction<'_>,
-    repo_id: &str,
-    source_path: &str,
-    target_path: &str,
-) -> Result<(), rusqlite::Error> {
-    let prefix = format!("{source_path}/%");
-    let mut stmt = tx.prepare(
-        r#"
-        SELECT path, parent_path, name
-        FROM directories
-        WHERE repo_id = ?1 AND (path = ?2 OR path LIKE ?3)
-        ORDER BY LENGTH(path) ASC
-        "#,
-    )?;
-    let rows = stmt.query_map(params![repo_id, source_path, prefix], |row| {
-        Ok((
-            row.get::<_, String>(0)?,
-            row.get::<_, String>(1)?,
-            row.get::<_, String>(2)?,
-        ))
-    })?;
-    let rows = rows.collect::<Result<Vec<_>, _>>()?;
-    let now = now_rfc3339();
-    for (old_path, _old_parent_path, _old_name) in rows {
-        let suffix = old_path.strip_prefix(source_path).unwrap_or("");
-        let new_path = format!("{target_path}{suffix}");
-        let new_parent_path = parent_relative_path(&new_path);
-        let new_name = if new_path.is_empty() {
-            String::new()
-        } else {
-            Path::new(&new_path)
-                .file_name()
-                .map(|value| value.to_string_lossy().to_string())
-                .unwrap_or_default()
-        };
-        tx.execute(
-            r#"
-            UPDATE directories
-            SET path = ?3, parent_path = ?4, name = ?5, updated_at = ?6
-            WHERE repo_id = ?1 AND path = ?2
-            "#,
-            params![repo_id, old_path, new_path, new_parent_path, new_name, now],
-        )?;
-    }
-    Ok(())
-}
-
 pub(super) fn dominant_folder_label(folders: &[FolderSummary], assets: &[AssetSummary]) -> String {
     if let Some(folder) = folders.first() {
         return folder.label.clone();

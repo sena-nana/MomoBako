@@ -3,7 +3,6 @@
 pub mod bundled_plugins;
 mod executor;
 pub(crate) mod external_api;
-pub(crate) mod preview_server;
 pub(crate) mod watcher;
 
 use crate::services::host_events::HostEventSink;
@@ -19,18 +18,14 @@ pub(crate) use external_api::{
     build_external_connection_status, generate_external_api_token, start_external_api_server,
     write_external_connection_file,
 };
-pub(crate) use preview_server::start_preview_server;
 pub(crate) use watcher::{start_structure_refresh_worker, sync_watched_paths, RepositoryWatcher};
 
-const PREVIEW_HOST: &str = "127.0.0.1";
-
-/// Runtime shell that coordinates repository-state access, preview hosting, and write serialization.
+/// Runtime shell that coordinates repository-state access, background workers and write serialization.
 #[derive(Clone)]
 pub struct RepositoryRuntime {
     pub(crate) repository_state: Arc<RepositoryState>,
     pub(crate) watcher_handle: Arc<Mutex<RepositoryWatcher>>,
     pub(crate) write_lock: Arc<Mutex<()>>,
-    pub(crate) preview_addr: String,
     pub(crate) external_connection: ExternalApiConnectionStatus,
 }
 
@@ -47,7 +42,6 @@ impl RepositoryRuntime {
 
         let watcher_handle =
             RepositoryWatcher::start(repository_state.clone(), write_lock.clone())?;
-        let preview_addr = start_preview_server(repository_state.clone())?;
         let external_token = generate_external_api_token()?;
         let external_addr = start_external_api_server(
             repository_state.clone(),
@@ -63,7 +57,6 @@ impl RepositoryRuntime {
             repository_state,
             watcher_handle,
             write_lock,
-            preview_addr,
             external_connection,
         })
     }
@@ -78,11 +71,6 @@ impl RepositoryRuntime {
         tokio::task::spawn_blocking(mutsuki_host::reload_plugins)
             .await
             .map_err(|error| error.to_string())?
-    }
-
-    /// Builds a browser-facing preview URL for a previously prepared source token.
-    pub fn preview_source_url(&self, token: &str) -> String {
-        format!("http://{}/preview/{token}", self.preview_addr)
     }
 
     /// Returns the latest external API connection payload, including readiness derived from state init.

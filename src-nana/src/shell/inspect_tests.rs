@@ -87,7 +87,6 @@ fn source(path: &str) -> FilePreviewSourceResponse {
         repo_id: "repo".into(),
         path: path.into(),
         token: "token".into(),
-        source_url: None,
         local_path: None,
         media_type: "image/png".into(),
         size_bytes: 4,

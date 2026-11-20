@@ -287,7 +287,7 @@ pub(super) fn get_api_design_snapshot(
 ) -> Result<ApiDesignSnapshot, String> {
     state.ensure_initialized()?;
     Ok(ApiDesignSnapshot {
-        transport: "REST over local repository service, gRPC-ready contract design".to_string(),
+        transport: "宿主进程内调用；外部客户端走本机回环 HTTP（/external/v1）".to_string(),
         endpoints: default_api_definitions(&state.root),
     })
 }

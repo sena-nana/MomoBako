@@ -31,7 +31,6 @@ impl ImagePreviewSource for Backend {
             repo_id: request.repo_id,
             token: format!("token:{}", request.path),
             path: request.path,
-            source_url: None,
             local_path: None,
             media_type: preview_media_type_for_extension(&extension).to_string(),
             size_bytes: self.bytes.len() as i64,
