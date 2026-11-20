@@ -198,5 +198,4 @@ fn remove_empty_folders(folder: &Path) {
 }
 
 #[cfg(test)]
-#[path = "download_staging_tests.rs"]
 pub(crate) mod tests;

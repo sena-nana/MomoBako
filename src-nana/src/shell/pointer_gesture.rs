@@ -15,7 +15,6 @@ const ENTRY_DRAG_PX: f32 = 7.0;
 /// 同一文件里框选开始移动的阈值：任一轴超过 3px。
 const BOX_DRAG_PX: f32 = 3.0;
 
-#[path = "folder_drop.rs"]
 mod folder_drop;
 pub(crate) use folder_drop::{note_external_folder_drag, tick_external_folder_hover};
 
@@ -612,7 +611,7 @@ mod tests {
     use crate::acceptance_document_for_model;
     use crate::shell::view_host::prepare_registered as prepare_motion;
 
-    include!("sidebar_drop_tests.rs");
+    include!("pointer_gesture/sidebar_drop_tests.rs");
 
     #[test]
     fn live_folder_button_escape_and_prefetch_use_the_shell_path() {

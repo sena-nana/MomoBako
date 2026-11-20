@@ -694,5 +694,4 @@ fn empty_source(repo_id: &str, path: &str) -> FilePreviewSourceResponse {
 }
 
 #[cfg(test)]
-#[path = "inspect_dispatch_tests.rs"]
 mod tests;

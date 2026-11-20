@@ -269,5 +269,4 @@ fn is_hex(text: &str) -> bool {
 }
 
 #[cfg(test)]
-#[path = "palette_tests.rs"]
 mod tests;

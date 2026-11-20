@@ -1,7 +1,7 @@
 //! 播放集路由（常驻）：播放表面，以及不能播放的条目。名称和当前目录不在这一页另开输入。
 //!
 //! 分支只在进入路由时建一次，之后同步只写 [`PlaylistRouteSignals`]：播放集页的页眉、条目和顺序
-//! （`player_playlist_page.rs`），以及「不可播放项目」那一行。首页外框上方是常驻筛选栏。
+//! （`shell/player_view/playlist.rs`），以及「不可播放项目」那一行。首页外框上方是常驻筛选栏。
 //!
 //! 播放条仍是播放器模块的旧视图，在这里登记成岛（见 `view_part_primary::Island`）：占位节点在播放集
 //! 面板最后，点开了播放集才有内容；版本按播放条真正读到的值算（`player_view::bar_stamp`）。
@@ -85,5 +85,4 @@ pub(super) fn view(filter: FilterBarSignals, signals: PlaylistRouteSignals) -> A
 }
 
 #[cfg(test)]
-#[path = "route_playlists_tests.rs"]
 mod tests;

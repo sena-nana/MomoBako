@@ -5,9 +5,9 @@
 //! 加入播放列表时写入的快照，以及播放列表卡片是否出现，同样认列表行或播放集条目自己的字段，不跟草稿。
 //! 已加入、还在当前列表里的条目，标题和状态按这一行自己的字段重算，不跟草稿。
 //! 候选来自素材元数据。没有歌词正文、封面像素、时间戳或任务数时不补。
-//! 作品信息上的「保存封面」只下载元数据或候选里已经写着的 http(s) 地址，见 `inspect_asmr_cover.rs`。
-//! - `inspect_asmr_candidates.rs`：候选的读取、展示、应用、导入和抓取；
-//! - `inspect_asmr_playlist.rs`：播放列表的加入、随机、清空和持久化，以及音轨的自然序。
+//! 作品信息上的「保存封面」只下载元数据或候选里已经写着的 http(s) 地址，见 `shell/inspect_asmr/cover.rs`。
+//! - `shell/inspect_asmr/candidates.rs`：候选的读取、展示、应用、导入和抓取；
+//! - `shell/inspect_asmr/playlist.rs`：播放列表的加入、随机、清空和持久化，以及音轨的自然序。
 //!
 //! 这里只出投影（[`AsmrPanels`]）和按投影建的小块；预览页按投影整块重建作品队列，
 //! 元数据列里的「补全候选」常驻，输入框受控，见 `inspect_metadata_view.rs`。
@@ -28,11 +28,8 @@ use super::inspect::support::display_value;
 use super::inspect_library::{asmr_enabled, matches_asmr};
 use super::{ShellMessage, ShellViewModel};
 
-#[path = "inspect_asmr_candidates.rs"]
 mod candidates;
-#[path = "inspect_asmr_cover.rs"]
 mod cover;
-#[path = "inspect_asmr_playlist.rs"]
 mod playlist;
 
 pub(super) use candidates::{
@@ -628,5 +625,4 @@ fn queue_card(key: &str, rows: Vec<AnyView>) -> AnyView {
 }
 
 #[cfg(test)]
-#[path = "inspect_asmr_tests.rs"]
 mod tests;

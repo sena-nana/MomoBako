@@ -187,5 +187,4 @@ fn report_failure(category: &str, action: &str, message: &str, error: &str) {
 }
 
 #[cfg(test)]
-#[path = "plugin_host_tests.rs"]
 mod tests;

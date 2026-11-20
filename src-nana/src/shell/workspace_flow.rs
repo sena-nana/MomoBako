@@ -1,5 +1,5 @@
 //! 工作台流程落到壳层上的那一层：资源库列表、同步、摘要和目录的结果写进壳层，换了活动仓库时清掉上一个
-//! 仓库的内容，同一个仓库刷新时重读当前目录。状态机本身在 `workspace.rs` 和 `workspace_switch.rs`。
+//! 仓库的内容，同一个仓库刷新时重读当前目录。状态机本身在 `workspace.rs` 和 `shell/workspace/switch.rs`。
 
 use crate::backend::services::repository::{
     FileBrowserSnapshot, RepositorySnapshot, RepositorySummary,

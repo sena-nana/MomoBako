@@ -124,4 +124,6 @@
 ## UI Structure
 
 - The desktop UI is the NanaUI shell in `src-nana` (crate `momobako-nana`). `ShellViewModel` is the single state source; messages are reduced, side effects go to the domain ViewModels of `momobako-backend` through `NativeServices`, and `ShellView::sync` writes the results into resident views. See [Nana 壳层绑定式视图](./nana-shell-view.md) and [Nana 迁移边界](./nana-migration.md).
+- Source files of `src-nana` sit where their module path says (`crate::shell::inspect::support` is `src-nana/src/shell/inspect/support.rs`); modules are not re-pointed with `#[path]`. Test modules live next to their parent as `tests.rs` or `*_tests.rs`, binary test fixtures in `src-nana/tests/fixtures/`.
+- Offscreen acceptance scenes, acceptance documents and the compiled-component lock (`shell::acceptance`, `acceptance_document*`, `capability`) are compiled only for tests: unit tests through `cfg(test)`, integration tests through the `acceptance` feature that `src-nana`'s self dev-dependency turns on. Release builds do not carry them.
 - The former Vue UI (page SFCs with `*ViewModel.ts` composables) and the Tauri command facade were removed; the Vue/Tauri sources last appear in commit `7bc847c`.

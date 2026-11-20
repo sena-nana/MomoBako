@@ -9,9 +9,7 @@ use crate::backend::services::repository::{AssetDetail, PlaybackSessionState};
 use super::ShellViewModel;
 use super::files::repository_is_writable;
 
-#[path = "preview_bridge.rs"]
 mod bridge;
-#[path = "native_preview.rs"]
 pub(super) mod native_preview;
 pub(super) use bridge::ArchiveEntryKind;
 pub use bridge::NativeLoad;
@@ -85,7 +83,6 @@ pub enum PreviewBody {
     Failed(String),
 }
 
-#[path = "inspect_search.rs"]
 pub(super) mod search;
 /// 搜索候选只从仓库摘要算出，测试直接造候选时用它。
 #[cfg(test)]
@@ -421,7 +418,6 @@ impl Default for InspectState {
     }
 }
 
-#[path = "inspect_tags.rs"]
 mod tags;
 pub(crate) use tags::poll_timers;
 
@@ -1114,7 +1110,6 @@ pub(crate) fn sync_preview_frame(model: &mut ShellViewModel) {
     bridge::show_video_frame(model);
 }
 
-#[path = "inspect_refresh_asset.rs"]
 mod refresh_asset;
 
 pub(super) fn reduce_message(
@@ -1160,7 +1155,7 @@ pub(super) fn reduce_message(
         }
     }
     // 标签变了：静默重读仓库摘要，侧栏计数、筛选栏和标签菜单的候选跟着换（Vue `applyAssetResponse` 换掉摘要里这项素材）。
-    // 文件行上的元数据和索引标签由文件表面就地换（`files_reduce.rs`）。
+    // 文件行上的元数据和索引标签由文件表面就地换（`shell/files/reduce.rs`）。
     if let Some(repo_id) = retagged
         .filter(|repo_id| model.workspace.active_repo_id.as_deref() == Some(repo_id.as_str()))
     {
@@ -1174,7 +1169,6 @@ pub(super) fn reduce_message(
     None
 }
 
-#[path = "inspect_support.rs"]
 pub(super) mod support;
 pub use support::prepare_text;
 
@@ -1196,5 +1190,4 @@ pub(crate) fn archive_entry_loaded(
 }
 
 #[cfg(test)]
-#[path = "inspect_tests.rs"]
 mod tests;

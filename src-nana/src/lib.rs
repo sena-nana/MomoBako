@@ -4,7 +4,7 @@
 //! `src-backend` 收口后由应用状态注入。离屏测试复用同一棵
 //! `RuntimeDocument`，不创建第二套 UI 树或 GPU 设备。
 
-use nana_ui::runtime::{DocumentId, FrameworkError};
+use nana_ui::runtime::FrameworkError;
 use nana_ui::{
     ApplicationState, ApplicationWindow, DiagnosticsConfig, HostTexture, NanaApplication,
     ResourcePackOptions, RuntimeApplication, RuntimeProgramContext, RuntimeProgramUpdate,
@@ -36,10 +36,18 @@ mod window_host;
 mod window_state;
 use shell::{
     DeleteMode, ShellMessage, ShellPage, ShellView, ShellViewModel, WorkspaceEffect,
-    display_mode_path, last_repository_path, mount_shell, sidebar_prefs_path,
+    display_mode_path, last_repository_path, sidebar_prefs_path,
 };
 
+#[cfg(any(test, feature = "acceptance"))]
 pub mod capability;
+#[cfg(any(test, feature = "acceptance"))]
+mod acceptance_document;
+#[cfg(any(test, feature = "acceptance"))]
+pub use acceptance_document::{
+    acceptance_document, acceptance_document_at_width, acceptance_document_for,
+    acceptance_document_for_model,
+};
 pub mod host_api;
 pub mod services;
 pub mod theme_map;
@@ -570,35 +578,4 @@ pub fn run() -> Result<(), nana_ui::HostedRunError> {
     builder.run::<RuntimeApplication<MomoBakoApplication>>(app_icon::with_window_icon(
         window_state::main_window_descriptor(),
     ))
-}
-
-/// 为离屏验收创建与生产宿主相同的 Runtime 文档。
-pub fn acceptance_document() -> Result<nana_ui::runtime::RuntimeDocument, FrameworkError> {
-    acceptance_document_for(ShellPage::Loading)
-}
-
-/// 为离屏验收创建指定页面状态的生产 Runtime 文档。
-pub fn acceptance_document_for(
-    page: ShellPage,
-) -> Result<nana_ui::runtime::RuntimeDocument, FrameworkError> {
-    acceptance_document_for_model(ShellViewModel::for_page(page))
-}
-
-/// 按离屏视口宽度挂载验收文档。窄于 Vue 断点的视口走窄屏排布。
-pub fn acceptance_document_at_width(
-    mut model: ShellViewModel,
-    width: f32,
-) -> Result<nana_ui::runtime::RuntimeDocument, FrameworkError> {
-    model.set_viewport_width(width);
-    acceptance_document_for_model(model)
-}
-
-/// 为离屏验收挂载指定 ViewModel；仍然复用生产壳层挂载函数和同一棵 Runtime 树。
-pub fn acceptance_document_for_model(
-    model: ShellViewModel,
-) -> Result<nana_ui::runtime::RuntimeDocument, FrameworkError> {
-    let document_id = DocumentId::new(1).expect("document id 1 is valid");
-    let mut document = nana_ui::runtime::RuntimeDocument::new(document_id);
-    mount_shell(&mut document, &model)?;
-    Ok(document)
 }

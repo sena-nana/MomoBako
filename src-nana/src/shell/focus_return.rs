@@ -704,5 +704,4 @@ impl Origin {
 }
 
 #[cfg(test)]
-#[path = "focus_return_tests.rs"]
 mod tests;

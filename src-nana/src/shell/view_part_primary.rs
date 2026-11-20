@@ -619,5 +619,4 @@ fn discard(cx: &mut AppContext, content: MountedView) {
 }
 
 #[cfg(test)]
-#[path = "view_part_primary_tests.rs"]
 mod tests;

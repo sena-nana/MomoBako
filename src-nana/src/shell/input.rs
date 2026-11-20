@@ -12,15 +12,10 @@ use crate::host_api::{ExternalOpenRequest, HostInputRequest, HostRequest};
 
 use super::{ShellMessage, ShellViewModel};
 
-#[path = "input_reduce.rs"]
 mod reduce;
-#[path = "source_prompt.rs"]
 mod source_prompt;
-#[path = "input_support.rs"]
 mod support;
-#[path = "thumbnail_prompt.rs"]
 mod thumbnail_prompt;
-#[path = "input_view.rs"]
 mod view;
 
 pub(crate) use reduce::{begin_relocate_dialog, reduce_message};
@@ -119,13 +114,10 @@ fn repository_is_filesystem(repository: &super::WorkspaceRepository) -> bool {
 pub(crate) use view::{FileDropFlags, accept_file_drops, file_drop_flags, file_drop_message};
 
 #[cfg(test)]
-#[path = "input_leave_tests.rs"]
 mod leave_tests;
 #[cfg(test)]
-#[path = "input_open_tests.rs"]
 mod open_tests;
 #[cfg(test)]
-#[path = "input_tests.rs"]
 mod tests;
 
 /// Tauri `onDragDropEvent` 的四个阶段。

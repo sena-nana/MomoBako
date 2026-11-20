@@ -3,9 +3,9 @@
 //! 对应 Vue `AppShell.vue`、`workspace/lifecycle.ts`、`workspace/state.ts`、
 //! `MissingRepositoryState.vue`、`EmptyRepositoryState.vue` 和缺失仓库动作。
 //! 这里是工作台的状态、主区和侧栏偏好，页面控件只消费结果。按流程分在子模块里：首屏启动在
-//! `workspace_launch.rs`（步骤条和加载日志的数据在 `workspace_startup.rs`），换仓库和同一个仓库的刷新在
-//! `workspace_switch.rs`，缺失仓库的动作和删除对话框在 `workspace_missing.rs`，记住上次打开的资源库在
-//! `workspace_remember.rs`。
+//! `shell/workspace/launch.rs`（步骤条和加载日志的数据在 `shell/workspace/startup.rs`），换仓库和同一个仓库的刷新在
+//! `shell/workspace/switch.rs`，缺失仓库的动作和删除对话框在 `shell/workspace/missing.rs`，记住上次打开的资源库在
+//! `shell/workspace/remember.rs`。
 
 use std::{fs, path::Path};
 
@@ -20,21 +20,16 @@ pub const SIDEBAR_COLLAPSED_KEY: &str = "momobako.sidebarCollapsed";
 /// 与 Vue `momobako.sidebarWidth` 相同的存储键。
 pub const SIDEBAR_WIDTH_KEY: &str = "momobako.sidebarWidth";
 
-#[path = "workspace_startup.rs"]
 mod startup;
 pub use startup::{
     IndexCounts, SettingsWait, StartupLog, StartupMode, StartupState, StartupStatus,
     StartupStepItem, StartupStepState, SyncCounts,
 };
-#[path = "workspace_switch.rs"]
 mod switch;
 pub use switch::{RefreshRun, RefreshStage};
-#[path = "workspace_remember.rs"]
 mod remember;
 pub use remember::last_repository_path;
-#[path = "workspace_launch.rs"]
 mod launch;
-#[path = "workspace_missing.rs"]
 mod missing;
 
 /// 工作台主面板，对应 `WorkspacePanelKey`。
@@ -245,7 +240,7 @@ pub struct WorkspaceState {
     pub list_loading: bool,
     /// 在选仓库（Vue `isLoadingSnapshot`）：换仓库或同一个仓库的同步、摘要和重读目录，整轮结束时放下。
     pub snapshot_loading: bool,
-    /// 进行中的同仓库刷新，见 `workspace_switch.rs`。
+    /// 进行中的同仓库刷新，见 `shell/workspace/switch.rs`。
     pub refresh: Option<RefreshRun>,
     /// 对任务弹层「仓库操作」行的请求，归约结束时交给壳层的槽位。
     pub(crate) operation: OperationRequests,
@@ -377,7 +372,7 @@ impl WorkspaceState {
     }
 
     /// 测试直接进入已有仓库，不排队同步或快照，界面验收（`src-nana/tests`）也用它。产品路径上进仓库都要
-    /// 先同步（启动和换仓库），验收场景走真实的启动消息（`acceptance_base.rs`）。
+    /// 先同步（启动和换仓库），验收场景走真实的启动消息（`shell/acceptance/base_scene.rs`）。
     #[doc(hidden)]
     pub fn present_repository(&mut self, repository: WorkspaceRepository) {
         self.active_repo_id = Some(repository.repo_id.clone());
@@ -432,5 +427,4 @@ pub fn parse_sidebar_width(raw: Option<&str>) -> f32 {
 }
 
 #[cfg(test)]
-#[path = "workspace_tests.rs"]
 mod tests;

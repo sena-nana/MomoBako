@@ -3,17 +3,17 @@
 //! 对应 Vue `workspace/files.ts`、`fileOperations.ts`、
 //! `useFileBrowserPanelViewModel.ts`、`CopyTargetDialog.vue` 和
 //! `HardlinkCandidateDialog.vue`。这里放列表行、对话框、服务请求、消息和状态本身，归约按功能分在子模块：
-//! - `files_reduce.rs`：壳层入口、消息分派和 Escape 分层；
-//! - `files_browse.rs`：读目录、分页和静默重读；
-//! - `files_selection.rs`：单击、双击、右键和框选的选择规则；
-//! - `files_mutation.rs`：变更守卫、对话框提交和变更结果；
-//! - `files_hardlink.rs`：硬链接候选的读取、确认和跳过；
-//! - `files_export.rs`：资源库导出对话框；
-//! - `files_thumbnail.rs`：缩略图的空闲预取、尺寸写回和自定义缩略图；
-//! - `files_thumbnail_ensure.rs`：浏览时逐条请后端生成还没有的缩略图；
-//! - `files_virtual_prefetch.rs`：来源目录还有下一页时，空闲后再读下一页，只生成缩略图、不画进列表；
-//! - `files_display.rs`：素材展示方式和它的持久化；
-//! - `files_operation.rs`：任务弹层「仓库操作」行上属于文件表面的部分。
+//! - `shell/files/reduce.rs`：壳层入口、消息分派和 Escape 分层；
+//! - `shell/files/browse.rs`：读目录、分页和静默重读；
+//! - `shell/files/selection.rs`：单击、双击、右键和框选的选择规则；
+//! - `shell/files/mutation.rs`：变更守卫、对话框提交和变更结果；
+//! - `shell/files/hardlink.rs`：硬链接候选的读取、确认和跳过；
+//! - `shell/files/export.rs`：资源库导出对话框；
+//! - `shell/files/thumbnail.rs`：缩略图的空闲预取、尺寸写回和自定义缩略图；
+//! - `shell/files/ensure.rs`：浏览时逐条请后端生成还没有的缩略图；
+//! - `shell/files/virtual_prefetch.rs`：来源目录还有下一页时，空闲后再读下一页，只生成缩略图、不画进列表；
+//! - `shell/files/display.rs`：素材展示方式和它的持久化；
+//! - `shell/files/operation.rs`：任务弹层「仓库操作」行上属于文件表面的部分。
 //!
 //! 框选手势、修饰键、系统对话框、拖放手势和缩略图解码不在这里完成。
 
@@ -24,32 +24,19 @@ use crate::backend::services::repository::{
 use super::repo_operation::OperationRequests;
 use super::workspace::{LibraryCategory, WorkspacePanel};
 
-#[path = "files_browse.rs"]
 mod browse;
-#[path = "files_display.rs"]
 mod display;
-#[path = "files_thumbnail_ensure.rs"]
 mod ensure;
-#[path = "files_export.rs"]
 mod export;
-#[path = "files_hardlink.rs"]
 mod hardlink;
-#[path = "files_menu_branch.rs"]
 mod menu_branch;
-#[path = "files_mutation.rs"]
 mod mutation;
-#[path = "files_operation.rs"]
 mod operation;
-#[path = "files_reduce.rs"]
 mod reduce;
-#[path = "files_selection.rs"]
 mod selection;
-#[path = "files_thumbnail.rs"]
 mod thumbnail;
-#[path = "files_virtual_prefetch.rs"]
 mod virtual_prefetch;
 
-#[path = "local_time.rs"]
 pub(crate) mod local_time;
 
 use browse::{BrowsePending, ImportFollowup};
@@ -80,7 +67,7 @@ pub struct FileRow {
     pub hardlink_state: Option<String>,
     pub extension: Option<String>,
     /// 元数据或解码后的原始宽高。卡片排版不直接用它：文件夹保持正方形，文件要等缩略图画出来
-    /// （`texture_ready`）才用解码出的尺寸，见 `files_cards.rs`。
+    /// （`texture_ready`）才用解码出的尺寸，见 `shell/files_view/cards.rs`。
     pub pixel_width: u32,
     pub pixel_height: u32,
     /// 宿主已经为这条缩略图登记了纹理（或者这一帧就登记）。宿主卸掉纹理时回到假，卡片画类型图标。
@@ -396,7 +383,7 @@ pub enum FilesEffect {
         action: String,
         paths: Vec<String>,
     },
-    /// 复制以后读候选。`epoch` 是请求时候选列表的版本，结果按它认过期（见 `files_hardlink.rs`）。
+    /// 复制以后读候选。`epoch` 是请求时候选列表的版本，结果按它认过期（见 `shell/files/hardlink.rs`）。
     LoadHardlinks {
         repo_id: String,
         epoch: u64,
@@ -426,7 +413,7 @@ pub enum FilesEffect {
     },
     /// 浏览时给还没有缩略图的条目要一张（Vue `loadThumbnailsForSnapshot`）。
     /// `source_url` 为空是本地文件的 `ensure`；有值是来源封面的 `save + sourceUrl`，地址必须是条目上的真实 http(s)。
-    /// 一次只有一条在途，结果回来再排下一条（`files_thumbnail_ensure.rs`）。
+    /// 一次只有一条在途，结果回来再排下一条（`shell/files/ensure.rs`）。
     EnsureThumbnail {
         repo_id: String,
         path: String,
@@ -655,9 +642,9 @@ pub struct FilesState {
     decode_requested: std::collections::HashSet<String>,
     /// 缩略图文件路径到取样色板。元数据没有色板时，详情预览和预览页用这一份（Vue `thumbnailPalettes`）。
     sampled_palettes: std::collections::HashMap<String, Vec<String>>,
-    /// 浏览时生成缩略图的队列：排过哪些、在途的是哪条、列表换过没有（`files_thumbnail_ensure.rs`）。
+    /// 浏览时生成缩略图的队列：排过哪些、在途的是哪条、列表换过没有（`shell/files/ensure.rs`）。
     ensure: ensure::EnsureQueue,
-    /// 来源目录下一页的缩略图预取。不画进列表，见 `files_virtual_prefetch.rs`。
+    /// 来源目录下一页的缩略图预取。不画进列表，见 `shell/files/virtual_prefetch.rs`。
     virtual_page: virtual_prefetch::VirtualPagePrefetch,
     pub(super) name_draft: String,
     /// 工具栏里的新建文件名。不占用对话框草稿，建成以后才清空（Vue `handleCreateFile`）。
@@ -677,7 +664,7 @@ pub struct FilesState {
     copy_sources: Vec<String>,
     hardlinks: Vec<HardlinkPrompt>,
     skipped_hardlinks: Vec<String>,
-    /// 候选列表的版本：确认结果回来、换仓库时加一，之前发出的读取回来时已经过期，见 `files_hardlink.rs`。
+    /// 候选列表的版本：确认结果回来、换仓库时加一，之前发出的读取回来时已经过期，见 `shell/files/hardlink.rs`。
     hardlink_epoch: u64,
     /// 确认结果回来以后在重读候选：确认框的按钮禁用，读回来（或读失败）才放开。
     pub(super) hardlink_rereading: bool,
@@ -792,21 +779,15 @@ fn parent_path(path: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-#[path = "files_tests.rs"]
 mod tests;
 
 #[cfg(test)]
-#[path = "files_mount_tests.rs"]
 mod mount_tests;
 #[cfg(test)]
-#[path = "files_rename_tests.rs"]
 mod rename_tests;
 #[cfg(test)]
-#[path = "files_select_tests.rs"]
 mod select_tests;
 #[cfg(test)]
-#[path = "files_ui_tests.rs"]
 mod ui_tests;
 #[cfg(test)]
-#[path = "files_virtual_tests.rs"]
 mod virtual_tests;

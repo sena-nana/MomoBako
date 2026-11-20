@@ -11,17 +11,12 @@ use nana_ui::runtime::{LengthSpec, Stack};
 
 use super::inspect_metadata_view::MetadataSignals;
 
-#[path = "inspect_preview_frame.rs"]
 mod frame;
 #[cfg(test)]
 pub(crate) use frame::preview_open_target;
-#[path = "inspect_audio_stage.rs"]
 mod audio_stage;
-#[path = "inspect_preview_body.rs"]
 mod body;
-#[path = "inspect_preview_page.rs"]
 mod page;
-#[path = "preview_paint.rs"]
 mod preview_paint;
 
 pub(crate) use audio_stage::{LyricFollow, follow_active_lyric};

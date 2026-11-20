@@ -378,5 +378,4 @@ fn commit_draft(plugin_id: &str, key: &str) -> ShellMessage {
 }
 
 #[cfg(test)]
-#[path = "admin_fields_tests.rs"]
 mod tests;

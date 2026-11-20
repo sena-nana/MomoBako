@@ -1427,5 +1427,4 @@ fn snapshot_with_trash(repo_id: &str, trash_count: i64) -> RepositorySnapshot {
     }
 }
 
-#[path = "folder_tree_reread_tests.rs"]
 mod folder_tree_reread_tests;

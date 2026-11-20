@@ -9,7 +9,6 @@ use nana_ui::runtime::{FrameworkError, MountedView, RuntimeDocument, StableNodeI
 use super::ShellViewModel;
 use super::view_part::{BodyMode, PartCx, PartId, ShellPart, Swap, first_root, mount_detached};
 
-#[path = "sidebar_project.rs"]
 pub(super) mod project;
 
 use project::{SidebarSignals, SidebarView};
@@ -79,5 +78,4 @@ impl ShellPart for SidebarPart {
 }
 
 #[cfg(test)]
-#[path = "view_part_sidebar_tests.rs"]
 mod tests;

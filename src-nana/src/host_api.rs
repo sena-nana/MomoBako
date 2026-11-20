@@ -8,7 +8,7 @@
 use crate::backend::services::repository::PlaybackSessionState;
 
 /// 播放器只提供媒体控制，播放会话状态由宿主控制器拥有。装载（经仓库服务读字节、在任务里解码）和卸下
-/// （停播放、清会话）由播放器状态机自己做（`shell/player_clip.rs`、`shell/player.rs`），不经这里。
+/// （停播放、清会话）由播放器状态机自己做（`shell/player/clip.rs`、`shell/player.rs`），不经这里。
 pub trait PlaybackMediaPlugin {
     fn play(&mut self) -> Result<(), String>;
     fn pause(&mut self) -> Result<(), String>;
@@ -17,7 +17,7 @@ pub trait PlaybackMediaPlugin {
 }
 
 /// 单一 Runtime 播放会话控制器：播放条和系统媒体键的播放、暂停、跳转和音量都经它落到播放器上
-/// （`shell/wav_player.rs` 的 `drive`），所有失败都会进入可解释的 failed 状态。
+/// （`shell/player/wav_player.rs` 的 `drive`），所有失败都会进入可解释的 failed 状态。
 pub struct PlaybackSessionController<P> {
     plugin: P,
     state: PlaybackSessionState,

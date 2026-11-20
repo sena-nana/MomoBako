@@ -128,7 +128,7 @@ MomoBako 是面向文件资源管理的仓库工作台。它不是素材展示�
 ### 5.1 按钮
 
 - 熟悉工具优先使用图标按钮:刷新、同步、搜索、筛选、折叠、删除、重试、打开目录、窗口控制。
-- 有可用图标时优先使用 NanaUI 自带的 Tabler 图标;要和已有页面一致的 Lucide 图形登记成产品图标(`src-nana/src/shell/player_icons.rs`、`admin_icons.rs`)。
+- 有可用图标时优先使用 NanaUI 自带的 Tabler 图标;要和已有页面一致的 Lucide 图形登记成产品图标(`src-nana/src/shell/player_view/icons.rs`、`src-nana/src/shell/admin/icons.rs`)。
 - 需要明确语义的命令使用文字按钮。
 - 按钮使用 NanaUI `Button` 作为基础,主操作用 `ButtonKind::Primary`,普通操作用 `ButtonKind::Ghost`,危险操作用 `ButtonKind::Danger`,纯图标按钮用 `IconButton`。
 - 按钮不使用边框区分类型;普通按钮常态透明背景,主操作使用低饱和蓝色,危险动作使用低饱和红色。

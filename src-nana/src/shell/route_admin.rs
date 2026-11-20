@@ -94,5 +94,4 @@ fn panel(filter: FilterBarSignals, key: &'static str, body: AnyView) -> AnyView 
 }
 
 #[cfg(test)]
-#[path = "route_admin_tests.rs"]
 mod tests;

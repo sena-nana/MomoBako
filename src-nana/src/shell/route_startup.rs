@@ -410,5 +410,4 @@ fn log_row(row: LogRow) -> AnyView {
 }
 
 #[cfg(test)]
-#[path = "route_startup_tests.rs"]
 mod tests;

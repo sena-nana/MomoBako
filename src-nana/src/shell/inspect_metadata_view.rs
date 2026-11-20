@@ -40,7 +40,6 @@ use super::inspect_asmr::CandidatesView;
 use super::inspect_library::LibrarySection;
 use super::{ShellMessage, ShellViewModel};
 
-#[path = "inspect_metadata_parts.rs"]
 mod parts;
 
 /// Vue `.file-metadata-card__star.is-active` 的金色。浅色深色主题同一个值。

@@ -25,9 +25,7 @@ use super::remount_state;
 use super::sidebar::PopoverMode;
 use super::view_part::{BodyMode, PartCx, PartId, ShellPart, Swap, first_root, mount_detached};
 
-#[path = "overlay_dialog.rs"]
 pub(crate) mod dialog;
-#[path = "overlay_session.rs"]
 pub(crate) mod session;
 
 use session::OverlaySession;
@@ -418,14 +416,10 @@ impl ShellPart for OverlayPart {
 }
 
 #[cfg(test)]
-#[path = "overlay_dialog_tests.rs"]
 mod dialog_tests;
 #[cfg(test)]
-#[path = "overlay_dialog_look_tests.rs"]
 mod look_tests;
 #[cfg(test)]
-#[path = "overlay_motion_tests.rs"]
 mod motion_tests;
 #[cfg(test)]
-#[path = "overlay_popover_tests.rs"]
 mod popover_tests;

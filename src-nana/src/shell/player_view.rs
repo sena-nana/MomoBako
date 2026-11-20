@@ -2,7 +2,7 @@
 //!
 //! 播放集页是一张 bg-elev 面板：眉题、标题、「播放器 · N 项」和右上角播放；下面每条是
 //! 白底圆角行（拖动柄、扩展名方块、文件名和路径、播放与移除），最后是播放条。
-//! 没点开播放集时只有虚线空框。播放集页本身（投影、信号和视图）在 `player_playlist_page.rs`。
+//! 没点开播放集时只有虚线空框。播放集页本身（投影、信号和视图）在 `shell/player_view/playlist.rs`。
 //! 播放条仍是旧视图：文件页、预览页和播放集页都把它登记成岛，版本按 [`bar_stamp`] 算。
 
 use std::collections::hash_map::DefaultHasher;
@@ -11,13 +11,9 @@ use std::hash::{Hash, Hasher};
 use super::player::PlayerMessage;
 use super::{ShellMessage, ShellViewModel};
 
-#[path = "player_bar.rs"]
 pub(super) mod bar;
-#[path = "player_icons.rs"]
 pub(super) mod icons;
-#[path = "player_paint.rs"]
 pub(super) mod paint;
-#[path = "player_playlist_page.rs"]
 pub(super) mod playlist;
 
 /// 拼进键的外部文本（条目编号、路径）：`/` 是键路径分隔符，`%` 和 `/` 转义成 `%25`、`%2F`，
@@ -26,7 +22,7 @@ pub(crate) fn key_part(text: &str) -> String {
     text.replace('%', "%25").replace('/', "%2F")
 }
 
-/// 播放条岛的版本：播放条读到的状态（`player_bar.rs` 的 `BarProps`、窗口是否不宽于 1120px）和岛该不该有内容
+/// 播放条岛的版本：播放条读到的状态（`shell/player_view/bar.rs` 的 `BarProps`、窗口是否不宽于 1120px）和岛该不该有内容
 /// （在不在预览、显不显示播放表面、点开的播放集）。
 ///
 /// 播放条量到自己的宽度后会发 `BarResized`。卡片宽窄不改变这一棵视图（窄卡片是音量挤出，不是另排三行），

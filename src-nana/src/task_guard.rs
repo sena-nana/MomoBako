@@ -150,5 +150,4 @@ fn panic_reason(payload: &(dyn Any + Send)) -> String {
 }
 
 #[cfg(test)]
-#[path = "task_guard_tests.rs"]
 pub(crate) mod tests;

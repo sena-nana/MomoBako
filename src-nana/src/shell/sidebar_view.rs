@@ -36,13 +36,9 @@ use super::view_part_sidebar::project::{
 };
 use super::{ShellMessage, WorkspacePanel};
 
-#[path = "sidebar_dialogs.rs"]
 mod dialogs;
-#[path = "sidebar_parts.rs"]
 pub(super) mod parts;
-#[path = "sidebar_popover_view.rs"]
 mod popover;
-#[path = "sidebar_tree_view.rs"]
 mod tree;
 
 pub use dialogs::{

@@ -242,5 +242,4 @@ impl ShellViewModel {
 }
 
 #[cfg(test)]
-#[path = "library_tests.rs"]
 mod tests;

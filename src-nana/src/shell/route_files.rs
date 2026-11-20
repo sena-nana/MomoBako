@@ -95,5 +95,4 @@ pub(super) fn view(
 }
 
 #[cfg(test)]
-#[path = "route_files_tests.rs"]
 mod tests;

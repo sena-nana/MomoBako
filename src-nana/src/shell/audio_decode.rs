@@ -1,9 +1,8 @@
 //! 把 mp3、flac、ogg/Vorbis 字节解成交错的 16-bit 小端 PCM。三个以上声道下混成立体声。
 //!
-//! WAV 仍由 `wav_player` 解析，这里不注册 Wave，也不解视频。样本的位深换算和下混在 `audio_pcm.rs`，
+//! WAV 仍由 `wav_player` 解析，这里不注册 Wave，也不解视频。样本的位深换算和下混在 `shell/audio_decode/pcm.rs`，
 //! WAV、AVI 音轨和媒体基础的音轨也用它。解码只动内存，不打开声卡。
 
-#[path = "audio_pcm.rs"]
 pub(crate) mod pcm;
 
 use std::io::Cursor;
@@ -39,7 +38,7 @@ pub(crate) fn decode_compressed(bytes: &[u8]) -> Result<DecodedPcm, String> {
 /// 按包解码并转成 16-bit。时长 = 帧数 × 1000 / 采样率，帧数是同一时刻全部声道的样本组数。
 ///
 /// 输出声道数由第一个有样本的包定：单声道就是单声道，其余都是立体声。之后每个包按自己的声道布局换到这个声道数
-/// （三个以上声道按扬声器位置下混，见 `audio_pcm.rs`），流里中途换了声道布局也接得上；采样率中途变了就报错。
+/// （三个以上声道按扬声器位置下混，见 `shell/audio_decode/pcm.rs`），流里中途换了声道布局也接得上；采样率中途变了就报错。
 fn decode_packets(bytes: &[u8]) -> Result<DecodedPcm, String> {
     if bytes.is_empty() {
         return Err("压缩音频是空的".into());
@@ -161,17 +160,26 @@ fn hint_for(bytes: &[u8]) -> Hint {
 
 #[cfg(test)]
 pub(crate) fn fixture_mp3() -> &'static [u8] {
-    include_bytes!("audio_fixtures/tone.mp3")
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/tone.mp3"
+    ))
 }
 
 #[cfg(test)]
 pub(crate) fn fixture_flac() -> &'static [u8] {
-    include_bytes!("audio_fixtures/tone.flac")
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/tone.flac"
+    ))
 }
 
 #[cfg(test)]
 pub(crate) fn fixture_ogg() -> &'static [u8] {
-    include_bytes!("audio_fixtures/tone.ogg")
+    include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/tone.ogg"
+    ))
 }
 
 #[cfg(test)]

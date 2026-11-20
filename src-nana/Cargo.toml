@@ -38,7 +38,13 @@ windows = { version = "0.62", features = ["Foundation", "Media", "Storage_Stream
 # 把图标和版本信息编进 Windows 可执行文件，见 build.rs。
 embed-resource = "3.0.11"
 
+[features]
+# 离屏验收场景、验收文档和组件能力锁。只给测试用：单元测试按 cfg(test) 编进来，集成测试经下面的自依赖打开，
+# 发布构建不带这些夹具。
+acceptance = []
+
 [dev-dependencies]
+momobako-nana = { path = ".", features = ["acceptance"] }
 nana-ui-devtools = { git = "https://github.com/sena-nana/NanaUI.git", rev = "da9b22bf72d16dd9674dcd2b17c4f50970ce613a", features = ["runtime-agent"] }
 
 [[bin]]

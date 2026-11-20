@@ -306,5 +306,4 @@ fn actions(view: Signal<MissingView>) -> AnyView {
 }
 
 #[cfg(test)]
-#[path = "route_missing_tests.rs"]
 mod tests;

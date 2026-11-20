@@ -1,6 +1,6 @@
 //! `DESIGN.md` 令牌到 Nana 主题角色的对应。
 //!
-//! 壳层的按钮和表面只取这里对应的主题角色，不写死 RGB；按钮由 `theme_map_button_tests.rs` 扫源码检查，
+//! 壳层的按钮和表面只取这里对应的主题角色，不写死 RGB；按钮由 `theme_map/button_tests.rs` 扫源码检查，
 //! Vue 也写死、两套主题共用的少数颜色（日志级别、页纸、投影……）列在那里的允许清单里。Nana 调色板的
 //! 具体数值由 `SemanticPalette` 持有；本模块只锁住颜色角色、字号、侧栏宽度和圆角刻度的对应，另给离屏
 //! 清屏色比对用的背景色。
@@ -286,5 +286,4 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "theme_map_button_tests.rs"]
 mod button_tests;

@@ -6,7 +6,9 @@
 use nana_ui_platform::WindowId;
 use nana_ui_platform::host::WindowCommand as PlatformWindowCommand;
 
-use super::{ShellMessage, ShellViewModel, WindowAction};
+#[cfg(any(test, feature = "acceptance"))]
+use super::ShellViewModel;
+use super::{ShellMessage, WindowAction};
 
 /// 最小化和最大化切换对应的平台命令。关闭和别的消息返回 `None`，让调用方继续归约（关闭按关闭设置走）。
 pub(crate) fn window_action_commands(
@@ -29,6 +31,7 @@ pub(crate) fn window_action_commands(
 ///
 /// 与 `MomoBakoApplication::update` 共用窗口命令映射。关闭要确认时只弹关闭确认、不排关窗命令，
 /// 确认以后才排。
+#[cfg(any(test, feature = "acceptance"))]
 pub fn commit_interaction(
     model: &mut ShellViewModel,
     message: ShellMessage,

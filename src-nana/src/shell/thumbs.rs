@@ -1,6 +1,6 @@
 //! 文件缩略图的宽高比和解码，以及预览图片的解码。
 //!
-//! Vue 在图片加载后用原始宽高比，并夹到 0.55–2.4；各展示方式的卡片尺寸在 `files_cards.rs`。
+//! Vue 在图片加载后用原始宽高比，并夹到 0.55–2.4；各展示方式的卡片尺寸在 `shell/files_view/cards.rs`。
 //! 解码按 EXIF 方向摆正（照片和 Vue 的 `<img>` 一样不横躺、不倒置）。预览里的 SVG 交给 NanaUI 带着的 resvg
 //! 光栅（`nana-svg-raster`）；预览图任一边超过宿主纹理上限时按比例缩小，不拒绝长条漫画和全景图。
 
@@ -189,5 +189,4 @@ pub fn decode_thumbnail_file(path: &str) -> Result<ThumbnailFrame, String> {
 }
 
 #[cfg(test)]
-#[path = "thumbs_tests.rs"]
 mod tests;

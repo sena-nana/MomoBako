@@ -1,0 +1,1065 @@
+//! 设置、插件、日志、任务和来源登录的消息归约。
+//!
+//! 规则照 Vue 对应组件：插件操作的提示文案、字段规范化、日志筛选、任务弹层的开关、
+//! 主题和圆角的即时保存。只改状态并排副作用，真正的服务调用在 `admin_dispatch`。
+
+use crate::backend::services::repository::{
+    PluginConfigSnapshot, PluginManifest, RepositoryAction,
+};
+
+use super::super::status::FailureSource;
+use super::super::workspace_refresh::SilentMessage;
+use super::super::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel};
+use super::support::{self, FieldChange};
+use super::{AdminEffect, AdminMessage, PluginCallOrigin, source_provision as flow};
+
+/// 处理管理消息，并吃掉壳层里属于设置、插件、日志和任务的分支。
+pub(crate) fn reduce_message(
+    model: &mut ShellViewModel,
+    message: ShellMessage,
+) -> Option<ShellMessage> {
+    match message {
+        ShellMessage::Admin(message) => {
+            reduce_admin(model, message);
+            None
+        }
+        ShellMessage::OpenSettings => {
+            open_settings_page(model, None);
+            None
+        }
+        ShellMessage::SetWorkspacePanel(panel) => {
+            if panel == WorkspacePanel::Actions {
+                model.admin.queue_actions(model.repository_id.clone());
+            }
+            if panel == WorkspacePanel::Logs {
+                model.admin.begin_logs_load();
+            }
+            if panel == WorkspacePanel::Extensions
+                && model.admin.plugins.is_empty()
+                && !model.admin.loading_settings
+            {
+                model.admin.begin_settings_load();
+            }
+            Some(ShellMessage::SetWorkspacePanel(panel))
+        }
+        ShellMessage::SelectWorkspaceRepository(repo_id) => {
+            if model.workspace.panel == WorkspacePanel::Actions {
+                model.admin.queue_actions(Some(repo_id.clone()));
+            }
+            Some(ShellMessage::SelectWorkspaceRepository(repo_id))
+        }
+        ShellMessage::WorkspaceListLoaded {
+            generation,
+            result: Ok(items),
+        } => {
+            model.admin.note_backends(&items);
+            Some(ShellMessage::WorkspaceListLoaded {
+                generation,
+                result: Ok(items),
+            })
+        }
+        ShellMessage::SilentWorkspace(SilentMessage::Repositories(Ok(items))) => {
+            model.admin.note_backends(&items);
+            Some(ShellMessage::SilentWorkspace(SilentMessage::Repositories(
+                Ok(items),
+            )))
+        }
+        other => consume_legacy(model, other),
+    }
+}
+
+fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<ShellMessage> {
+    match message {
+        ShellMessage::PluginConfigLoaded(Ok(config)) => {
+            apply_config(model, &config);
+            model.admin.apply_success();
+            model.admin.managing = false;
+            None
+        }
+        ShellMessage::PluginConfigLoaded(Err(error)) => {
+            eprintln!("Nana 插件设置读取或保存失败：{error}");
+            model.admin.managing = false;
+            model.admin.apply_failure(&error);
+            None
+        }
+        ShellMessage::LogsLoaded(Ok(page)) => {
+            model.admin.logs_loading = false;
+            model.admin.replace_logs(page.records);
+            None
+        }
+        ShellMessage::LogsLoaded(Err(error)) => {
+            eprintln!("Nana 系统日志读取失败：{error}");
+            model.admin.logs_loading = false;
+            model
+                .status
+                .fail(FailureSource::Logs, format!("无法读取系统日志：{error}"));
+            None
+        }
+        // Vue `clearSystemLogsInWorkspace`：清空中按钮禁用，结果回来以前日志页不变。
+        ShellMessage::ClearLogs => {
+            if model.admin.logs_clearing {
+                eprintln!("Nana 系统日志正在清空，忽略重复点击");
+            } else {
+                model.admin.logs_clearing = true;
+                model.admin.push_effect(AdminEffect::ClearLogs);
+            }
+            None
+        }
+        ShellMessage::TaskProgressLoaded(progress) => {
+            model.task_progress = progress;
+            None
+        }
+        // 读的这段时间里改过设置、或者有保存在写时，读到的可能是旧内容，不换上（`SettingsSync`）。
+        ShellMessage::SettingsLoaded(Ok((settings, diagnostic))) => {
+            if let Some(diagnostic) = diagnostic {
+                eprintln!("Nana {diagnostic}");
+            }
+            if model.admin.settings_sync.finish_load() {
+                model.settings = settings;
+            } else {
+                eprintln!("Nana 读设置文件的这段时间里改过设置，读到的旧内容不换上");
+            }
+            None
+        }
+        ShellMessage::SettingsLoaded(Err(error)) => {
+            model.admin.settings_sync.finish_load();
+            eprintln!("Nana 应用设置读取失败：{error}");
+            model.status.fail(
+                FailureSource::Settings,
+                format!("无法读取应用设置：{error}"),
+            );
+            None
+        }
+        // 主题：暗色、浅色和跟随系统，改了立即生效并写进设置文件；和现在一样时不写。
+        ShellMessage::SettingsThemeChanged(theme) => {
+            if theme != "light" && theme != "dark" && theme != "system" {
+                eprintln!("Nana 忽略未知主题：{theme}");
+                return None;
+            }
+            if model.settings.theme == theme {
+                return None;
+            }
+            model.settings.theme = theme;
+            if model.admin.settings_sync.note_change() {
+                model.admin.push_effect(AdminEffect::SaveSettings);
+            }
+            None
+        }
+        // 写设置文件的结果。内存里的设置不跟着结果改（它总比这次写的新或者一样）；写的时候又改过，接着把
+        // 最新的写一次。结果不切页面。
+        ShellMessage::SettingsSaved(result) => {
+            if let Err(error) = &result {
+                eprintln!("Nana 应用设置保存失败：{error}");
+                model.status.fail(
+                    FailureSource::Settings,
+                    format!("保存应用设置失败：{error}"),
+                );
+            }
+            if model.admin.settings_sync.note_saved() {
+                model.admin.push_effect(AdminEffect::SaveSettings);
+            }
+            None
+        }
+        other => Some(other),
+    }
+}
+
+fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
+    match message {
+        AdminMessage::SetKeyword(value) => model.admin.keyword = value,
+        AdminMessage::SetEnabled { plugin_id, enabled } => {
+            model.admin.reset_action();
+            model.admin.managing = true;
+            model.admin.remember_outcome(
+                if enabled {
+                    "插件已启用。"
+                } else {
+                    "插件已禁用。"
+                },
+                "插件状态更新失败。",
+            );
+            model
+                .admin
+                .push_effect(AdminEffect::SetEnabled { plugin_id, enabled });
+        }
+        AdminMessage::RequestDelete(plugin_id) => request_delete(model, &plugin_id),
+        AdminMessage::CancelDelete => model.admin.pending_delete = None,
+        AdminMessage::ConfirmDelete => confirm_delete(model),
+        AdminMessage::ToggleSettings(plugin_id) => open_settings(model, &plugin_id),
+        AdminMessage::RefreshDownloaderStatus => super::downloader::request(model),
+        AdminMessage::DownloaderStatusLoaded(result) => super::downloader::finish(model, result),
+        AdminMessage::RefreshOfficeStatus => super::office::request(model, false),
+        AdminMessage::SelectOfficeRepository(repo_id) => {
+            super::office::select_repository(model, repo_id)
+        }
+        AdminMessage::RunOfficeSelfCheck => super::office::self_check(model),
+        AdminMessage::ShutdownOfficeDaemon => super::office::shutdown(model),
+        AdminMessage::ClearOfficeCache => super::office::clear_cache(model),
+        AdminMessage::OfficeCallFinished { call, result } => {
+            super::office::finish(model, call, result)
+        }
+        AdminMessage::RoutePlugin(plugin_id) => open_route(model, &plugin_id),
+        AdminMessage::ConfigInput {
+            plugin_id,
+            key,
+            text,
+            checked,
+        } => apply_field(model, &plugin_id, &key, &text, checked),
+        AdminMessage::FieldDraft {
+            plugin_id,
+            key,
+            value,
+        } => {
+            model
+                .admin
+                .field_drafts
+                .entry(plugin_id)
+                .or_default()
+                .insert(key, value);
+        }
+        AdminMessage::JsonDraft {
+            plugin_id,
+            key,
+            value,
+        } => {
+            model
+                .admin
+                .json_drafts
+                .entry(plugin_id)
+                .or_default()
+                .insert(key, value);
+        }
+        AdminMessage::CommitDraft { plugin_id, key } => commit_draft(model, &plugin_id, &key),
+        AdminMessage::ResetConfig { plugin_id, key } => reset_config(model, &plugin_id, &key),
+        AdminMessage::RefreshPlugins => {
+            model.admin.reset_action();
+            model.admin.begin_settings_load();
+        }
+        AdminMessage::ChooseArchive => {
+            model.admin.reset_action();
+            model.admin.push_effect(AdminEffect::RequestOpenDialog);
+        }
+        AdminMessage::InstallArchive(path) => install_archive(model, path),
+        AdminMessage::PluginsReplaced(result) => replace_plugins(model, result),
+        AdminMessage::OpenDataDirectory(plugin_id) => {
+            model.admin.reset_action();
+            model.admin.managing = true;
+            let name = model
+                .admin
+                .plugins
+                .iter()
+                .find(|plugin| plugin.plugin_id == plugin_id)
+                .map(|plugin| plugin.name.clone())
+                .unwrap_or_else(|| plugin_id.clone());
+            model
+                .admin
+                .push_effect(AdminEffect::OpenDataDirectory { plugin_id, name });
+        }
+        AdminMessage::DataDirectoryFinished { name, result } => {
+            finish_directory(model, &name, result)
+        }
+        AdminMessage::HooksLoaded(Ok(records)) => model.admin.hook_executions = records,
+        AdminMessage::HooksLoaded(Err(error)) => {
+            eprintln!("Nana 插件钩子记录读取失败：{error}");
+            model.admin.load_error = error;
+        }
+        AdminMessage::CacheLoaded(Ok(snapshot)) => model.admin.cache = Some(snapshot),
+        AdminMessage::CacheLoaded(Err(error)) => eprintln!("Nana 缓存快照读取失败：{error}"),
+        AdminMessage::ApiDesignLoaded(Ok(snapshot)) => model.admin.api_design = Some(snapshot),
+        AdminMessage::ApiDesignLoaded(Err(error)) => {
+            eprintln!("Nana API 设计快照读取失败：{error}")
+        }
+        AdminMessage::SettingsBundleLoaded {
+            plugins,
+            hooks,
+            cache,
+            api,
+            external,
+        } => apply_bundle(model, plugins, hooks, cache, api, external),
+        AdminMessage::SetCornerStyle(style) => set_corner_style(model, &style),
+        AdminMessage::SetCornerRadius(value) => set_corner_radius(model, &value),
+        AdminMessage::CopyExternal { label, value } => copy_external(model, &label, &value),
+        AdminMessage::ExportExternal => export_external(model),
+        AdminMessage::CompleteExport(path) => complete_export(model, path),
+        AdminMessage::WriteFinished(Ok(())) => {
+            model.admin.external_error.clear();
+            model.admin.external_message = "external-api.json 已导出。".into();
+        }
+        AdminMessage::WriteFinished(Err(error)) => {
+            eprintln!("Nana 外部连接导出失败：{error}");
+            model.admin.external_message.clear();
+            model.admin.external_error = format!("导出失败：{error}");
+        }
+        AdminMessage::SetAudioPlayer(plugin_id) => model.set_audio_preference(plugin_id),
+        AdminMessage::ToggleLogLevel(level) => {
+            model.admin.log_levels = support::toggle_value(&model.admin.log_levels, &level);
+            model.admin.note_log_scroll();
+        }
+        AdminMessage::ToggleLogKind(kind) => {
+            model.admin.log_kinds = support::toggle_value(&model.admin.log_kinds, &kind);
+            model.admin.note_log_scroll();
+        }
+        AdminMessage::SetLogPlugin(plugin_id) => {
+            model.admin.log_plugin_id = plugin_id;
+            model.admin.note_log_scroll();
+        }
+        AdminMessage::SetLogRepo(repo_id) => {
+            model.admin.log_repo_id = repo_id;
+            model.admin.note_log_scroll();
+        }
+        AdminMessage::SetLogSearch(value) => {
+            model.admin.log_search = value;
+            model.admin.note_log_scroll();
+        }
+        AdminMessage::ResetLogFilters => {
+            model.admin.log_levels.clear();
+            model.admin.log_kinds.clear();
+            model.admin.log_plugin_id.clear();
+            model.admin.log_repo_id.clear();
+            model.admin.log_search.clear();
+            model.admin.note_log_scroll();
+        }
+        AdminMessage::SetLogPaused(paused) => {
+            model.admin.log_paused = paused;
+            if paused {
+                model.admin.log_would_scroll = false;
+            }
+        }
+        AdminMessage::ToggleLogContext(id) => {
+            if !model.admin.log_context_open.remove(&id) {
+                model.admin.log_context_open.insert(id);
+            }
+        }
+        AdminMessage::LogsCleared(result) => note_logs_cleared(model, result),
+        AdminMessage::ToggleTaskPopover => model.admin.popover_open = !model.admin.popover_open,
+        AdminMessage::CloseTaskPopover => model.admin.popover_open = false,
+        AdminMessage::CancelTask(task_id) => cancel_task(model, &task_id),
+        AdminMessage::SelectAction(action_id) => {
+            model.admin.active_action_id = Some(action_id);
+            model.workspace.panel = WorkspacePanel::Actions;
+        }
+        AdminMessage::RunAction(action_id) => run_action(model, action_id),
+        AdminMessage::ActionsLoaded { repo_id, result } => apply_actions(model, &repo_id, result),
+        AdminMessage::ActionRunFinished { result } => finish_action(model, result),
+        AdminMessage::SetToolPages(pages) => {
+            model.admin.active_tool_page_id = support::apply_tool_page_selection(
+                &pages,
+                model.admin.active_tool_page_id.as_deref(),
+            );
+            model.admin.tool_pages = pages;
+        }
+        AdminMessage::SelectToolPage(page_id) => {
+            if model.admin.tool_pages.iter().any(|page| page.id == page_id) {
+                model.admin.active_tool_page_id = Some(page_id);
+            }
+        }
+        AdminMessage::Api(message) => super::api::reduce(model, message),
+        AdminMessage::CallFilePlugin {
+            plugin_id,
+            method,
+            payload,
+            repository_id,
+        } => {
+            if plugin_id.trim().is_empty() || method.trim().is_empty() {
+                eprintln!("Nana 文件插件动作缺少方法");
+                return;
+            }
+            model.admin.push_effect(AdminEffect::CallPlugin {
+                plugin_id,
+                method,
+                payload,
+                repository_id,
+                origin: PluginCallOrigin::FileMenu,
+            });
+        }
+        AdminMessage::FilePluginFinished { method, result } => {
+            finish_file_plugin(model, &method, result)
+        }
+        AdminMessage::DownloadFinished { run, result } => {
+            super::source_download::finish(model, run, result)
+        }
+        AdminMessage::LogsWritten(Ok(())) => {}
+        AdminMessage::LogsWritten(Err(error)) => eprintln!("Nana 系统日志没有写进去：{error}"),
+        AdminMessage::BeginRepositoryDownload(download) => {
+            super::source_target::begin(model, download)
+        }
+        AdminMessage::ChooseDownloadRepository(repo_id) => {
+            super::source_target::choose(model, &repo_id)
+        }
+        AdminMessage::CancelDownloadRepository => super::source_target::cancel(model),
+        AdminMessage::CreateSourcePlaylist {
+            playlist,
+            repository_id,
+        } => create_source_playlist(model, playlist, repository_id),
+        AdminMessage::SourcePlaylistFinished(result) => finish_source_playlist(model, result),
+        AdminMessage::BeginSourceAuth { plugin_id, repo_id } => {
+            flow::begin(model, &plugin_id, repo_id)
+        }
+        AdminMessage::CheckSourceAuth { plugin_id, repo_id } => {
+            flow::refresh_status(model, &plugin_id, &repo_id)
+        }
+        AdminMessage::ClearSourceAuth { plugin_id, repo_id } => {
+            flow::clear(model, &plugin_id, &repo_id)
+        }
+        AdminMessage::CancelSourceAuth => flow::cancel(model),
+        AdminMessage::PollSourceAuth { plugin_id } => flow::poll(model, &plugin_id),
+        AdminMessage::ChooseSourceCache => {
+            if !model.admin.source_auth.busy {
+                let name = flow::cache_dialog_plugin_name(model);
+                model.input.queue_source_cache_dialog(name);
+            }
+        }
+        AdminMessage::SetSourceCachePath(path) => {
+            let path = path.trim().to_string();
+            if !path.is_empty() {
+                model.admin.source_auth.cache_path = path;
+            }
+        }
+        AdminMessage::ChooseEagleLibrary => super::tool_native::begin_library_dialog(model),
+        AdminMessage::SetEagleLibraryPath(path) => {
+            super::tool_native::set_library_path(model, &path)
+        }
+        AdminMessage::RunEagleImport(mode) => {
+            let busy = model.files.mutating;
+            super::tool_native::run_import(model, &mode);
+            if !busy && model.files.mutating {
+                model.admin.eagle_import = None;
+            }
+        }
+        AdminMessage::SourceStepFinished { step, result } => flow::finish(model, step, result),
+    }
+}
+
+/// 插件列表换新：重算筛选栏的库类型快捷方式，再重读插件登记的播放器类型。
+/// Vue 每次拿到新列表都同步前端插件注册表（`syncPreviewPlugins`），播放器跟着换。
+fn publish_plugins(model: &mut ShellViewModel, plugins: &[PluginManifest]) {
+    model.inspect.shortcuts = super::super::inspect_shortcuts::shortcuts_from_plugins(plugins);
+    model.admin.push_effect(AdminEffect::LoadPlaylistPlayers);
+}
+
+fn apply_config(model: &mut ShellViewModel, config: &PluginConfigSnapshot) {
+    model
+        .admin
+        .config_snapshots
+        .insert(config.plugin_id.clone(), config.clone());
+    model.admin.sync_json_drafts(&config.plugin_id);
+}
+
+/// 打开设置页：读设置包（Vue `Settings.vue` 挂载时的 `loadSettingsData`）和应用设置。
+/// 带插件时照 Vue 路由的 `?plugin=` 展开它的设置，插件列表里还没有它时不展开。
+pub(crate) fn open_settings_page(model: &mut ShellViewModel, plugin_id: Option<&str>) {
+    model.page = ShellPage::Settings;
+    model.admin.begin_settings_load();
+    model.admin.settings_sync.begin_load();
+    model.admin.push_effect(AdminEffect::LoadAppSettings);
+    if let Some(plugin_id) = plugin_id {
+        open_route(model, plugin_id);
+    }
+}
+
+fn request_delete(model: &mut ShellViewModel, plugin_id: &str) {
+    let Some(plugin) = model
+        .admin
+        .plugins
+        .iter()
+        .find(|plugin| plugin.plugin_id == plugin_id)
+        .cloned()
+    else {
+        eprintln!("Nana 找不到要删除的插件：{plugin_id}");
+        return;
+    };
+    if !support::can_delete_plugin(&plugin) {
+        return;
+    }
+    model.admin.pending_delete = Some(plugin.plugin_id);
+}
+
+/// 确认删除。成功后对话框关闭；失败时对话框保留，提示写在面板上。
+fn confirm_delete(model: &mut ShellViewModel) {
+    let Some(plugin_id) = model.admin.pending_delete.clone() else {
+        return;
+    };
+    model.admin.reset_action();
+    model.admin.managing = true;
+    model
+        .admin
+        .remember_outcome("插件已删除。", "插件删除失败。");
+    model
+        .admin
+        .push_effect(AdminEffect::DeletePlugin(plugin_id));
+}
+
+/// 打开或收起插件设置。打开时读一次配置，下载服务和 Office 转换再读运行状态；收起或换插件时来源登录和运行状态重置。
+fn open_settings(model: &mut ShellViewModel, plugin_id: &str) {
+    model.admin.reset_action();
+    if model.admin.active_settings_plugin_id.as_deref() == Some(plugin_id) {
+        model.admin.active_settings_plugin_id = None;
+        flow::bind_plugin(model, None);
+        super::downloader::release(model);
+        super::office::release(model);
+        return;
+    }
+    model.admin.active_settings_plugin_id = Some(plugin_id.to_string());
+    flow::bind_plugin(model, Some(plugin_id));
+    super::downloader::on_settings_opened(model, plugin_id);
+    super::office::on_settings_opened(model, plugin_id);
+    model.admin.managing = true;
+    model.admin.pending_notice = None;
+    model.admin.pending_failure = Some("插件设置读取失败。".into());
+    model
+        .admin
+        .push_effect(AdminEffect::LoadConfig(plugin_id.to_string()));
+}
+
+/// 路由带插件标识时打开它的设置；已经打开并有快照就不重复读。
+fn open_route(model: &mut ShellViewModel, plugin_id: &str) {
+    let plugin_id = plugin_id.trim();
+    if plugin_id.is_empty()
+        || !model
+            .admin
+            .plugins
+            .iter()
+            .any(|plugin| plugin.plugin_id == plugin_id)
+    {
+        return;
+    }
+    if model.admin.active_settings_plugin_id.as_deref() == Some(plugin_id)
+        && model.admin.config_snapshots.contains_key(plugin_id)
+    {
+        return;
+    }
+    open_settings(model, plugin_id);
+}
+
+fn field_of(model: &ShellViewModel, plugin_id: &str, key: &str) -> Option<support::ConfigField> {
+    let plugin = model
+        .admin
+        .plugins
+        .iter()
+        .find(|plugin| plugin.plugin_id == plugin_id)?;
+    support::settings_fields(plugin)
+        .into_iter()
+        .find(|field| field.key == key)
+}
+
+fn apply_field(
+    model: &mut ShellViewModel,
+    plugin_id: &str,
+    key: &str,
+    text: &str,
+    checked: Option<bool>,
+) {
+    let Some(field) = field_of(model, plugin_id, key) else {
+        eprintln!("Nana 插件 {plugin_id} 没有配置字段 {key}");
+        return;
+    };
+    model.admin.reset_action();
+    match support::normalize_field_input(&field, text, checked) {
+        FieldChange::Reset => reset_config(model, plugin_id, key),
+        FieldChange::Invalid(error) => {
+            eprintln!("Nana 插件 {plugin_id} 的字段 {key} 输入无效：{error}");
+            model.admin.action_error = error;
+        }
+        FieldChange::Set(value) => {
+            model.admin.managing = true;
+            model
+                .admin
+                .remember_outcome("插件设置已保存。", "插件设置保存失败。");
+            model.admin.push_effect(AdminEffect::SetConfig {
+                plugin_id: plugin_id.to_string(),
+                key: key.to_string(),
+                value,
+            });
+        }
+    }
+}
+
+fn reset_config(model: &mut ShellViewModel, plugin_id: &str, key: &str) {
+    model.admin.reset_action();
+    model.admin.managing = true;
+    model
+        .admin
+        .remember_outcome("插件设置已重置。", "插件设置重置失败。");
+    model.admin.push_effect(AdminEffect::DeleteConfig {
+        plugin_id: plugin_id.to_string(),
+        key: key.to_string(),
+    });
+}
+
+/// 单行字段回车，单行和 JSON 字段失焦（Vue 文本框的 `@change`、JSON 文本域的 `@blur`）：有没提交的草稿、
+/// 而且和字段现在的值（配置快照，没有时是清单默认值）不同才提交，没改过的不保存。单行字段比显示的文字；
+/// JSON 字段比解析出来的值，只改了空白和缩进不算改过，解析不了的算改过、提交时报错。
+/// 插件管理在途时控件禁用、焦点也会离开，这时不重复提交，草稿留着。
+fn commit_draft(model: &mut ShellViewModel, plugin_id: &str, key: &str) {
+    let Some(field) = field_of(model, plugin_id, key) else {
+        eprintln!("Nana 插件 {plugin_id} 没有配置字段 {key}");
+        return;
+    };
+    let json = field.field_type == "json";
+    let drafts = if json {
+        &model.admin.json_drafts
+    } else {
+        &model.admin.field_drafts
+    };
+    let Some(draft) = drafts
+        .get(plugin_id)
+        .and_then(|drafts| drafts.get(key))
+        .cloned()
+    else {
+        return;
+    };
+    let current = support::config_value(&model.admin.config_snapshots, plugin_id, &field);
+    let unchanged = if json {
+        let current = current.cloned().unwrap_or(serde_json::Value::Null);
+        support::parse_json_draft(&field.label, &draft).is_ok_and(|value| value == current)
+    } else {
+        draft == support::field_text(current)
+    };
+    if unchanged {
+        return;
+    }
+    if model.admin.managing {
+        eprintln!("Nana 插件 {plugin_id} 正在处理，字段 {key} 的草稿先不提交");
+        return;
+    }
+    if json {
+        save_json(model, plugin_id, &field, &draft);
+    } else {
+        apply_field(model, plugin_id, key, &draft, None);
+    }
+}
+
+/// 保存 JSON 字段：草稿按 JSON 解析，空白按 null 保存；不是有效 JSON 时不保存，写错误。
+fn save_json(
+    model: &mut ShellViewModel,
+    plugin_id: &str,
+    field: &support::ConfigField,
+    draft: &str,
+) {
+    let key = field.key.as_str();
+    model.admin.reset_action();
+    match support::parse_json_draft(&field.label, draft) {
+        Ok(value) => {
+            model.admin.managing = true;
+            model
+                .admin
+                .remember_outcome("插件设置已保存。", "插件设置保存失败。");
+            model.admin.push_effect(AdminEffect::SetConfig {
+                plugin_id: plugin_id.to_string(),
+                key: key.to_string(),
+                value,
+            });
+        }
+        Err(error) => {
+            eprintln!("Nana 插件 {plugin_id} 的字段 {key} 不是有效 JSON，不保存");
+            model.admin.action_error = error;
+        }
+    }
+}
+
+fn install_archive(model: &mut ShellViewModel, path: Option<String>) {
+    let Some(path) = path.filter(|path| !path.trim().is_empty()) else {
+        return;
+    };
+    model.admin.reset_action();
+    model.admin.managing = true;
+    model
+        .admin
+        .remember_outcome("插件已安装。", "插件安装失败。");
+    model.admin.push_effect(AdminEffect::Install(path));
+}
+
+/// 安装、删除、启停之后的新列表。删除成功时收起确认框。
+fn replace_plugins(model: &mut ShellViewModel, result: Result<Vec<PluginManifest>, String>) {
+    model.admin.managing = false;
+    match result {
+        Ok(plugins) => {
+            publish_plugins(model, &plugins);
+            model.admin.store_plugins(plugins);
+            model.admin.pending_delete = None;
+            model.admin.apply_success();
+        }
+        Err(error) => {
+            eprintln!("Nana 插件操作失败：{error}");
+            model.admin.apply_failure(&error);
+        }
+    }
+}
+
+/// 查到了插件的设置目录：交给宿主打开，打开的结果回来（[`settle_directory_open`]）才写提示，和 Vue
+/// `openPluginDataDirectoryInWorkspace` 等 `openRepositoryPath` 完成一样。查不到时写错误。
+fn finish_directory(model: &mut ShellViewModel, name: &str, result: Result<String, String>) {
+    model.admin.managing = false;
+    match result {
+        Ok(path) => {
+            model.admin.pending_directory = Some((path.clone(), name.to_string()));
+            model
+                .input
+                .host_requests
+                .push(crate::host_api::HostRequest::OpenExternal(
+                    crate::host_api::ExternalOpenRequest {
+                        target: path,
+                        reveal: true,
+                    },
+                ));
+            model.admin.action_error.clear();
+        }
+        Err(error) => {
+            eprintln!("Nana 插件设置目录读取失败：{error}");
+            model.admin.action_error = if error.is_empty() {
+                "插件设置目录打开失败。".into()
+            } else {
+                error
+            };
+        }
+    }
+}
+
+/// 宿主执行完一次外部打开（`host_bridge::perform`）。是插件「打开目录」等着的那一次：结果写在插件面板上，
+/// 交回 `None`；别的打开把结果原样交回，失败由宿主写进状态区。
+pub(crate) fn settle_directory_open(
+    model: &mut ShellViewModel,
+    target: &str,
+    result: Result<(), String>,
+) -> Option<Result<(), String>> {
+    let Some((_, name)) = model
+        .admin
+        .pending_directory
+        .take_if(|(path, _)| path == target)
+    else {
+        return Some(result);
+    };
+    match result {
+        Ok(()) => {
+            model.admin.action_error.clear();
+            model.admin.action_message = format!("已打开“{name}”设置目录。");
+        }
+        Err(error) => {
+            eprintln!("Nana 插件“{name}”的设置目录打不开：{target}：{error}");
+            model.admin.action_message.clear();
+            model.admin.action_error = format!("插件设置目录打开失败：{error}");
+        }
+    }
+    model.mark_surface_dirty();
+    None
+}
+
+/// 设置页五份数据。任何一份失败整批不写，只记下错误，和 Vue 的 `Promise.all` 一致。
+fn apply_bundle(
+    model: &mut ShellViewModel,
+    plugins: Result<Vec<PluginManifest>, String>,
+    hooks: Result<Vec<crate::backend::services::repository::PluginHookExecutionRecord>, String>,
+    cache: Result<crate::backend::services::repository::CacheSnapshot, String>,
+    api: Result<crate::backend::services::repository::ApiDesignSnapshot, String>,
+    external: Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>,
+) {
+    model.admin.loading_settings = false;
+    // 首屏启动在等的设置包：成功时插件列表换新、接着读播放器类型，启动等它回来；失败照 Vue 吃掉错误，启动就此结束。
+    let complete =
+        plugins.is_ok() && hooks.is_ok() && cache.is_ok() && api.is_ok() && external.is_ok();
+    model.workspace.note_settings_loaded(complete);
+    match (plugins, hooks, cache, api, external) {
+        (Ok(plugins), Ok(hooks), Ok(cache), Ok(api), Ok(external)) => {
+            publish_plugins(model, &plugins);
+            model.admin.store_plugins(plugins);
+            model.admin.hook_executions = hooks;
+            model.admin.cache = Some(cache);
+            model.admin.api_design = Some(api);
+            model.admin.external = Some(external);
+            model.admin.load_error.clear();
+            // API Playground 挂载时选中第一个端点并带出方法、目标和请求体，契约换新后同样重选。
+            let _ = super::api::selected(model);
+        }
+        (plugins, hooks, cache, api, external) => {
+            let error = [
+                plugins.err(),
+                hooks.err(),
+                cache.err(),
+                api.err(),
+                external.err(),
+            ]
+            .into_iter()
+            .flatten()
+            .next()
+            .unwrap_or_default();
+            eprintln!("Nana 设置页数据读取失败：{error}");
+            model.admin.load_error = error;
+        }
+    }
+}
+
+fn set_corner_style(model: &mut ShellViewModel, style: &str) {
+    if style != "smooth" && style != "round" {
+        eprintln!("Nana 忽略未知圆角样式：{style}");
+        return;
+    }
+    model.admin.corner_style = style.to_string();
+    model.admin.push_effect(AdminEffect::PersistCorners);
+}
+
+fn set_corner_radius(model: &mut ShellViewModel, value: &str) {
+    let Ok(parsed) = value.trim().parse::<f64>() else {
+        eprintln!("Nana 圆角半径不是数字：{value}");
+        return;
+    };
+    let Some(radius) = support::clamp_radius(parsed) else {
+        eprintln!("Nana 圆角半径不是有限数字：{value}");
+        return;
+    };
+    model.admin.corner_radius = radius;
+    model.admin.push_effect(AdminEffect::PersistCorners);
+}
+
+fn copy_external(model: &mut ShellViewModel, label: &str, value: &str) {
+    model.admin.external_message.clear();
+    model.admin.external_error.clear();
+    if value.is_empty() {
+        model.admin.external_error = format!("{label} 尚未加载。");
+        return;
+    }
+    model
+        .admin
+        .push_effect(AdminEffect::CopyText(value.to_string()));
+    model.admin.external_message = format!("{label} 已复制。");
+}
+
+fn export_external(model: &mut ShellViewModel) {
+    let content = external_json(model);
+    model.admin.external_message.clear();
+    model.admin.external_error.clear();
+    if content.is_empty() {
+        model.admin.external_error = "连接 JSON 尚未加载。".into();
+        return;
+    }
+    model
+        .admin
+        .push_effect(AdminEffect::RequestSaveDialog { content });
+}
+
+fn complete_export(model: &mut ShellViewModel, path: Option<String>) {
+    let Some(path) = path.filter(|path| !path.trim().is_empty()) else {
+        return;
+    };
+    let content = external_json(model);
+    if content.is_empty() {
+        model.admin.external_error = "连接 JSON 尚未加载。".into();
+        return;
+    }
+    model.admin.push_effect(AdminEffect::WriteFile {
+        path,
+        bytes: content.into_bytes(),
+    });
+}
+
+fn external_json(model: &ShellViewModel) -> String {
+    let Some(connection) = &model.admin.external else {
+        return String::new();
+    };
+    support::connection_json(
+        &connection.base_url,
+        &connection.token,
+        &connection.version,
+        &connection.started_at,
+    )
+}
+
+/// 清空系统日志的结果。成功照 Vue 把手上的日志清空、不再重读（之后的新记录照常经宿主事件合并进来）；
+/// 失败时日志留着，原因写进状态区。Vue 这里的失败没有界面反馈，不照抄。
+fn note_logs_cleared(model: &mut ShellViewModel, result: Result<(), String>) {
+    model.admin.logs_clearing = false;
+    match result {
+        Ok(()) => model.admin.replace_logs(Vec::new()),
+        Err(error) => {
+            eprintln!("Nana 清空系统日志失败：{error}");
+            model
+                .status
+                .fail(FailureSource::Logs, format!("清空系统日志失败：{error}"));
+        }
+    }
+}
+
+/// 清理缓存、重新获取播放资源的结果。成功和 Vue 来源动作完成后的 `context.refreshRepo()` 一样重读资源库列表，再按
+/// 当前仓库同步、重读摘要和目录；失败写进文件列。下载的收尾在 `shell/admin/source_download.rs`。
+fn finish_file_plugin(
+    model: &mut ShellViewModel,
+    method: &str,
+    result: Result<serde_json::Value, String>,
+) {
+    match result {
+        Ok(_) => {
+            model.files.error.clear();
+            model.workspace.request_repository_refresh();
+        }
+        Err(error) => {
+            eprintln!("Nana 文件插件动作失败：{method}：{error}");
+            model.files.error = if error.is_empty() {
+                format!("{method} 调用失败。")
+            } else {
+                error
+            };
+        }
+    }
+}
+
+/// 「创建播放列表」照 Vue `runPlaylistAction` 交给服务：没有当前仓库或来源歌单标识时只报错，不建。
+fn create_source_playlist(
+    model: &mut ShellViewModel,
+    playlist: super::super::entry_actions::SourcePlaylist,
+    repository_id: Option<String>,
+) {
+    let Some(repo_id) = repository_id.filter(|id| !id.trim().is_empty()) else {
+        eprintln!("Nana 创建来源播放集没有当前仓库：{}", playlist.path);
+        model.files.error = "没有当前资源库，不能创建播放列表。".into();
+        return;
+    };
+    let Some(playlist_id) = playlist.playlist_id else {
+        eprintln!("Nana 来源目录缺少播放列表标识：{}", playlist.path);
+        model.files.error = "来源目录缺少播放列表标识".into();
+        return;
+    };
+    model.admin.push_effect(AdminEffect::CreateSourcePlaylist {
+        repo_id,
+        playlist_id,
+        name: playlist.name,
+        player_type_id: playlist.player_type_id,
+        path: playlist.path,
+    });
+}
+
+/// 建好以后和别的来源动作一样刷新资源库（Vue `context.refreshRepo()`），新播放集随摘要出现在侧栏。
+/// 失败写进文件列表的错误；Vue 在这里没有任何提示，失败只留在控制台。
+fn finish_source_playlist(model: &mut ShellViewModel, result: Result<(), String>) {
+    match result {
+        Ok(()) => {
+            model.files.error.clear();
+            model.workspace.request_repository_refresh();
+        }
+        Err(error) => {
+            eprintln!("Nana 创建来源播放集失败：{error}");
+            model.files.error = if error.is_empty() {
+                "创建播放列表失败。".into()
+            } else {
+                error
+            };
+        }
+    }
+}
+
+fn selected_action<'a>(
+    model: &'a ShellViewModel,
+    action_id: &Option<String>,
+) -> Option<&'a RepositoryAction> {
+    let requested = action_id
+        .as_deref()
+        .or(model.admin.active_action_id.as_deref());
+    model
+        .admin
+        .actions
+        .iter()
+        .find(|action| Some(action.action_id.as_str()) == requested)
+        .or(model.admin.actions.first())
+}
+
+/// 取消排队或运行中的后台任务。仓库操作行和已经在取消的任务只记日志，不发请求。
+fn cancel_task(model: &mut ShellViewModel, task_id: &str) {
+    let cancellable = model.task_progress.iter().any(|task| {
+        task.task_id == task_id && matches!(task.status.as_str(), "queued" | "running")
+    });
+    if !cancellable {
+        eprintln!("Nana 任务不能取消：{task_id}");
+        return;
+    }
+    model
+        .admin
+        .push_effect(AdminEffect::CancelTask(task_id.to_string()));
+}
+
+fn run_action(model: &mut ShellViewModel, action_id: Option<String>) {
+    let Some(repo_id) = model.repository_id.clone() else {
+        eprintln!("Nana 没有活动仓库，不能执行仓库动作");
+        return;
+    };
+    let Some(action) = selected_action(model, &action_id).cloned() else {
+        eprintln!("Nana 没有可执行的仓库动作");
+        return;
+    };
+    let selected = model.files.selected_paths().len();
+    if !support::action_can_run(
+        &action.status,
+        action.enabled,
+        selected,
+        model.admin.actions_running,
+    ) {
+        eprintln!("Nana 仓库动作当前不能执行：{}", action.action_id);
+        return;
+    }
+    let paths = model.files.selected_paths().to_vec();
+    model.admin.actions_running = true;
+    model.admin.actions_error.clear();
+    model.admin.push_effect(AdminEffect::RunAction {
+        repo_id,
+        action_id: action.action_id,
+        paths,
+    });
+}
+
+fn apply_actions(
+    model: &mut ShellViewModel,
+    repo_id: &str,
+    result: Result<Vec<RepositoryAction>, String>,
+) {
+    if model.admin.actions_repo_id.as_deref() != Some(repo_id) {
+        eprintln!("Nana 忽略过期的仓库动作：{repo_id}");
+        return;
+    }
+    model.admin.actions_loading = false;
+    if model.repository_id.as_deref() != Some(repo_id) {
+        eprintln!("Nana 忽略不属于当前仓库的动作列表：{repo_id}");
+        return;
+    }
+    match result {
+        Ok(actions) => {
+            if model
+                .admin
+                .active_action_id
+                .as_ref()
+                .is_some_and(|id| !actions.iter().any(|action| &action.action_id == id))
+            {
+                model.admin.active_action_id = None;
+            }
+            model.admin.active_action_id = model
+                .admin
+                .active_action_id
+                .clone()
+                .or_else(|| actions.first().map(|action| action.action_id.clone()));
+            model.admin.actions = actions;
+        }
+        Err(error) => {
+            eprintln!("Nana 仓库动作读取失败：{error}");
+            model.admin.actions_error = error;
+        }
+    }
+}
+
+fn finish_action(model: &mut ShellViewModel, result: Result<RepositoryAction, String>) {
+    model.admin.actions_running = false;
+    match result {
+        Ok(action) => {
+            let repo_id = action.repo_id.clone();
+            if let Some(current) = model
+                .admin
+                .actions
+                .iter_mut()
+                .find(|item| item.action_id == action.action_id)
+            {
+                *current = action;
+            }
+            // Vue `runActiveRepositoryAction` 的 `refreshWorkspaceAfterMutation`。
+            model.reload_after_mutation(&repo_id);
+        }
+        Err(error) => {
+            eprintln!("Nana 仓库动作执行失败：{error}");
+            model.admin.actions_error = error;
+        }
+    }
+}

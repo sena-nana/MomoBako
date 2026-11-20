@@ -364,5 +364,4 @@ pub(super) fn now_ms() -> i64 {
 }
 
 #[cfg(test)]
-#[path = "tree_sync_tests.rs"]
 mod tests;

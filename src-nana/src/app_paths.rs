@@ -163,5 +163,4 @@ pub fn current() -> &'static HostLocations {
 }
 
 #[cfg(test)]
-#[path = "app_paths_tests.rs"]
 mod tests;

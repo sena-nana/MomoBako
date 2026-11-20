@@ -20,13 +20,13 @@
 
 | 块 | 模块 | 切换 | 现状 |
 | --- | --- | --- | --- |
-| 侧栏 | `view_part_sidebar.rs`，投影在 `sidebar_project.rs` | 无 | 常驻：`SidebarSignals`（几个信号加播放集、文件夹树、智能文件夹树三份 Store）建在骨架作用域里，同步只写变了的；第一次排成工作台时建，收起时跟着工作区停放，展开时原样回来 |
+| 侧栏 | `view_part_sidebar.rs`，投影在 `src-nana/src/shell/view_part_sidebar/project.rs` | 无 | 常驻：`SidebarSignals`（几个信号加播放集、文件夹树、智能文件夹树三份 Store）建在骨架作用域里，同步只写变了的；第一次排成工作台时建，收起时跟着工作区停放，展开时原样回来 |
 | 主区 | `view_part_primary.rs`，路由在 `route_*.rs` | `dynamic(RouteKey)` | 所有路由（启动、文件、缺失仓库、空库、搜索含空库搜索、设置、日志、拓展、动作和播放集页）都常驻；播放条是旧视图岛，共三处：文件页工作台左列底部、预览页底部、播放集面板底部 |
 | 浮层 | `view_part_overlay.rs` | 按 `OverlayIdentity` 换块 | 常驻：浮层层一直在 AppShell 的 overlay 槽位里，各块按身份换进换出；身份不变时只经会话写信号；对话框走统一框架，靠 `open` 开合，换下的放完退场才卸 |
 
 并行改区域时各改各的文件：
 
-- 浮层和对话框：`view_part_overlay.rs`（`overlay_branch` 里自己那种浮层的分支，身份的结构见 `OverlayIdentity`），对话框框架 `overlay_dialog.rs`、`overlay_dialog_fields.rs`，会话 `overlay_session.rs`，以及 `sidebar_dialogs.rs`、`sidebar_smart_dialog.rs`、`sidebar_popover_view.rs`、`admin_view.rs` 的任务弹层、文件和文件夹两种右键菜单（共用 `context_menu.rs`，条目在 `files_menu.rs`、`sidebar_tree_view.rs`）、`workspace_dialogs.rs`、`workspace_export_dialog.rs` 等浮层视图。
+- 浮层和对话框：`view_part_overlay.rs`（`overlay_branch` 里自己那种浮层的分支，身份的结构见 `OverlayIdentity`），对话框框架 `src-nana/src/shell/view_part_overlay/dialog.rs`、`src-nana/src/shell/view_part_overlay/dialog/form.rs`，会话 `src-nana/src/shell/view_part_overlay/session.rs`，以及 `src-nana/src/shell/sidebar_view/dialogs.rs`、`src-nana/src/shell/sidebar_view/dialogs/smart.rs`、`src-nana/src/shell/sidebar_view/popover.rs`、`src-nana/src/shell/admin/view.rs` 的任务弹层、文件和文件夹两种右键菜单（共用 `context_menu.rs`，条目在 `src-nana/src/shell/files_view/menu.rs`、`src-nana/src/shell/sidebar_view/tree.rs`）、`workspace_dialogs.rs`、`src-nana/src/shell/workspace_dialogs/export.rs` 等浮层视图。
 - 文件页和详情：`route_files.rs` 和 `files_*.rs`、`inspect_*.rs`。
 - 侧栏和其余路由：`view_part_sidebar.rs`、`sidebar_*.rs`，以及 `route_search.rs`、`route_playlists.rs`、`route_settings.rs`、`route_admin.rs`、`route_startup.rs`、`route_missing.rs`、`route_empty.rs`；首页外框和滚动主体在 `route_home.rs`。
 
@@ -65,7 +65,7 @@
 
 - 几个平铺的值、读者不多：`Signal<T>`，`T` 是投影里的一段结构，绑定用 `move || sig.with(|v| v.field.clone())` 取字段。值变了以后读者重跑，按字段比较，没变的字段不打补丁，成本很低。
 - 嵌套的状态，或者列表里每行的字段各自在变、行数又多：`store(..)` 加 `#[derive(Store)]`（壳层已开 `view-macro`），行用 `keyed(LogRowView::key).each(..)` 这样按行键建，行内绑定读 `item.title()` 这样的路径，改一行只重跑读这一行的绑定。整体 `set` 列表会让所有行的绑定重跑一遍再按字段比较，大列表写回时只改变了的项（`at(&key).set(..)`、`push`、`retain`）。
-- 投影出的整份新列表写回 Store 时按键做差异：删掉没有了的、按位置插入新的、只改内容变了的，顺序变了再排一次；键重复时两边都只认第一行。侧栏的播放集、文件夹树和智能文件夹树，以及播放集条目、搜索结果、日志和插件面板共用 `row_sync::sync_rows`，删、插、排只通知列表本身，留下的行一个绑定都不重跑；文件页的卡片仓另有自己的写法（`files_board.rs` 的 `write_cards`）。新日志到达只建新的一行。管理页的行内绑定用 `admin::bind::row_text` / `row_flag`，读 `try_with`，行已经删掉时读默认值；侧栏和播放集的行直接读 `item.try_with(..)`。
+- 投影出的整份新列表写回 Store 时按键做差异：删掉没有了的、按位置插入新的、只改内容变了的，顺序变了再排一次；键重复时两边都只认第一行。侧栏的播放集、文件夹树和智能文件夹树，以及播放集条目、搜索结果、日志和插件面板共用 `row_sync::sync_rows`，删、插、排只通知列表本身，留下的行一个绑定都不重跑；文件页的卡片仓另有自己的写法（`src-nana/src/shell/files_view/board.rs` 的 `write_cards`）。新日志到达只建新的一行。管理页的行内绑定用 `admin::bind::row_text` / `row_flag`，读 `try_with`，行已经删掉时读默认值；侧栏和播放集的行直接读 `item.try_with(..)`。
 - 行的类型不一定要派生 `Store`：行内绑定整行读 `item.try_with(..)`，也只在这一行变了时重跑。要按字段取下一层列表时（分组里的插件卡片 `group.cards()`）才派生。
 - 不要把整个 ViewModel 放进一个信号。
 
@@ -109,13 +109,13 @@
 
 ### 测试
 
-- 投影的单测：取值、相等性，以及哪些消息改投影、哪些不改（侧栏的在 `sidebar_project_tests.rs`）。
+- 投影的单测：取值、相等性，以及哪些消息改投影、哪些不改（侧栏的在 `src-nana/src/shell/view_part_sidebar/project/tests.rs`）。
 - 用 `view_harness::ShellHarness`：
   - `assert_same_as_fresh_mount()`：增量更新后的文档和同一 ViewModel 新挂的文档逐个比较，每一步更新后都调。先比无障碍树（角色、名称、值、布局盒），再按文档顺序比每个节点（含不进无障碍树的容器）的组装路径、组件类型、无障碍状态（禁用、选中、勾选、忙、无效）和整份样式，只绑在样式和状态上的字段也比得到。路径里 `#v0`、`#adopt-1` 这类自动起名的段不比：先挂后插的行和一次建出的行名字不同，结构一样。滚动偏移、焦点和悬停不比。
-  - 「N 次无关更新后节点 id 不变」：用 `harness.keyed("键")` 记下节点，`apply` 几条无关消息并 `flush` 后再取，应该是同一个节点；相关更新后绑定的字段原地变，结构变了的那一行才换（`route_startup_tests.rs`）。
+  - 「N 次无关更新后节点 id 不变」：用 `harness.keyed("键")` 记下节点，`apply` 几条无关消息并 `flush` 后再取，应该是同一个节点；相关更新后绑定的字段原地变，结构变了的那一行才换（`src-nana/src/shell/route_startup/tests.rs`）。
   - `view_stats().remounts` 不变：动效帧、播放推进和常驻区域的更新都不该重挂。
-  - `route_branch()`、`sidebar_root()`、`content_roots()` 判断哪一块换了（`view_part_primary_tests.rs`）。
-  - 常驻路由里的输入框：组合输入中后台消息和相关消息都不换节点、不断预编辑；按键消息排在后台消息后面时刚打的字不回滚；新列表项到达时已有行的节点不换（`route_search_tests.rs`、`route_admin_tests.rs`）。
+  - `route_branch()`、`sidebar_root()`、`content_roots()` 判断哪一块换了（`src-nana/src/shell/view_part_primary/tests.rs`）。
+  - 常驻路由里的输入框：组合输入中后台消息和相关消息都不换节点、不断预编辑；按键消息排在后台消息后面时刚打的字不回滚；新列表项到达时已有行的节点不换（`src-nana/src/shell/route_search/tests.rs`、`src-nana/src/shell/route_admin/tests.rs`）。
 - 藏起（`.visible(false)`）的块排过一次版才退出无障碍树，取节点前先 `flush`（`ShellHarness::mount` 已经排过）。
 - 改完用 `scene_shots` 出受影响的场景（`NANA_SCENES` 点名，命令见 [离屏验收证据](./nana-offscreen-evidence.md)），和改动前逐字节比较。
 
@@ -129,17 +129,17 @@
 | --- | --- | --- |
 | `Host` | 打开、定位、拖出文件（原 `input.error`，已删） | `host_bridge::perform`、`drag_out::apply_result` |
 | `Tray` | 最小化到托盘（原来借 `input.notice`，关闭确认框以外没有显示位）；收进托盘成功时作废 | `host_bridge::perform` |
-| `Repository` | 启动以后读资源库列表、读仓库摘要失败；添加资源库时的文件夹选择失败（弹层已关） | `shell.rs` 归约、`input_reduce.rs` |
+| `Repository` | 启动以后读资源库列表、读仓库摘要失败；添加资源库时的文件夹选择失败（弹层已关） | `shell.rs` 归约、`src-nana/src/shell/input/reduce.rs` |
 | `Directory` | 文件区以外发起的目录读取失败（文件区自己的写在文件列表里） | `shell.rs` 归约 |
 | `Asset` | 读素材详情失败 | `shell.rs` 归约 |
 | `Metadata` | 保存元数据失败 | `inspect::reduce_message` |
 | `Playlist` | 播放集的读写、条目增删排序、播放器类型 | `shell.rs` 归约 |
 | `Player` | 播放控制、播放集成员写入 | `PlayerState::note_failure`，归约结束时取走 |
-| `Settings`、`Logs` | 读写应用设置、系统服务状态；读系统日志 | `admin_reduce.rs` |
+| `Settings`、`Logs` | 读写应用设置、系统服务状态；读系统日志 | `src-nana/src/shell/admin/reduce.rs` |
 | `SmartFolder` | 智能文件夹删除失败（编辑对话框没开着）；查询、读列表失败 | `sidebar.rs` 归约；`sidebar.smart_error` |
 | `FolderTree` | 文件夹树读取失败 | `sidebar.tree_error` |
 | `Sync` | 刷新文件夹树：同步仓库，或之后重读摘要、硬链接候选、目录树失败 | `tree_sync.rs` |
-| `Download` | 来源下载里插件报告失败的条目：「{动作名}「{名称}」有 N 项失败，原因见「日志」。」，每一条的原因写进系统日志；导入目标资源库时跳过了同名文件时写已有几个同名文件、保留原文件没有导入；只有跳过、或者一项也没有下载到（「{动作名}「{名称}」没有下载到任何条目。」）时是提醒（警告色） | `source_download.rs` |
+| `Download` | 来源下载里插件报告失败的条目：「{动作名}「{名称}」有 N 项失败，原因见「日志」。」，每一条的原因写进系统日志；导入目标资源库时跳过了同名文件时写已有几个同名文件、保留原文件没有导入；只有跳过、或者一项也没有下载到（「{动作名}「{名称}」没有下载到任何条目。」）时是提醒（警告色） | `src-nana/src/shell/admin/source_download.rs` |
 | `Files` | 文件操作失败 | `files.error` |
 
 文案先写失败的对象（「定位失败：」「无法读取文件元数据：」），后接系统返回的原因。`files.error`、`sidebar.tree_error`、`sidebar.smart_error` 三个字段被盯着（`observe_failures`）：新写一次记一次，字段清掉时它记下的那一条一起清。宿主在归约以外写下的失败（服务派发、拖出结果）在 `update` 同步视图之前、`prepare` 里收进来。
@@ -183,7 +183,7 @@
 
 信号建在这一块的挂载作用域里，随浮层一起回收。列表行按内容做键（变了的行重建）或按编号做键、字段从投影里取（任务进度只改字段）。
 
-**对话框框架**（`overlay_dialog.rs`）。所有对话框都用 `DialogFrame`：
+**对话框框架**（`src-nana/src/shell/view_part_overlay/dialog.rs`）。所有对话框都用 `DialogFrame`：
 
 ```rust
 DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string()), || close_message())
@@ -240,7 +240,7 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 
 - **Escape**：激活的对话框由运行时直接拿到 Escape、发自己的关闭请求（见上一节）。其余的层：`MomoBakoApplication::input_event` 收到运行时没处理掉的 Escape 按下（`prevent_default` 为假）时，按 `escape_layer(model)` 判断还有没有能关的层，有就发 `GapMessage::Escape`，归约时 `dismiss_top` 照同一个顺序关掉最上面一层。焦点在哪都一样。下拉框收起选项这类控件自己处理的 Escape 不会再关别的层。新的可关闭层加进 `EscapeLayer`。
 - **系统文件拖放**：在建拖放目标的视图里给它一个 `node_ref`，调用 `input::accept_file_drops(node_ref)`，挂上后由 `on_mount` 登记。
-- **字段的无障碍名**：标题和控件分开写的字段，标题加 `.node_ref(caption)`，下拉框这类没有自己名称的控件加 `.labelled_by(caption)`（对话框框架 `overlay_dialog_fields.rs` 的 `select_field`）。没有可见标题时写控件自己的 `label`。
+- **字段的无障碍名**：标题和控件分开写的字段，标题加 `.node_ref(caption)`，下拉框这类没有自己名称的控件加 `.labelled_by(caption)`（对话框框架 `src-nana/src/shell/view_part_overlay/dialog/form.rs` 的 `select_field`）。没有可见标题时写控件自己的 `label`。
 
 ## NanaUI 缺口
 

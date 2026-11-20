@@ -190,5 +190,4 @@ impl FieldWrite<Stack, bool> for DropHighlight {
 }
 
 #[cfg(test)]
-#[path = "route_empty_tests.rs"]
 mod tests;

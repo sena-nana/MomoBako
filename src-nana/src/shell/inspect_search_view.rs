@@ -6,7 +6,7 @@
 //!
 //! 视图只建一次（[`resident_search_panel`]），只读 [`SearchPanelSignals`]：文案按字段绑定，状态块用
 //! `.visible` 显隐，结果行是按「仓库 + 素材」做键的 `each`，再搜一次只换变了的行。
-//! 筛选栏的视图在 `search_filter_bar.rs`，放在哪里由壳层决定。
+//! 筛选栏的视图在 `shell/inspect_search_view/filter_bar_view.rs`，放在哪里由壳层决定。
 
 use nana_ui::icons_tabler::LOADER_2;
 use nana_ui::runtime::view::{
@@ -22,17 +22,11 @@ use nana_ui_core::BorderStyle;
 use super::ShellMessage;
 use super::inspect::InspectMessage;
 
-#[path = "search_filter_bar.rs"]
 mod filter_bar_view;
-#[path = "search_filter_state.rs"]
 mod filter_state;
-#[path = "search_paint.rs"]
 mod paint;
-#[path = "search_panel_state.rs"]
 mod panel_state;
-#[path = "search_presenter.rs"]
 mod presenter;
-#[path = "search_widgets.rs"]
 mod widgets;
 
 pub(crate) use filter_bar_view::resident_filter_bar;
@@ -331,5 +325,4 @@ impl HitRow {
 }
 
 #[cfg(test)]
-#[path = "search_view_tests.rs"]
 mod tests;

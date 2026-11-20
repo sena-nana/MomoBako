@@ -31,5 +31,4 @@ pub(super) fn empty_library(search: SearchPanelSignals) -> AnyView {
 }
 
 #[cfg(test)]
-#[path = "route_search_tests.rs"]
 mod tests;

@@ -20,17 +20,17 @@ yarn test:nana:offscreen
 - 52 个补充场景：`acceptance_gap_models()`，定义在 `src-nana/src/shell/acceptance_*.rs` 各自的 `models()`。
 - 4 个压力场景，只在这个测试里：`long-content` 根目录读回一个超长文件名，`empty-list` 根目录读回空列表，`disabled-feedback` 在设置错误页上保存设置被拒（状态区写原因），`dense-list` 任务弹层里 12 个运行中任务。都经真实消息归约。
 
-有仓库的场景都从 `acceptance_base.rs` 的共用底子起步：照产品启动依次归约资源库列表、同步、仓库摘要、首屏目录和侧栏的读取结果，数据和 Vue 夹具 `base()` 一致。场景要别的条目、目录树、播放集、播放器或仓库时改底子的字段。
+有仓库的场景都从 `src-nana/src/shell/acceptance/base_scene.rs` 的共用底子起步：照产品启动依次归约资源库列表、同步、仓库摘要、首屏目录和侧栏的读取结果，数据和 Vue 夹具 `base()` 一致。场景要别的条目、目录树、播放集、播放器或仓库时改底子的字段。
 
 | 来源 | 场景 |
 | --- | --- |
 | 15 页（`ShellPage`） | `loading`、`empty-repository`、`error`、`file-list`、`selected-file`、`playlists`、`plugin-settings`、`task-running`、`playback-running`、`task-cancelling`、`conflict`、`unsaved-edit`、`settings`、`settings-error`、`logs` |
-| `acceptance_shell.rs` | `live-files-plain`、`live-visual`、`missing`、`repo-switcher`、`repo-delete-dialog`、`folder-create-dialog`、`smart-folder-dialog`、`playlist-create-dialog`、`status-error`、`folder-tree-refresh`、`repo-switch-startup`、`repo-refresh-sync` |
-| `acceptance_files.rs` | `live-files`、`live-files-selected`、`files-selected-metadata`、`files-selected-folder`、`live-menu`、`copy-dialog`、`hardlink-dialog`、`export-dialog`、`files-list-mode`、`files-adaptive`、`files-masonry`、`file-operation-progress`、`files-multi-select` |
-| `acceptance_player.rs` | `playlist-open`、`playback-queue`、`still-playback`、`outside-playback`、`live-preview`、`live-asmr`、`preview-text`、`preview-image`、`preview-audio`、`preview-audio-failed`、`preview-no-player` |
-| `acceptance_admin.rs` | `logs-paused`、`extensions`、`downloader-settings`、`office-convert`、`source-auth-gap`、`source-auth-methods`、`foreign-tool` |
-| `acceptance_search.rs` | `filter-bar`、`filter-bar-active`、`search-results`、`search-empty` |
-| `acceptance_source.rs` | `source-menu-unavailable`、`source-download-target`、`online-preview-preparing`、`online-preview-failed`、`online-playback-failed` |
+| `src-nana/src/shell/acceptance/shell_scenes.rs` | `live-files-plain`、`live-visual`、`missing`、`repo-switcher`、`repo-delete-dialog`、`folder-create-dialog`、`smart-folder-dialog`、`playlist-create-dialog`、`status-error`、`folder-tree-refresh`、`repo-switch-startup`、`repo-refresh-sync` |
+| `src-nana/src/shell/acceptance/files_scenes.rs` | `live-files`、`live-files-selected`、`files-selected-metadata`、`files-selected-folder`、`live-menu`、`copy-dialog`、`hardlink-dialog`、`export-dialog`、`files-list-mode`、`files-adaptive`、`files-masonry`、`file-operation-progress`、`files-multi-select` |
+| `src-nana/src/shell/acceptance/player_scenes.rs` | `playlist-open`、`playback-queue`、`still-playback`、`outside-playback`、`live-preview`、`live-asmr`、`preview-text`、`preview-image`、`preview-audio`、`preview-audio-failed`、`preview-no-player` |
+| `src-nana/src/shell/acceptance/admin_scenes.rs` | `logs-paused`、`extensions`、`downloader-settings`、`office-convert`、`source-auth-gap`、`source-auth-methods`、`foreign-tool` |
+| `src-nana/src/shell/acceptance/search_scenes.rs` | `filter-bar`、`filter-bar-active`、`search-results`、`search-empty` |
+| `src-nana/src/shell/acceptance/source_scenes.rs` | `source-menu-unavailable`、`source-download-target`、`online-preview-preparing`、`online-preview-failed`、`online-playback-failed` |
 | 压力场景（`special_models`） | `long-content`、`empty-list`、`disabled-feedback`、`dense-list` |
 
 ## 每组证据检查什么

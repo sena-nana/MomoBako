@@ -6,13 +6,13 @@
 
 use nana_ui::RuntimeProgramContext;
 
-#[path = "files_effect_dispatch.rs"]
 mod files_effect_dispatch;
-#[path = "files_protocol_dispatch.rs"]
 mod files_protocol_dispatch;
 
+#[cfg(test)]
 pub(crate) use files_protocol_dispatch::protocol_folder_tree;
 
+use crate::MomoBakoApplication;
 use crate::backend::services::mutsuki_runner::{
     PROTOCOL_ARCHIVE_IMPORT, PROTOCOL_EAGLE_IMPORT, PROTOCOL_ENTRY_COPY, PROTOCOL_ENTRY_DELETE,
     PROTOCOL_ENTRY_IMPORT, PROTOCOL_ENTRY_MOVE,
@@ -21,9 +21,8 @@ use crate::backend::services::repository::{
     EagleLibraryImportRequest, FileArchiveImportRequest, FileCopyRequest, FileDeleteRequest,
     FileImportRequest, FileMoveRequest,
 };
-use crate::shell::{display_mode_path, FilesEffect, FilesMessage, ShellMessage};
+use crate::shell::{FilesEffect, FilesMessage, ShellMessage, display_mode_path};
 use crate::task_guard::spawn_service;
-use crate::MomoBakoApplication;
 
 /// 执行文件归约留下的请求。
 pub fn dispatch_files_effects(

@@ -350,5 +350,4 @@ pub(crate) fn busy(model: &ShellViewModel) -> bool {
 }
 
 #[cfg(test)]
-#[path = "status_tests.rs"]
 mod tests;

@@ -21,30 +21,22 @@ use super::inspect_metadata_view::MetadataSignals;
 use super::inspect_view::PreviewSignals;
 use super::{ShellMessage, ShellPage, ShellViewModel};
 
-#[path = "files_bind.rs"]
 pub(super) mod bind;
-#[path = "files_grid.rs"]
 mod grid;
-#[path = "files_header.rs"]
 mod header;
-#[path = "files_style.rs"]
 pub(super) mod style;
 pub(crate) use grid::load_more_if_sentinel_near;
-pub(crate) use grid::suppress_row_click;
 #[cfg(test)]
 pub(crate) use grid::reset_row_click_state;
-#[path = "files_cards.rs"]
+pub(crate) use grid::suppress_row_click;
 mod cards;
-#[path = "files_virtual.rs"]
 mod virtual_rows;
 pub(crate) use board::estimated_list_width;
 pub(crate) use virtual_rows::{RowSlot, row_slots};
-#[path = "files_board.rs"]
 mod board;
-#[path = "files_detail.rs"]
 mod detail;
-#[path = "files_menu.rs"]
 mod menu;
+#[cfg(any(test, feature = "acceptance"))]
 pub(crate) use menu::EntryMenuView;
 #[cfg(test)]
 pub(crate) use menu::open_and_reveal_targets;

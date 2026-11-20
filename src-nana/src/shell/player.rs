@@ -15,14 +15,11 @@ use crate::backend::services::repository::{
     PlaylistPlayerContribution, PlaylistSummary,
 };
 
-#[path = "player_clip.rs"]
 mod clip;
-#[path = "player_support.rs"]
 mod support;
 #[cfg(test)]
 pub(crate) use clip::fulfill_loads;
 pub(crate) use clip::{LoadedItem, StillShow, decode_loaded, decode_media};
-#[path = "wav_player.rs"]
 mod wav_player;
 pub(crate) use support::{
     AUDIO_CAPABILITY, AUDIO_SEQUENCE_TYPE, builtin_audio_formats, capability_id, resolution_notice,
@@ -1170,12 +1167,9 @@ fn fresh_session(repo_id: &str) -> PlaybackSessionState {
     }
 }
 
-#[path = "player_preview.rs"]
 mod preview;
-#[path = "player_reduce.rs"]
 mod reduce;
 pub(crate) use preview::{ClockStep, PreviewEntry};
-#[path = "player_library.rs"]
 mod library;
 pub(crate) use reduce::reduce_message;
 
@@ -1196,8 +1190,6 @@ impl ShellViewModel {
 }
 
 #[cfg(test)]
-#[path = "player_clip_tests.rs"]
 mod clip_tests;
 #[cfg(test)]
-#[path = "player_tests.rs"]
 mod tests;

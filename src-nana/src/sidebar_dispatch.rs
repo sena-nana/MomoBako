@@ -225,7 +225,7 @@ fn dispatch_smart_folders(
 }
 
 /// 新建、编辑、删除智能文件夹：在任务里调 `save`，结果（整份智能文件夹树和这次改的是哪个）回
-/// `SmartFolderSaved`，归约据此打开新建的、重查或退出被删的（`sidebar_smart_flow.rs`）。
+/// `SmartFolderSaved`，归约据此打开新建的、重查或退出被删的（`shell/sidebar/smart_flow.rs`）。
 fn dispatch_save_smart(
     app: &MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,

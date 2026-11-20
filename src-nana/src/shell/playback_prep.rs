@@ -54,5 +54,4 @@ impl SourcePrep {
 }
 
 #[cfg(test)]
-#[path = "playback_prep_tests.rs"]
 mod tests;

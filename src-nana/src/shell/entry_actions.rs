@@ -3,11 +3,11 @@
 //! 清单 `contributes.source.entryActions[]` 的 operation 只有 `docs/api-design.md` 约定的五种：
 //! 宿主负责每一种的目录选择、进度、导入和刷新，声明不能让宿主执行别的命令。
 //! 能直接调用的方法接到现有 `call_plugin`。下载照 Vue `downloadTargets` 分「到本地」和「到其他资源库」两项
-//! （声明了 `targets` 时只出声明的）：到本地先要系统目录对话框，到其他资源库先选目标资源库（`source_target.rs`），
+//! （声明了 `targets` 时只出声明的）：到本地先要系统目录对话框，到其他资源库先选目标资源库（`shell/admin/source_target.rs`），
 //! 选好才带上 `destination` 调用。清理缓存、重新获取播放资源和下载的载荷照 Vue 带上当前资源库的本地缓存目录
 //! （`managedCacheRoot`），网易云插件据此找到真正的播放缓存和暂存目录。
 //! 「创建播放列表」（`playlist-from-directory`）照 Vue `runPlaylistAction` 不调用插件：在本地建一个以来源
-//! 歌单命名的播放集（已经有就不建），把这个目录加进去，再刷新资源库（`admin_reduce.rs`）。约定以外的 operation
+//! 歌单命名的播放集（已经有就不建），把这个目录加进去，再刷新资源库（`shell/admin/reduce.rs`）。约定以外的 operation
 //! 和没写 scope 的声明不出菜单，只记日志（Vue 把约定以外的 operation 一律当成「创建播放列表」，是缺陷）。
 //!
 //! 来源认证或本地缓存不可用时（Vue `actionDisabled`：登录过期、没有登录、要本地缓存但没就绪，或者条目自己标了
@@ -535,5 +535,4 @@ fn text(value: &Value, key: &str) -> Option<String> {
 }
 
 #[cfg(test)]
-#[path = "entry_actions_tests.rs"]
 mod tests;

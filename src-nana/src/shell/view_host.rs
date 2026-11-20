@@ -669,5 +669,4 @@ pub(crate) fn prepare_registered(
 }
 
 #[cfg(test)]
-#[path = "view_host_tests.rs"]
 mod tests;

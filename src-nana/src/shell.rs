@@ -10,6 +10,7 @@ use crate::backend::services::repository::{
 };
 use crate::settings::ApplicationSettings;
 
+#[cfg(any(test, feature = "acceptance"))]
 mod acceptance;
 mod files;
 mod system_media;
@@ -43,6 +44,7 @@ mod inspect_search_view;
 mod inspect_view;
 pub(crate) mod player;
 pub(crate) mod search_collate;
+#[cfg(any(test, feature = "acceptance"))]
 pub use acceptance::gap_models as acceptance_gap_models;
 pub use admin::{AdminMessage, SourceStep, ToolPageEntry};
 pub mod host_events;
@@ -386,6 +388,7 @@ pub const NARROW_VIEWPORT_PX: f32 = 1120.0;
 
 impl ShellViewModel {
     /// 创建某一页面的验收模型，并挂上和产品窗口相同的表面。
+    #[cfg(any(test, feature = "acceptance"))]
     pub fn for_page(page: ShellPage) -> Self {
         let mut model = Self {
             page,
@@ -477,7 +480,7 @@ impl ShellViewModel {
         self.flush_folder_mutations();
         self.settle_sidebar_dialogs();
         tree_sync::settle(self);
-        // 列表换过或者上一条生成结果回来了：给下一条还没有缩略图的条目排生成或来源封面（`files_thumbnail_ensure.rs`）。
+        // 列表换过或者上一条生成结果回来了：给下一条还没有缩略图的条目排生成或来源封面（`shell/files/ensure.rs`）。
         self.files
             .settle_thumbnail_ensure(self.workspace.active_repo_id.as_deref());
         // 同一次归约里先后开始的操作，照开始的先后交给槽位：文件和侧栏的在前，换仓库的在后。
@@ -839,6 +842,7 @@ mod view_part_primary;
 mod view_part_sidebar;
 mod workbench;
 mod workspace_flow;
+#[cfg(any(test, feature = "acceptance"))]
 pub use interaction::commit_interaction;
 pub(crate) use interaction::window_action_commands;
 pub(crate) use view_host::ShellView;

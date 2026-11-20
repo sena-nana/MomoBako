@@ -1,6 +1,6 @@
 //! 换仓库和同一个仓库的刷新，对照 Vue `selectRepository` / `loadRepositories`：从切换列表、附加、新建、
 //! 删除、来源动作完成以后的刷新和重定向这些入口走，送回服务结果，看启动页、侧栏、任务弹层、状态区和
-//! 最后的工作区。搜索命中在别的仓库见 `search_tests.rs`。
+//! 最后的工作区。搜索命中在别的仓库见 `shell/inspect/search/tests.rs`。
 
 use std::collections::BTreeMap;
 

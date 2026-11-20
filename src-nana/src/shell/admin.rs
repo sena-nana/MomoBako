@@ -15,56 +15,31 @@ use crate::backend::services::runtime::ExternalApiConnectionStatus;
 use super::player::PlayerMessage;
 use super::{ShellMessage, ShellViewModel, WorkspacePanel};
 
-#[path = "admin_support.rs"]
 pub(crate) mod support;
-#[path = "admin_time.rs"]
 mod time;
 pub(crate) use time::iso8601_from_unix_ms;
-#[path = "admin_actions_view.rs"]
 mod actions_view;
-#[path = "api_playground.rs"]
 pub(crate) mod api;
-#[path = "admin_bind.rs"]
 pub(crate) mod bind;
-#[path = "admin_downloader.rs"]
 mod downloader;
-#[path = "admin_icons.rs"]
 pub(crate) mod icons;
-#[path = "admin_logs_state.rs"]
 mod logs_state;
-#[path = "admin_logs_view.rs"]
 mod logs_view;
-#[path = "admin_office_convert.rs"]
 mod office;
-#[path = "admin_plugin_card.rs"]
 mod plugin_card;
-#[path = "admin_plugins_state.rs"]
 mod plugins_state;
-#[path = "admin_plugins_view.rs"]
 mod plugins_view;
-#[path = "admin_reduce.rs"]
 mod reduce;
-#[path = "admin_settings_state.rs"]
 mod settings_state;
-#[path = "admin_settings_view.rs"]
 mod settings_view;
-#[path = "source_download.rs"]
 pub(crate) mod source_download;
-#[path = "source_auth_page.rs"]
 mod source_page;
-#[path = "source_provision.rs"]
 pub(crate) mod source_provision;
-#[path = "source_target.rs"]
 pub(crate) mod source_target;
-#[path = "source_target_view.rs"]
 mod source_target_view;
-#[path = "admin_style.rs"]
 pub(crate) mod style;
-#[path = "tool_native.rs"]
 mod tool_native;
-#[path = "admin_gap.rs"]
 mod tools;
-#[path = "admin_view.rs"]
 mod view;
 
 pub(crate) use actions_view::{ActionsSignals, ActionsView, actions_panel};
@@ -88,10 +63,8 @@ pub(crate) use tools::{ToolsSignals, extensions_page};
 pub(crate) use view::{task_fill_targets, task_popover};
 
 #[cfg(test)]
-#[path = "admin_settings_tests.rs"]
 mod settings_tests;
 #[cfg(test)]
-#[path = "admin_tests.rs"]
 mod tests;
 
 /// 插件配置、安装、日志筛选、任务弹层、来源登录和仓库动作消息。
@@ -208,14 +181,14 @@ pub enum AdminMessage {
         result: Result<serde_json::Value, String>,
     },
     /// 来源下载结束（到本地或到其他资源库）：插件交回的结果和导入时跳过的同名文件，带着开始时的下载回来
-    /// （`source_download.rs`）。
+    /// （`shell/admin/source_download.rs`）。
     DownloadFinished {
         run: source_download::DownloadRun,
         result: Result<source_download::DownloadOutcome, String>,
     },
     /// 宿主写系统日志的结果。写不进去时只记标准错误。
     LogsWritten(Result<(), String>),
-    /// 文件右键里的「下载到其他资源库」：一个候选直接下载，几个候选弹出「选择目标资源库」（`source_target.rs`）。
+    /// 文件右键里的「下载到其他资源库」：一个候选直接下载，几个候选弹出「选择目标资源库」（`shell/admin/source_target.rs`）。
     BeginRepositoryDownload(source_target::RepositoryDownload),
     /// 「选择目标资源库」里点了一个资源库。
     ChooseDownloadRepository(String),

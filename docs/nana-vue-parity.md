@@ -15,7 +15,7 @@ Vue 前端、Tauri 外壳和插件前端已经删掉（见 [迁移边界](./nana
 - Vue 侧在本机的 `tmp/vue-mock`（`tmp/` 被 git 忽略，不在仓库里）：用 `@tauri-apps/api/mocks` 模拟 IPC，渲染 `src/` 的真实页面，在无头 Edge（与 WebView2 同内核）里截图。先在仓库根目录用 `yarn vite --config tmp/vue-mock/vite.config.ts` 起 Vite（端口 1420），再用 `bash tmp/vue-mock/shoot.sh <场景> [light|dark] [宽] [高]` 截一张，`shoot_all.sh` 批量截浅色、深色和 1200×800、960×600，图在 `tmp/vue-mock/shots/`。场景登记在 `tmp/vue-mock/scenes/*.ts`，夹具在 `fixtures.ts`，命令应答在 `ipc.ts`。
 - 截图要经 DevTools 协议在导航前定好视口（`shoot.sh` 调 `shoot_cdp.mjs`），等满 12 秒再截（任务进度要爬到 88）。只给 `--window-size` 时，无头 Edge 在加载期间的视口是 1170×705，截图前一刻才改成 1200×800：CSS 布局会跟着重排，可打开时按视口算一次位置的右键菜单、任务弹层会按 705 高夹住，看起来像 Nana 的位置不对。
 - Nana 侧用 `scene_shots` 按场景名出图和节点清单，命令和输出位置见 [离屏验收证据](./nana-offscreen-evidence.md)。场景定义在 `src-nana/src/shell/acceptance_*.rs`，和 Vue 场景同名。截图前先把视图量到尺寸后发回的消息（播放条宽、文件列表宽）归约几轮，截到的是稳定后的画面。
-- 有仓库的场景从 `acceptance_base.rs` 的共用底子起步，对应 Vue 夹具 `base()`：照产品启动依次送回资源库列表、同步、仓库摘要、首屏目录和侧栏的读取结果，侧栏计数、目录树和文件列表都由这些结果算出。场景要别的条目、目录树、播放集、播放器或仓库时改底子的字段，和 Vue 场景改 `scene.entries`、`scene.playlists` 一样。缺失仓库的 `missing` 场景不用底子，直接送一条缺失的资源库。
+- 有仓库的场景从 `src-nana/src/shell/acceptance/base_scene.rs` 的共用底子起步，对应 Vue 夹具 `base()`：照产品启动依次送回资源库列表、同步、仓库摘要、首屏目录和侧栏的读取结果，侧栏计数、目录树和文件列表都由这些结果算出。场景要别的条目、目录树、播放集、播放器或仓库时改底子的字段，和 Vue 场景改 `scene.entries`、`scene.playlists` 一样。缺失仓库的 `missing` 场景不用底子，直接送一条缺失的资源库。
 - `python tmp/vue-mock/compare.py <场景>` 出单个场景的并排图、差异热图和差异像素比例，`report.py` 对两边同名的截图批量出对照页。比例只用来发现问题，不作为通过标准。
 
 ## 全局取舍
@@ -165,7 +165,7 @@ Vue 前端、Tauri 外壳和插件前端已经删掉（见 [迁移边界](./nana
     - 歌单目录是来源歌单的只读投影，用户在 MomoBako 里不能增删其中的曲目，列出来的行不带用户的取舍，只有歌单标识是用户的意图；
     - 列出来的不一定全、不一定新：网易云目录走分页回源并缓存 24 小时（`netease_directory_cache`）；插件的分页方法原来取歌单详情失败时返回空页、不报错，Vue 的循环就此结束，`tracks` 只剩前几页，插件只下这一部分，界面上看不出少了（现在报错，见下面「网易云插件吞掉错误」）；
     - 列目录本身很贵：插件每一页都从头取到这一页为止的歌曲详情，歌单越长越慢、越容易被限流，而插件按歌单标识取完整曲目表只要一次请求。
-    - 不带 `tracks` 以后，失败的条目由插件用歌单详情里的歌名补上（详情没带到的歌按标识批量取一次歌曲详情），日志里写歌名；歌名实在取不到时才写「歌曲 {标识}」。插件交回的一批里一项也没有时，Nana 在状态区用警告色提醒「{动作名}「{名称}」没有下载到任何条目。」（`source_download.rs`），不再只有一闪而过的「下载完成」。
+    - 不带 `tracks` 以后，失败的条目由插件用歌单详情里的歌名补上（详情没带到的歌按标识批量取一次歌曲详情），日志里写歌名；歌名实在取不到时才写「歌曲 {标识}」。插件交回的一批里一项也没有时，Nana 在状态区用警告色提醒「{动作名}「{名称}」没有下载到任何条目。」（`src-nana/src/shell/admin/source_download.rs`），不再只有一闪而过的「下载完成」。
   - 网易云插件吞掉错误（插件两边共用）：下载歌单取不到歌单详情时什么也不下、照样交回成功；分页列目录（`filesystem.listDirectoryPage`）和不分页列歌单目录取不到歌单详情时交回空页、空目录。现在都报错，原因按种类写清楚：网络连不上或超时、登录失效（下载前先查一次登录状态，登录失效时网易云只给试听片段或者不给地址）、歌单不存在（接口 404 或返回里没有歌单）、请求太频繁、接口拒绝。宿主把插件交回的原因原样交给调用方（原来套着「plugin task failed: … {}」），Nana 的文件列写「{动作名}「{名称}」失败：{原因}」，列目录失败照常写在文件列。Vue 的下载失败没人接，界面上仍然什么也没有。
   - Vue 的爬升定时器会把更新到 88 以上的值压回 88（更新和完成总在同一拍，看不到）；Nana 不往回压。
   - 「同步资源库」「导入资源库」「配置网易云缓存」「导出资源库」在 Vue 里也有进度行，但入口函数（`syncActiveRepository`、`importExistingRepository`、`configureNeteaseRepositoryCacheInWorkspace`、`exportCurrentRepository`）没有界面调用方，Nana 不做。
@@ -189,7 +189,7 @@ Vue 前端、Tauri 外壳和插件前端已经删掉（见 [迁移边界](./nana
 
 ### 外观
 - 标签菜单「标签分组」的分组名：Vue 写的是 `--text-secondary`，MomoBako 的主题表里没有这个角色，Nana 用弱化色。
-- 侧栏、文件页和菜单的图标用 Tabler（Vue 用 Lucide），个别图形不同。预览、播放条、播放集页、设置、插件、日志和动作页把 Vue 用到的 lucide 源登记成产品图标（`player_icons.rs`、`admin_icons.rs`），形状和 Vue 一致。
+- 侧栏、文件页和菜单的图标用 Tabler（Vue 用 Lucide），个别图形不同。预览、播放条、播放集页、设置、插件、日志和动作页把 Vue 用到的 lucide 源登记成产品图标（`src-nana/src/shell/player_view/icons.rs`、`src-nana/src/shell/admin/icons.rs`），形状和 Vue 一致。
 - 对话框统一用 NanaUI `Dialog` / `ConfirmDialog`（行为优先）。距顶 12vh、最高 72vh、`--radius-xl`、三段内边距和两条分隔线、遮罩的暗度和模糊、进退场照 Vue `.modal-overlay` / `.modal-card` / `.dialog-card__*` 写进主题配方（`appearance.rs`）；宽度、危险口气和标题前的图标照各对话框的 Vue 模板和宽度类。截图对照下卡片的位置、宽度和分隔线在 1px 内。还剩的差异：
   - 卡片没有 Vue 的 1px 透明描边：内容整体上移 1px，卡片矮 2px。
   - 导出对话框的标题行矮约 2px：Vue 的 24px 关闭钮把那一行撑到 24，NanaUI 的关闭位不撑高标题行（确认框忙碌时藏起关闭位，正文不跳），最小行高按没有关闭钮的对话框取 Vue 正文的行盒 21.7。
@@ -210,7 +210,7 @@ Vue 前端、Tauri 外壳和插件前端已经删掉（见 [迁移边界](./nana
 - PDF 预览：Vue 用 pdf.js 照原样画（嵌入字体、图片、矢量）。Nana 换上渲染器以前只做到页数、页序和翻页对：按页树数页，每页只画内容流里的 Tj/TJ 文字（5×7 点阵，不解析字体编码，中文和多数现代 PDF 是乱码）或者扫描页的 JPEG，只画前 32 页；原来把文件里的每个流（字体、ToUnicode、对象流）都当成一页，第一页画不出来时翻页按钮跟着消失。
 - 文件列表的 ASMR 摘要不在详情卡片的统计里再列一遍（Vue 列「ASMR」「作品」「音轨」「收听」「歌词」五行），下面元数据里的作品信息已经有这些。
 - ASMR 播放列表存在设置目录的 `asmr-playlist.json`，不读 Vue 写在 WebView 本地存储里的旧列表。
-- 浏览时生成缩略图：Vue 开 3 个并发，选中项和根目录的条目优先，每次读回目录（包括文件变化以后的静默重读）都把还没有缩略图的条目重排一遍。Nana 一次一条（后端在写锁里排队生成，并发不会更快，还多占任务线程，别的写操作也插不进来），选中项优先、再按列表从上往下；同一个目录里排过的（失败的、生成不了的）不重试，换了目录才重来。网易云歌曲和歌单目录的来源封面，Vue 在生成不了时用 `save + sourceUrl` 下载、存成自定义缩略图。Nana 也这样做（`files_thumbnail_ensure.rs`）：没有本地文件，或本地 `ensure` 交回空时，歌曲用 `coverUrl`、歌单目录用 `playlistCoverUrl`（载荷没有时用元数据里镜像的 `coverUrl`），只接受去掉空白后的 http(s)，下载后标成自定义缩略图；没有地址、不是 http(s)、或在回收站里不预取，也不编造封面。来源目录还有下一页、当前页里有虚拟条目时，空闲 420ms 后再读下一页，只生成缩略图，不画进列表（`files_virtual_prefetch.rs`，Vue `queueVirtualThumbnailPrefetch`）。见 [API 设计](./api-design.md) 的 `thumbnails:ensure`。
+- 浏览时生成缩略图：Vue 开 3 个并发，选中项和根目录的条目优先，每次读回目录（包括文件变化以后的静默重读）都把还没有缩略图的条目重排一遍。Nana 一次一条（后端在写锁里排队生成，并发不会更快，还多占任务线程，别的写操作也插不进来），选中项优先、再按列表从上往下；同一个目录里排过的（失败的、生成不了的）不重试，换了目录才重来。网易云歌曲和歌单目录的来源封面，Vue 在生成不了时用 `save + sourceUrl` 下载、存成自定义缩略图。Nana 也这样做（`src-nana/src/shell/files/ensure.rs`）：没有本地文件，或本地 `ensure` 交回空时，歌曲用 `coverUrl`、歌单目录用 `playlistCoverUrl`（载荷没有时用元数据里镜像的 `coverUrl`），只接受去掉空白后的 http(s)，下载后标成自定义缩略图；没有地址、不是 http(s)、或在回收站里不预取，也不编造封面。来源目录还有下一页、当前页里有虚拟条目时，空闲 420ms 后再读下一页，只生成缩略图，不画进列表（`src-nana/src/shell/files/virtual_prefetch.rs`，Vue `queueVirtualThumbnailPrefetch`）。见 [API 设计](./api-design.md) 的 `thumbnails:ensure`。
 - `foreign-tool`（宿主没有内置页面的工具页）只画页头和说明。插件只能在清单里声明工具页，页面由宿主画，API Playground、文件导入和 Eagle 导入三个内置页面照旧（它们的插件改成了仅清单）。Vue 当时直接挂插件自己的组件；插件前端删掉以后，插件不能再自带页面。
 - 插件清单声明的预览（`contributes.preview`）在 Vue 里要加载插件前端的 `dist/register.js`，由它 `registerPreview` 的 Vue 组件绘制。插件前端删掉以后合同里没有这一项了（见 [API 设计](./api-design.md)），Nana 也从来不登记这些贡献。随附插件（媒体、音频、文本、Office、压缩包、三维模型）声明的扩展名都由内置视图接手；只有第三方插件认得的扩展名照 Vue 没有预览插件时的样子，预览框只画缩略图或类型图标，不写字。原来给不能绘制的贡献写的「原生预览 · 名称 · 视图 id」随登记一起删掉。
 - Vue 没有入口的设置卡已从设置页移除：缩略图缓存上限、默认播放器类型（`default_playlist_player_type_id`，不是设置页上的「音频播放」）、关闭行为、「保存应用设置」按钮，只为它们存在的消息和草稿也一并删掉。设置字段本身保留：缓存上限照旧校验和保存，默认播放器类型照旧读写，关闭行为照旧由关窗流程读取。主题改动后立即写入设置文件。
@@ -224,7 +224,7 @@ Vue 前端、Tauri 外壳和插件前端已经删掉（见 [迁移边界](./nana
 | Select 不能按最长的选项定宽 | 已补：上游 `b02eaa231` 的 `Select::fit_options`，内容宽是最长的选项加箭头，选哪一项外框都不动。日志页的插件、仓库筛选用上它，保留 `Shrink` 和最小宽 122；和 Vue 还差的几像素是字体度量，见上文「外观」 |
 | Select、滑杆等没有可见标签的控件，没有声明式的无障碍名称 | 已补：控件写 `.labelled_by(标题节点)`；没有可见标题时写控件自己的 `label`，见 [壳层绑定式视图](./nana-shell-view.md) 的「不再扫描文档补登」 |
 | 固定定位盒自动高度时，百分比 `max-height` 被当成 0 | 上游已修；用到它的文件页自建对话框卡片改成 NanaUI `Dialog`，这处 `vh` 绕行随卡片删掉 |
-| 网格自动行高按最窄内容测量，可折行的芯片把行撑高 | 上游 `1f37b9c79` 已修（`c6dc1086b` 起就带着）：网格先定列宽，再按列宽量行高。插件卡片的依赖、权限、Hook 和执行记录段已改回 Vue 的 `56px minmax(0, 1fr)` 网格（`admin_plugin_card.rs`），测试 `plugin_grid_sections_are_as_tall_as_their_wrapped_chips` 看折行芯片的那一段不多出高度 |
+| 网格自动行高按最窄内容测量，可折行的芯片把行撑高 | 上游 `1f37b9c79` 已修（`c6dc1086b` 起就带着）：网格先定列宽，再按列宽量行高。插件卡片的依赖、权限、Hook 和执行记录段已改回 Vue 的 `56px minmax(0, 1fr)` 网格（`src-nana/src/shell/admin/plugin_card.rs`），测试 `plugin_grid_sections_are_as_tall_as_their_wrapped_chips` 看折行芯片的那一段不多出高度 |
 | IconButton 的默认方形尺寸盖掉显式布局 | 上游已修（写了宽高的轴不再被方盒改写）：壳层里的 `square = None` 都删了（任务弹层关闭钮、播放条图标按钮和点击区、筛选栏按钮），去掉前后播放条、播放集页和筛选栏 171 个按钮和输入框的布局盒逐一相同 |
 | 框架自己关掉 Dialog 时不通知应用 | 上游已修：`DialogCloseRequested` 加 `DialogClosePolicy::requests_only()`，对话框框架只听请求、发关闭消息 |
 | `DialogSize` 只有 420 / 520 / 600 / 680 / 1080 几档，不能给像素宽，也不能按窗口比例收 | 已补：`DialogSize::Width(长度)` 和 `capped(px, vw)`。各对话框照 Vue 的宽度类给 CSS 宽度 |
@@ -237,13 +237,13 @@ Vue 前端、Tauri 外壳和插件前端已经删掉（见 [迁移边界](./nana
 | 对话框卡面圆角固定 `Md` 档 | 已补：`DialogRecipe::radius` |
 | 对话框开场只有淡入，没有卡片位移和缩放；表面开合动效不看「减少动态效果」 | 已补：`DialogRecipe::motion`（`DialogMotion`），减少动态效果时直接开合 |
 | `activate_overlay` 要求宿主已在树里；视图层没有「挂进树时」的钩子，也没有声明式的打开状态 | 已补：`.open` / `.model` 声明开合，宿主做的开合发 `DialogToggled`。对话框常驻在宿主下靠 `open` 开合，换下的放完退场才卸 |
-| `ReorderList` 按下行就抓走指针，行里的按钮收不到点击；一行只能用 `.tools(节点)` 标一块不开始拖动的区域 | 已补：上游 `b02eaa231` 起按在行里能获得焦点的控件上，不移动松开就是控件的点击，移动超过 4px 才拖这一行。播放集条目的 `tools` 登记已删，扩展名方块、标题、播放和移除照常能点，从它们上面按下拖动会拖动这一行，和 Vue 一致（`route_playlists_tests.rs`） |
+| `ReorderList` 按下行就抓走指针，行里的按钮收不到点击；一行只能用 `.tools(节点)` 标一块不开始拖动的区域 | 已补：上游 `b02eaa231` 起按在行里能获得焦点的控件上，不移动松开就是控件的点击，移动超过 4px 才拖这一行。播放集条目的 `tools` 登记已删，扩展名方块、标题、播放和移除照常能点，从它们上面按下拖动会拖动这一行，和 Vue 一致（`src-nana/src/shell/route_playlists/tests.rs`） |
 | 应用层没有悬停事件 | 已补：上游 `150bd172e` 的 `PointerHoverChanged { hovered }` 和 `b57ccd92d` 的 `FocusWithinChanged { focused }`，节点挂处理函数，指针或焦点进出它的子树时收到。右键子菜单从点击展开改回悬停和聚焦展开（`context_menu.rs`） |
 | 滚动范围按全部后代的盒子合并，不在里层的滚动区或裁剪盒处停下 | 上游 `941df646d` 已修：范围只算到最近的裁剪盒，里层滚动区只贡献自己的盒子。日志页主体恢复成滚动区（`route_admin.rs` 走 `home_scroll`），不滚的裁剪盒 `route_home::home_fixed` 和撑满它的 `fill_panel` 已删，矮窗口里日志页也能滚 |
 | `RadiusTier` 没有 2xl 档 | 已补：上游 `8541a2f8d` 的 `RadiusTier::Xxl` / `ThemeMetrics::radius_xxl`。`corner_metrics` 按两倍基数给，原来按像素给的 `theme_map::radius_2xl` 已删，插件、日志和搜索页的面板也从 Xl 改回 2xl，见上文「圆角」 |
 | 线性空间混合 | 设计如此，见上文「颜色合成」 |
 | 滚动条颜色写死成共享的主题角色，显隐瞬切、滚动时不出现，滑块被内容盖住 | 上游 `7f94c925d` 已补：`ScrollbarRecipe`（颜色、动效、应用级显隐策略）和 `ThemeMetrics::scrollbar` 的激活粗细、车道内缩；滚动条叠在内容上。`appearance.rs` 照 Vue 的 overlay 滚动条写进主题，见上文「滚动条」 |
 | `AutoHide` 指针进到滚动区就显示，没有 Vue 那样只认右边、底边 12px 热区的模式 | 这是界面库的限制，应用侧没有另做 12px 热区。要对齐必须改 NanaUI 的 `ScrollbarRecipe` |
-| `mask-image` 不罩子树：子节点和节点自己的文字都不进遮罩，渐变遮罩只罩本节点的底色和 Painter | 歌词视口的上下淡出改成按行心取样的不透明度（`inspect_audio_lyric_fade.rs`）。行内连续渐变要对齐，必须让 NanaUI 把子树收成一层再罩 |
+| `mask-image` 不罩子树：子节点和节点自己的文字都不进遮罩，渐变遮罩只罩本节点的底色和 Painter | 歌词视口的上下淡出改成按行心取样的不透明度（`src-nana/src/shell/inspect_view/audio_stage/lyric_fade.rs`）。行内连续渐变要对齐，必须让 NanaUI 把子树收成一层再罩 |
 | `IconButton` 停用时整枚淡到 50%（`88f659bb4`），没有退出口：`colors_from_style` 或自绘的按钮已经画了停用色，还会再淡一层，而且是线性空间合成，和 CSS `opacity` 不同 | 上游 `cfc484ac7` 已修：`colors_from_style` 的按钮（包括按 `PaintState::disabled` 自绘的）照 `style.interaction.disabled` 画、不淡，节点上写的不透明度照写的来，只有按种类配色的按钮还淡到 50%。播放条的传输按钮改回 `IconButton`，侧栏标题工具和两处关闭钮按所在底色写停用色，见上文「颜色合成」 |
 | 任务工作线程不接 panic（`b02eaa231` 的 `spawn_task_workers` 在 `pollster::block_on` 外面没有 `catch_unwind`：任务 panic 时工作线程退出，四个都退出以后之后的 `run_task` 一律报「runtime host task executor has stopped」） | 上游 `d0486cf37` 已修：每个任务在 `catch_unwind` 里跑，panic 的任务丢掉自己的消息、记一条 `host.task_panicked` 故障，工作线程接着处理队列。结果消息仍然不交回，`Task` 也不能带一条出 panic 时交回的消息，所以 `task_guard` 照样在任务里接住 panic、按失败交回；它还负责任务排不进去和服务没起来时交回失败 |

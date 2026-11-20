@@ -23,18 +23,18 @@
 | 组件 | 用在哪里 |
 | --- | --- |
 | `app-shell`、`app-title-bar`、`workspace` | 骨架、标题栏和工作区（`view_host.rs`、`title_bar.rs`、`render.rs`） |
-| `sidebar-frame`、`list-item` | 侧栏外框和侧栏、弹层、对话框里的行（`sidebar_view.rs`、`sidebar_tree_view.rs`、`sidebar_popover_view.rs`），以及文件和文件夹两种右键菜单的项（自绘，`context_menu.rs`） |
-| `dialog`、`confirm-dialog`、`overlay-host` | 全部对话框（`overlay_dialog.rs`） |
+| `sidebar-frame`、`list-item` | 侧栏外框和侧栏、弹层、对话框里的行（`sidebar_view.rs`、`src-nana/src/shell/sidebar_view/tree.rs`、`src-nana/src/shell/sidebar_view/popover.rs`），以及文件和文件夹两种右键菜单的项（自绘，`context_menu.rs`） |
+| `dialog`、`confirm-dialog`、`overlay-host` | 全部对话框（`src-nana/src/shell/view_part_overlay/dialog.rs`） |
 | `button`、`icon-button`、`text-input`、`textarea`、`checkbox`、`range-field`、`select` | 各页控件；`textarea` 的类型是 `TextArea` |
-| `reorder-list` | 播放集条目（`player_playlist_page.rs`） |
-| `thumbnail` | 文件卡片、预览兜底和播放条封面（`files_cards.rs`、`inspect_preview_body.rs`、`player_bar.rs`） |
-| `gpu-texture-view` | 图片和视频预览，纹理槽 `file-preview`（`inspect_preview_body.rs`） |
-| `qr-code` | 来源插件扫码登录（`source_auth_page.rs`） |
+| `reorder-list` | 播放集条目（`src-nana/src/shell/player_view/playlist.rs`） |
+| `thumbnail` | 文件卡片、预览兜底和播放条封面（`src-nana/src/shell/files_view/cards.rs`、`src-nana/src/shell/inspect_view/body.rs`、`src-nana/src/shell/player_view/bar.rs`） |
+| `gpu-texture-view` | 图片和视频预览，纹理槽 `file-preview`（`src-nana/src/shell/inspect_view/body.rs`） |
+| `qr-code` | 来源插件扫码登录（`src-nana/src/shell/admin/source_page.rs`） |
 | `empty-state`、`labeled-value` | 压缩包空目录和资源库扩展信息（`inspect_library.rs`） |
 | `validation-message` | 元数据的版本冲突提示（`inspect_metadata_view.rs`） |
 | `text` | 文字 |
 
-目录外的公开类型用到 `SettingsCard`（`inspect_library.rs`、`inspect_metadata_parts.rs`）和 `List`（压缩包文件列表，`inspect_library.rs`）。文件列表用视图层的 `each_virtual` 按视口建行（`files_virtual.rs`），不用 `VirtualListLayout`。
+目录外的公开类型用到 `SettingsCard`（`inspect_library.rs`、`src-nana/src/shell/inspect_metadata_view/parts.rs`）和 `List`（压缩包文件列表，`inspect_library.rs`）。文件列表用视图层的 `each_virtual` 按视口建行（`src-nana/src/shell/files_view/virtual_rows.rs`），不用 `VirtualListLayout`。
 
 其余已编译组件产品里没有用到，包括 `context-menu`、`tree-view`、`sidebar-row`、`sidebar-section`、`sidebar-footer`、`native-markdown`、`selectable-rich-text`、`image-viewer`、`gpu-view`、`progress`、`spinner`、`settings`、`settings-collapsible-card`、`appearance-section`。设置页、日志页、插件页和播放条由 `Stack`、`Text`、`Button`、`RangeField` 等拼成（`admin_*.rs`、`player_bar*.rs`）。
 
@@ -42,7 +42,7 @@
 
 `capability.rs` 的测试锁住下面几条：
 
-- `MediaTransportBar` 能从 `nana_ui::components` 构造，事件有播放暂停、提交 seek、拖动开始和结束、音量；它不在 `component_catalog` 里。产品的播放条没有用它，是 `IconButton`、`RangeField` 等拼的（`player_bar.rs`、`player_bar_parts.rs`）。
+- `MediaTransportBar` 能从 `nana_ui::components` 构造，事件有播放暂停、提交 seek、拖动开始和结束、音量；它不在 `component_catalog` 里。产品的播放条没有用它，是 `IconButton`、`RangeField` 等拼的（`src-nana/src/shell/player_view/bar.rs`、`src-nana/src/shell/player_view/bar/parts.rs`）。
 - `VirtualListLayout` 在 800px 视口、28px 行高、56px overscan 下，一万行的可见窗口少于 100 行。
 - `media-transport-bar`、`settings-card`、`settings-row`、`runtime-list` 是没有目录 id 的公开类型（`UNCATALOGUED_PUBLIC_WIDGETS`），进了目录测试会失败。
 - 壳层图标目录认得 `lucide-folder`、`lucide-search`、`lucide-settings`、`lucide-file`；`trash`、`player-play` 解析为空，这些图标用 Tabler 常量。
@@ -53,7 +53,7 @@
 | --- | --- |
 | `/` 与 `/settings` | 同一个 `RuntimeDocument`。主区按 `RouteKey` 切换路由，设置页是其中一条（`view_part_primary.rs`） |
 | `WorkspacePanelKey` | `WorkspacePanel`，和启动、加载错误、缺失仓库、空库（`MainRegion`）正交 |
-| 侧栏快捷方式和目录树 | `SidebarFrame` 里的 `ListItem` 行；文件夹树和智能文件夹树是按显示顺序展开的扁平行，用 `keyed(..).each` 建（`sidebar_tree_view.rs`），不用 `TreeView` |
+| 侧栏快捷方式和目录树 | `SidebarFrame` 里的 `ListItem` 行；文件夹树和智能文件夹树是按显示顺序展开的扁平行，用 `keyed(..).each` 建（`src-nana/src/shell/sidebar_view/tree.rs`），不用 `TreeView` |
 | composable 分支 | `ShellMessage` 和 `ShellViewModel`，记在逻辑矩阵 |
 | `repositoryApi` invoke | `NativeServices` 上的 ViewModel |
 | 宿主事件 | `HostEvent` / `HostEventSink` |
@@ -78,13 +78,13 @@
 产品图标有两个来源：
 
 - `nana_ui::icons_tabler` 的常量，侧栏、文件页、菜单等处用。未引用的常量由链接器丢掉。
-- 照 Vue 用的 lucide 源 SVG 登记的产品 `IconData`：`player_icons.rs` 给预览、播放条和播放集页，`admin_icons.rs` 给设置、插件、日志、动作页和任务弹层，形状和 Vue 一致。
+- 照 Vue 用的 lucide 源 SVG 登记的产品 `IconData`：`src-nana/src/shell/player_view/icons.rs` 给预览、播放条和播放集页，`src-nana/src/shell/admin/icons.rs` 给设置、插件、日志、动作页和任务弹层，形状和 Vue 一致。
 
 不用文字冒充图标。
 
 ## 没有现成组件的部分
 
-- 视频画面、PDF 页面和 3D 模型。视频帧解码后放进宿主纹理槽 `file-preview`，由 `GpuTextureView` 显示；PDF 页和模型网格软件光栅成 RGBA 帧，预览框把帧编码成 PNG 画出来（`inspect_preview_page.rs`）。`GpuView` 只有内置调色板着色器，没有网格管线，产品没有用它。压缩包、Office 文本和 FBX、BLEND 文件头由内置预览读出（`native_preview.rs`）。
+- 视频画面、PDF 页面和 3D 模型。视频帧解码后放进宿主纹理槽 `file-preview`，由 `GpuTextureView` 显示；PDF 页和模型网格软件光栅成 RGBA 帧，预览框把帧编码成 PNG 画出来（`src-nana/src/shell/inspect_view/page.rs`）。`GpuView` 只有内置调色板着色器，没有网格管线，产品没有用它。压缩包、Office 文本和 FBX、BLEND 文件头由内置预览读出（`src-nana/src/shell/inspect/native_preview.rs`）。
 - 系统托盘、拖出、窗口几何和系统媒体传输控件。宿主用 `tray-icon`、`drag`、`windows` crate 和 `nana_ui_platform` 实现（`tray.rs`、`drag_out.rs`、`window_state.rs`、`system_media.rs`）。系统文件对话框和文件拖入用 Nana 平台的 `WindowCommand::OpenFileDialog` 和 `FileDropEvent`。测试只断言排出的请求和命令，真效果记在 `nana-device-matrix.md`。
 - 全局快捷键：没有实现。
 - 代码高亮：没开 `syntax-highlighting`。文本预览和 Vue `text-preview` 一样显示等宽原文，不着色。

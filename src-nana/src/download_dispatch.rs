@@ -394,5 +394,4 @@ impl DownloadServices for LiveServices {
 }
 
 #[cfg(test)]
-#[path = "download_dispatch_tests.rs"]
 mod tests;

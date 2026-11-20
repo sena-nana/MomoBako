@@ -92,15 +92,10 @@ pub enum PopoverMode {
     BackendForm,
 }
 
-#[path = "sidebar_bind.rs"]
 mod bind;
-#[path = "sidebar_gap.rs"]
 mod gap;
-#[path = "sidebar_popover.rs"]
 mod popover;
-#[path = "sidebar_smart.rs"]
 mod smart;
-#[path = "sidebar_smart_flow.rs"]
 mod smart_flow;
 
 pub use gap::{
@@ -1180,5 +1175,4 @@ pub(super) fn reduce_message(
 }
 
 #[cfg(test)]
-#[path = "sidebar_tests.rs"]
 mod tests;

@@ -120,5 +120,4 @@ pub(crate) fn request(model: &mut ShellViewModel, request: MenuFocusRequest) {
 }
 
 #[cfg(test)]
-#[path = "menu_focus_tests.rs"]
 mod tests;

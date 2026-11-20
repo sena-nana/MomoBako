@@ -125,5 +125,4 @@ fn plan_rows<T: PartialEq, K: Hash + Eq>(
 }
 
 #[cfg(test)]
-#[path = "row_sync_tests.rs"]
 mod tests;

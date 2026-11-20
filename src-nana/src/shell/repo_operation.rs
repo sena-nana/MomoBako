@@ -328,5 +328,4 @@ fn clamp_percent(value: f64) -> f64 {
 }
 
 #[cfg(test)]
-#[path = "repo_operation_tests.rs"]
 mod tests;

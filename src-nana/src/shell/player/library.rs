@@ -1,0 +1,255 @@
+//! 播放列表成员、按路径加入和排序。
+//!
+//! 这些只改播放器状态并留下副作用请求，真正的读写由 `player_dispatch` 交给仓库服务。成员写回以后要重读哪些
+//! 播放集由 `shell/player/reduce.rs` 交给侧栏。
+
+use std::collections::BTreeMap;
+
+use crate::backend::services::repository::{
+    PlaylistDetail, PlaylistItemsByPathsAddRequest, PlaylistItemsOrderRequest,
+    PlaylistMembershipRequest, PlaylistMembershipSnapshot,
+};
+
+use super::support::{
+    compatible_playlist_ids, membership_can_toggle, next_membership_ids, reorder_before,
+};
+use super::{MembershipAction, PlayerEffect, PlayerState};
+
+/// Vue `playlistDetailCacheKey`：仓库编号和播放集编号拼成一格。
+fn playlist_detail_cache_key(repo_id: &str, playlist_id: &str) -> String {
+    format!("{repo_id}:{playlist_id}")
+}
+
+impl PlayerState {
+    pub fn membership_actions(
+        &self,
+        kind: &str,
+        extension: &str,
+        asset_id: &str,
+        is_virtual: bool,
+    ) -> Vec<MembershipAction> {
+        let toggle = membership_can_toggle(kind, asset_id, is_virtual);
+        let current = self
+            .memberships
+            .get(asset_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        compatible_playlist_ids(
+            kind,
+            extension,
+            &self.playlists,
+            &self.contributions,
+            &self.candidates,
+        )
+        .into_iter()
+        .filter_map(|playlist_id| {
+            let playlist = self
+                .playlists
+                .iter()
+                .find(|playlist| playlist.playlist_id == playlist_id)?;
+            let checked = toggle && current.iter().any(|id| id == &playlist_id);
+            let label = if checked {
+                format!("移出 {}", playlist.name)
+            } else {
+                format!("加入 {}", playlist.name)
+            };
+            Some(MembershipAction {
+                playlist_id,
+                label,
+                checked,
+                toggle,
+            })
+        })
+        .collect()
+    }
+
+    pub(super) fn toggle_membership(
+        &mut self,
+        playlist_id: &str,
+        kind: &str,
+        extension: &str,
+        asset_id: &str,
+        is_virtual: bool,
+        path: &str,
+        writable: bool,
+        repo_id: Option<&str>,
+    ) {
+        let compatible = compatible_playlist_ids(
+            kind,
+            extension,
+            &self.playlists,
+            &self.contributions,
+            &self.candidates,
+        );
+        if !compatible.iter().any(|id| id == playlist_id) {
+            eprintln!("Nana 播放列表不兼容这个条目：{playlist_id}");
+            return;
+        }
+        let Some(repo_id) = repo_id else {
+            eprintln!("Nana 成员资格需要活动仓库");
+            return;
+        };
+        if !writable {
+            eprintln!("Nana 资源库不可写，已忽略播放列表成员变更");
+            return;
+        }
+        if membership_can_toggle(kind, asset_id, is_virtual) {
+            let current = self.memberships.get(asset_id).cloned().unwrap_or_default();
+            let playlist_ids = next_membership_ids(&current, playlist_id);
+            self.effects
+                .push(PlayerEffect::SetMembership(PlaylistMembershipRequest {
+                    repo_id: repo_id.to_string(),
+                    asset_id: asset_id.to_string(),
+                    playlist_ids,
+                }));
+            return;
+        }
+        if path.trim().is_empty() {
+            eprintln!("Nana 没有可加入播放列表的路径");
+            return;
+        }
+        self.effects
+            .push(PlayerEffect::AddByPaths(PlaylistItemsByPathsAddRequest {
+                repo_id: repo_id.to_string(),
+                playlist_id: playlist_id.to_string(),
+                paths: vec![path.to_string()],
+            }));
+    }
+
+    pub(super) fn note_memberships(
+        &mut self,
+        repo_id: &str,
+        result: Result<BTreeMap<String, Vec<String>>, String>,
+        active_repo: Option<&str>,
+    ) {
+        if active_repo != Some(repo_id) {
+            eprintln!("Nana 忽略过期的播放列表成员：{repo_id}");
+            return;
+        }
+        match result {
+            Ok(memberships) => self.memberships = memberships,
+            // 和 Vue `syncPlaylistMemberships` 一样读不到就当没有成员，不提示。
+            Err(error) => {
+                eprintln!("Nana 读取播放列表成员失败：{error}");
+                self.memberships.clear();
+            }
+        }
+    }
+
+    /// 成员写回：换上这个素材的成员。返回成员前后有出入的播放集（加入的和移出的），失败时为空。
+    pub(super) fn note_membership_saved(
+        &mut self,
+        result: Result<PlaylistMembershipSnapshot, String>,
+    ) -> Vec<String> {
+        match result {
+            Ok(snapshot) => {
+                let before = self
+                    .memberships
+                    .remove(&snapshot.asset_id)
+                    .unwrap_or_default();
+                let mut changed: Vec<String> = before
+                    .iter()
+                    .filter(|id| !snapshot.playlist_ids.contains(id))
+                    .cloned()
+                    .collect();
+                changed.extend(
+                    snapshot
+                        .playlist_ids
+                        .iter()
+                        .filter(|id| !before.contains(id))
+                        .cloned(),
+                );
+                self.memberships
+                    .insert(snapshot.asset_id, snapshot.playlist_ids);
+                changed
+            }
+            Err(error) => {
+                eprintln!("Nana 更新播放列表成员失败：{error}");
+                self.note_failure(format!("更新播放集成员失败：{error}"));
+                Vec::new()
+            }
+        }
+    }
+
+    /// 按路径加入的结果。返回读回的那张；失败时记进状态区，返回空。
+    pub(super) fn note_paths_added(
+        &mut self,
+        result: Result<PlaylistDetail, String>,
+    ) -> Option<PlaylistDetail> {
+        result
+            .map_err(|error| {
+                eprintln!("Nana 按路径加入播放集失败：{error}");
+                self.note_failure(format!("加入播放集失败：{error}"));
+            })
+            .ok()
+    }
+
+    /// 记下一份读回的播放集详情。键和 Vue `playlistDetailCacheKey` 一样，是 `仓库:播放集`。
+    pub(super) fn remember_playlist_detail(&mut self, detail: &PlaylistDetail) {
+        let key = playlist_detail_cache_key(&detail.playlist.repo_id, &detail.playlist.playlist_id);
+        self.detail_cache.insert(key, detail.clone());
+    }
+
+    /// 取出这一张的缓存。没有就空，调用方不要另编一份播放集。
+    pub(crate) fn cached_playlist_detail(
+        &self,
+        repo_id: &str,
+        playlist_id: &str,
+    ) -> Option<PlaylistDetail> {
+        self.detail_cache
+            .get(&playlist_detail_cache_key(repo_id, playlist_id))
+            .cloned()
+    }
+
+    /// 播放集列表空了：丢掉这个仓库的详情缓存。
+    ///
+    /// 照 Vue `clearPlaylistDetailCache`。下次再点开时没有旧缓存可画，页面停在空框，不把已经不在的那一份编回来。
+    pub(crate) fn forget_detail_cache(&mut self, repo_id: &str) {
+        let prefix = format!("{repo_id}:");
+        let before = self.detail_cache.len();
+        self.detail_cache.retain(|key, _| !key.starts_with(&prefix));
+        let removed = before.saturating_sub(self.detail_cache.len());
+        if removed > 0 {
+            eprintln!("Nana 播放集列表为空，丢掉 {removed} 份详情缓存：{repo_id}");
+        }
+    }
+
+    /// 页面上点开的正是这一张。
+    pub(super) fn lists(&self, playlist_id: &str) -> bool {
+        self.listed
+            .as_ref()
+            .is_some_and(|listed| listed.playlist.playlist_id == playlist_id)
+    }
+
+    pub(super) fn reorder(
+        &mut self,
+        source: &str,
+        before: Option<&str>,
+        playlist_id: Option<&str>,
+        ids: &[String],
+        writable: bool,
+        repo_id: Option<&str>,
+    ) {
+        let Some(playlist_id) = playlist_id else {
+            eprintln!("Nana 排序需要先选中播放列表");
+            return;
+        };
+        let Some(repo_id) = repo_id else {
+            eprintln!("Nana 排序需要活动仓库");
+            return;
+        };
+        if !writable {
+            eprintln!("Nana 资源库不可写，已忽略播放列表排序");
+            return;
+        }
+        let Some(item_ids) = reorder_before(ids, source, before) else {
+            return;
+        };
+        self.effects
+            .push(PlayerEffect::Reorder(PlaylistItemsOrderRequest {
+                repo_id: repo_id.to_string(),
+                playlist_id: playlist_id.to_string(),
+                item_ids,
+            }));
+    }
+}

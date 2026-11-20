@@ -1,7 +1,7 @@
 //! 15 个验收页使用和产品窗口同一套表面。
 //!
 //! 只填已经存在的仓库、预览、播放和任务状态，不发新的领域请求。有仓库的页面都从 Vue 夹具 `base()`
-//! 的工作区起步（`acceptance_base.rs`），状态经过真实消息归约。
+//! 的工作区起步（`shell/acceptance/base_scene.rs`），状态经过真实消息归约。
 
 use super::{InspectEffect, ShellPage, ShellViewModel};
 use crate::frame_clock::FrameStep;
@@ -59,21 +59,13 @@ fn await_inspect_effect<T>(
 use base_scene::Base;
 use files_scenes::PAGE_PDF;
 
-#[path = "acceptance_admin.rs"]
 mod admin_scenes;
-#[path = "acceptance_base.rs"]
 mod base_scene;
-#[path = "acceptance_files.rs"]
 mod files_scenes;
-#[path = "acceptance_player.rs"]
 mod player_scenes;
-#[path = "acceptance_plugins.rs"]
 mod plugin_fixtures;
-#[path = "acceptance_search.rs"]
 mod search_scenes;
-#[path = "acceptance_shell.rs"]
 mod shell_scenes;
-#[path = "acceptance_source.rs"]
 mod source_scenes;
 
 /// 补上的表面，给离屏验收出画面。数字和像素都不编造。

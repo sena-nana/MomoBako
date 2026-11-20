@@ -1,5 +1,5 @@
 //! 文件页的对话框：重命名、复制到文件夹、导入路径和硬链接确认，导出资源库在
-//! `workspace_export_dialog.rs`。它们是浮层槽位里的一块（`OverlayKey::FileDialog` /
+//! `shell/workspace_dialogs/export.rs`。它们是浮层槽位里的一块（`OverlayKey::FileDialog` /
 //! `OverlayKey::ExportDialog`），外壳走统一对话框框架：文件变更进行中三种关闭手势都不关，
 //! 点外面等于取消，硬链接确认点外面等于跳过（Vue `@click.self`）。
 //!
@@ -22,7 +22,6 @@ use super::view_part_overlay::dialog::{
 use super::view_part_overlay::session::{Draft, Projected};
 use super::{ShellMessage, ShellViewModel};
 
-#[path = "workspace_export_dialog.rs"]
 mod export;
 pub(super) use export::export_dialog;
 
@@ -317,5 +316,4 @@ fn path_line(
 }
 
 #[cfg(test)]
-#[path = "workspace_dialogs_tests.rs"]
 mod tests;

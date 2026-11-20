@@ -252,5 +252,4 @@ fn world_position(
 }
 
 #[cfg(test)]
-#[path = "remount_state_tests.rs"]
 mod tests;
