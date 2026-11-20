@@ -24,7 +24,7 @@ cargo run -p momobako-nana                   # 原生窗口
 | 上次打开的资源库 | 设置文件旁的 `last-repository.json`（键同 Vue 本地存储 `momobako.lastActiveRepositoryId`） | `src-nana/src/shell/workspace/remember.rs` |
 | 播放设置、播放会话、播放器偏好 | 设置文件旁的 `playback-settings.json`、`playback-sessions.json`、`playlist-player-preferences.json` | `src-nana/src/shell/player/support.rs` |
 | ASMR 播放列表 | 设置文件旁的 `asmr-playlist.json`（Vue 存在本地存储 `momobako.library.asmr.playlist.v1`，不迁移） | `src-nana/src/shell/inspect_asmr/playlist.rs` |
-| 主窗口位置、尺寸和最大化 | 应用数据目录下的 `com.momobako.desktop/nana-main-window-state.json` | `src-nana/src/window_state.rs` |
+| 主窗口位置、尺寸和最大化 | 应用数据目录下 NanaUI 的文件存储（`com.momobako.desktop/local-storage.bin`，键 `main`）；旧版的 `nana-main-window-state.json` 第一次启动时搬进来后删掉 | `src-nana/src/window_state.rs` |
 | 随附插件 | 读插件打包输出 `External/Plugins/.packages`，同步进服务目录的 `plugins/builtin` | `src-nana/src/plugin_host.rs` |
 
 ## 渲染和验收路径
@@ -74,7 +74,7 @@ cargo run -p momobako-nana                   # 原生窗口
   - 每一行进度条的宽度照 Vue `.progress-bar__fill` 按 0.18 s 过渡到新值，减少动态效果时直接跳到新值（`motion.rs` 的 `set_task_fills`）。
   - 出这一行的操作：加载资源库（换仓库、刷新）、挂载资源库、创建资源库、重定向资源库、刷新文件树、来源下载，复制、移动、导入、ZIP 和 Eagle 导入、多选删除和还原，以及非静默的读目录（「读取目录」「读取回收站」「读取文件树」：回收站和快捷访问、刷新时重读目录、仓库动作完成后的重读、搜索命中所在目录）。点文件夹、双击进入和面包屑在 Vue 里是静默读取，不出。见 `operation_row_tests.rs`、`workspace_switch_tests.rs`。
 - **键盘和焦点**：菜单按钮（仓库头、「导入」）上的 ArrowDown / ArrowUp，文件卡片和文件夹行上的菜单键和 Shift+F10 打开菜单，焦点落在首项或末项（`menu_focus.rs`、`menu_focus_view.rs`）；菜单项首尾相接，Enter 执行，Escape 关掉。对话框、弹层和菜单关掉以后按同一条规则交还焦点（`focus_return.rs`）：回到打开它的控件；它随菜单、弹层收起了，回到菜单、弹层的主人（文件条目、文件夹行、仓库头、「导入」）；被删掉了，回到它那一片里选中的项或第一个能聚焦的控件；自己弹出来的硬链接确认回到文件列表里的条目。对话框在刷新时才关上，每帧画完以后（`presented`）补还。各对话框和弹层还到哪见 [壳层绑定式视图](./nana-shell-view.md) 的「焦点归还」，和 Vue 的差别见 [对照](./nana-vue-parity.md)。
-- **宿主操作**：标题栏的最小化、最大化、关闭；关闭行为按设置确认、退出或最小化到托盘（`src-nana/src/window_host.rs`）；托盘在 Windows 上用 `tray-icon`（`src-nana/src/tray.rs`）；主窗口几何下次启动恢复；打开和定位启动系统程序；拖出文件在 Windows 上用 `drag` crate（`src-nana/src/drag_out.rs`）；剪贴板读写系统剪贴板（`src-nana/src/host_bridge.rs`）；文件区和空库页接收系统文件拖入（`input::accept_file_drops`）；Escape 由运行时交给激活的对话框，其余按 `escape_layer` 关最上面一层。
+- **宿主操作**：标题栏的最小化、最大化、关闭；关闭行为按设置确认、退出或最小化到托盘（`src-nana/src/window_host.rs`）；托盘在 Windows 上用 `tray-icon`（`src-nana/src/tray.rs`）；主窗口几何由 NanaUI 持久化，下次启动建窗前恢复；打开和定位启动系统程序；拖出文件在 Windows 上用 `drag` crate（`src-nana/src/drag_out.rs`）；剪贴板读写系统剪贴板（`src-nana/src/host_bridge.rs`）；文件区和空库页接收系统文件拖入（`input::accept_file_drops`）；Escape 由运行时交给激活的对话框，其余按 `escape_layer` 关最上面一层。
 
 ## 还没做或要靠设备验证的部分
 

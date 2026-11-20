@@ -40,9 +40,9 @@ use shell::{
 };
 
 #[cfg(any(test, feature = "acceptance"))]
-pub mod capability;
-#[cfg(any(test, feature = "acceptance"))]
 mod acceptance_document;
+#[cfg(any(test, feature = "acceptance"))]
+pub mod capability;
 #[cfg(any(test, feature = "acceptance"))]
 pub use acceptance_document::{
     acceptance_document, acceptance_document_at_width, acceptance_document_for,
@@ -575,7 +575,11 @@ pub fn run() -> Result<(), nana_ui::HostedRunError> {
     if let Some(paths) = paths {
         builder = builder.paths(paths);
     }
-    builder.run::<RuntimeApplication<MomoBakoApplication>>(app_icon::with_window_icon(
-        window_state::main_window_descriptor(),
-    ))
+    let descriptor = app_icon::with_window_icon(window_state::main_window_descriptor());
+    match window_state::store(&descriptor) {
+        Some(store) => {
+            builder.run_with_store::<RuntimeApplication<MomoBakoApplication>>(descriptor, store)
+        }
+        None => builder.run::<RuntimeApplication<MomoBakoApplication>>(descriptor),
+    }
 }

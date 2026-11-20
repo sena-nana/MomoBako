@@ -85,6 +85,6 @@
 ## 没有现成组件的部分
 
 - 视频画面、PDF 页面和 3D 模型。视频帧解码后放进宿主纹理槽 `file-preview`，由 `GpuTextureView` 显示；PDF 页和模型网格软件光栅成 RGBA 帧，预览框把帧编码成 PNG 画出来（`src-nana/src/shell/inspect_view/page.rs`）。`GpuView` 只有内置调色板着色器，没有网格管线，产品没有用它。压缩包、Office 文本和 FBX、BLEND 文件头由内置预览读出（`src-nana/src/shell/inspect/native_preview.rs`）。
-- 系统托盘、拖出、窗口几何和系统媒体传输控件。宿主用 `tray-icon`、`drag`、`windows` crate 和 `nana_ui_platform` 实现（`tray.rs`、`drag_out.rs`、`window_state.rs`、`system_media.rs`）。系统文件对话框和文件拖入用 Nana 平台的 `WindowCommand::OpenFileDialog` 和 `FileDropEvent`。测试只断言排出的请求和命令，真效果记在 `nana-device-matrix.md`。
+- 系统托盘、拖出、窗口几何和系统媒体传输控件。托盘、拖出和媒体控件由宿主用 `tray-icon`、`drag`、`windows` crate 实现（`tray.rs`、`drag_out.rs`、`system_media.rs`）；窗口几何用 NanaUI 自带的 `persist_key` 持久化（`window_state.rs` 只给描述符和存储）。系统文件对话框和文件拖入用 Nana 平台的 `WindowCommand::OpenFileDialog` 和 `FileDropEvent`。测试只断言排出的请求和命令，真效果记在 `nana-device-matrix.md`。
 - 全局快捷键：没有实现。
 - 代码高亮：没开 `syntax-highlighting`。文本预览和 Vue `text-preview` 一样显示等宽原文，不着色。

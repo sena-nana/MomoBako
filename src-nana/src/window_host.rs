@@ -14,11 +14,10 @@ use crate::shell::{
 };
 use crate::{MomoBakoApplication, host_api};
 
-/// 托盘和图标失败原因。窗口几何会话和帧时钟跟这一扇主窗口走。
+/// 托盘和图标失败原因，以及跟这一扇主窗口走的帧时钟。窗口几何由 NanaUI 持久化（`window_state.rs`）。
 pub(crate) struct HostSession {
     pub tray: Option<crate::tray::TrayHost>,
     pub tray_error: Option<String>,
-    pub windows: crate::window_state::Session,
     /// 准备帧的时钟：每帧的步长是两帧之间真实流逝的时间。
     pub frames: FrameClock,
 }
@@ -28,7 +27,6 @@ impl Default for HostSession {
         Self {
             tray: None,
             tray_error: None,
-            windows: crate::window_state::Session::default(),
             frames: FrameClock::default(),
         }
     }
@@ -255,27 +253,13 @@ pub(crate) fn on_window_event(
             // 打开时记下尺寸。随后的缩放才和它对，尺寸没变不关菜单。
             note_window_resize(app, geometry, context);
             app.shell.set_viewport_width(geometry.logical_size.0);
-            let window_commands = app.host.windows.on_ready(*id);
-            RuntimeProgramUpdate {
-                window_commands,
-                ..RuntimeProgramUpdate::redraw(*id)
-            }
+            RuntimeProgramUpdate::redraw(*id)
         }
         nana_ui_platform::WindowEvent::Resized { id, geometry } => {
-            app.host.windows.on_geometry(geometry);
             note_window_resize(app, geometry, context);
             if app.shell.set_viewport_width(geometry.logical_size.0) {
                 return RuntimeProgramUpdate::redraw(*id);
             }
-            RuntimeProgramUpdate::default()
-        }
-        // 只移动窗口不改变尺寸，右键菜单留着。
-        nana_ui_platform::WindowEvent::Moved { geometry, .. } => {
-            app.host.windows.on_geometry(geometry);
-            RuntimeProgramUpdate::default()
-        }
-        nana_ui_platform::WindowEvent::Closed { .. } => {
-            app.host.windows.persist();
             RuntimeProgramUpdate::default()
         }
         nana_ui_platform::WindowEvent::AppearanceChanged { id, appearance } => {
