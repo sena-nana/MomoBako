@@ -6,6 +6,7 @@
 use nana_ui::runtime::view::{Signal, signal};
 
 use super::super::ShellViewModel;
+use crate::backend::services::repository::CacheSnapshot;
 use super::support;
 
 /// 设置页卡片要显示的东西。
@@ -70,11 +71,65 @@ pub(crate) struct KvRow {
     pub last: bool,
 }
 
-/// 缓存：三格容量和最近条目。
+/// 缓存：当前资源库的缩略图文件数、其余缓存文件数和总占用三格，下面逐项列出各缓存目录。
+/// 没有打开资源库或还没读回来时三格写「未加载」，不另造数字。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct CacheCard {
-    pub metrics: [usize; 3],
+    pub metrics: [String; 3],
     pub entries: Vec<KvRow>,
+}
+
+impl CacheCard {
+    fn project(snapshot: Option<&CacheSnapshot>) -> Self {
+        let Some(snapshot) = snapshot else {
+            return Self {
+                metrics: std::array::from_fn(|_| "未加载".into()),
+                entries: Vec::new(),
+            };
+        };
+        let thumbnails = snapshot
+            .entries
+            .iter()
+            .filter(|entry| entry.kind == "thumbnails")
+            .map(|entry| entry.files)
+            .sum::<u64>();
+        let files = snapshot.entries.iter().map(|entry| entry.files).sum::<u64>();
+        let bytes = snapshot.entries.iter().map(|entry| entry.bytes).sum::<u64>();
+        let count = snapshot.entries.len();
+        Self {
+            metrics: [
+                thumbnails.to_string(),
+                (files - thumbnails).to_string(),
+                human_bytes(bytes),
+            ],
+            entries: snapshot
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(index, entry)| KvRow {
+                    key: format!("admin-cache-entry-{}", entry.kind.replace('/', "-")),
+                    name: entry.label.clone(),
+                    value: format!("{} 个文件 · {}", entry.files, human_bytes(entry.bytes)),
+                    last: index + 1 == count,
+                })
+                .collect(),
+        }
+    }
+}
+
+/// 字节数按 1024 进位写成 B、KB、MB、GB，KB 以上保留一位小数。
+pub(crate) fn human_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit + 1 < UNITS.len() {
+        value /= 1024.0;
+        unit += 1;
+    }
+    format!("{value:.1} {}", UNITS[unit])
 }
 
 /// API 设计：传输方式和端点。
@@ -96,12 +151,6 @@ impl SettingsView {
         let status = admin.external.as_ref();
         let text =
             |value: Option<&str>| value.map(str::to_string).unwrap_or_else(|| "未加载".into());
-        let config = admin.cache.as_ref().map(|cache| &cache.config);
-        let entries = admin
-            .cache
-            .as_ref()
-            .map(|cache| cache.entries.as_slice())
-            .unwrap_or(&[]);
         let endpoints = admin
             .api_design
             .as_ref()
@@ -148,23 +197,9 @@ impl SettingsView {
                 error: admin.external_error.clone(),
                 message: admin.external_message.clone(),
             },
-            cache: CacheCard {
-                metrics: [
-                    config.map(|item| item.metadata_capacity).unwrap_or(0),
-                    config.map(|item| item.thumbnail_capacity).unwrap_or(0),
-                    config.map(|item| item.query_capacity).unwrap_or(0),
-                ],
-                entries: entries
-                    .iter()
-                    .enumerate()
-                    .map(|(index, entry)| KvRow {
-                        key: format!("admin-cache-entry-{index}"),
-                        name: format!("{} / {}", entry.cache_type, entry.key),
-                        value: entry.last_accessed_at.clone(),
-                        last: index + 1 == entries.len(),
-                    })
-                    .collect(),
-            },
+            cache: CacheCard::project(admin.cache.as_ref().filter(|cache| {
+                model.workspace.active_repo_id.as_deref() == Some(cache.repo_id.as_str())
+            })),
             api: ApiCard {
                 transport: admin
                     .api_design

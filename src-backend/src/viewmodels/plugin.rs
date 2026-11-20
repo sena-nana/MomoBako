@@ -121,9 +121,10 @@ impl PluginViewModel {
         Ok(response)
     }
 
-    pub async fn get_cache_snapshot(&self) -> Result<CacheSnapshot, String> {
+    /// 资源库的缓存占用：缩略图和 `.momo/cache` 下的各子缓存。
+    pub async fn get_cache_snapshot(&self, repo_id: String) -> Result<CacheSnapshot, String> {
         self.runtime
-            .run_read(|state| state.get_cache_snapshot())
+            .run_read(move |state| state.get_cache_snapshot(&repo_id))
             .await
     }
 

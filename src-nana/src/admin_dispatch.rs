@@ -76,7 +76,10 @@ fn dispatch_one(
         }
         AdminEffect::RequestOpenDialog => app.shell.input.queue_plugin_dialog(),
         AdminEffect::RequestSaveDialog { .. } => app.shell.input.queue_save_dialog(),
-        AdminEffect::LoadSettingsBundle => load_bundle(app, context),
+        AdminEffect::LoadSettingsBundle => {
+            load_bundle(app, context);
+            load_cache(app, context);
+        }
         AdminEffect::LoadLogs => load_logs(app, context),
         AdminEffect::ClearLogs => clear_logs(app, context),
         AdminEffect::LoadAppSettings => load_app_settings(app, context),
@@ -524,8 +527,8 @@ fn http_request(context: &RuntimeProgramContext<ShellMessage>, request: HttpRequ
     });
 }
 
-/// 设置页一次读五份数据：插件、钩子记录、缓存、API 设计和外部连接。首屏启动第 4 步等着它，失败（含任务 panic）时
-/// 按五份都失败交回（[`failed_bundle_message`]），启动照常结束。
+/// 设置页一次读四份数据：插件、钩子记录、API 设计和外部连接。首屏启动第 4 步等着它，失败（含任务 panic）时
+/// 按四份都失败交回（[`failed_bundle_message`]），启动照常结束。有打开的资源库时另读它的缓存占用。
 fn load_bundle(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
     spawn_service(
         app.services.as_ref(),
@@ -544,17 +547,33 @@ fn load_bundle(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellM
                         limit: Some(200),
                     },
                 )));
-                let cache = executor.block_on(plugin.get_cache_snapshot());
                 let api = executor.block_on(plugin.get_api_design_snapshot());
                 let external = executor.block_on(system.get_external_api_connection_status());
                 admin(AdminMessage::SettingsBundleLoaded {
                     plugins,
                     hooks: hooks.map(|response| response.records),
-                    cache,
                     api,
                     external,
                 })
             }
+        },
+    );
+}
+
+/// 读当前资源库的缓存占用，结果回 `CacheLoaded`。没有打开的资源库时不读，卡片写「未加载」。
+fn load_cache(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
+    let Some(repo_id) = app.shell.workspace.active_repo_id.clone() else {
+        return;
+    };
+    spawn_service(
+        app.services.as_ref(),
+        context,
+        "缓存占用",
+        |error| admin(AdminMessage::CacheLoaded(Err(error))),
+        |services| {
+            let plugin = services.plugin.clone();
+            let executor = services.executor.clone();
+            move || admin(AdminMessage::CacheLoaded(executor.block_on(plugin.get_cache_snapshot(repo_id))))
         },
     );
 }
@@ -564,7 +583,6 @@ pub(crate) fn failed_bundle_message(error: String) -> ShellMessage {
     admin(AdminMessage::SettingsBundleLoaded {
         plugins: Err(error.clone()),
         hooks: Err(error.clone()),
-        cache: Err(error.clone()),
         api: Err(error.clone()),
         external: Err(error),
     })

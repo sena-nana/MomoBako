@@ -572,5 +572,7 @@
 
 ## Cache API
 
-- `GET /cache`
-  - Return cache capacities and recent entries for metadata, thumbnail and query caches
+- `GET /repositories/{repoId}/cache`
+  - ViewModel: `PluginViewModel::get_cache_snapshot(repo_id)`; implementation `src-backend/src/services/repository/cache_usage.rs`
+  - Returns `{ repoId, entries }`; each entry is `{ kind, label, path, files, bytes, modifiedAt }`, measured on disk: `thumbnails` is the repository thumbnail cache, `cache/<name>` is one subdirectory of `.momo/cache` (Office preview PDFs, 网易云 playback cache, download staging, …), and `cache` collects loose files directly under `.momo/cache`
+  - There are no in-memory metadata or query caches to report

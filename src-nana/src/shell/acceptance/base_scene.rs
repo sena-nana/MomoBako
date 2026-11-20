@@ -22,7 +22,7 @@ use super::super::admin::{AdminEffect, AdminMessage};
 use super::super::files::DisplayMode;
 use super::super::sidebar::SidebarTree;
 use super::super::{ShellMessage, ShellPage, ShellViewModel, SidebarMessage, SyncCounts};
-use super::plugin_fixtures::{bundle_failed, bundle_loaded, bundled_plugins};
+use super::plugin_fixtures::{bundle_failed, bundle_loaded, bundled_plugins, cache_snapshot};
 
 pub(super) const REPO_ID: &str = "acceptance-repo";
 pub(super) const REPO_NAME: &str = "默认资源库";
@@ -257,6 +257,11 @@ pub(super) fn answer_admin_reads(
     model.reduce(ShellMessage::Admin(bundle_loaded(bundled_plugins(|_| {
         true
     }))));
+    if let Some(repo_id) = model.workspace.active_repo_id.clone() {
+        model.reduce(ShellMessage::Admin(AdminMessage::CacheLoaded(Ok(
+            cache_snapshot(&repo_id),
+        ))));
+    }
     if !model
         .admin
         .take_effects()

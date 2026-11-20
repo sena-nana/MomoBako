@@ -694,23 +694,3 @@ pub fn install_local_filesystem_test_plugin_archive(service_root: &Path) {
     archive.finish().expect("plugin archive should finish");
     enable_local_filesystem_adapter();
 }
-
-pub(super) fn default_cache_entries() -> Vec<CacheEntry> {
-    vec![
-        CacheEntry {
-            cache_type: "metadata".to_string(),
-            key: "repo-main-001:asset-01".to_string(),
-            last_accessed_at: now_rfc3339(),
-        },
-        CacheEntry {
-            cache_type: "query".to_string(),
-            key: "tag=封面".to_string(),
-            last_accessed_at: now_rfc3339(),
-        },
-        CacheEntry {
-            cache_type: "thumbnail".to_string(),
-            key: "asset-02".to_string(),
-            last_accessed_at: now_rfc3339(),
-        },
-    ]
-}

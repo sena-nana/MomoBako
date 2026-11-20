@@ -1613,27 +1613,24 @@ pub struct SmartFolderMutationResponse {
     pub smart_folder: Option<SmartFolder>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct CacheConfig {
-    pub metadata_capacity: usize,
-    pub thumbnail_capacity: usize,
-    pub query_capacity: usize,
+pub struct CacheUsage {
+    /// `thumbnails`、`cache/<子目录>` 或 `cache`（缓存根下的散文件）。
+    pub kind: String,
+    pub label: String,
+    pub path: String,
+    pub files: u64,
+    pub bytes: u64,
+    pub modified_at: Option<String>,
 }
 
-#[derive(Debug, Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct CacheEntry {
-    pub cache_type: String,
-    pub key: String,
-    pub last_accessed_at: String,
-}
-
-#[derive(Debug, Serialize, Clone)]
+/// 一个资源库的缓存占用，见 `cache_usage.rs`。
+#[derive(Debug, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CacheSnapshot {
-    pub config: CacheConfig,
-    pub entries: Vec<CacheEntry>,
+    pub repo_id: String,
+    pub entries: Vec<CacheUsage>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

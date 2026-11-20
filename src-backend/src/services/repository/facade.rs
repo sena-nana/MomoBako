@@ -979,8 +979,8 @@ impl RepositoryState {
         plugin::install_plugin_from_archive(self, request)
     }
 
-    pub fn get_cache_snapshot(&self) -> Result<CacheSnapshot, String> {
-        plugin::get_cache_snapshot(self)
+    pub fn get_cache_snapshot(&self, repo_id: &str) -> Result<CacheSnapshot, String> {
+        cache_usage::get_cache_snapshot(self, repo_id)
     }
 
     pub fn get_api_design_snapshot(&self) -> Result<ApiDesignSnapshot, String> {

@@ -74,11 +74,8 @@
 
 ## Cache Strategy
 
-- LRU-style capacities are configured for:
-  - metadata cache
-  - thumbnail cache
-  - query cache
-- Current UI surfaces capacities and recent entries
+- Caches are files on disk under each repository's `.momo/`: `thumbnails/` and the subdirectories of `cache/` (Office preview PDFs, 网易云 playback cache, download staging). Metadata and queries are read from SQLite each time; there is no in-memory LRU.
+- The Settings page shows the active repository's cache usage (file count and bytes per cache directory), measured on disk by `cache_usage.rs`.
 - Thumbnail cache files use sha256 hex filenames. The backend generates thumbnails for images, videos and audio covers; custom thumbnails (local file, remote URL or image bytes) are saved through the thumbnail API.
 - Prepared preview and playback sources are local files; the Nana host reads their bytes in process through the query ViewModel. The runtime serves no preview URLs.
 

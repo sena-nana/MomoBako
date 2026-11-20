@@ -219,7 +219,6 @@ fn empty_and_missing_launches_close_the_log_after_the_settings_bundle() {
         ShellMessage::Admin(AdminMessage::SettingsBundleLoaded {
             plugins: Err("读取插件目录失败".into()),
             hooks: Ok(Vec::new()),
-            cache: Err("读取插件目录失败".into()),
             api: Err("读取插件目录失败".into()),
             external: Err("读取插件目录失败".into()),
         })

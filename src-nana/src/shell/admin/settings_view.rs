@@ -711,7 +711,7 @@ fn copy_action(
         .into_any()
 }
 
-/// 缓存：三格容量和最近条目。没有快照时容量写 0，和 Vue 一样不另造数字。
+/// 缓存：当前资源库的缩略图、其余缓存文件和总占用三格，下面逐项列出各缓存目录的文件数和大小。
 fn cache_card(signals: SettingsSignals) -> AnyView {
     let cache = signals.cache;
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
@@ -726,15 +726,15 @@ fn cache_card(signals: SettingsSignals) -> AnyView {
         layout.padding_bottom = Some(LengthSpec::Px(12.0));
     });
     let cells = [
-        ("Metadata LRU", "admin-cache"),
-        ("Thumbnail LRU", "admin-cache-thumbnail"),
-        ("Query LRU", "admin-cache-query"),
+        ("缩略图", "admin-cache-thumbnail"),
+        ("缓存文件", "admin-cache-files"),
+        ("总占用", "admin-cache-bytes"),
     ]
     .into_iter()
     .enumerate()
     .map(|(index, (name, key))| {
         metric(
-            move || cache.with(|card| card.metrics[index].to_string()),
+            move || cache.with(|card| card.metrics[index].clone()),
             name,
             key,
         )

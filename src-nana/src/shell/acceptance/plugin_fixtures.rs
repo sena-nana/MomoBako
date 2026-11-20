@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use serde_json::{Map, Value, json};
 
 use crate::backend::services::repository::{
-    ApiDesignSnapshot, CacheConfig, CacheSnapshot, PlaylistPlayerContribution, PluginManifest,
+    ApiDesignSnapshot, CacheSnapshot, CacheUsage, PlaylistPlayerContribution, PluginManifest,
 };
 use crate::backend::services::runtime::ExternalApiConnectionStatus;
 
@@ -78,12 +78,12 @@ pub(super) fn players_of(plugins: &[PluginManifest]) -> Vec<PlaylistPlayerContri
         .collect()
 }
 
-/// 一次读完设置包五份数据的应答，插件之外都和 Vue 模拟 IPC 的默认应答一致。
+/// 一次读完设置包四份数据的应答。
 pub(super) fn bundle_loaded(plugins: Vec<PluginManifest>) -> AdminMessage {
     bundle_with(Ok(plugins))
 }
 
-/// 插件目录读取失败的设置包：其它四份照常应答。Vue 的 `Promise.all` 整批失败，这四份也不写入。
+/// 插件目录读取失败的设置包：其它三份照常应答，整批失败，这三份也不写入。
 pub(super) fn bundle_failed(error: &str) -> AdminMessage {
     bundle_with(Err(error.to_string()))
 }
@@ -92,7 +92,6 @@ fn bundle_with(plugins: Result<Vec<PluginManifest>, String>) -> AdminMessage {
     AdminMessage::SettingsBundleLoaded {
         plugins,
         hooks: Ok(Vec::new()),
-        cache: Ok(cache_snapshot()),
         api: Ok(api_design()),
         external: Ok(external_status()),
     }
@@ -139,14 +138,22 @@ fn mock_install(manifest: &mut Map<String, Value>) {
     manifest.insert("dependencyStatus".into(), status);
 }
 
-pub(super) fn cache_snapshot() -> CacheSnapshot {
+/// 夹具资源库的缓存占用：缩略图和 Office 预览两项。
+pub(super) fn cache_snapshot(repo_id: &str) -> CacheSnapshot {
+    let usage = |kind: &str, label: &str, files: u64, bytes: u64| CacheUsage {
+        kind: kind.into(),
+        label: label.into(),
+        path: format!("D:/Library/.momo/{kind}"),
+        files,
+        bytes,
+        modified_at: Some("2026-10-08T08:00:00Z".into()),
+    };
     CacheSnapshot {
-        config: CacheConfig {
-            metadata_capacity: 512,
-            thumbnail_capacity: 1024,
-            query_capacity: 256,
-        },
-        entries: Vec::new(),
+        repo_id: repo_id.into(),
+        entries: vec![
+            usage("thumbnails", "缩略图", 128, 6_291_456),
+            usage("cache/office-preview", "Office 预览 PDF", 3, 1_572_864),
+        ],
     }
 }
 

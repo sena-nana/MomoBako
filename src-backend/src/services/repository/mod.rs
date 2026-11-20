@@ -25,6 +25,7 @@ mod api_design;
 mod asset_mutation;
 mod atomic_io;
 mod browser;
+mod cache_usage;
 mod cancellation;
 mod contracts;
 mod discovery;

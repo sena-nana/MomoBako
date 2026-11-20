@@ -272,10 +272,9 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
         AdminMessage::SettingsBundleLoaded {
             plugins,
             hooks,
-            cache,
             api,
             external,
-        } => apply_bundle(model, plugins, hooks, cache, api, external),
+        } => apply_bundle(model, plugins, hooks, api, external),
         AdminMessage::SetCornerStyle(style) => set_corner_style(model, &style),
         AdminMessage::SetCornerRadius(value) => set_corner_radius(model, &value),
         AdminMessage::CopyExternal { label, value } => copy_external(model, &label, &value),
@@ -744,37 +743,34 @@ pub(crate) fn settle_directory_open(
     None
 }
 
-/// 设置页五份数据。任何一份失败整批不写，只记下错误，和 Vue 的 `Promise.all` 一致。
+/// 设置页四份数据。任何一份失败整批不写，只记下错误。
 fn apply_bundle(
     model: &mut ShellViewModel,
     plugins: Result<Vec<PluginManifest>, String>,
     hooks: Result<Vec<crate::backend::services::repository::PluginHookExecutionRecord>, String>,
-    cache: Result<crate::backend::services::repository::CacheSnapshot, String>,
     api: Result<crate::backend::services::repository::ApiDesignSnapshot, String>,
     external: Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>,
 ) {
     model.admin.loading_settings = false;
     // 首屏启动在等的设置包：成功时插件列表换新、接着读播放器类型，启动等它回来；失败照 Vue 吃掉错误，启动就此结束。
     let complete =
-        plugins.is_ok() && hooks.is_ok() && cache.is_ok() && api.is_ok() && external.is_ok();
+        plugins.is_ok() && hooks.is_ok() && api.is_ok() && external.is_ok();
     model.workspace.note_settings_loaded(complete);
-    match (plugins, hooks, cache, api, external) {
-        (Ok(plugins), Ok(hooks), Ok(cache), Ok(api), Ok(external)) => {
+    match (plugins, hooks, api, external) {
+        (Ok(plugins), Ok(hooks), Ok(api), Ok(external)) => {
             publish_plugins(model, &plugins);
             model.admin.store_plugins(plugins);
             model.admin.hook_executions = hooks;
-            model.admin.cache = Some(cache);
             model.admin.api_design = Some(api);
             model.admin.external = Some(external);
             model.admin.load_error.clear();
             // API Playground 挂载时选中第一个端点并带出方法、目标和请求体，契约换新后同样重选。
             let _ = super::api::selected(model);
         }
-        (plugins, hooks, cache, api, external) => {
+        (plugins, hooks, api, external) => {
             let error = [
                 plugins.err(),
                 hooks.err(),
-                cache.err(),
                 api.err(),
                 external.err(),
             ]

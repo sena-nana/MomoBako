@@ -2,7 +2,7 @@
 //! 再把读取结果送回，看界面要读的状态有没有接上。时机照 Vue 各 composable 读数据的时候。
 
 use crate::backend::services::repository::{
-    ApiDesignSnapshot, CacheConfig, CacheSnapshot, FileBrowserSnapshot, PlaylistPlayerContribution,
+    ApiDesignSnapshot, FileBrowserSnapshot, PlaylistPlayerContribution,
     PlaylistSummary, PluginManifest, RepositoryAction, RepositoryBackendSummary,
     RepositoryLocalCacheStatus, RepositoryOverview, RepositorySnapshot,
     RepositoryStructureCacheState, RepositorySummary, SystemLogLocation, SystemLogPage,
@@ -198,14 +198,6 @@ pub(super) fn bundle(plugins: Vec<PluginManifest>) -> ShellMessage {
     ShellMessage::Admin(AdminMessage::SettingsBundleLoaded {
         plugins: Ok(plugins),
         hooks: Ok(Vec::new()),
-        cache: Ok(CacheSnapshot {
-            config: CacheConfig {
-                metadata_capacity: 1,
-                thumbnail_capacity: 1,
-                query_capacity: 1,
-            },
-            entries: Vec::new(),
-        }),
         api: Ok(ApiDesignSnapshot {
             transport: "native".into(),
             endpoints: Vec::new(),
@@ -285,7 +277,6 @@ fn a_failed_settings_bundle_still_finishes_the_startup() {
     model.reduce(ShellMessage::Admin(AdminMessage::SettingsBundleLoaded {
         plugins: Err("读取插件目录失败".into()),
         hooks: Ok(Vec::new()),
-        cache: Err("读取插件目录失败".into()),
         api: Err("读取插件目录失败".into()),
         external: Err("读取插件目录失败".into()),
     }));

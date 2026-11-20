@@ -270,18 +270,6 @@ pub(super) fn install_plugin_from_archive(
     })
 }
 
-pub(super) fn get_cache_snapshot(state: &RepositoryState) -> Result<CacheSnapshot, String> {
-    state.ensure_initialized()?;
-    Ok(CacheSnapshot {
-        config: CacheConfig {
-            metadata_capacity: 2_048,
-            thumbnail_capacity: 512,
-            query_capacity: 128,
-        },
-        entries: default_cache_entries(),
-    })
-}
-
 pub(super) fn get_api_design_snapshot(
     state: &RepositoryState,
 ) -> Result<ApiDesignSnapshot, String> {

@@ -121,11 +121,10 @@ pub enum AdminMessage {
     HooksLoaded(Result<Vec<PluginHookExecutionRecord>, String>),
     CacheLoaded(Result<CacheSnapshot, String>),
     ApiDesignLoaded(Result<ApiDesignSnapshot, String>),
-    /// 设置页一次读完的五份数据。任何一份失败，整批都不写入，和 Vue 的 `Promise.all` 一致。
+    /// 设置页一次读完的四份数据。任何一份失败，整批都不写入。资源库的缓存占用另走 [`Self::CacheLoaded`]。
     SettingsBundleLoaded {
         plugins: Result<Vec<PluginManifest>, String>,
         hooks: Result<Vec<PluginHookExecutionRecord>, String>,
-        cache: Result<CacheSnapshot, String>,
         api: Result<ApiDesignSnapshot, String>,
         external: Result<ExternalApiConnectionStatus, String>,
     },

@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use serde_json::json;
 
 use crate::backend::services::repository::{
-    ApiDesignSnapshot, CacheConfig, CacheSnapshot, PluginConfigSnapshot, PluginDependencyStatus,
+    ApiDesignSnapshot, CacheSnapshot, CacheUsage, PluginConfigSnapshot, PluginDependencyStatus,
     PluginManifest, RepositoryAction, RepositoryActionStep, RepositoryBackendSummary,
     RepositorySummary, SystemLogLocation, SystemLogPage, SystemLogRecord, SystemLogSource,
     TaskProgressSnapshot,
@@ -188,14 +188,27 @@ fn candidate(plugin_id: &str, label: &str) -> PlayerCandidate {
     }
 }
 
-fn cache() -> CacheSnapshot {
+fn cache(repo_id: &str) -> CacheSnapshot {
     CacheSnapshot {
-        config: CacheConfig {
-            metadata_capacity: 1,
-            thumbnail_capacity: 2,
-            query_capacity: 3,
-        },
-        entries: Vec::new(),
+        repo_id: repo_id.into(),
+        entries: vec![
+            CacheUsage {
+                kind: "thumbnails".into(),
+                label: "缩略图".into(),
+                path: "D:/r/.momo/thumbnails".into(),
+                files: 3,
+                bytes: 2048,
+                modified_at: None,
+            },
+            CacheUsage {
+                kind: "cache/office-preview".into(),
+                label: "Office 预览 PDF".into(),
+                path: "D:/r/.momo/cache/office-preview".into(),
+                files: 2,
+                bytes: 1_572_864,
+                modified_at: None,
+            },
+        ],
     }
 }
 
@@ -214,7 +227,6 @@ fn load_bundle(model: &mut ShellViewModel, plugins: Vec<PluginManifest>) {
         AdminMessage::SettingsBundleLoaded {
             plugins: Ok(plugins),
             hooks: Ok(Vec::new()),
-            cache: Ok(cache()),
             api: Ok(api_design()),
             external: Ok(connection()),
         },
@@ -243,14 +255,12 @@ fn settings_bundle_is_all_or_nothing_and_success_clears_the_error() {
         AdminMessage::SettingsBundleLoaded {
             plugins: Ok(vec![plugin("next", "system", "service", "service")]),
             hooks: Ok(Vec::new()),
-            cache: Ok(cache()),
             api: Err("API 设计读取失败".into()),
             external: Ok(connection()),
         },
     );
     assert!(!model.admin.loading_settings);
     assert!(model.admin.plugins.is_empty());
-    assert!(model.admin.cache.is_none());
     assert!(model.admin.external.is_none());
     assert_eq!(model.admin.load_error, "API 设计读取失败");
 
@@ -263,14 +273,6 @@ fn settings_bundle_is_all_or_nothing_and_success_clears_the_error() {
         vec![plugin("next", "system", "service", "service"), tools],
     );
     assert_eq!(model.admin.plugins.len(), 2);
-    assert_eq!(
-        model
-            .admin
-            .cache
-            .as_ref()
-            .map(|item| item.config.query_capacity),
-        Some(3)
-    );
     assert_eq!(
         model.admin.external.as_ref().map(|item| item.ready),
         Some(true)
@@ -1643,4 +1645,42 @@ fn a_checked_native_checkbox_keeps_its_mark_visible() {
             "{mode:?}：选中勾选框的「✓」和底色对比只有 {contrast:.2}"
         );
     }
+}
+
+/// 缓存卡片读当前资源库的真实占用：缩略图、其余缓存文件和总占用三格，逐项写文件数和大小。
+/// 没有快照或快照属于别的资源库时三格写「未加载」。
+#[test]
+fn cache_card_shows_the_active_repository_usage() {
+    use super::settings_state::{SettingsView, human_bytes};
+
+    let mut model = ShellViewModel::default();
+    model.workspace.active_repo_id = Some("repo-a".into());
+    let view = SettingsView::project(&model);
+    assert_eq!(view.cache.metrics, ["未加载", "未加载", "未加载"]);
+
+    send(&mut model, AdminMessage::CacheLoaded(Ok(cache("repo-a"))));
+    let view = SettingsView::project(&model);
+    assert_eq!(view.cache.metrics, ["3", "2", "1.5 MB"]);
+    let rows: Vec<_> = view
+        .cache
+        .entries
+        .iter()
+        .map(|row| (row.name.as_str(), row.value.as_str(), row.last))
+        .collect();
+    assert_eq!(
+        rows,
+        [
+            ("缩略图", "3 个文件 · 2.0 KB", false),
+            ("Office 预览 PDF", "2 个文件 · 1.5 MB", true),
+        ]
+    );
+
+    model.workspace.active_repo_id = Some("repo-b".into());
+    assert_eq!(
+        SettingsView::project(&model).cache.metrics,
+        ["未加载", "未加载", "未加载"],
+        "别的资源库的快照不显示"
+    );
+    assert_eq!(human_bytes(512), "512 B");
+    assert_eq!(human_bytes(3 * 1024 * 1024 * 1024), "3.0 GB");
 }
