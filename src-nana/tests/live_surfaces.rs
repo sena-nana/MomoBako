@@ -82,17 +82,19 @@ fn assert_import_tool() {
     let stats = shot(&mut session, "import-tool-light");
     assert!(stats.nonclear_ratio > 0.01, "导入工具页几乎是空的");
     click(&mut session, "从文件夹导入");
-    let _ = pump(&mut session, &mut model);
+    let commands = pump(&mut session, &mut model);
     assert_eq!(
         model.workspace.panel,
-        WorkspacePanel::Files,
-        "导入没有回到文件页"
+        WorkspacePanel::Extensions,
+        "从工具页导入要留在工具页，进度和完成提示写在这一页"
     );
     assert!(
-        has(&session.accessibility_dump(), "多个路径用分号分隔"),
-        "点击导入没有打开路径对话框"
+        commands
+            .iter()
+            .any(|command| matches!(command, WindowCommand::OpenFileDialog { .. })),
+        "点击导入没有打开系统文件夹选择器：{commands:?}"
     );
-    let _ = shot(&mut session, "import-tool-dialog");
+    let _ = shot(&mut session, "import-tool-picker");
 }
 
 /// 来源账号区照 `SourceAuthenticationSettings.vue`：点「连接新账号」先建扫码会话，

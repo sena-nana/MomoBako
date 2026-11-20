@@ -93,13 +93,16 @@ describe("Nana 发布包配置", () => {
       "[runtime]",
       "tools = [{ source = \"vendor/ffmpeg.exe\" }]",
     ].join("\r\n");
-    const config = renderPackageConfig(template, "D:/repo/src-nana", "portable", [
+    // 模板目录用本机的绝对路径：盘符路径在 Windows 以外不是绝对路径。
+    const templateDir = resolve("repo", "src-nana");
+    const ffmpeg = resolve(templateDir, "vendor/ffmpeg.exe").replace(/\\/g, "/");
+    const config = renderPackageConfig(template, templateDir, "portable", [
       { name: "momobako.local-filesystem", source: "D:\\repo\\External\\Plugins\\.packages\\local.momoplug", version: "1.0.0" },
     ]);
 
     expect(config).toContain("backend = \"portable\"");
     expect(config).not.toContain("installer");
-    expect(config).toContain("tools = [{ source = \"D:/repo/src-nana/vendor/ffmpeg.exe\" }]");
+    expect(config).toContain(`tools = [{ source = "${ffmpeg}" }]`);
     expect(config).toContain("# tools = [{ source = \"in-comment\" }]");
     expect(config).toContain([
       "[[runtime.plugins]]",
