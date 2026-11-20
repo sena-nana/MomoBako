@@ -21,6 +21,7 @@
 //! 展开哪个子菜单只切换子菜单的显隐。点条目发的消息是条目数据的一部分（[`MenuAction`]），
 //! 条目变了行就重建，处理器不会拿着过期的值。
 
+use crate::shell::dismiss_layer::{DismissCover, dismiss_layer};
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -450,16 +451,8 @@ impl FieldWrite<Stack, (f32, f32, f32, f32)> for MenuPlacement {
 
 /// 铺满窗口的透明底，在菜单外按下就关闭。
 fn backdrop(chrome: MenuChrome) -> AnyView {
-    let mut style = NodeStyle::default();
-    let layout = Arc::make_mut(&mut style.layout);
-    layout.position = PositionSpec::Absolute;
-    layout.offset_top = Some(LengthSpec::Px(0.0));
-    layout.offset_left = Some(LengthSpec::Px(0.0));
-    layout.width = Some(LengthSpec::Percent(100.0));
-    layout.height = Some(LengthSpec::Percent(100.0));
     let close = chrome.close;
-    widget(ListItem::new("关闭菜单").style(style))
-        .content(widget(Stack::column(0.0)))
+    dismiss_layer("关闭菜单", DismissCover::Container)
         .key(format!("{}-context-backdrop", chrome.prefix))
         .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(close()))
         .on_cx(move |_, _: &SecondaryPress, cx| cx.dispatch_program_all(close()))

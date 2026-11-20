@@ -8,6 +8,7 @@
 //! 弹层常驻：三页（切换、添加、表单）各是一块，换页时浮层块按身份换块；同一页打开期间位置、
 //! 列表、禁用和错误都经信号原地改，列表行按内容做键，变了的那一行才重建；表单输入框受控。
 
+use crate::shell::dismiss_layer::{DismissCover, dismiss_layer};
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{CHECK, PLUS, TRASH, X};
@@ -91,7 +92,7 @@ pub fn repository_popover(model: &ShellViewModel) -> Option<AnyView> {
             Stack::fill_column(0.0)
                 .with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative),
         )
-        .children((dismiss_layer(), positioned))
+        .children((popover_dismiss(), positioned))
         .key("repository-popover-layer")
         .into_any(),
     )
@@ -121,18 +122,8 @@ impl FieldWrite<Stack, Placement> for PlacementField {
 }
 
 /// 弹层外的透明点击层。提交中归约不关。
-fn dismiss_layer() -> AnyView {
-    let mut style = nana_ui::runtime::NodeStyle::default();
-    {
-        let layout = Arc::make_mut(&mut style.layout);
-        layout.position = nana_ui_core::PositionSpec::Absolute;
-        layout.offset_left = Some(LengthSpec::Px(0.0));
-        layout.offset_top = Some(LengthSpec::Px(0.0));
-        layout.width = Some(LengthSpec::Percent(100.0));
-        layout.height = Some(LengthSpec::Percent(100.0));
-    }
-    widget(ListItem::new("关闭资源库弹层").style(style))
-        .content(widget(Stack::row(0.0)))
+fn popover_dismiss() -> AnyView {
+    dismiss_layer("关闭资源库弹层", DismissCover::Container)
         .key("repository-popover-dismiss")
         .on_cx(|_, _: &Activate, cx| {
             cx.dispatch_program_all(sidebar_message(SidebarMessage::CloseRepositoryPopover))

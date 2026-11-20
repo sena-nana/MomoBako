@@ -3,6 +3,7 @@
 //! 两块都常驻：展开、菜单、导入框按 `.visible` 显隐；标签片、标签分组、已有标签和候选是带键的 `each`，
 //! 只有变了的那一片重建；输入框受控，处理器只发消息，要用到当前值时现读信号。
 
+use crate::shell::dismiss_layer::{DismissCover, dismiss_layer};
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{CHEVRON_DOWN, CHEVRON_RIGHT, PLUS};
@@ -172,17 +173,8 @@ fn tag_panel(signals: MetadataSignals) -> AnyView {
 /// 菜单层的 z 序更高，点菜单本身不会打到这一层。
 fn tag_menu_closer(signals: MetadataSignals) -> AnyView {
     let tags = signals.tags;
-    let mut style = NodeStyle::default();
-    let layout = Arc::make_mut(&mut style.layout);
-    layout.position = PositionSpec::Fixed;
-    layout.offset_top = Some(LengthSpec::Px(0.0));
-    layout.offset_left = Some(LengthSpec::Px(0.0));
-    layout.width = Some(LengthSpec::Percent(100.0));
-    layout.height = Some(LengthSpec::Percent(100.0));
-    layout.z_index = Some(30);
-    widget(ListItem::new("关闭标签菜单").style(style))
+    dismiss_layer("关闭标签菜单", DismissCover::Window { z_index: 30 })
         .visible(move || tags.with(|view| view.menu_open))
-        .content(widget(Stack::column(0.0)))
         .key("inspect-tag-menu-closer")
         .on_cx(|_, _: &Activate, cx| {
             cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::CloseTagMenu))

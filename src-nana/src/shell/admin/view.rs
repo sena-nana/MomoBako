@@ -5,14 +5,14 @@
 //! 绑定的字段；进度条的填充宽度按 0.18s 过渡（动效时钟在 `motion.rs`，逐帧的
 //! 宽度经热信号写进来）；在弹层外面按下就关闭。
 
+use crate::shell::dismiss_layer::{DismissCover, dismiss_layer};
 use std::sync::Arc;
 
 use nana_ui::runtime::view::{
     AnyView, FieldWrite, IntoView, Signal, StyledComponent, computed, each, fields, signal, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, IconButton, JustifySpec, LengthSpec, ListItem, ScrollAxes,
-    ScrollView, Stack,
+    Activate, AlignSpec, Button, IconButton, JustifySpec, LengthSpec, ScrollAxes, ScrollView, Stack,
 };
 use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
 
@@ -175,7 +175,7 @@ pub(crate) fn task_popover(model: &ShellViewModel) -> Option<AnyView> {
                 }),
         )
         .children((
-            dismiss_layer(),
+            task_dismiss(),
             widget(anchored)
                 .prop::<f32, AnchorHeight>(move || view.with(|view| view.anchor))
                 .children((widget(popover)
@@ -187,18 +187,8 @@ pub(crate) fn task_popover(model: &ShellViewModel) -> Option<AnyView> {
 }
 
 /// 弹层外的透明点击层：在弹层外面按下就关闭。
-fn dismiss_layer() -> AnyView {
-    let mut style = nana_ui::runtime::NodeStyle::default();
-    {
-        let layout = Arc::make_mut(&mut style.layout);
-        layout.position = nana_ui_core::PositionSpec::Absolute;
-        layout.offset_left = Some(LengthSpec::Px(0.0));
-        layout.offset_top = Some(LengthSpec::Px(0.0));
-        layout.width = Some(LengthSpec::Percent(100.0));
-        layout.height = Some(LengthSpec::Percent(100.0));
-    }
-    widget(ListItem::new("关闭任务弹层").style(style))
-        .content(widget(Stack::row(0.0)))
+fn task_dismiss() -> AnyView {
+    dismiss_layer("关闭任务弹层", DismissCover::Container)
         .key("admin-task-dismiss")
         .on_cx(|_, _: &Activate, cx| {
             cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::CloseTaskPopover))

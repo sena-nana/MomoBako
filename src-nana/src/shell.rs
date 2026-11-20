@@ -59,6 +59,7 @@ pub(crate) mod inspect_lyrics;
 mod listening_progress;
 pub(crate) use inspect::support::is_video_extension;
 mod context_menu;
+mod dismiss_layer;
 mod focus_return;
 mod menu_focus;
 mod menu_focus_view;

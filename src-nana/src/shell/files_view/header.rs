@@ -9,6 +9,7 @@
 //! 每一级按「路径 + 文字」认；只在某种面板出现的工具用 `.visible`（不占布局，不多一个间距）。
 //! 新建文件名的输入框受控（`.model` 加 [`DraftField`]），处理器只发消息。
 
+use crate::shell::dismiss_layer::{DismissCover, dismiss_layer};
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{FILE, FOLDER_OPEN, PLUS, ROTATE, TRASH};
@@ -586,17 +587,8 @@ fn import_anchor(tools: Signal<Tools>) -> AnyView {
 
 /// 菜单打开时铺满窗口的透明层：点在菜单外就收起。
 fn outside_closer(tools: Signal<Tools>) -> AnyView {
-    let mut style = NodeStyle::default();
-    let layout = Arc::make_mut(&mut style.layout);
-    layout.position = PositionSpec::Fixed;
-    layout.offset_top = Some(LengthSpec::Px(0.0));
-    layout.offset_left = Some(LengthSpec::Px(0.0));
-    layout.width = Some(LengthSpec::Percent(100.0));
-    layout.height = Some(LengthSpec::Percent(100.0));
-    layout.z_index = Some(19);
-    widget(nana_ui::runtime::ListItem::new("收起导入菜单").style(style))
+    dismiss_layer("收起导入菜单", DismissCover::Window { z_index: 19 })
         .visible(move || tools.with(Tools::menu_open))
-        .content(widget(Stack::column(0.0)))
         .key("file-import-closer")
         .on_cx(|_, _: &Activate, cx| {
             cx.dispatch_program_all(file_message(FilesMessage::ToggleImportMenu))
