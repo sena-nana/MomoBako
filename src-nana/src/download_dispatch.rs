@@ -1,9 +1,9 @@
-//! 来源「下载到其他资源库」的宿主一侧（Vue `runDownloadAction` 的 `writable-repository`）。
+//! 来源「下载到其他资源库」（目标 `writable-repository`）的宿主一侧。
 //!
 //! 给这次下载新建一个暂存目录（`download_staging.rs`），写进载荷的 `destination.stagingPath` 再调用插件；把下载回来
 //! 的文件（`paths` 和 `completed[].paths`）导入目标资源库，下载歌单时导入以歌单命名的文件夹，目标里还没有这个文件夹
-//! 就先建（Vue 不建，导入报「directory not found」）。导入带 `skipExisting`：目标里已有同名文件的保留原文件、不导入，
-//! 其余照常导入（Vue 的导入遇到一个同名就整批失败）。导入完成（包括跳过）以后清掉这次暂存的文件，再同步目标资源库；
+//! 就先建，不让导入报「directory not found」。导入带 `skipExisting`：目标里已有同名文件的保留原文件、不导入，
+//! 其余照常导入，不因为一个同名就整批失败。导入完成（包括跳过）以后清掉这次暂存的文件，再同步目标资源库；
 //! 导入失败时暂存的文件留着，位置写进系统日志。哪一步失败都把原因交回，不留在进行中。
 
 use std::path::Path;

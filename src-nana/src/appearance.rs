@@ -1,12 +1,11 @@
 //! 外观：设置里的主题和圆角落到 Nana 主题与宿主。
 //!
-//! Vue 由 `useTheme` 写 `data-theme`，`useCornerStyle` 写 `--app-corner-radius` 和
-//! `data-corners`，整页跟着变。这里对应成一份 Nana `ThemeDefinition`：主题模式交给
+//! 主题模式、圆角半径和圆角形状合成一份 Nana `ThemeDefinition`，整页跟着变：主题模式交给
 //! 宿主（窗口底色、标题栏，经 `ApplicationState::theme`）和文档（调色板），圆角半径换成
 //! `RadiusTier` 刻度，「平滑 / 普通」换成主题的圆角形状（CSS `superellipse(2)` / 圆弧）。
-//! 对话框的站位、分区、开合动效和身后的遮罩也归主题：照 Vue `.modal-overlay`、`.modal-card` 和
-//! `.dialog-card__*` 写进 [`DialogRecipe`] 和 [`EffectTokens`]，深浅两套相同。滚动条同样归主题：尺寸、颜色、
-//! 动效和显隐策略照 Vue 的全局 overlay 滚动条写进 `ThemeMetrics::scrollbar` 和 [`ScrollbarRecipe`]。
+//! 对话框的站位、分区、开合动效和身后的遮罩也归主题，写进 [`DialogRecipe`] 和 [`EffectTokens`]，深浅两套相同。
+//! 滚动条同样归主题：尺寸、颜色、动效和显隐策略写进 `ThemeMetrics::scrollbar` 和 [`ScrollbarRecipe`]，
+//! 所有滚动区共用一份浮层滚动条。
 //! 只有外观真的变了才重新编译和安装；失败只记日志，宿主和文档都保留上一份主题。
 
 use std::sync::Arc;
@@ -37,8 +36,7 @@ pub struct Appearance {
 impl Appearance {
     /// 从壳层设置读出外观。
     ///
-    /// 浅色、深色照设置；跟随系统时用宿主报告的系统外观，读不到时用 Vue 的默认深色
-    /// （Lilia `useTheme` 的 `DEFAULT_THEME`）。
+    /// 浅色、深色照设置；跟随系统时用宿主报告的系统外观，读不到时用默认的深色。
     pub fn from_shell(shell: &ShellViewModel, system: Option<SystemAppearance>) -> Self {
         Self {
             mode: theme_mode(&shell.settings.theme, system),
@@ -86,10 +84,8 @@ impl Appearance {
     }
 }
 
-/// 滚动条的尺寸，照 Vue 的全局 overlay 滚动条（`useGlobalScrollbarVisibility.ts` 和 Lilia
-/// `global-scrollbar.css`）：12px 宽的悬停和拖动区贴着滚动区的边（车道不内缩），里面 4px 的滑块，悬停和拖动都
-/// 不变粗，最短 24px。NanaUI 把滑块放在车道正中，竖条离右边 4px、横条离底边 4px；Vue 的竖条贴边、横条离底
-/// 4px，两端各留 4px。
+/// 滚动条的尺寸：12px 宽的悬停和拖动区贴着滚动区的边（车道不内缩），里面 4px 的滑块，悬停和拖动都
+/// 不变粗，最短 24px。NanaUI 把滑块放在车道正中，竖条离右边 4px、横条离底边 4px。
 const SCROLLBAR: ScrollbarMetrics = ScrollbarMetrics {
     thickness: 12.0,
     thumb_thickness: 4.0,
@@ -98,11 +94,11 @@ const SCROLLBAR: ScrollbarMetrics = ScrollbarMetrics {
     track_inset: 0.0,
     page_fraction: SCROLLBAR_METRICS.page_fraction,
 };
-/// `.global-scrollbar-overlay { transition: opacity .48s ease }`，淡入淡出同长；理由都没了以后先停的时长
+/// 滑块淡入淡出都是 480ms；理由都没了以后先停的时长
 /// （`DEFAULT_HIDE_DELAY`）也是 480ms。
 const SCROLLBAR_FADE_MS: u16 = 480;
 
-/// 滚动条的颜色、动效和显隐，照 Vue 的全局 overlay 滚动条：原生滚动条隐藏、不占宽度；指针在滚动区上、滚动或
+/// 滚动条的颜色、动效和显隐：浮层滚动条，不占宽度；指针在滚动区上、滚动或
 /// 拖动时淡入 `--border-strong` 的胶囊滑块，没有轨道，悬停和拖动都不换色；理由都没了以后停 480ms 再淡出。
 /// 所有滚动区跟着这一份策略，不逐个写。
 fn scrollbar_recipe() -> ScrollbarRecipe {
@@ -128,9 +124,9 @@ fn scrollbar_recipe() -> ScrollbarRecipe {
 const DIALOG_TOP_VH: f32 = 12.0;
 /// `.modal-card { max-height: 72vh }`。
 const DIALOG_MAX_HEIGHT_VH: f32 = 72.0;
-/// 标题行的最小高度：Vue 正文 14px、行高 1.55 的行盒。NanaUI 的标题按常规行高排，比它矮。
+/// 标题行的最小高度：正文 14px、行高 1.55 的行盒。NanaUI 的标题按常规行高排，比它矮。
 const DIALOG_HEADER_LINE: f32 = 21.7;
-/// 标题前图标的格子：Vue 头部图标都是 14px。
+/// 标题前图标的格子：头部图标都是 14px。
 const DIALOG_ICON_SIZE: f32 = 14.0;
 /// 标题右侧关闭位的格子：`.repository-export-dialog__close` 24 见方。
 const DIALOG_CLOSE_SIZE: f32 = 24.0;
@@ -151,7 +147,7 @@ const DIALOG_ENTER_SCALE: f32 = 0.98;
 /// CSS 的 `ease`。
 const CSS_EASE: Easing = Easing::CubicBezier([0.25, 0.1, 0.25, 1.0]);
 
-/// 对话框卡片的配方，照 Vue `.modal-overlay`、`.modal-card` 和 `.dialog-card__*`：
+/// 对话框卡片的配方：
 /// 距顶 12vh、最高 72vh、`--radius-xl`；标题行和正文内边距 12/14、底栏 10/14，标题行下和
 /// 底栏上各一条 `--border-soft` 发丝线；标题行 `align-items: center; gap: 8px`；开场遮罩淡入
 /// 160ms，卡片从上方 8px、0.98 倍处移回，退场倒放。
@@ -191,7 +187,7 @@ fn dialog_recipe() -> DialogRecipe {
     }
 }
 
-/// 对话框身后的遮罩：Vue 的 45% 黑和 2px 背景模糊，深浅主题相同。画家在线性光里合成，
+/// 对话框身后的遮罩：45% 黑和 2px 背景模糊，深浅主题相同。画家在线性光里合成，
 /// CSS 的不透明度换算成同样暗的线性值；别的效果令牌（投影、媒体遮罩）照基础主题。
 fn modal_effects(base: EffectTokens) -> EffectTokens {
     EffectTokens {
@@ -331,7 +327,7 @@ mod tests {
         assert_eq!(smooth.metrics().corner_shape, CornerShape::SQUIRCLE);
     }
 
-    /// 深浅两套都装得上，装进文档以后对话框配方和遮罩是 Vue `.modal-*` 的值；遮罩以外的效果令牌
+    /// 深浅两套都装得上，装进文档以后对话框配方和遮罩是上面写定的值；遮罩以外的效果令牌
     /// 照同模式的内置主题。
     #[test]
     fn both_themes_install_with_the_vue_dialog_recipe_and_scrim() {
@@ -422,7 +418,7 @@ mod tests {
         }
     }
 
-    /// Vue `--radius-2xl` 的大块表面（文件卡、详情卡、预览页、播放条、播放集面板和搜索、插件、日志的
+    /// 设计令牌 `--radius-2xl` 的大块表面（文件卡、详情卡、预览页、播放条、播放集面板和搜索、插件、日志的
     /// 工作台面板）写 2xl 档：圆角是装上的主题给的两倍基数；改了圆角半径重新安装，同一批节点跟着变。
     #[test]
     fn large_surfaces_follow_the_installed_2xl_radius() {
@@ -510,7 +506,7 @@ mod tests {
         }
     }
 
-    /// 深浅两套都装上 Vue overlay 滚动条的尺寸和配方；滚动条只重画，不改布局。
+    /// 深浅两套都装上浮层滚动条的尺寸和配方；滚动条只重画，不改布局。
     #[test]
     fn both_themes_install_the_vue_overlay_scrollbar() {
         for mode in [ThemeAppearance::Light, ThemeAppearance::Dark] {
@@ -554,7 +550,7 @@ mod tests {
         }
     }
 
-    /// 指针进到能滚的滚动区以后，照 Vue 淡入贴着右边的 4px `--border-strong` 滑块，没有轨道；滑块叠在内容上，
+    /// 指针进到能滚的滚动区以后，淡入贴着右边的 4px `--border-strong` 滑块，没有轨道；滑块叠在内容上，
     /// 内容的宽度和没显示时一样。
     #[test]
     fn hovered_scroll_areas_fade_in_the_vue_overlay_thumb() {

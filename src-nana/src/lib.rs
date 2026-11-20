@@ -233,7 +233,7 @@ impl ApplicationState for MomoBakoApplication {
         {
             context.dispatch(message);
         }
-        // 右键菜单开着时，列表或侧栏一滚就收起，和 Vue 捕获阶段的 scroll 一样。
+        // 右键菜单开着时，列表或侧栏一滚就收起，任何一个滚动区都算。
         for message in shell::dismiss_context_menus_on_scroll(&mut self.shell, &window.document) {
             context.dispatch(message);
         }

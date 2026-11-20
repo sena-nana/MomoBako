@@ -509,7 +509,7 @@ fn to_service_request(request: SearchRequestDraft) -> SearchRequest {
         date_filters: some_dates(request.date_filters),
         formats: some_list(request.formats),
         min_rating: request.min_rating,
-        // 筛选栏和 Vue 一样没有匹配方式开关，多个条件总是全部满足，不传 `matchMode`。
+        // 筛选栏没有匹配方式开关，多个条件总是全部满足，不传 `matchMode`。
         match_mode: None,
         sort: request.sort_field.map(|field| SearchSort {
             field,

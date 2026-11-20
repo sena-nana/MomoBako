@@ -284,7 +284,7 @@ fn dispatch_delete_playlist(
     );
 }
 
-/// 新建播放集。成功时带上整份列表和新播放集的编号，归约照 Vue `createPlaylistInWorkspace` 接着点开它；
+/// 新建播放集。成功时带上整份列表和新播放集的编号，归约接着点开它；
 /// 失败时按失败写回，对话框不会停在处理中。
 fn dispatch_create_playlist(
     app: &MomoBakoApplication,
@@ -381,7 +381,7 @@ fn dispatch_smart_query(
         |services| {
             let interaction = services.repository_interaction.clone();
             move || {
-                // 文件夹名和与祖先合并以后的筛选也带回去，文件页头写标题和摘要行（Vue `smartFolderSummary`）。
+                // 文件夹名和与祖先合并以后的筛选也带回去，文件页头写标题和摘要行。
                 let result = interaction
                     .query_smart_folder(repo_id.clone(), smart_folder_id.clone())
                     .map(|snapshot| SmartFolderResult {

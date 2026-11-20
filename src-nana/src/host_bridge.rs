@@ -1,8 +1,8 @@
 //! 剪贴板、外部打开、目录揭示、文件拖出和最小化到托盘。
 //!
 //! 打开交给系统默认程序：Windows 上直接调 `ShellExecuteW`，不经过 `cmd` 解析命令行。定位文件交给 NanaUI 的
-//! `reveal_in_file_manager`（在所在文件夹里选中）。定位文件夹时 NanaUI 会直接打开该目录，和 Vue
-//! `revealItemInDir` 不一致；Windows 上改用资源管理器的 `/select` 在上一级里选中该项。没有这个能力的系统
+//! `reveal_in_file_manager`（在所在文件夹里选中）。定位文件夹时 NanaUI 会直接打开该目录，而不是
+//! 在上一级里选中它；Windows 上改用资源管理器的 `/select` 在上一级里选中该项。没有这个能力的系统
 //! 记日志并返回失败，不把「打开目录」当成已经定位成功。拖出和托盘沿用已有的 `HostInputRequest`。
 //! 失败时保留系统返回的错误。
 

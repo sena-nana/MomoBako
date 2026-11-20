@@ -410,7 +410,7 @@ fn a_playlist_without_tracks_fails_with_the_reason_its_detail_could_not_be_read(
     );
 }
 
-/// 载荷带了曲目（Vue 列出来的）时详情只用来补歌单名：带了名字就不取；没名字又取不到时记一条警告、照常下载。
+/// 载荷带了曲目（前端已经列出来的）时详情只用来补歌单名：带了名字就不取；没名字又取不到时记一条警告、照常下载。
 #[test]
 fn a_playlist_with_tracks_only_needs_its_detail_for_the_name() {
     let tracks = serde_json::json!([{ "songId": 1, "songName": "晴天" }]);

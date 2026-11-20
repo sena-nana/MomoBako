@@ -310,7 +310,7 @@ pub(super) fn parse_plugin_manifest_with_source(
 }
 
 /// 插件只有后端形态：`sdk` 是 `backend`，`runtime` 是 `native-dylib`、`process` 或 `manifest-only`。
-/// 别的形态（包括已删除的前端插件 `vue-module`）读清单时就拒绝，插件目录里显示为读取失败的插件。
+/// 别的形态（包括已删除的前端模块插件）读清单时就拒绝，插件目录里显示为读取失败的插件。
 fn ensure_backend_plugin_form(manifest: &PluginManifest) -> Result<(), String> {
     if manifest.sdk == "backend"
         && matches!(

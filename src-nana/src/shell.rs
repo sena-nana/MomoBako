@@ -101,7 +101,7 @@ pub use workspace::{
 
 /// Nana Runtime 传递给应用状态的壳层交互消息。
 pub enum ShellMessage {
-    /// 打开设置页：读设置包和应用设置，和 Vue `Settings.vue` 挂载时的 `loadSettingsData` 一致。
+    /// 打开设置页：读设置包和应用设置，设置页每次打开都读。
     OpenSettings,
     /// 带代次的仓库摘要结果：启动和换仓库的第 3 步，或者同一个仓库刷新时的读摘要。代次不对的丢掉。
     RepositorySnapshotLoaded {
@@ -287,7 +287,7 @@ pub struct ShellViewModel {
     pub playlist_players: Vec<PlaylistPlayerContribution>,
     pub selected_new_playlist_player_type_id: Option<String>,
     pub playlist_dialog_open: bool,
-    /// 新建播放集的请求在途：对话框留着，「创建」禁用，处理中不能关（Vue 等 `createPlaylistInWorkspace` 返回才关）。
+    /// 新建播放集的请求在途：对话框留着，「创建」禁用，处理中不能关（等创建返回才关）。
     pub playlist_creating: bool,
     /// 新建播放集失败的原因，写在对话框里；重新打开或再次提交时清掉。
     pub playlist_dialog_error: String,
@@ -313,7 +313,7 @@ pub struct ShellViewModel {
     pub status: status::StatusState,
     /// 文件夹树的「刷新」：同步仓库再刷新工作区，见 `tree_sync.rs`。
     pub tree_sync: tree_sync::TreeSyncState,
-    /// 任务弹层的「仓库操作」行（Vue `operationProgress`），见 `repo_operation.rs`。
+    /// 任务弹层的「仓库操作」行，见 `repo_operation.rs`。
     pub operation: repo_operation::RepositoryOperation,
     /// 键盘打开菜单时要把焦点放进哪个菜单，见 `menu_focus.rs`。
     pub(crate) menu_focus: menu_focus::MenuFocus,
@@ -321,7 +321,7 @@ pub struct ShellViewModel {
     pub(crate) context_menu_scroll: Option<context_menu::MenuScrollSnapshot>,
     /// 上次见到的窗口逻辑像素尺寸。变了才关右键菜单，见 `context_menu.rs`。
     pub(crate) context_menu_window: Option<(i32, i32)>,
-    /// 窗口逻辑宽。Vue 唯一按窗口宽度切换的断点在播放条，见 [`NARROW_VIEWPORT_PX`]。
+    /// 窗口逻辑宽。唯一按窗口宽度切换的断点在播放条，见 [`NARROW_VIEWPORT_PX`]。
     pub viewport_width: f32,
     /// 对话框、弹层或打开文件夹之后，手势松开时要重建树。
     pub surface_dirty: bool,
@@ -385,7 +385,7 @@ impl Default for ShellViewModel {
 
 /// 主窗口默认逻辑宽，和窗口描述符的初始尺寸一致。
 pub const DEFAULT_VIEWPORT_PX: f32 = 1200.0;
-/// Vue `@media (max-width: 1120px)`：窗口不超过这个宽度时，播放条改成三行。
+/// 窄屏断点：窗口不超过这个宽度时，播放条改成三行。
 pub const NARROW_VIEWPORT_PX: f32 = 1120.0;
 
 impl ShellViewModel {
@@ -401,7 +401,7 @@ impl ShellViewModel {
         model
     }
 
-    /// 宿主报告窗口逻辑宽。跨过 Vue 的 1120px 断点时标记重建，返回是否跨过。
+    /// 宿主报告窗口逻辑宽。跨过 1120px 断点时标记重建，返回是否跨过。
     pub fn set_viewport_width(&mut self, width: f32) -> bool {
         if !width.is_finite() || width <= 0.0 {
             eprintln!("Nana 窗口宽度无效，保持 {}：{width}", self.viewport_width);
@@ -421,7 +421,7 @@ impl ShellViewModel {
         self.revision = self.revision.wrapping_add(1);
     }
 
-    /// 窗口是否落在 Vue 的窄屏断点内。
+    /// 窗口是否落在窄屏断点内。
     pub fn narrow_viewport(&self) -> bool {
         self.viewport_width <= NARROW_VIEWPORT_PX
     }
@@ -466,8 +466,8 @@ impl ShellViewModel {
         if settings_before != workspace::SettingsWait::Bundle
             && self.workspace.startup.settings == workspace::SettingsWait::Bundle
         {
-            // Vue 首屏启动在离开启动页之前 `await loadSettingsData()`：插件、钩子记录、缓存、API 设计和外部连接。
-            // 没有仓库、仓库丢失的启动也读，添加资源库的来源列表要用插件清单。换仓库不读（Vue `selectRepository`）。
+            // 首屏启动在离开启动页之前读完设置包：插件、钩子记录、API 设计和外部连接。
+            // 没有仓库、仓库丢失的启动也读，添加资源库的来源列表要用插件清单。换仓库不读。
             // 设置包和随后的播放器类型都回来才结束启动（`admin_reduce::apply_bundle`、`PlaylistPlayersLoaded`）。
             self.admin.begin_settings_load();
         }
@@ -640,10 +640,10 @@ impl ShellViewModel {
             ShellMessage::AssetDetailLoaded(Ok(detail)) => {
                 self.page = ShellPage::SelectedFile;
                 self.selected_path = Some(detail.summary.path.clone());
-                // 单击只在右侧详情里看（Vue 不挂预览插件）：不读预览内容，不准备播放源，也不记访问。
+                // 单击只在右侧详情里看：不读预览内容，不准备播放源，也不记访问。
                 let preview = self.files.preview_open(Some(detail.summary.path.as_str()));
                 self.inspect.note_selected_detail(&detail, preview);
-                // Vue `FilePreviewPane` 的四行读 `previewFileEntry`，不读 `activeAssetDetail`。
+                // 预览页头的四行读预览中的条目，不读当前素材详情。
                 // 详情可以写下缩略图和元数据，类型、大小、硬链接和修改时间仍按列表或播放集条目填回去。
                 let path = detail.summary.path.clone();
                 inspect_view::seed_preview_facts(self, &path);
@@ -663,7 +663,7 @@ impl ShellViewModel {
                 self.inspect.note_detail_error(&error);
             }
             ShellMessage::PreviewPixelsLoaded { source, pixels } => {
-                // 预览源准备好时后端已经写下访问时间（`prepare_preview_file_source`），照 Vue 当场改「最近使用」。
+                // 预览源准备好时后端已经写下访问时间（`prepare_preview_file_source`），这里当场改「最近使用」。
                 if !source.token.is_empty() {
                     self.note_entry_access(
                         &source.repo_id,
@@ -702,7 +702,7 @@ impl ShellViewModel {
                 self.note_playlist_created(&repo_id, result)
             }
             ShellMessage::PlaylistPlayersLoaded(Ok(mut players)) => {
-                // 照 Vue `listRegisteredPlaylistPlayers` 按名称的 zh-CN 顺序排，新建播放集默认选第一项。
+                // 按名称的 zh-CN 顺序排，新建播放集默认选第一项。
                 players.sort_by(|left, right| {
                     search_collate::compare_zh(&left.label, &right.label)
                         .then_with(|| left.player_type_id.cmp(&right.player_type_id))
@@ -793,7 +793,7 @@ impl ShellViewModel {
                 self.select_workspace_repository(&repo_id)
             }
             // 选面板就是去首页的这个面板：设置页上点「拓展」「日志」「动作」或在标题栏搜索都离开设置页
-            // （Vue `selectPanel`、`showSearchWorkspace` 在 `/settings` 时 `router.push("/")`）。
+            // （从设置页切面板或打开搜索都先回到工作区）。
             ShellMessage::SetWorkspacePanel(panel) => {
                 self.workspace.panel = panel;
                 self.leave_settings_page();

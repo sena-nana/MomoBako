@@ -1,7 +1,7 @@
 //! `DESIGN.md` 令牌到 Nana 主题角色的对应。
 //!
 //! 壳层的按钮和表面只取这里对应的主题角色，不写死 RGB；按钮由 `theme_map/button_tests.rs` 扫源码检查，
-//! Vue 也写死、两套主题共用的少数颜色（日志级别、页纸、投影……）列在那里的允许清单里。Nana 调色板的
+//! 设计上写死、两套主题共用的少数颜色（日志级别、页纸、投影……）列在那里的允许清单里。Nana 调色板的
 //! 具体数值由 `SemanticPalette` 持有；本模块只锁住颜色角色、字号、侧栏宽度和圆角刻度的对应，另给离屏
 //! 清屏色比对用的背景色。
 
@@ -11,7 +11,7 @@ use nana_ui_core::SemanticColorMix;
 
 /// 一条 CSS 变量到 Nana 调色板字段的对应。
 pub struct ColorRole {
-    /// `DESIGN.md` 的令牌名，沿用 Vue 界面 CSS 变量的名字。
+    /// `DESIGN.md` 的令牌名。
     pub css: &'static str,
     /// `SemanticPalette` 上的字段名。
     pub nana: &'static str,
@@ -89,7 +89,7 @@ pub const COLOR_ROLES: &[ColorRole] = &[
     },
 ];
 
-/// Vue 侧栏宽度约束，单位是逻辑像素：拖宽的上下限和默认宽。
+/// 侧栏宽度约束，单位是逻辑像素：拖宽的上下限和默认宽。
 pub const SIDEBAR_MIN_PX: f32 = 220.0;
 pub const SIDEBAR_DEFAULT_PX: f32 = 276.0;
 pub const SIDEBAR_MAX_PX: f32 = 480.0;
@@ -141,16 +141,16 @@ pub const TYPE_ROLES: &[TypeRole] = &[
     },
 ];
 
-/// Vue 禁用控件的整体不透明度：Lilia `button:disabled { opacity: 0.45 }`，右键菜单项和滑杆也是这个值。
+/// 禁用控件的整体不透明度 0.45，右键菜单项和滑杆也是这个值。
 /// 有的控件直接写节点透明度，有的在 sRGB 里和所在底色混成不透明色（渲染器按线性空间合成会更亮），
 /// 都用这一个值。遮罩的 0.45（`appearance.rs` 的 `SCRIM_CSS_ALPHA`）是另一个意思，不用它。
 pub const DISABLED_OPACITY: f32 = 0.45;
 
-/// 停用控件的字色：Vue `button:disabled` 的 0.45 整体不透明度盖在不透明底色 `base` 上的结果。
+/// 停用控件的字色：0.45 整体不透明度盖在不透明底色 `base` 上的结果。
 ///
 /// `SemanticColorMix::new` 在 sRGB 通道里按比例混（带预乘透明度，两种颜色都不透明时就是逐通道线性插值），
 /// 和浏览器合成 `opacity` 的结果一致，混出来的是不透明色；直接写节点不透明度会被渲染器按线性空间合成，
-/// 比 Vue 亮。`colors_from_style` 的 `IconButton` 照写的停用样子画，NanaUI 不再整枚淡化。
+/// 会偏亮。`colors_from_style` 的 `IconButton` 照写的停用样子画，NanaUI 不再整枚淡化。
 pub fn disabled_paint(foreground: SemanticColorRole, base: SemanticColorRole) -> SemanticPaint {
     SemanticPaint {
         foreground_mix: Some(SemanticColorMix::new(foreground, base, DISABLED_OPACITY)),
@@ -158,15 +158,15 @@ pub fn disabled_paint(foreground: SemanticColorRole, base: SemanticColorRole) ->
     }
 }
 
-/// Vue `--app-corner-radius` 的默认值（`src/ui/core/useCornerStyle.ts`）。
+/// 圆角半径 `--app-corner-radius` 的默认值。
 pub const DEFAULT_CORNER_RADIUS_PX: f32 = 8.0;
-/// 圆角半径设置的上下限，和 Lilia `CORNER_RADIUS_MIN` / `CORNER_RADIUS_MAX` 一致。
+/// 圆角半径设置的上下限。
 pub const CORNER_RADIUS_RANGE: std::ops::RangeInclusive<f32> = 0.0..=20.0;
 
 /// 圆角半径基数换成主题半径刻度。
 ///
-/// Vue 的刻度都从 `--app-corner-radius` 乘出来：Lilia 给 xs=0.5r、sm=0.75r、md=r、lg=1.25r，
-/// MomoBako 另加 xl=1.5r、2xl=2r（`src/styles/index.css`）。2xl 落到 `RadiusTier::Xxl`，
+/// 刻度都从 `--app-corner-radius` 乘出来：xs=0.5r、sm=0.75r、md=r、lg=1.25r，
+/// MomoBako 另加 xl=1.5r、2xl=2r。2xl 落到 `RadiusTier::Xxl`，
 /// 播放条、文件卡、预览页和工作台面板这类大块表面写这一档，装主题后跟着设置变。
 /// 其余控件尺寸沿用 Nana 默认度量。
 pub fn corner_metrics(radius: f32) -> ThemeMetrics {

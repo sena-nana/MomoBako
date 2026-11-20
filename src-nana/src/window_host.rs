@@ -113,7 +113,7 @@ pub(crate) fn prepare_motion(
     if shell.observe_failures() {
         shell.mark_surface_dirty();
     }
-    // 仓库操作行往上爬、完成后收起，任务弹层和「任务」计数跟着整体同步，进度条的宽度照 Vue 过渡到新值。
+    // 仓库操作行往上爬、完成后收起，任务弹层和「任务」计数跟着整体同步，进度条的宽度过渡到新值。
     if shell.operation.tick(step.ui_ms) {
         shell.mark_surface_dirty();
         shell.follow_task_fills();

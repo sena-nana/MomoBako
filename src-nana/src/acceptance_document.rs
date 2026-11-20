@@ -16,7 +16,7 @@ pub fn acceptance_document_for(
     acceptance_document_for_model(ShellViewModel::for_page(page))
 }
 
-/// 按离屏视口宽度挂载验收文档。窄于 Vue 断点的视口走窄屏排布。
+/// 按离屏视口宽度挂载验收文档。不超过窄屏断点的视口走窄屏排布。
 pub fn acceptance_document_at_width(
     mut model: ShellViewModel,
     width: f32,

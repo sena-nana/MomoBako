@@ -369,7 +369,7 @@ fn call_plugin(
                     payload,
                 });
                 let result = match origin {
-                    // Playground 显示整个调用结果，和 Vue `ctx.callPlugin` 的返回一致。
+                    // Playground 显示插件交回的整个调用结果。
                     PluginCallOrigin::Playground => result.and_then(|item| {
                         serde_json::to_value(item)
                             .map_err(|error| format!("插件调用结果无法序列化：{error}"))
@@ -382,7 +382,7 @@ fn call_plugin(
     );
 }
 
-/// 「创建播放列表」照 Vue `runPlaylistAction`：先列出播放集，没有这个标识才建，再把目录按路径加进去。
+/// 「创建播放列表」：先列出播放集，没有这个标识才建，再把目录按路径加进去。
 /// 哪一步失败都把原因交回，不留在进行中。
 fn create_source_playlist(
     app: &MomoBakoApplication,
@@ -571,7 +571,7 @@ pub(crate) fn failed_bundle_message(error: String) -> ShellMessage {
     })
 }
 
-/// 历史日志一次读的条数，和 Vue `loadSystemLogsInWorkspace(limit = 200)` 一致。
+/// 历史日志一次读的条数。
 const LOG_PAGE_LIMIT: usize = 200;
 
 /// 读最近一页系统日志。结果回 `LogsLoaded`。
@@ -592,7 +592,7 @@ fn load_logs(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMes
     );
 }
 
-/// 清空系统日志的持久化文件。结果回 `LogsCleared`，成功后不再重读（Vue `clearSystemLogsInWorkspace`）。
+/// 清空系统日志的持久化文件。结果回 `LogsCleared`，成功后不再重读，列表由归约直接清空。
 fn clear_logs(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMessage>) {
     spawn_service(
         app.services.as_ref(),

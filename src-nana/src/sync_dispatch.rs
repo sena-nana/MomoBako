@@ -52,7 +52,7 @@ fn dispatch_sync(
     );
 }
 
-/// 同步完以后重读仓库摘要、硬链接候选和目录树（`tree` 时）。三份各自记成败，交给归约照 Vue 收尾；整个任务失败时
+/// 同步完以后重读仓库摘要、硬链接候选和目录树（`tree` 时）。三份各自记成败，交给归约收尾；整个任务失败时
 /// 三份都按同一个原因失败。
 fn dispatch_refresh(
     app: &MomoBakoApplication,
