@@ -8,7 +8,7 @@
 
 Vue 的缺陷、死代码和意外的层叠效果不照抄，按设计意图实现，并记在本页。
 
-Vue 前端、Tauri 外壳和插件前端已经删掉（见 [迁移边界](./nana-migration.md)）。本页提到的 Vue、Tauri 和插件前端文件都在提交 `7bc847c` 里；要重新出 Vue 截图，在这个提交的 worktree 里起对照环境。现有的 Vue 截图留在本机的 `tmp/vue-mock/shots/`。
+Vue 前端、Tauri 外壳和插件前端已经删掉（见 [迁移边界](./nana-migration.md)）。本页提到的 Vue、Tauri 和插件前端文件都在提交 `1948ed9` 里；要重新出 Vue 截图，在这个提交的 worktree 里起对照环境。现有的 Vue 截图留在本机的 `tmp/vue-mock/shots/`。
 
 ## 对照方法
 
@@ -117,7 +117,7 @@ Vue 前端、Tauri 外壳和插件前端已经删掉（见 [迁移边界](./nana
 - 元数据保存：Vue 每次都写评分、注释、链接和标签组，旧格式的标签组 `{ label, tags }` 在只改评分时也被改写成展平的字符串，素材没有 `tagGroups` 时写进空数组、清掉索引标签。Nana 只写改过的字段。
 - 文件预览里的音视频失败（读不出、认不出格式、解码失败），Vue 只在播放条第二行写一行弱色小字，预览框里照旧是唱片舞台或黑底。Nana 照 Vue 预览插件（`audioPreview.js`、`media-preview`）的失败浮层，在预览框里写红色标题「无法预览该音频」（视频是「无法预览该媒体」），下面一行原因，包括 Nana 自己的「没有原生解码器」和各格式的「解码失败」。播放条装不上同一个文件、写回的失败也这样显示。预览和播放条共用同一个解码，坏的 wav、mp3、flac、ogg 报它自己格式的原因，不再被说成没有解码器。
 - 新建播放集失败时 Vue 只留着对话框、没有任何提示（请求失败成了没人接的 Promise 拒绝），也没有处理中状态，可以重复提交。Nana 等结果回来再关对话框，处理中禁用按钮、不能关，失败把原因写在对话框里。
-- 在线条目（网易云这类来源资源库里的单曲，`is_virtual`）的播放源：Vue 的音频播放器和媒体预览插件（`playbackSource.js`、`media-preview/src/register.js`）经宿主 SDK 的 `prepareEntryPlaybackSourceWithProgress` 跑 Mutsuki 协议 `momobako.playback.prepare`，它在前端调 `mutsuki_start_task` / `mutsuki_task_result`（`src/services/mutsukiTasks.ts`），可 Tauri 外壳从来没登记这两个命令（`7bc847c` 的 `src-tauri/src/lib.rs`），只有测试的模拟 IPC 里有：真实窗口里这一步报命令不存在，经插件运行时播放的条目（在线的和本地的）都放不了。Nana 在任务线程里经 `MutsukiTaskViewModel` 直接跑这个协议，读交回的本地文件解码（`src-nana/src/playback_source.rs`）。
+- 在线条目（网易云这类来源资源库里的单曲，`is_virtual`）的播放源：Vue 的音频播放器和媒体预览插件（`playbackSource.js`、`media-preview/src/register.js`）经宿主 SDK 的 `prepareEntryPlaybackSourceWithProgress` 跑 Mutsuki 协议 `momobako.playback.prepare`，它在前端调 `mutsuki_start_task` / `mutsuki_task_result`（`src/services/mutsukiTasks.ts`），可 Tauri 外壳从来没登记这两个命令（`1948ed9` 的 `src-tauri/src/lib.rs`），只有测试的模拟 IPC 里有：真实窗口里这一步报命令不存在，经插件运行时播放的条目（在线的和本地的）都放不了。Nana 在任务线程里经 `MutsukiTaskViewModel` 直接跑这个协议，读交回的本地文件解码（`src-nana/src/playback_source.rs`）。
 - 切曲时还在准备的那一次：Vue 的插件不传取消信号，同一个运行时也不认先后，先发的准备晚回来时会把上一首的 `<audio>` 挂上去、接着被 `loadCurrentItem` 的 `play()` 放出来，界面写着新曲目，响的是旧的。Nana 按代次丢弃晚到的结果（播放条 `load_generation`，预览 `generation`），切曲、停止、换仓库和预览接管都换代次。不取消任务：`MutsukiTaskViewModel::execute` 不交出任务编号，来源插件下载中途也不看取消。
 - 播放源准备失败以后：Vue 预览框里一直留着准备卡（运行时失败时不清挂载点），播放条第二行写原因，「播放」「上一首」「下一首」都不可点，只能回播放集页点那一行的「播放」或重新打开预览。Nana 预览框换成失败浮层（「无法预览该音频」和来源的原话），下面给「重试」；播放条第二行照写原因，「播放」留着可点，点了重新准备，上一首、下一首照 Vue 不可点。
 - 单击只选中的文件：Vue 单击只在右侧详情里看，`FilePreviewPane` 只在预览页挂载。Nana 原来单击也读预览内容：图片会写访问时间，音频会接管播放条并自动播放。现在单击只换元数据，双击、右键「预览」、播放集和搜索结果打开预览时才读，在线条目也只在这时准备播放源。

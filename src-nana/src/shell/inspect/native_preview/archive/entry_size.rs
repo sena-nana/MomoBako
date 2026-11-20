@@ -1,6 +1,6 @@
 //! 压缩包名单上的文件大小。
 //!
-//! 对齐 Vue `preview-archive` 的 `formatByteCount`（`7bc847c:External/Plugins/preview-archive/src/register.js`）。
+//! 对齐 Vue `preview-archive` 的 `formatByteCount`（`1948ed9:External/Plugins/preview-archive/src/register.js`）。
 //! 只格式化已经从压缩包读到的字节数。目录不经过这里，仍写「目录」。
 //! 没有大小字段时不要调用本函数编一个数。
 

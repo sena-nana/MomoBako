@@ -1,7 +1,7 @@
 //! 压缩包嵌套层数。
 //!
 //! 对齐 Vue `preview-archive` 的 `nestedDepthExceeded` 和
-//! `service-archive-preview` 的默认 `maxNestedDepth`（提交 `7bc847c`，默认 5）。
+//! `service-archive-preview` 的默认 `maxNestedDepth`（提交 `1948ed9`，默认 5）。
 //! 外层压缩包不算一层。点进第 5 个 zip、cbz 或 7z 以后，这一层里的 zip、cbz 和 7z 不再展开：
 //! 行尾写「嵌套深度已达上限」，点开停在名单上，舞台写「无法预览内部文件」。
 //! rar 和 cbr 仍不进入下一层，大小照旧，也不加深 RAR。

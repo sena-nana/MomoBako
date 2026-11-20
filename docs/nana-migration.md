@@ -1,6 +1,6 @@
 # NanaUI 原生迁移边界
 
-迁移已经完成：桌面端是 NanaUI 原生界面（`src-nana/`），原来的 Vue/Tauri 界面（`src/`、`src-tauri/`）和插件前端都已删掉，Vue/Tauri 源码最后一次出现在提交 `7bc847c`。本文写原生端现在的入口、渲染和验收路径、服务边界、已经接通的能力、还没做或要靠设备验证的部分，以及怎么验证。逐条分支记在 [逻辑矩阵](./nana-logic-matrix.md)，壳层视图的结构在 [壳层绑定式视图](./nana-shell-view.md)，组件目录在 [组件对应](./nana-component-map.md)，和 Vue 的取舍在 [Nana 与 Vue 对照](./nana-vue-parity.md)。
+迁移已经完成：桌面端是 NanaUI 原生界面（`src-nana/`），原来的 Vue/Tauri 界面（`src/`、`src-tauri/`）和插件前端都已删掉，Vue/Tauri 源码最后一次出现在提交 `1948ed9`。本文写原生端现在的入口、渲染和验收路径、服务边界、已经接通的能力、还没做或要靠设备验证的部分，以及怎么验证。逐条分支记在 [逻辑矩阵](./nana-logic-matrix.md)，壳层视图的结构在 [壳层绑定式视图](./nana-shell-view.md)，组件目录在 [组件对应](./nana-component-map.md)，和 Vue 的取舍在 [Nana 与 Vue 对照](./nana-vue-parity.md)。
 
 ## 入口和运行
 
@@ -91,8 +91,9 @@ cargo run -p momobako-nana                   # 原生窗口
 - **出声**：暂停后继续、播放中改音量的出声位置和音量，测试只核对游标交给声卡的起点帧和音量（测试构建不开声卡）；多声道下混、24 位和浮点 WAV 在真声卡上的效果没有验收。媒体基础的音轨读取和截断说明有测试走真实的源读取器（WAV、AVI 当容器），m4a、mp4 这些真实容器没有验收；本机没有 Ogg 的字节流处理程序时 Opus 解不开。
 - **UIA/AccessKit**：`hosted` 带 AccessKit 平台适配器；测试只读 NanaUI 自己的无障碍树，读屏器看到的结果没有验收。
 - **发布包**：发布流程（`.github/workflows/release.yml`）改用 NanaUI 的 `nana-packager` 打 `momobako-nana`，不再调用 tauri-action：dist 配置编主程序，打安装版布局和便携版两个 zip，各自 `validate`，便携版再跑 `validate --run --tamper-suite`，发到草稿 Release。本地用 `yarn nana:build`、`yarn nana:package`，见 [Nana 发布包](./nana-packaging.md)。没有安装程序（NanaUI 还没有安装包后端）和代码签名；没在干净的 Windows 上验收：没装 VC++ 运行库时能不能启动、解压到只读目录（例如 `Program Files`）以后数据是不是都落在用户目录。CI（`ci.yml`）分开跑 `yarn test:backend`、`yarn verify`、插件 build/package、`yarn nana:build` 和 `yarn nana:package --dry-run`；不跑 Nana 单测，也不执行完整发布打包。
-- **全局快捷键**：没有实现。删掉的 Vue 和 Tauri 端（提交 `7bc847c` 的 `src/`、`src-tauri/src`）也没有注册全局快捷键，宿主请求里不留占位变体。
+- **全局快捷键**：没有实现。删掉的 Vue 和 Tauri 端（提交 `1948ed9` 的 `src/`、`src-tauri/src`）也没有注册全局快捷键，宿主请求里不留占位变体。
 - **插件不带界面**：插件前端（设置页、工具页、预览、播放器的 Vue 组件）已经删掉，插件只剩后端形态，见 [API 设计](./api-design.md) 的 Plugin API。插件设置只画清单 `contributes.settings.fields` 声明的字段；工具页来自清单的 `contributes.toolPages`，三个内置页面画原生页面，宿主没有的工具页只画页头和「MomoBako 没有这个工具页：插件只能打开内置的工具页，不能自带页面。」（`src-nana/src/shell/admin/tools.rs`）；预览由内置视图按扩展名绘制（`native_preview::builtin_view`），认不出的扩展名照 Vue 没有预览插件时一样只画缩略图或类型图标；只有播放器贡献、扩展名又不是音视频或图片的条目写「暂不支持播放 {扩展名} 文件」（`src-nana/src/shell/player/clip.rs`）。
+- **NanaUI 版本**：固定在 10 月 11 日的 `da9b22bf`。升到 11 月的 main（`bf35e6e`）时，API 层面的改名（`LayoutStyle` 的文字、网格、变换和分边框字段收进 `text_ext`、`grid`、`transforms`、`border_sides`；`outline` 改名 `border`；`LengthSpec` 的 `Min2`、`CalcPercentOffset`、`CalcViewportOffset` 换成构造函数；`HostTexture::new`、`SvgFonts`、`TextureSlotName`、`scrollbar_bars`）都能机械迁过去，但新的布局模型和浮层命中让 31 个单测失败（菜单项点到下面的收起层、播放条和卡片的尺寸、框选、进度条拖动、歌词点击、播放列表重排），要逐项对照新语义重做并在真窗口里验收，所以还没升。升级后托盘可以换成 NanaUI 的 `install_tray`，去掉 `tray-icon`。
 
 逐项的设备验收要求见 [设备矩阵](./nana-device-matrix.md)。
 
@@ -110,6 +111,6 @@ cargo run -p momobako-nana                   # 原生窗口
 | `yarn verify` | Node 脚本类型检查、vitest（工具链、打包、文档和插件清单）和上面的 `cargo check`，不跑 `momobako-nana` 的测试 |
 | `yarn nana:build`、`yarn nana:package` | dist 版主程序，打安装版布局和便携版、`nana-packager validate`、便携版自检，见 [Nana 发布包](./nana-packaging.md#本地打包) |
 
-Vue 界面已经删掉。还要和 Vue 对照时，在提交 `7bc847c` 的检出里用本机的 `tmp/vue-mock`（`tmp/` 被 git 忽略，不在仓库里）：模拟 Tauri IPC，在无头 Edge 里渲染那份检出里 `src/` 的真实页面，和 Nana 用同名场景、同一份夹具。做法见 [Nana 与 Vue 对照](./nana-vue-parity.md#对照方法)。
+Vue 界面已经删掉。还要和 Vue 对照时，在提交 `1948ed9` 的检出里用本机的 `tmp/vue-mock`（`tmp/` 被 git 忽略，不在仓库里）：模拟 Tauri IPC，在无头 Edge 里渲染那份检出里 `src/` 的真实页面，和 Nana 用同名场景、同一份夹具。做法见 [Nana 与 Vue 对照](./nana-vue-parity.md#对照方法)。
 
 颜色和字号以 `src-nana/src/theme_map.rs` 为准，组件目录以 `src-nana/src/capability.rs` 为准。

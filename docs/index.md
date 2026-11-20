@@ -1,6 +1,6 @@
 # MomoBako
 
-MomoBako 是一个桌面资源库工作台，面向本地素材管理、文件同步、预览、缩略图和可扩展插件能力。桌面端是 NanaUI 原生壳层 `momobako-nana`。原来的 Vue 3 与 Tauri 2 界面已经删掉，Vue/Tauri 源码最后一次出现在提交 `7bc847c`。
+MomoBako 是一个桌面资源库工作台，面向本地素材管理、文件同步、预览、缩略图和可扩展插件能力。桌面端是 NanaUI 原生壳层 `momobako-nana`。原来的 Vue 3 与 Tauri 2 界面已经删掉，Vue/Tauri 源码最后一次出现在提交 `1948ed9`。
 
 ## 文档入口
 

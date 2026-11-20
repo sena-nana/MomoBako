@@ -1,6 +1,6 @@
 # MomoBako 样式标准
 
-视觉语言见 `DESIGN.md`。本文写 Nana 原生界面里样式落在哪里、按什么规矩写。原来 Vue 界面的 CSS 分层（`src/styles/*.css` 和 `.ui-*` 标准类）随 Vue 源码一起删了，Vue/Tauri 源码最后一次出现在提交 `7bc847c`。
+视觉语言见 `DESIGN.md`。本文写 Nana 原生界面里样式落在哪里、按什么规矩写。原来 Vue 界面的 CSS 分层（`src/styles/*.css` 和 `.ui-*` 标准类）随 Vue 源码一起删了，Vue/Tauri 源码最后一次出现在提交 `1948ed9`。
 
 ## 入口分层
 

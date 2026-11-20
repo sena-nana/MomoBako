@@ -1,6 +1,6 @@
 # Nana 逻辑迁移矩阵
 
-静态截图不能当作迁移完成。每一行从 Vue 或 composable 的分支读出，不从现有离屏场景反推。尚未读过的来源保持“未读”，不预填分支。Vue/Tauri 源码已经删掉，表里的来源（`src/...`、`*.vue`、`*.ts`）指提交 `7bc847c` 的检出。
+静态截图不能当作迁移完成。每一行从 Vue 或 composable 的分支读出，不从现有离屏场景反推。尚未读过的来源保持“未读”，不预填分支。Vue/Tauri 源码已经删掉，表里的来源（`src/...`、`*.vue`、`*.ts`）指提交 `1948ed9` 的检出。
 
 记账列是：来源、触发、服务、结果、可见性、状态。状态依次为未读、已记账、已测试、已离屏。服务行要有真实调用测试；不改变控件树的分支也要有 ViewModel 测试；改变控件树的分支才增加离屏场景。「已离屏」指有验收场景直接走过这一行的分支、结果画在场景里，括号里写场景名；场景定义在 `src-nana/src/shell/acceptance*.rs`，命令和断言见 [离屏验收证据](./nana-offscreen-evidence.md)。可见性列写画面上看得到的文字。
 
@@ -279,4 +279,4 @@
 | `refresh.ts` `refreshRepositorySnapshot` | 就绪且仓库匹配 | `get_repository_snapshot`，没有替身 | 更新名称、详情和快捷计数；不重新绑定目录树；失败、仓库不一致或缺失时不改页面 | 仓库名称和侧栏快捷计数 | 已测试（未离屏） |
 | `refresh.ts` `refreshHardlinkCandidates` | 就绪后的结构更新 | `list_hardlink_candidates`，没有替身 | 替换候选；不打开对话框，不清已跳过项；失败不写页面错误 | 页面不变 | 已测试（未离屏） |
 
-原生窗口用 `cargo run -p momobako-nana` 启动。Vue/Tauri 界面已经删掉，要开对照窗口得在提交 `7bc847c` 的检出里跑 `yarn tauri:dev`。离屏通过不勾掉拖放、IME、托盘和真窗口行；那些行留在 [设备矩阵](./nana-device-matrix.md)。
+原生窗口用 `cargo run -p momobako-nana` 启动。Vue/Tauri 界面已经删掉，要开对照窗口得在提交 `1948ed9` 的检出里跑 `yarn tauri:dev`。离屏通过不勾掉拖放、IME、托盘和真窗口行；那些行留在 [设备矩阵](./nana-device-matrix.md)。
