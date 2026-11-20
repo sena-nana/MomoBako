@@ -4,7 +4,7 @@
 use nana_ui::RuntimeProgramContext;
 
 use crate::MomoBakoApplication;
-use crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_ATTACH;
+use crate::backend::services::mutsuki_runner::{RepositoryAttach, RepositoryCreate};
 use crate::backend::services::repository::{
     FileBrowserRequest, RecentAccessHistoryClearRequest, RepositoryFolderRequest,
 };
@@ -38,9 +38,8 @@ pub fn dispatch_sidebar_effects(
                     context,
                     "新建智能文件夹",
                     repo_id,
-                    move |interaction, executor| {
-                        let response =
-                            executor.block_on(interaction.create_smart_folder(request))?;
+                    move |interaction| {
+                        let response = interaction.create_smart_folder(request)?;
                         let created = response.smart_folder.map(|folder| folder.smart_folder_id);
                         Ok((response.smart_folders, SmartFolderChange::Created(created)))
                     },
@@ -54,9 +53,8 @@ pub fn dispatch_sidebar_effects(
                     context,
                     "保存智能文件夹",
                     repo_id,
-                    move |interaction, executor| {
-                        let response =
-                            executor.block_on(interaction.update_smart_folder(request))?;
+                    move |interaction| {
+                        let response = interaction.update_smart_folder(request)?;
                         Ok((response.smart_folders, SmartFolderChange::Updated(edited)))
                     },
                 );
@@ -71,10 +69,9 @@ pub fn dispatch_sidebar_effects(
                     context,
                     "删除智能文件夹",
                     repo_id,
-                    move |interaction, executor| {
-                        let response = executor.block_on(
-                            interaction.delete_smart_folder(task_repo, smart_folder_id.clone()),
-                        )?;
+                    move |interaction| {
+                        let response =
+                            interaction.delete_smart_folder(task_repo, smart_folder_id.clone())?;
                         Ok((
                             response.smart_folders,
                             SmartFolderChange::Deleted(smart_folder_id),
@@ -144,14 +141,11 @@ fn dispatch_clear_recent(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
-                let result = executor
-                    .block_on(interaction.clear_recent_access_history(
-                        RecentAccessHistoryClearRequest {
-                            repo_id: repo_id.clone(),
-                        },
-                    ))
+                let result = interaction
+                    .clear_recent_access_history(RecentAccessHistoryClearRequest {
+                        repo_id: repo_id.clone(),
+                    })
                     .map(|response| response.cleared_count);
                 sidebar_message(SidebarMessage::RecentCleared { repo_id, result })
             }
@@ -178,10 +172,9 @@ fn dispatch_tree(
         failed,
         |services| {
             let browser = services.file_browser.clone();
-            let executor = services.executor.clone();
             move || {
-                let result = executor
-                    .block_on(browser.get_repository_tree(repo_id.clone()))
+                let result = browser
+                    .get_repository_tree(repo_id.clone())
                     .map(|snapshot| SidebarTree::from_nodes(&snapshot.tree));
                 sidebar_message(SidebarMessage::SidebarTreeLoaded { repo_id, result })
             }
@@ -208,10 +201,9 @@ fn dispatch_smart_folders(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
-                let result = executor
-                    .block_on(interaction.list_smart_folders(repo_id.clone()))
+                let result = interaction
+                    .list_smart_folders(repo_id.clone())
                     .map(|folders| {
                         folders
                             .iter()
@@ -232,8 +224,7 @@ fn dispatch_save_smart(
     what: &str,
     repo_id: String,
     save: impl FnOnce(
-        crate::backend::viewmodels::RepositoryInteractionViewModel,
-        std::sync::Arc<tokio::runtime::Runtime>,
+        crate::backend::app::RepositoryInteractionService,
     ) -> Result<
         (
             Vec<crate::backend::services::repository::SmartFolderTreeNode>,
@@ -252,9 +243,8 @@ fn dispatch_save_smart(
     };
     spawn_service(app.services.as_ref(), context, what, failed, |services| {
         let interaction = services.repository_interaction.clone();
-        let executor = services.executor.clone();
         move || {
-            let result = save(interaction, executor).map(|(folders, change)| SmartFolderOutcome {
+            let result = save(interaction).map(|(folders, change)| SmartFolderOutcome {
                 folders: folders
                     .iter()
                     .map(SidebarSmartFolder::from_tree_node)
@@ -284,10 +274,9 @@ fn dispatch_delete_playlist(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
-                let result = executor
-                    .block_on(interaction.delete_playlist(repo_id.clone(), playlist_id))
+                let result = interaction
+                    .delete_playlist(repo_id.clone(), playlist_id)
                     .map(|response| response.playlists);
                 ShellMessage::PlaylistsLoaded { repo_id, result }
             }
@@ -322,18 +311,14 @@ fn dispatch_create_playlist(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
-                let result =
-                    executor
-                        .block_on(interaction.create_playlist(request))
-                        .map(|response| {
-                            let open = response
-                                .playlist
-                                .as_ref()
-                                .map(|playlist| playlist.playlist_id.clone());
-                            (response.playlists, open)
-                        });
+                let result = interaction.create_playlist(request).map(|response| {
+                    let open = response
+                        .playlist
+                        .as_ref()
+                        .map(|playlist| playlist.playlist_id.clone());
+                    (response.playlists, open)
+                });
                 ShellMessage::PlaylistCreated { repo_id, result }
             }
         },
@@ -364,17 +349,10 @@ fn dispatch_create_backend(
         failed,
         |services| {
             let tasks = services.tasks.clone();
-            let query = services.repository_query.clone();
-            let executor = services.executor.clone();
             move || {
-                let result = executor
-                    .block_on(tasks.execute(
-                        crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_CREATE,
-                        request,
-                    ))
-                    .and_then(|(output, _)| {
-                        crate::app_dispatch::mutated_repository(&executor, &query, &output)
-                    });
+                let result = tasks
+                    .run::<RepositoryCreate>(request)
+                    .map(|output| output.result.repository);
                 sidebar_message(SidebarMessage::RepositoryAttachFinished(result))
             }
         },
@@ -402,13 +380,10 @@ fn dispatch_smart_query(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
                 // 文件夹名和与祖先合并以后的筛选也带回去，文件页头写标题和摘要行（Vue `smartFolderSummary`）。
-                let result = executor
-                    .block_on(
-                        interaction.query_smart_folder(repo_id.clone(), smart_folder_id.clone()),
-                    )
+                let result = interaction
+                    .query_smart_folder(repo_id.clone(), smart_folder_id.clone())
                     .map(|snapshot| SmartFolderResult {
                         name: snapshot.smart_folder.name.clone(),
                         filter: snapshot.inherited_filter.clone(),
@@ -446,9 +421,8 @@ fn dispatch_playlists(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
-                let result = executor.block_on(interaction.list_playlists(repo_id.clone()));
+                let result = interaction.list_playlists(repo_id.clone());
                 sidebar_message(SidebarMessage::SidebarPlaylistsLoaded { repo_id, result })
             }
         },
@@ -469,10 +443,9 @@ fn dispatch_playlist_detail(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
                 ShellMessage::PlaylistDetailLoaded(
-                    executor.block_on(interaction.get_playlist_detail(repo_id, playlist_id)),
+                    interaction.get_playlist_detail(repo_id, playlist_id),
                 )
             }
         },
@@ -538,12 +511,7 @@ pub(crate) fn dispatch_browse_request(
         failed,
         |services| {
             let browser = services.file_browser.clone();
-            let executor = services.executor.clone();
-            move || {
-                ShellMessage::FileBrowserLoaded(
-                    executor.block_on(browser.get_file_browser(request)),
-                )
-            }
+            move || ShellMessage::FileBrowserLoaded(browser.get_file_browser(request))
         },
     );
 }
@@ -561,16 +529,10 @@ fn dispatch_attach(
         failed,
         |services| {
             let tasks = services.tasks.clone();
-            let query = services.repository_query.clone();
-            let executor = services.executor.clone();
             move || {
-                let result = executor
-                    .block_on(
-                        tasks.execute(PROTOCOL_REPOSITORY_ATTACH, RepositoryFolderRequest { path }),
-                    )
-                    .and_then(|(output, _)| {
-                        crate::app_dispatch::mutated_repository(&executor, &query, &output)
-                    });
+                let result = tasks
+                    .run::<RepositoryAttach>(RepositoryFolderRequest { path })
+                    .map(|output| output.result.repository);
                 sidebar_message(SidebarMessage::RepositoryAttachFinished(result))
             }
         },

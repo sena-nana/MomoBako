@@ -1027,6 +1027,7 @@ fn start_legacy_libreoffice_daemon(
 ) -> Result<(), String> {
     let profile_dir = libreoffice_profile_dir(runtime);
     fs::create_dir_all(&profile_dir).map_err(io_error)?;
+    let pid_path = libreoffice_helper_dir(runtime).join("pid.txt");
     let child = {
         let mut command = Command::new(executable_path);
         with_no_window(
@@ -1473,7 +1474,7 @@ fn helper_convert(
 ) -> Result<Option<String>, String> {
     #[cfg(not(target_os = "windows"))]
     {
-        let profile_dir = libreoffice_profile_dir(runtime);
+        let profile_dir = libreoffice_profile_dir(_runtime);
         let output = run_command(
             with_no_window(
                 Command::new(_executable_path)

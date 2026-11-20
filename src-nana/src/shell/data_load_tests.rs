@@ -2,11 +2,10 @@
 //! 再把读取结果送回，看界面要读的状态有没有接上。时机照 Vue 各 composable 读数据的时候。
 
 use crate::backend::services::repository::{
-    ApiDesignSnapshot, FileBrowserSnapshot, PlaylistPlayerContribution,
-    PlaylistSummary, PluginManifest, RepositoryAction, RepositoryBackendSummary,
-    RepositoryLocalCacheStatus, RepositoryOverview, RepositorySnapshot,
-    RepositoryStructureCacheState, RepositorySummary, SystemLogLocation, SystemLogPage,
-    SystemLogRecord, SystemLogSource,
+    ApiDesignSnapshot, FileBrowserSnapshot, PlaylistPlayerContribution, PlaylistSummary,
+    PluginManifest, RepositoryAction, RepositoryBackendSummary, RepositoryLocalCacheStatus,
+    RepositoryOverview, RepositorySnapshot, RepositoryStructureCacheState, RepositorySummary,
+    SystemLogLocation, SystemLogPage, SystemLogRecord, SystemLogSource,
 };
 use crate::backend::services::runtime::ExternalApiConnectionStatus;
 use crate::shell::admin::{AdminEffect, AdminMessage, LogsView};

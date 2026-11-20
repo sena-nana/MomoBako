@@ -1,21 +1,17 @@
 //! 音频预览的歌词。对齐 `player-audio` 的 `audioPreview.js` / `lyrics.js`。
 //!
-//! 播放源带回本地 `lyricPath`（或不是 http(s) 的 `lyricSourceUrl`）时读那个文件；都没有时读同级
-//! `.lrc`。解析成 LRC 行以后画在唱片右边，播放头走到的那一行加重。没有文件、读失败、正文空，
-//! 或只有网络地址时写「暂无歌词」，不下载、不编造歌词。音频舞台出来以后、文件还在读时写「读取歌词...」。
+//! 播放源带回本地歌词路径时读那个文件；没有时读同级 `.lrc`。解析成 LRC 行以后画在唱片右边，
+//! 播放头走到的那一行加重。没有文件、读失败或正文空时写「暂无歌词」，不编造歌词。音频舞台出来以后、文件还在读时写「读取歌词...」。
 //! 逐字歌词 `wordLyricPath` 这首预览也不画。
 
-use serde_json::Value;
-
 use super::SourcePrep;
+use crate::backend::services::repository::EntryPlaybackSourceResponse;
 
 /// 播放源准备结果里和歌词有关的那一项。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum LyricHint {
     /// 本地歌词文件。
     Local(String),
-    /// 只有 http(s) 地址。Nana 不下载它。
-    RemoteOnly(String),
     /// 准备结果没带歌词，改读同级 `.lrc`。
     Absent,
 }
@@ -27,31 +23,14 @@ pub(super) struct LyricLine {
     pub time_ms: Option<u64>,
 }
 
-/// 从准备结果里取歌词位置。Vue 先用 `lyricSourceUrl`，没有再用 `lyricPath`。
-/// 网址是 http(s) 时，旁边若还有 `lyricPath` 就读本地文件（同一份歌词，不走网络）。
-pub(crate) fn hint_from_prepare(output: &Value) -> LyricHint {
-    let Some(fields) = output.as_object() else {
-        return LyricHint::Absent;
-    };
-    let filled = |key: &str| {
-        fields
-            .get(key)
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_string)
-    };
-    if let Some(url) = filled("lyricSourceUrl") {
-        if is_remote(&url) {
-            return match filled("lyricPath") {
-                Some(path) => LyricHint::Local(path),
-                None => LyricHint::RemoteOnly(url),
-            };
-        }
-        return LyricHint::Local(url);
-    }
-    filled("lyricPath")
-        .map(LyricHint::Local)
+/// 从准备结果里取歌词位置：有本地歌词路径就用它，没有时读同级 `.lrc`。
+pub(crate) fn hint_from_prepare(response: &EntryPlaybackSourceResponse) -> LyricHint {
+    response
+        .lyric_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(|path| LyricHint::Local(path.to_string()))
         .unwrap_or(LyricHint::Absent)
 }
 
@@ -78,13 +57,10 @@ pub(crate) fn schedule_lyrics(prep: &mut SourcePrep, hint: LyricHint, playable_a
             prep.lyrics_pending = true;
             prep.lyric_path = None;
         }
-        LyricHint::RemoteOnly(url) => {
-            eprintln!("Nana 歌词只有网络地址，不下载：{url}");
-        }
     }
 }
 
-/// 按提示读出歌词正文。失败、空文件和只有网址都得到空串，调用方画「暂无歌词」。
+/// 按提示读出歌词正文。失败和空文件都得到空串，调用方画「暂无歌词」。
 pub(crate) fn text_for(
     hint: LyricHint,
     audio_path: &str,
@@ -98,10 +74,6 @@ pub(crate) fn text_for(
                 String::new()
             }
         },
-        LyricHint::RemoteOnly(url) => {
-            eprintln!("Nana 歌词只有网络地址，不下载：{url}");
-            String::new()
-        }
         LyricHint::Absent => {
             let path = sibling_lrc_path(audio_path);
             match read_sibling(&path) {
@@ -177,11 +149,6 @@ pub(super) fn active_index(lines: &[LyricLine], playback_ms: u64) -> Option<usiz
         }
     }
     index
-}
-
-fn is_remote(url: &str) -> bool {
-    let lower = url.trim().to_ascii_lowercase();
-    lower.starts_with("http://") || lower.starts_with("https://")
 }
 
 fn time_tags(line: &str) -> Vec<u64> {
@@ -323,25 +290,25 @@ mod tests {
         };
         assert_eq!(parse_lrc(&bom)[0].time_ms, Some(1500));
 
-        assert!(matches!(
-            hint_from_prepare(&serde_json::json!({})),
-            LyricHint::Absent
-        ));
-        assert!(matches!(
-            hint_from_prepare(&serde_json::json!({ "lyricPath": "C:/cache/a.lrc" })),
-            LyricHint::Local(path) if path == "C:/cache/a.lrc"
-        ));
-        assert!(matches!(
-            hint_from_prepare(&serde_json::json!({ "lyricSourceUrl": "https://music.example/a.lrc" })),
-            LyricHint::RemoteOnly(url) if url == "https://music.example/a.lrc"
-        ));
-        assert!(matches!(
-            hint_from_prepare(&serde_json::json!({
-                "lyricSourceUrl": "https://127.0.0.1/a.lrc",
-                "lyricPath": "C:/cache/a.lrc"
-            })),
-            LyricHint::Local(path) if path == "C:/cache/a.lrc"
-        ));
+        let response = |lyric_path: Option<&str>| EntryPlaybackSourceResponse {
+            repo_id: "repo".into(),
+            path: "a.mp3".into(),
+            media_type: "audio/mpeg".into(),
+            source_url: None,
+            local_path: Some("C:/cache/a.mp3".into()),
+            temp_file_path: None,
+            lyric_path: lyric_path.map(str::to_string),
+            word_lyric_path: None,
+            expires_at: None,
+            size_bytes: None,
+            modified_at: None,
+        };
+        assert_eq!(hint_from_prepare(&response(None)), LyricHint::Absent);
+        assert_eq!(hint_from_prepare(&response(Some("  "))), LyricHint::Absent);
+        assert_eq!(
+            hint_from_prepare(&response(Some("C:/cache/a.lrc"))),
+            LyricHint::Local("C:/cache/a.lrc".into())
+        );
 
         let file = std::env::temp_dir().join(format!("momobako-lyric-{}.lrc", std::process::id()));
         std::fs::write(&file, "[00:00.00]文件里的一句").expect("写入临时歌词");
@@ -357,14 +324,6 @@ mod tests {
                 LyricHint::Local("D:/no/such-momobako.lrc".into()),
                 "song.mp3",
                 |_| panic!("缺文件不读同级")
-            )
-            .is_empty()
-        );
-        assert!(
-            text_for(
-                LyricHint::RemoteOnly("https://music.example/a.lrc".into()),
-                "song.mp3",
-                |_| panic!("网址不读同级")
             )
             .is_empty()
         );
@@ -446,16 +405,9 @@ mod tests {
 
     /// 音频舞台出来以后、歌词文件还在读时写「读取歌词...」。
     /// 读到正文就换成歌词；读完是空的写成「暂无歌词」。过期结果和预览失败都不留着这句。
-    /// 视频、解不开、只有网址不排这次读取。
+    /// 视频和解不开的不排这次读取。
     #[test]
     fn audio_stage_says_reading_lyrics_until_the_file_arrives() {
-        let mut remote = SourcePrep::default();
-        schedule_lyrics(
-            &mut remote,
-            LyricHint::RemoteOnly("https://music.example/a.lrc".into()),
-            true,
-        );
-        assert!(!remote.lyrics_pending, "只有网址不读、也不写读取中");
         let mut skipped = SourcePrep::default();
         schedule_lyrics(&mut skipped, LyricHint::Absent, false);
         assert!(!skipped.lyrics_pending, "视频和解不开的不读歌词");

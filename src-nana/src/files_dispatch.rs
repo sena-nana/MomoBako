@@ -14,11 +14,10 @@ pub(crate) use files_protocol_dispatch::protocol_folder_tree;
 
 use crate::MomoBakoApplication;
 use crate::backend::services::mutsuki_runner::{
-    PROTOCOL_ARCHIVE_IMPORT, PROTOCOL_EAGLE_IMPORT, PROTOCOL_ENTRY_COPY, PROTOCOL_ENTRY_DELETE,
-    PROTOCOL_ENTRY_IMPORT, PROTOCOL_ENTRY_MOVE,
+    ArchiveImport, EagleImport, EntryCopy, EntryDelete, EntryImport, EntryMove,
 };
 use crate::backend::services::repository::{
-    EagleLibraryImportRequest, FileArchiveImportRequest, FileCopyRequest, FileDeleteRequest,
+    EagleLibraryImportRequest, EntryDeleteRequest, FileArchiveImportRequest, FileCopyRequest,
     FileImportRequest, FileMoveRequest,
 };
 use crate::shell::{FilesEffect, FilesMessage, ShellMessage, display_mode_path};
@@ -90,10 +89,10 @@ pub fn dispatch_files_effects(
                     "复制",
                     true,
                     true,
-                    move |tasks, executor| {
-                        executor
-                            .block_on(tasks.execute(PROTOCOL_ENTRY_COPY, request))
-                            .map(|(value, _)| value)
+                    move |tasks| {
+                        tasks
+                            .run::<EntryCopy>(request)
+                            .map(|output| Some(output.result))
                     },
                 );
             }
@@ -113,10 +112,10 @@ pub fn dispatch_files_effects(
                     "移动",
                     false,
                     true,
-                    move |tasks, executor| {
-                        executor
-                            .block_on(tasks.execute(PROTOCOL_ENTRY_MOVE, request))
-                            .map(|(value, _)| value)
+                    move |tasks| {
+                        tasks
+                            .run::<EntryMove>(request)
+                            .map(|output| Some(output.result))
                     },
                 );
             }
@@ -137,10 +136,10 @@ pub fn dispatch_files_effects(
                     "导入",
                     false,
                     false,
-                    move |tasks, executor| {
-                        executor
-                            .block_on(tasks.execute(PROTOCOL_ENTRY_IMPORT, request))
-                            .map(|(value, _)| value)
+                    move |tasks| {
+                        tasks
+                            .run::<EntryImport>(request)
+                            .map(|output| Some(output.result.snapshot))
                     },
                 );
             }
@@ -160,10 +159,10 @@ pub fn dispatch_files_effects(
                     "压缩包导入",
                     false,
                     false,
-                    move |tasks, executor| {
-                        executor
-                            .block_on(tasks.execute(PROTOCOL_ARCHIVE_IMPORT, request))
-                            .map(|(value, _)| value)
+                    move |tasks| {
+                        tasks
+                            .run::<ArchiveImport>(request)
+                            .map(|output| Some(output.result))
                     },
                 );
             }
@@ -188,16 +187,11 @@ pub fn dispatch_files_effects(
                     failed,
                     |services| {
                         let tasks = services.tasks.clone();
-                        let executor = services.executor.clone();
-                        move || match executor
-                            .block_on(tasks.execute(PROTOCOL_EAGLE_IMPORT, request))
-                        {
-                            Ok((value, _)) => files_message(FilesMessage::EagleImportSettled {
-                                result: Ok(crate::shell::admin::eagle_import_report(&value)),
-                            }),
-                            Err(error) => files_message(FilesMessage::EagleImportSettled {
-                                result: Err(error),
-                            }),
+                        move || {
+                            let result = tasks.run::<EagleImport>(request).map(|output| {
+                                crate::shell::admin::eagle_import_report(&output.result)
+                            });
+                            files_message(FilesMessage::EagleImportSettled { result })
                         }
                     },
                 );
@@ -213,32 +207,17 @@ pub fn dispatch_files_effects(
                     "删除",
                     false,
                     true,
-                    move |tasks, executor| {
+                    move |tasks| {
                         if paths.is_empty() {
-                            return Ok(serde_json::Value::Null);
+                            return Ok(None);
                         }
-                        let mut last = None;
-                        for path in paths {
-                            let request = FileDeleteRequest {
-                                repo_id: repo_id.clone(),
-                                path: path.clone(),
-                                mode: mode.clone(),
-                            };
-                            match executor.block_on(tasks.execute(PROTOCOL_ENTRY_DELETE, request)) {
-                                Ok((value, _)) => last = Some(value),
-                                Err(error) => {
-                                    eprintln!("Nana 删除条目失败 {path}：{error}");
-                                    return Err(error);
-                                }
-                            }
-                        }
-                        match last {
-                            Some(value) => Ok(value),
-                            None => {
-                                eprintln!("Nana 删除没有返回结果");
-                                Err("删除没有返回结果".into())
-                            }
-                        }
+                        tasks
+                            .run::<EntryDelete>(EntryDeleteRequest::Batch {
+                                repo_id,
+                                paths,
+                                mode,
+                            })
+                            .map(|output| output.result.snapshot)
                     },
                 );
             }

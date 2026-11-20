@@ -3,10 +3,11 @@
 use nana_ui::RuntimeProgramContext;
 
 use crate::MomoBakoApplication;
-use crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_EXPORT;
+use crate::backend::services::mutsuki_runner::RepositoryExport;
 use crate::backend::services::repository::{
-    FileTreeNode, HardlinkConfirmRequest, RepositoryArchiveExportOptions, RepositoryExportRequest,
-    RepositoryGitExportOptions, TrashMutationRequest,
+    FileBrowserSnapshot, HardlinkConfirmRequest, RepositoryArchiveExportOptions,
+    RepositoryExportRequest, RepositoryExportResponse, RepositoryGitExportOptions,
+    TrashMutationRequest,
 };
 use crate::shell::{FilesMessage, HardlinkPrompt, ProtocolFolderTree, ShellMessage};
 use crate::task_guard::spawn_service;
@@ -14,25 +15,21 @@ use crate::task_guard::spawn_service;
 use super::{files_message, snapshot_message};
 
 /// 复制、移动、导入、压缩包和 Eagle 导入、删除：在任务里跑 Mutsuki 协议，结果回 `ProtocolFinished`（`hardlinks` 为真时
-/// 成功后再读硬链接候选）。`sidebar_tree` 为真时从协议 JSON 取出文件夹树，没有树就不编。
+/// 成功后再读硬链接候选）。`sidebar_tree` 为真时从结果的目录快照取出文件夹树，没有树就不编。
 pub(super) fn dispatch_protocol(
     app: &MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
     what: &str,
     hardlinks: bool,
     sidebar_tree: bool,
-    run: impl FnOnce(
-        crate::backend::viewmodels::MutsukiTaskViewModel,
-        std::sync::Arc<tokio::runtime::Runtime>,
-    ) -> Result<serde_json::Value, String>
+    run: impl FnOnce(crate::backend::app::TaskService) -> Result<Option<FileBrowserSnapshot>, String>
     + Send
     + 'static,
 ) {
     let failed = |error| protocol_message(Err(error), false, false);
     spawn_service(app.services.as_ref(), context, what, failed, |services| {
         let tasks = services.tasks.clone();
-        let executor = services.executor.clone();
-        move || protocol_message(run(tasks, executor), hardlinks, sidebar_tree)
+        move || protocol_message(run(tasks), hardlinks, sidebar_tree)
     });
 }
 
@@ -51,7 +48,6 @@ pub(super) fn dispatch_trash(
         failed,
         |services| {
             let browser = services.file_browser.clone();
-            let executor = services.executor.clone();
             move || {
                 let calls: Vec<Option<String>> = if paths.is_empty() {
                     vec![None]
@@ -65,7 +61,7 @@ pub(super) fn dispatch_trash(
                         action: action.clone(),
                         path,
                     };
-                    match executor.block_on(browser.mutate_trash(request)) {
+                    match browser.mutate_trash(request) {
                         Ok(snapshot) => last = Some(snapshot),
                         Err(error) => {
                             eprintln!("Nana 回收站变更失败：{error}");
@@ -109,10 +105,9 @@ pub(super) fn dispatch_hardlinks(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
-                let result = executor
-                    .block_on(interaction.list_hardlink_candidates(repo_id))
+                let result = interaction
+                    .list_hardlink_candidates(repo_id)
                     .map(|response| {
                         response
                             .candidates
@@ -163,14 +158,13 @@ pub(super) fn dispatch_confirm_hardlink(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
                 let request = HardlinkConfirmRequest {
                     repo_id: repo_id.clone(),
                     candidate_id: candidate_id.clone(),
                 };
-                let result = executor
-                    .block_on(interaction.confirm_hardlink_candidate(request))
+                let result = interaction
+                    .confirm_hardlink_candidate(request)
                     .map(|_| candidate_id);
                 files_message(FilesMessage::HardlinkConfirmed { repo_id, result })
             }
@@ -194,23 +188,18 @@ pub(super) fn dispatch_asset(
         failed,
         |services| {
             let query = services.repository_query.clone();
-            let executor = services.executor.clone();
-            move || {
-                ShellMessage::AssetDetailLoaded(
-                    executor.block_on(query.get_asset_detail(repo_id, asset_id)),
-                )
-            }
+            move || ShellMessage::AssetDetailLoaded(query.get_asset_detail(repo_id, asset_id))
         },
     );
 }
 
 fn protocol_message(
-    result: Result<serde_json::Value, String>,
+    result: Result<Option<FileBrowserSnapshot>, String>,
     hardlinks: bool,
     sidebar_tree: bool,
 ) -> ShellMessage {
     let folder_tree = match &result {
-        Ok(value) if sidebar_tree => protocol_folder_tree(value),
+        Ok(Some(snapshot)) if sidebar_tree => protocol_folder_tree(snapshot),
         _ => None,
     };
     let result = result.map(|_| ());
@@ -223,50 +212,19 @@ fn protocol_message(
     })
 }
 
-/// 从复制、移动、删除的协议 JSON 取出文件夹树。
-///
-/// 单条结果就是目录快照；批量删除把快照放在 `snapshot` 里。没有 `tree`、`tree` 为 null 时不编。
-/// 树解析不了、或没有仓库时记日志并丢掉。
-pub(crate) fn protocol_folder_tree(value: &serde_json::Value) -> Option<ProtocolFolderTree> {
-    let snapshot = value
-        .get("snapshot")
-        .filter(|item| item.is_object())
-        .unwrap_or(value);
-    let Some(tree) = snapshot.get("tree") else {
-        return None;
-    };
-    if tree.is_null() {
-        return None;
-    }
-    let Some(repo_id) = snapshot
-        .get("repoId")
-        .and_then(|item| item.as_str())
-        .filter(|repo_id| !repo_id.is_empty())
-    else {
+/// 复制、移动、删除后的目录快照里带着文件夹树时，取出来交给侧栏。没有树或没有仓库时不写。
+pub(crate) fn protocol_folder_tree(snapshot: &FileBrowserSnapshot) -> Option<ProtocolFolderTree> {
+    let nodes = snapshot.tree.clone()?;
+    if snapshot.repo_id.is_empty() {
         eprintln!("Nana 协议结果的文件夹树没有仓库，不写入侧栏");
         return None;
-    };
-    let current_path = snapshot
-        .get("currentPath")
-        .and_then(|item| item.as_str())
-        .unwrap_or("")
-        .to_string();
-    let trash = snapshot
-        .get("specialLocation")
-        .and_then(|item| item.as_str())
-        == Some("trash");
-    match serde_json::from_value::<Vec<FileTreeNode>>(tree.clone()) {
-        Ok(nodes) => Some(ProtocolFolderTree {
-            repo_id: repo_id.to_string(),
-            current_path,
-            trash,
-            nodes,
-        }),
-        Err(error) => {
-            eprintln!("Nana 协议结果的文件夹树无法解析，不写入侧栏：{error}");
-            None
-        }
     }
+    Some(ProtocolFolderTree {
+        repo_id: snapshot.repo_id.clone(),
+        current_path: snapshot.current_path.clone(),
+        trash: snapshot.special_location.as_deref() == Some("trash"),
+        nodes,
+    })
 }
 
 /// 用对话框里的格式、路径和压缩选项组压缩包导出请求。
@@ -331,27 +289,22 @@ pub(super) fn dispatch_export(
         failed,
         |services| {
             let tasks = services.tasks.clone();
-            let executor = services.executor.clone();
             move || {
-                let result = executor
-                    .block_on(tasks.execute(PROTOCOL_REPOSITORY_EXPORT, request))
-                    .map(|(output, _)| export_notice(&output));
+                let result = tasks
+                    .run::<RepositoryExport>(request)
+                    .map(|output| export_notice(&output.result));
                 files_message(FilesMessage::ExportFinished(result))
             }
         },
     );
 }
 
-/// 只采用宿主返回的 message。没有说明时记日志，不编造成功。
-fn export_notice(value: &serde_json::Value) -> String {
-    value
-        .get("message")
-        .and_then(|item| item.as_str())
-        .map(str::trim)
-        .filter(|text| !text.is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| {
-            eprintln!("Nana 导出返回没有说明：{value}");
-            "导出已返回，但没有结果说明。".into()
-        })
+/// 导出结果的说明。说明是空的时记日志，写「导出已返回，但没有结果说明。」，不编造成功。
+fn export_notice(response: &RepositoryExportResponse) -> String {
+    let message = response.message.trim();
+    if message.is_empty() {
+        eprintln!("Nana 导出返回没有说明：{response:?}");
+        return "导出已返回，但没有结果说明。".into();
+    }
+    message.to_string()
 }

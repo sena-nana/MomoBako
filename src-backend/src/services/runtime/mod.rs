@@ -67,10 +67,8 @@ impl RepositoryRuntime {
     }
 
     /// 配置、安装、删除或启停后原子切换桌面插件 generation。
-    pub async fn reload_mutsuki_plugins(&self) -> Result<(), String> {
-        tokio::task::spawn_blocking(mutsuki_host::reload_plugins)
-            .await
-            .map_err(|error| error.to_string())?
+    pub fn reload_mutsuki_plugins(&self) -> Result<(), String> {
+        mutsuki_host::reload_plugins()
     }
 
     /// Returns the latest external API connection payload, including readiness derived from state init.

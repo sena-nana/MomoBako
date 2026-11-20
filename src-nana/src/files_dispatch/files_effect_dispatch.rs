@@ -31,7 +31,6 @@ pub(super) fn dispatch_thumbnail(
     let failed = |error| files_message(FilesMessage::NoteError(error));
     spawn_service(app.services.as_ref(), context, what, failed, |services| {
         let browser = services.file_browser.clone();
-        let executor = services.executor.clone();
         move || {
             let request = thumbnail_request(
                 &repo_id,
@@ -41,7 +40,7 @@ pub(super) fn dispatch_thumbnail(
                 image_bytes.clone(),
                 None,
             );
-            let saved = match executor.block_on(browser.ensure_thumbnail(request)) {
+            let saved = match browser.ensure_thumbnail(request) {
                 Ok(response) => response,
                 Err(error) => {
                     eprintln!("Nana {what}失败：{path}：{error}");
@@ -50,7 +49,7 @@ pub(super) fn dispatch_thumbnail(
             };
             let saved = if action == "clear" && saved.thumbnail_path.is_none() && kind == "file" {
                 let refresh = thumbnail_request(&repo_id, &path, "refresh", None, None, None);
-                match executor.block_on(browser.ensure_thumbnail(refresh)) {
+                match browser.ensure_thumbnail(refresh) {
                     Ok(response) => response,
                     Err(error) => {
                         eprintln!("Nana 恢复默认缩略图失败：{error}");
@@ -87,7 +86,6 @@ pub(super) fn dispatch_ensure(
     };
     spawn_service(app.services.as_ref(), context, what, failed, |services| {
         let browser = services.file_browser.clone();
-        let executor = services.executor.clone();
         move || {
             let action = if source_url.is_some() {
                 "save"
@@ -96,8 +94,8 @@ pub(super) fn dispatch_ensure(
             };
             let request =
                 thumbnail_request(&repo_id, &path, action, None, None, source_url.clone());
-            let result = executor
-                .block_on(browser.ensure_thumbnail(request))
+            let result = browser
+                .ensure_thumbnail(request)
                 .map(|response| EnsuredThumbnail {
                     thumbnail_path: response.thumbnail_path,
                     custom: response.thumbnail_custom,
@@ -141,12 +139,11 @@ pub(super) fn dispatch_save_cover(
         failed,
         |services| {
             let browser = services.file_browser.clone();
-            let executor = services.executor.clone();
             move || {
                 let request =
                     thumbnail_request(&repo_id, &path, "save", None, None, Some(source_url));
-                let result = executor
-                    .block_on(browser.ensure_thumbnail(request))
+                let result = browser
+                    .ensure_thumbnail(request)
                     .map(|response| EnsuredThumbnail {
                         thumbnail_path: response.thumbnail_path,
                         custom: response.thumbnail_custom,
@@ -248,12 +245,7 @@ pub(super) fn dispatch_browse(
         failed,
         |services| {
             let browser = services.file_browser.clone();
-            let executor = services.executor.clone();
-            move || {
-                ShellMessage::FileBrowserLoaded(
-                    executor.block_on(browser.get_file_browser(request)),
-                )
-            }
+            move || ShellMessage::FileBrowserLoaded(browser.get_file_browser(request))
         },
     );
 }
@@ -296,13 +288,12 @@ pub(super) fn dispatch_virtual_page(
         failed,
         |services| {
             let browser = services.file_browser.clone();
-            let executor = services.executor.clone();
             move || ShellMessage::VirtualThumbnailPage {
                 repo_id,
                 path,
                 trash,
                 offset,
-                result: executor.block_on(browser.get_file_browser(request)),
+                result: browser.get_file_browser(request),
             }
         },
     );
@@ -331,12 +322,11 @@ pub(super) fn dispatch_create(
         failed,
         |services| {
             let browser = services.file_browser.clone();
-            let executor = services.executor.clone();
             move || {
                 let result = if directory {
-                    executor.block_on(browser.create_directory(request))
+                    browser.create_directory(request)
                 } else {
-                    executor.block_on(browser.create_file(request))
+                    browser.create_file(request)
                 };
                 snapshot_message(result, created_name)
             }
@@ -364,8 +354,7 @@ pub(super) fn dispatch_rename(
         failed,
         |services| {
             let browser = services.file_browser.clone();
-            let executor = services.executor.clone();
-            move || snapshot_message(executor.block_on(browser.rename_entry(request)), None)
+            move || snapshot_message(browser.rename_entry(request), None)
         },
     );
 }

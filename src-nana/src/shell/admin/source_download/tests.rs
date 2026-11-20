@@ -4,6 +4,7 @@
 
 use serde_json::json;
 
+use crate::backend::services::repository::FileImportResponse;
 use crate::shell::admin::{AdminEffect, AdminMessage};
 use crate::shell::data_load_tests::{browser, snapshot};
 use crate::shell::files::FilesMessage;
@@ -141,12 +142,20 @@ fn plugin(payload: serde_json::Value) -> Result<DownloadOutcome, String> {
     Ok(DownloadOutcome::plugin(payload))
 }
 
-/// 下载到其他资源库的结果：插件载荷加上导入时宿主交回的结果（`FileImportResponse` 的 JSON）。
+/// 下载到其他资源库的结果：插件载荷加上导入时宿主交回的结果。
 fn imported(
     payload: serde_json::Value,
-    import: serde_json::Value,
+    import: FileImportResponse,
 ) -> Result<DownloadOutcome, String> {
     Ok(DownloadOutcome::imported(payload, &import))
+}
+
+/// 导入目标资源库后宿主交回的结果，`skipped` 是保留原文件、没有导入的同名条目。
+pub(crate) fn import_response(skipped: &[&str]) -> FileImportResponse {
+    FileImportResponse {
+        snapshot: browser("third-repo"),
+        skipped_entries: skipped.iter().map(|path| path.to_string()).collect(),
+    }
 }
 
 /// 写进系统日志的那一批。
@@ -357,7 +366,7 @@ fn files_already_in_the_target_are_kept_and_reported() {
     ];
     let payload = json!({ "completed": [{ "paths": paths }], "failed": [] });
     let skipped = ["夜曲/周杰伦 - 晴天.mp3", "夜曲/周杰伦 - 晴天.lrc"];
-    let import = json!({ "repoId": "third-repo", "currentPath": FOLDER, "entries": [], "skippedEntries": skipped });
+    let import = import_response(&skipped);
     model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished {
         run,
         result: imported(payload, import),
@@ -403,7 +412,7 @@ fn files_already_in_the_target_are_kept_and_reported() {
 
     let mut clean = netease();
     let run = download_playlist(&mut clean);
-    let import = json!({ "repoId": "third-repo", "currentPath": FOLDER, "entries": [] });
+    let import = import_response(&[]);
     let result = imported(
         json!({ "completed": [{ "paths": paths }], "failed": [] }),
         import,
@@ -602,7 +611,7 @@ fn a_failed_download_says_which_download_failed_and_why() {
 fn failures_and_skipped_files_share_one_notice() {
     let mut model = netease();
     let run = download_playlist(&mut model);
-    let import = json!({ "repoId": "third-repo", "currentPath": FOLDER, "entries": [], "skippedEntries": ["夜曲/周杰伦 - 晴天.mp3"] });
+    let import = import_response(&["夜曲/周杰伦 - 晴天.mp3"]);
     model.reduce(ShellMessage::Admin(AdminMessage::DownloadFinished {
         run,
         result: imported(partly_failed(), import),

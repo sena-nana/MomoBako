@@ -21,14 +21,25 @@ fn cache_snapshot_measures_thumbnail_and_cache_directories() {
     fs::write(thumbnail_root.join("b.png"), [0u8; 5]).expect("缩略图");
     let cache = thumbnail_root.parent().expect("元数据目录").join("cache");
     fs::create_dir_all(cache.join("office-preview").join("nested")).expect("预览缓存目录");
-    fs::write(cache.join("office-preview").join("nested").join("doc.pdf"), [0u8; 7]).expect("预览");
+    fs::write(
+        cache.join("office-preview").join("nested").join("doc.pdf"),
+        [0u8; 7],
+    )
+    .expect("预览");
     fs::write(cache.join("stray.tmp"), [0u8; 3]).expect("散文件");
 
     let snapshot = state.get_cache_snapshot(&repo_id).expect("缓存占用");
     let rows: Vec<_> = snapshot
         .entries
         .iter()
-        .map(|entry| (entry.kind.as_str(), entry.label.as_str(), entry.files, entry.bytes))
+        .map(|entry| {
+            (
+                entry.kind.as_str(),
+                entry.label.as_str(),
+                entry.files,
+                entry.bytes,
+            )
+        })
         .collect();
     assert_eq!(
         rows,

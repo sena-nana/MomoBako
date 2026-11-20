@@ -905,56 +905,37 @@ fn snapshot_tree_replaces_the_sidebar_folders() {
 /// 在途读取和这份快照对不上，侧栏都不动。重读回来的目录快照没有树时，侧栏留着协议写下的那份。
 #[test]
 fn protocol_tree_replaces_the_sidebar_folders() {
-    let with_tree = serde_json::json!({
-        "repoId": "acceptance-repo",
-        "currentPath": "albums",
-        "tree": [{ "path": "albums", "label": "albums", "fileCount": 3, "children": [] }],
-    });
-    let parsed = crate::files_dispatch::protocol_folder_tree(&with_tree).expect("带树的协议结果");
+    use crate::backend::services::repository::{FileBrowserSnapshot, FileTreeNode};
+    use crate::files_dispatch::protocol_folder_tree;
+    let node = |path: &str, file_count: usize| FileTreeNode {
+        path: path.into(),
+        label: path.into(),
+        file_count,
+        children: Vec::new(),
+    };
+    let snapshot = |current_path: &str, tree: Option<Vec<FileTreeNode>>| FileBrowserSnapshot {
+        current_path: current_path.into(),
+        tree,
+        ..super::data_load_tests::browser("acceptance-repo")
+    };
+    let parsed = protocol_folder_tree(&snapshot("albums", Some(vec![node("albums", 3)])))
+        .expect("带树的协议结果");
     assert_eq!(parsed.current_path, "albums");
     assert!(!parsed.trash);
     assert_eq!(parsed.nodes[0].file_count, 3);
-    assert!(
-        crate::files_dispatch::protocol_folder_tree(
-            &serde_json::json!({ "repoId": "acceptance-repo", "currentPath": "" })
-        )
-        .is_none()
-    );
-    assert!(
-        crate::files_dispatch::protocol_folder_tree(
-            &serde_json::json!({ "repoId": "acceptance-repo", "tree": null })
-        )
-        .is_none()
-    );
-    let batch = serde_json::json!({
-        "repoId": "acceptance-repo",
-        "deletedCount": 1,
-        "snapshot": {
-            "repoId": "acceptance-repo",
-            "currentPath": "",
-            "specialLocation": "trash",
-            "tree": [{ "path": "left", "label": "left", "fileCount": 1, "children": [] }],
-        },
-    });
-    let parsed =
-        crate::files_dispatch::protocol_folder_tree(&batch).expect("批量删除的 snapshot.tree");
+    assert!(protocol_folder_tree(&snapshot("", None)).is_none());
+    let trash = FileBrowserSnapshot {
+        special_location: Some("trash".into()),
+        ..snapshot("", Some(vec![node("left", 1)]))
+    };
+    let parsed = protocol_folder_tree(&trash).expect("回收站里删除后的树");
     assert_eq!(parsed.nodes[0].path, "left");
     assert!(parsed.trash);
-    assert!(
-        crate::files_dispatch::protocol_folder_tree(&serde_json::json!({
-            "repoId": "acceptance-repo",
-            "currentPath": "",
-            "tree": { "path": "nope" },
-        }))
-        .is_none()
-    );
-    assert!(
-        crate::files_dispatch::protocol_folder_tree(&serde_json::json!({
-            "currentPath": "",
-            "tree": [],
-        }))
-        .is_none()
-    );
+    let orphan = FileBrowserSnapshot {
+        repo_id: String::new(),
+        ..snapshot("", Some(Vec::new()))
+    };
+    assert!(protocol_folder_tree(&orphan).is_none(), "没有仓库的树不写");
 
     let mut away = files_page();
     away.files.set_drag_selection(

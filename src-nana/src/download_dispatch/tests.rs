@@ -10,14 +10,14 @@ use serde_json::{Value, json};
 
 use super::{DownloadServices, run};
 use crate::backend::services::repository::{
-    FileImportRequest, PluginCallRequest, SystemLogWriteRequest,
+    FileImportRequest, FileImportResponse, PluginCallRequest, SystemLogWriteRequest,
 };
 use crate::download_staging::tests::Scratch;
 use crate::shell::ShellMessage;
 use crate::shell::admin::AdminMessage;
 use crate::shell::admin::source_download::DownloadRun;
 use crate::shell::admin::source_download::tests::{
-    chosen_playlist_download as chosen_download, file_column_error,
+    chosen_playlist_download as chosen_download, file_column_error, import_response,
 };
 use crate::shell::admin::source_target::TargetCandidate;
 use crate::shell::status::StatusLine;
@@ -28,7 +28,7 @@ const FOLDER: &str = "夜曲";
 /// 假的领域服务：插件按 `plugin` 写暂存文件、交回结果；导入、建文件夹、同步交回给定的结果；请求和日志都记下来。
 struct FakeServices {
     plugin: Box<dyn Fn(&Path) -> Result<Value, String>>,
-    import_result: Result<Value, String>,
+    import_result: Result<FileImportResponse, String>,
     folder_result: Result<(), String>,
     calls: RefCell<Vec<PluginCallRequest>>,
     folders: RefCell<Vec<(Option<String>, String)>>,
@@ -41,7 +41,7 @@ impl FakeServices {
     fn new(plugin: impl Fn(&Path) -> Result<Value, String> + 'static) -> Self {
         Self {
             plugin: Box::new(plugin),
-            import_result: Ok(json!({ "repoId": "third-repo", "entries": [] })),
+            import_result: Ok(import_response(&[])),
             folder_result: Ok(()),
             calls: RefCell::new(Vec::new()),
             folders: RefCell::new(Vec::new()),
@@ -88,7 +88,7 @@ impl DownloadServices for FakeServices {
         self.folder_result.clone()
     }
 
-    fn import(&self, request: FileImportRequest) -> Result<Value, String> {
+    fn import(&self, request: FileImportRequest) -> Result<FileImportResponse, String> {
         self.imports.borrow_mut().push(request);
         self.import_result.clone()
     }
@@ -144,9 +144,7 @@ fn a_finished_import_clears_only_what_this_download_staged() {
     let user_file = scratch.file("Music/用户自己的.mp3", "用户自己的文件");
     let user_path = user_file.to_string_lossy().to_string();
     let services = FakeServices {
-        import_result: Ok(
-            json!({ "repoId": "third-repo", "entries": [], "skippedEntries": ["夜曲/周杰伦 - 晴天.mp3"] }),
-        ),
+        import_result: Ok(import_response(&["夜曲/周杰伦 - 晴天.mp3"])),
         ..FakeServices::new(move |staging| {
             let mut result = stage_playlist(
                 staging,

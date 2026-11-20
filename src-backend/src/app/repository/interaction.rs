@@ -14,221 +14,195 @@ use crate::services::repository::{
 use crate::services::runtime::RepositoryRuntime;
 
 #[derive(Clone)]
-pub struct RepositoryInteractionViewModel {
+pub struct RepositoryInteractionService {
     runtime: RepositoryRuntime,
 }
 
-impl RepositoryInteractionViewModel {
+impl RepositoryInteractionService {
     pub fn new(runtime: RepositoryRuntime) -> Self {
         Self { runtime }
     }
 
-    pub async fn list_smart_folders(
-        &self,
-        repo_id: String,
-    ) -> Result<Vec<SmartFolderTreeNode>, String> {
+    pub fn list_smart_folders(&self, repo_id: String) -> Result<Vec<SmartFolderTreeNode>, String> {
         self.runtime
-            .run_read(move |state| state.list_smart_folders(&repo_id))
-            .await
+            .read(move |state| state.list_smart_folders(&repo_id))
     }
 
-    pub async fn create_smart_folder(
+    pub fn create_smart_folder(
         &self,
         request: SmartFolderMutationRequest,
     ) -> Result<SmartFolderMutationResponse, String> {
         self.runtime
-            .run_write(move |state| state.create_smart_folder(request))
-            .await
+            .write(move |state| state.create_smart_folder(request))
     }
 
-    pub async fn update_smart_folder(
+    pub fn update_smart_folder(
         &self,
         request: SmartFolderUpdateRequest,
     ) -> Result<SmartFolderMutationResponse, String> {
         self.runtime
-            .run_write(move |state| state.update_smart_folder(request))
-            .await
+            .write(move |state| state.update_smart_folder(request))
     }
 
-    pub async fn delete_smart_folder(
+    pub fn delete_smart_folder(
         &self,
         repo_id: String,
         smart_folder_id: String,
     ) -> Result<SmartFolderMutationResponse, String> {
         self.runtime
-            .run_write(move |state| state.delete_smart_folder(&repo_id, &smart_folder_id))
-            .await
+            .write(move |state| state.delete_smart_folder(&repo_id, &smart_folder_id))
     }
 
-    pub async fn query_smart_folder(
+    pub fn query_smart_folder(
         &self,
         repo_id: String,
         smart_folder_id: String,
     ) -> Result<SmartFolderResultSnapshot, String> {
         self.runtime
-            .run_read(move |state| state.query_smart_folder(&repo_id, &smart_folder_id))
-            .await
+            .read(move |state| state.query_smart_folder(&repo_id, &smart_folder_id))
     }
 
-    pub async fn list_playlists(&self, repo_id: String) -> Result<Vec<PlaylistSummary>, String> {
+    pub fn list_playlists(&self, repo_id: String) -> Result<Vec<PlaylistSummary>, String> {
         self.runtime
-            .run_read(move |state| state.list_playlists(&repo_id))
-            .await
+            .read(move |state| state.list_playlists(&repo_id))
     }
 
-    pub async fn list_playlist_memberships(
+    pub fn list_playlist_memberships(
         &self,
         repo_id: String,
     ) -> Result<PlaylistMembershipIndex, String> {
         self.runtime
-            .run_read(move |state| state.list_playlist_memberships(&repo_id))
-            .await
+            .read(move |state| state.list_playlist_memberships(&repo_id))
     }
 
-    pub async fn create_playlist(
+    pub fn create_playlist(
         &self,
         request: PlaylistMutationRequest,
     ) -> Result<PlaylistMutationResponse, String> {
         self.runtime
-            .run_write(move |state| state.create_playlist(request))
-            .await
+            .write(move |state| state.create_playlist(request))
     }
 
-    pub async fn delete_playlist(
+    pub fn delete_playlist(
         &self,
         repo_id: String,
         playlist_id: String,
     ) -> Result<PlaylistMutationResponse, String> {
         self.runtime
-            .run_write(move |state| state.delete_playlist(&repo_id, &playlist_id))
-            .await
+            .write(move |state| state.delete_playlist(&repo_id, &playlist_id))
     }
 
-    pub async fn get_playlist_detail(
+    pub fn get_playlist_detail(
         &self,
         repo_id: String,
         playlist_id: String,
     ) -> Result<PlaylistDetail, String> {
         self.runtime
-            .run_read(move |state| state.get_playlist_detail(&repo_id, &playlist_id))
-            .await
+            .read(move |state| state.get_playlist_detail(&repo_id, &playlist_id))
     }
 
-    pub async fn add_playlist_items_by_paths(
+    pub fn add_playlist_items_by_paths(
         &self,
         request: PlaylistItemsByPathsAddRequest,
     ) -> Result<PlaylistDetail, String> {
         self.runtime
-            .run_write(move |state| state.add_playlist_items_by_paths(request))
-            .await
+            .write(move |state| state.add_playlist_items_by_paths(request))
     }
 
-    pub async fn reorder_playlist_items(
+    pub fn reorder_playlist_items(
         &self,
         request: PlaylistItemsOrderRequest,
     ) -> Result<PlaylistDetail, String> {
         self.runtime
-            .run_write(move |state| state.reorder_playlist_items(request))
-            .await
+            .write(move |state| state.reorder_playlist_items(request))
     }
 
-    pub async fn remove_playlist_item(
+    pub fn remove_playlist_item(
         &self,
         request: PlaylistItemRemoveRequest,
     ) -> Result<PlaylistDetail, String> {
         self.runtime
-            .run_write(move |state| state.remove_playlist_item(request))
-            .await
+            .write(move |state| state.remove_playlist_item(request))
     }
 
-    pub async fn set_playlist_membership(
+    pub fn set_playlist_membership(
         &self,
         request: PlaylistMembershipRequest,
     ) -> Result<PlaylistMembershipSnapshot, String> {
         self.runtime
-            .run_write(move |state| state.set_playlist_membership(request))
-            .await
+            .write(move |state| state.set_playlist_membership(request))
     }
 
-    pub async fn list_repository_actions(
+    pub fn list_repository_actions(
         &self,
         repo_id: String,
     ) -> Result<Vec<RepositoryAction>, String> {
         self.runtime
-            .run_read(move |state| state.list_repository_actions(&repo_id))
-            .await
+            .read(move |state| state.list_repository_actions(&repo_id))
     }
 
-    pub async fn get_repository_action(
+    pub fn get_repository_action(
         &self,
         repo_id: String,
         action_id: String,
     ) -> Result<RepositoryAction, String> {
         self.runtime
-            .run_read(move |state| state.get_repository_action(&repo_id, &action_id))
-            .await
+            .read(move |state| state.get_repository_action(&repo_id, &action_id))
     }
 
-    pub async fn set_repository_action_enabled(
+    pub fn set_repository_action_enabled(
         &self,
         request: RepositoryActionEnabledRequest,
     ) -> Result<RepositoryActionMutationResponse, String> {
         self.runtime
-            .run_write(move |state| state.set_repository_action_enabled(request))
-            .await
+            .write(move |state| state.set_repository_action_enabled(request))
     }
 
-    pub async fn list_hardlink_candidates(
+    pub fn list_hardlink_candidates(
         &self,
         repo_id: String,
     ) -> Result<HardlinkCandidateResponse, String> {
         self.runtime
-            .run_read(move |state| state.list_hardlink_candidates(&repo_id))
-            .await
+            .read(move |state| state.list_hardlink_candidates(&repo_id))
     }
 
-    pub async fn confirm_hardlink_candidate(
+    pub fn confirm_hardlink_candidate(
         &self,
         request: HardlinkConfirmRequest,
     ) -> Result<HardlinkConfirmResponse, String> {
         self.runtime
-            .run_write(move |state| state.confirm_hardlink_candidate(request))
-            .await
+            .write(move |state| state.confirm_hardlink_candidate(request))
     }
 
-    pub async fn record_entry_access(
+    pub fn record_entry_access(
         &self,
         request: EntryAccessRecordRequest,
     ) -> Result<EntryAccessRecordResponse, String> {
         self.runtime
-            .run_write(move |state| state.record_entry_access(request))
-            .await
+            .write(move |state| state.record_entry_access(request))
     }
 
-    pub async fn clear_recent_access_history(
+    pub fn clear_recent_access_history(
         &self,
         request: RecentAccessHistoryClearRequest,
     ) -> Result<RecentAccessHistoryClearResponse, String> {
         self.runtime
-            .run_write(move |state| state.clear_recent_access_history(request))
-            .await
+            .write(move |state| state.clear_recent_access_history(request))
     }
 
-    pub async fn undo_last_revision(
+    pub fn undo_last_revision(
         &self,
         request: RevisionActionRequest,
     ) -> Result<RevisionActionResponse, String> {
         self.runtime
-            .run_write(move |state| state.undo_last_revision(request))
-            .await
+            .write(move |state| state.undo_last_revision(request))
     }
 
-    pub async fn redo_last_revision(
+    pub fn redo_last_revision(
         &self,
         request: RevisionActionRequest,
     ) -> Result<RevisionActionResponse, String> {
         self.runtime
-            .run_write(move |state| state.redo_last_revision(request))
-            .await
+            .write(move |state| state.redo_last_revision(request))
     }
 }

@@ -18,7 +18,7 @@
 //! 框选手势、修饰键、系统对话框、拖放手势和缩略图解码不在这里完成。
 
 use crate::backend::services::repository::{
-    AssetSummary, FileBrowserEntry, FileBrowserSnapshot, FileTreeNode,
+    AssetSummary, EagleLibraryImportSummary, FileBrowserEntry, FileBrowserSnapshot, FileTreeNode,
 };
 
 use super::repo_operation::OperationRequests;
@@ -267,58 +267,19 @@ pub fn repository_is_writable(status: &str, capabilities: &[String]) -> bool {
     status != "missing" && capabilities.iter().any(|capability| capability == "write")
 }
 
-/// 结果卡上一格计数。缺失和真 0 页面上都是「0」，但缺失不是导入出来的 0。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EagleSummaryCount {
-    /// 响应里没有这个字段，或值是 null。对应 Vue `value ?? 0`。
-    Missing,
-    /// 响应里的非负整数，含 0。
-    Count(u64),
-    /// 小数、负数或其他不能当条数的值。这一行不画，也不改成 0。
-    NotCount,
-}
-
-impl EagleSummaryCount {
-    /// 这一格要显示的文字。`NotCount` 不显示。
-    pub fn label(self) -> Option<String> {
-        match self {
-            Self::Missing => Some("0".into()),
-            Self::Count(value) => Some(value.to_string()),
-            Self::NotCount => None,
-        }
-    }
-}
-
-/// 警告行。`kind` 是 Vue 的 `type || warningType || "warning"`，`text` 是 `warningText`。
+/// 警告行：类型和说明。说明依次取原因、素材 id、来源 id，都没有时写细节 JSON。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EagleImportWarning {
     pub kind: String,
     pub text: String,
 }
 
-/// Eagle 导入结果卡。有真值 `summary` 才构造；九个计数各自按响应取值。
+/// Eagle 导入结果卡：九项计数来自导入摘要；警告最多列前 20 条，条数是全部警告数。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct EagleImportReport {
-    pub imported_files: EagleSummaryCount,
-    pub imported_directories: EagleSummaryCount,
-    /// `warnings` 数组的长度。不是数组时为 0。最多只展示前 20 条，条数仍用这个长度。
-    pub warning_count: u64,
-    /// 最多 20 条。文字只来自 Vue `warningText`，没有文字时是空字符串。
+    pub summary: EagleLibraryImportSummary,
+    pub warning_count: usize,
     pub warnings: Vec<EagleImportWarning>,
-    /// `summary.importedTrashEntries`。
-    pub imported_trash_entries: EagleSummaryCount,
-    /// `summary.importedShortcuts`。
-    pub imported_shortcuts: EagleSummaryCount,
-    /// `summary.importedSmartFolders`。
-    pub imported_smart_folders: EagleSummaryCount,
-    /// `summary.importedRepositoryActions`。
-    pub imported_repository_actions: EagleSummaryCount,
-    /// `summary.importedTagGroups`。
-    pub imported_tag_groups: EagleSummaryCount,
-    /// `summary.importedAliasGroups`。
-    pub imported_alias_groups: EagleSummaryCount,
-    /// `summary.importedHardlinkGroups`。
-    pub imported_hardlink_groups: EagleSummaryCount,
 }
 
 /// 归约后交给宿主的服务请求。
@@ -556,9 +517,9 @@ pub enum FilesMessage {
         hardlinks: bool,
         folder_tree: Option<ProtocolFolderTree>,
     },
-    /// Eagle 导入协议返回。`Ok(Some)` 是响应里的文件数、目录数、警告，以及真有的其余计数；`Ok(None)` 是成功但缺这三个字段；`Err` 是协议失败原因。
+    /// Eagle 导入长任务返回：成功时是结果卡，失败时是原因。
     EagleImportSettled {
-        result: Result<Option<EagleImportReport>, String>,
+        result: Result<EagleImportReport, String>,
     },
     /// 复制以后读到的候选。`epoch` 是请求时候选列表的版本，比现在旧的结果丢掉。
     HardlinksLoaded {

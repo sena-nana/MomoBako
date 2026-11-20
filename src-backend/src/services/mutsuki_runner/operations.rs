@@ -7,30 +7,19 @@ use std::{
 };
 
 use mutsuki_runtime_contracts::{DomainEvent, RunnerResult, RuntimeError, ScalarValue, Task};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
 use serde_json::json;
 
 use super::protocols::*;
 use crate::services::repository::{
     download_playlist_with_progress_cancellable, CancellationCheck, DownloaderPlaylistRequest,
-    EntryPlaybackProgressEvent, EntryPlaybackRequest, FileDeleteRequest,
+    EntryDeleteRequest, EntryDeleteResponse, EntryPlaybackProgressEvent, EntryPlaybackRequest,
+    FileDeleteRequest, RepositoryState,
 };
 use crate::services::runtime::{sync_watched_paths, RepositoryRuntime};
 
 const ERROR_INVALID_PAYLOAD: &str = "momobako.invalid_payload";
 const ERROR_OPERATION_FAILED: &str = "momobako.operation_failed";
-
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum EntryDeleteOperationRequest {
-    Single(FileDeleteRequest),
-    Batch {
-        #[serde(rename = "repoId")]
-        repo_id: String,
-        paths: Vec<String>,
-        mode: Option<String>,
-    },
-}
 
 /// 复用 RepositoryRuntime 的写锁与 watcher 同步语义。
 pub(super) struct RepositoryTaskExecutor<'a> {
@@ -152,42 +141,12 @@ impl<'a> RepositoryTaskExecutor<'a> {
                 }),
             ),
             PROTOCOL_ENTRY_DELETE => {
-                let request = decode_request::<EntryDeleteOperationRequest>(task)
+                let request = decode_request::<EntryDeleteRequest>(task)
                     .map_err(|error| operation_error(task, error))?;
                 finish_operation(
                     task,
                     events,
-                    self.write(|state| match request {
-                        EntryDeleteOperationRequest::Single(request) => {
-                            serde_json::to_value(state.delete_entry(request)?)
-                                .map_err(|error| error.to_string())
-                        }
-                        EntryDeleteOperationRequest::Batch {
-                            repo_id,
-                            paths,
-                            mode,
-                        } => {
-                            if paths.is_empty() {
-                                return Err("no paths were provided for batch deletion".to_string());
-                            }
-                            let deleted_count = paths.len();
-                            let mut snapshot = None;
-                            for path in paths {
-                                self.cancellation.checkpoint()?;
-                                snapshot = Some(state.delete_entry(FileDeleteRequest {
-                                    repo_id: repo_id.clone(),
-                                    path,
-                                    mode: mode.clone(),
-                                })?);
-                            }
-                            self.cancellation.checkpoint()?;
-                            Ok(json!({
-                                "repoId": repo_id,
-                                "deletedCount": deleted_count,
-                                "snapshot": snapshot,
-                            }))
-                        }
-                    }),
+                    self.write(|state| self.delete_entries(state, request)),
                 )
             }
             PROTOCOL_REPOSITORY_ACTION_RUN => finish_operation(
@@ -208,6 +167,43 @@ impl<'a> RepositoryTaskExecutor<'a> {
                 "内建长任务 runner 不支持该协议。",
             )),
         }
+    }
+
+    /// 删除一个或一批条目。一批时逐条删，条目之间可以取消；结果带最后一次删除后的目录快照。
+    fn delete_entries(
+        &self,
+        state: &RepositoryState,
+        request: EntryDeleteRequest,
+    ) -> Result<EntryDeleteResponse, String> {
+        let (repo_id, paths, mode) = match request {
+            EntryDeleteRequest::Single(request) => {
+                (request.repo_id, vec![request.path], request.mode)
+            }
+            EntryDeleteRequest::Batch {
+                repo_id,
+                paths,
+                mode,
+            } => (repo_id, paths, mode),
+        };
+        if paths.is_empty() {
+            return Err("no paths were provided for batch deletion".to_string());
+        }
+        let deleted_count = paths.len();
+        let mut snapshot = None;
+        for path in paths {
+            self.cancellation.checkpoint()?;
+            snapshot = Some(state.delete_entry(FileDeleteRequest {
+                repo_id: repo_id.clone(),
+                path,
+                mode: mode.clone(),
+            })?);
+        }
+        self.cancellation.checkpoint()?;
+        Ok(EntryDeleteResponse {
+            repo_id,
+            deleted_count,
+            snapshot,
+        })
     }
 
     /// 准备播放源，并把插件进度转换为 Mutsuki 领域事件。

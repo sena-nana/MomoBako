@@ -4,16 +4,15 @@
 //! 起来、任务排不进去或解码时 panic 都按失败写回，预览不会停在读取中。
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 
 use nana_ui::RuntimeProgramContext;
 use serde_json::Value;
 
+use crate::backend::app::RepositoryQueryService;
 use crate::backend::services::repository::{
     FilePreviewSourceResponse, FileReadRequest, MetadataUpdateRequest, SearchDateFilter,
     SearchMetadataFilter, SearchNumberFilter, SearchRequest, SearchSort,
 };
-use crate::backend::viewmodels::RepositoryQueryViewModel;
 use crate::playback_source::{Requester, prepare_and_read};
 use crate::shell::inspect_lyrics::{self, LyricHint};
 use crate::shell::{
@@ -121,20 +120,18 @@ pub(crate) trait ImagePreviewSource {
     fn read(&self, request: FileReadRequest) -> Result<Vec<u8>, String>;
 }
 
-/// 产品里的预览源：在任务线程里阻塞调用仓库查询 ViewModel。
+/// 产品里的预览源：在任务线程里调用仓库查询服务。
 struct QueryImageSource {
-    query: RepositoryQueryViewModel,
-    executor: Arc<tokio::runtime::Runtime>,
+    query: RepositoryQueryService,
 }
 
 impl ImagePreviewSource for QueryImageSource {
     fn prepare(&self, request: FileReadRequest) -> Result<FilePreviewSourceResponse, String> {
-        self.executor
-            .block_on(self.query.prepare_preview_file_source(request))
+        self.query.prepare_preview_file_source(request)
     }
 
     fn read(&self, request: FileReadRequest) -> Result<Vec<u8>, String> {
-        self.executor.block_on(self.query.read_file(request))
+        self.query.read_file(request)
     }
 }
 
@@ -157,7 +154,6 @@ fn dispatch_image(
         |services| {
             let source = QueryImageSource {
                 query: services.repository_query.clone(),
-                executor: services.executor.clone(),
             };
             move || load_image_preview(&source, repo_id, path)
         },
@@ -245,16 +241,15 @@ fn dispatch_media(
         |services| {
             let query = services.repository_query.clone();
             let tasks = services.tasks.clone();
-            let executor = services.executor.clone();
             move || {
                 let (bytes, mut prep, hint) = if virtual_entry {
-                    prepare_and_read(&tasks, &executor, Requester::Preview, &repo_id, &path)
+                    prepare_and_read(&tasks, Requester::Preview, &repo_id, &path)
                 } else {
                     (
-                        executor.block_on(query.read_file(FileReadRequest {
+                        query.read_file(FileReadRequest {
                             repo_id: repo_id.clone(),
                             path: path.clone(),
-                        })),
+                        }),
                         SourcePrep::default(),
                         LyricHint::Absent,
                     )
@@ -292,13 +287,12 @@ fn dispatch_text(
         failed,
         |services| {
             let query = services.repository_query.clone();
-            let executor = services.executor.clone();
             move || {
-                let result = executor
-                    .block_on(query.read_file(FileReadRequest {
+                let result = query
+                    .read_file(FileReadRequest {
                         repo_id,
                         path: path.clone(),
-                    }))
+                    })
                     .map(|bytes| prepare_preview_text(&bytes));
                 if let Err(error) = &result {
                     eprintln!("Nana 读取文本预览失败：{path}：{error}");
@@ -331,13 +325,12 @@ fn dispatch_native(
         failed,
         |services| {
             let query = services.repository_query.clone();
-            let executor = services.executor.clone();
             move || {
-                let result = executor
-                    .block_on(query.read_file(FileReadRequest {
+                let result = query
+                    .read_file(FileReadRequest {
                         repo_id,
                         path: path.clone(),
-                    }))
+                    })
                     .and_then(|bytes| crate::shell::load_native_preview(&view_id, &bytes));
                 native_message(path, generation, result)
             }
@@ -374,13 +367,12 @@ fn dispatch_archive_entry(
         failed,
         |services| {
             let query = services.repository_query.clone();
-            let executor = services.executor.clone();
             move || {
-                let result = executor
-                    .block_on(query.read_file(FileReadRequest {
+                let result = query
+                    .read_file(FileReadRequest {
                         repo_id,
                         path: path.clone(),
-                    }))
+                    })
                     .and_then(|bytes| {
                         crate::shell::preview_archive_entry(&bytes, &through, &entry)
                     });
@@ -411,7 +403,6 @@ fn dispatch_save(
         failed,
         |services| {
             let query = services.repository_query.clone();
-            let executor = services.executor.clone();
             move || {
                 let request = MetadataUpdateRequest {
                     repo_id,
@@ -421,8 +412,8 @@ fn dispatch_save(
                     source: Some("desktop".into()),
                 };
                 saved_message(
-                    executor
-                        .block_on(query.update_asset_metadata(request))
+                    query
+                        .update_asset_metadata(request)
                         .map(|response| (response.outcome, response.asset)),
                 )
             }
@@ -445,12 +436,7 @@ fn dispatch_refresh_asset(
         failed,
         |services| {
             let query = services.repository_query.clone();
-            let executor = services.executor.clone();
-            move || {
-                ShellMessage::RefreshAssetLoaded(
-                    executor.block_on(query.get_asset_detail(repo_id, asset_id)),
-                )
-            }
+            move || ShellMessage::RefreshAssetLoaded(query.get_asset_detail(repo_id, asset_id))
         },
     );
 }
@@ -469,12 +455,7 @@ fn dispatch_asset(
         failed,
         |services| {
             let query = services.repository_query.clone();
-            let executor = services.executor.clone();
-            move || {
-                ShellMessage::AssetDetailLoaded(
-                    executor.block_on(query.get_asset_detail(repo_id, asset_id)),
-                )
-            }
+            move || ShellMessage::AssetDetailLoaded(query.get_asset_detail(repo_id, asset_id))
         },
     );
 }
@@ -494,18 +475,14 @@ fn dispatch_search(
         failed,
         |services| {
             let query = services.repository_query.clone();
-            let executor = services.executor.clone();
             move || {
-                let result =
-                    executor
-                        .block_on(query.search_assets(service_request))
-                        .map(|response| {
-                            response
-                                .results
-                                .into_iter()
-                                .map(SearchRow::from_hit)
-                                .collect()
-                        });
+                let result = query.search_assets(service_request).map(|response| {
+                    response
+                        .results
+                        .into_iter()
+                        .map(SearchRow::from_hit)
+                        .collect()
+                });
                 search_message(generation, result)
             }
         },
@@ -603,7 +580,6 @@ fn dispatch_lyrics(
         failed,
         |services| {
             let query = services.repository_query.clone();
-            let executor = services.executor.clone();
             move || {
                 let hint = match lyric_path.clone() {
                     Some(path) => LyricHint::Local(path),
@@ -611,10 +587,10 @@ fn dispatch_lyrics(
                 };
                 let repo_id = repo_id.clone();
                 let text = inspect_lyrics::text_for(hint, &audio_path, |path| {
-                    executor.block_on(query.read_file(FileReadRequest {
+                    query.read_file(FileReadRequest {
                         repo_id: repo_id.clone(),
                         path: path.to_string(),
-                    }))
+                    })
                 });
                 lyrics_message(audio_path, generation, text)
             }

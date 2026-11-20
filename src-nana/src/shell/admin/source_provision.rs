@@ -35,10 +35,6 @@ pub enum SourceStep {
     ProvisionUpdate { repo_id: String, name: String },
     /// 已有仓库：配置本地缓存目录。
     ProvisionCache { repo_id: String, name: String },
-    /// 新仓库：跳过首次同步创建。
-    ProvisionCreate { repo_id: String, name: String },
-    /// 后台同步。
-    Sync { repo_id: String },
 }
 
 /// 一个来源插件设置页的状态。收起设置或换插件时重置，对应 Vue 组件卸载。
@@ -429,16 +425,6 @@ pub(crate) fn finish(model: &mut ShellViewModel, step: SourceStep, result: Resul
         model.admin.source_auth.busy = false;
         return;
     };
-    if let SourceStep::Sync { repo_id } = &step {
-        match result {
-            Ok(_) => model.workspace.request_repository_refresh(),
-            Err(error) => {
-                eprintln!("Nana 来源仓库后台同步失败：{repo_id}：{error}");
-                model.admin.source_auth.error = format!("后台同步失败：{error}");
-            }
-        }
-        return;
-    }
     let payload = match result {
         Ok(payload) => payload,
         Err(error) => return fail(model, error),
@@ -522,17 +508,6 @@ pub(crate) fn finish(model: &mut ShellViewModel, step: SourceStep, result: Resul
                 format!("已更新 {name} 的登录状态，正在同步。"),
             );
         }
-        SourceStep::ProvisionCreate { repo_id, name } => {
-            if let Some(operation) = model.admin.source_auth.create_operation.take() {
-                model
-                    .operation
-                    .update(operation, OperationPatch::step("切换到新资源库", 72.0));
-            }
-            adopt_created(model, &payload);
-            model.select_workspace_repository(&repo_id);
-            complete(model, &repo_id, format!("已创建 {name}，正在同步。"));
-        }
-        SourceStep::Sync { .. } => {}
     }
 }
 
@@ -641,62 +616,46 @@ fn complete(model: &mut ShellViewModel, repo_id: &str, message: String) {
     });
 }
 
-/// 把建仓返回的仓库先放进列表，切换不用等列表刷新。
-fn adopt_created(model: &mut ShellViewModel, payload: &Value) {
-    let Some(repository) = payload.get("repository") else {
-        eprintln!("Nana 来源建仓返回没有仓库摘要：{payload}");
-        return;
+/// 新仓库建好（跳过首次同步）：先把它放进资源库列表，切过去，再在后台同步。
+pub(crate) fn finish_created(
+    model: &mut ShellViewModel,
+    name: &str,
+    result: Result<RepositorySummary, String>,
+) {
+    let repository = match result {
+        Ok(repository) => repository,
+        Err(error) => return fail(model, error),
     };
-    let Some(repo_id) = text_at(repository.get("repoId")) else {
-        eprintln!("Nana 来源建仓返回没有仓库标识");
-        return;
-    };
-    if model
+    if let Some(operation) = model.admin.source_auth.create_operation.take() {
+        model
+            .operation
+            .update(operation, OperationPatch::step("切换到新资源库", 72.0));
+    }
+    let repo_id = repository.repo_id.clone();
+    if !model
         .workspace
         .repositories
         .iter()
         .any(|item| item.repo_id == repo_id)
     {
-        return;
+        model
+            .workspace
+            .repositories
+            .push(WorkspaceRepository::from_summary(&repository));
     }
-    let backend = repository.get("backend");
-    let cache = repository.get("localCache");
-    let authentication = repository.get("authentication");
-    model.workspace.repositories.push(WorkspaceRepository {
-        repo_id,
-        name: text_at(repository.get("name")).unwrap_or_default(),
-        path: text_at(repository.get("path")).unwrap_or_default(),
-        status: text_at(repository.get("status")).unwrap_or_else(|| "ready".into()),
-        backend_plugin_id: backend
-            .and_then(|item| text_at(item.get("pluginId")))
-            .unwrap_or_default(),
-        capabilities: backend
-            .and_then(|item| item.get("capabilities"))
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(|item| item.as_str().map(str::to_string))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        cache_required: cache
-            .and_then(|item| item.get("required"))
-            .and_then(Value::as_bool)
-            == Some(true),
-        cache_status: cache
-            .and_then(|item| text_at(item.get("status")))
-            .unwrap_or_default(),
-        cache_path: cache.and_then(|item| text_at(item.get("path"))),
-        login_expired: authentication
-            .and_then(|item| item.get("loginExpired"))
-            .and_then(Value::as_bool)
-            == Some(true),
-        logged_out: authentication
-            .and_then(|item| item.get("loggedIn"))
-            .and_then(Value::as_bool)
-            == Some(false),
-    });
+    model.select_workspace_repository(&repo_id);
+    complete(model, &repo_id, format!("已创建 {name}，正在同步。"));
+}
+
+/// 后台同步结束：成功刷新资源库列表，失败写在登录区。
+pub(crate) fn finish_synced(model: &mut ShellViewModel, repo_id: &str, result: Result<(), String>) {
+    match result {
+        Ok(()) => model.workspace.request_repository_refresh(),
+        Err(error) => {
+            eprintln!("Nana 来源仓库后台同步失败：{repo_id}：{error}");
+            model.admin.source_auth.error = format!("后台同步失败：{error}");
+        }
+    }
 }
 
 /// 新仓库名称：资料昵称、账号用户名，最后是「插件名 账号」。

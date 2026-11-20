@@ -1,30 +1,26 @@
-//! MomoBako 长任务的提交、观察和取消边界。
+//! 长任务的提交、观察和取消。宿主提交的是类型化协议（`services::mutsuki_runner::TaskProtocol`），
+//! 拿回带类型的结果和进度事件。
 
-use crate::services::mutsuki_runner::MomoTaskRuntime;
-use serde::Serialize;
-use serde_json::Value;
+use crate::services::mutsuki_runner::{MomoTaskRuntime, TaskOutput, TaskProtocol};
 use std::sync::Arc;
 
 #[derive(Clone)]
-pub struct MutsukiTaskViewModel {
+pub struct TaskService {
     runtime: Arc<MomoTaskRuntime>,
 }
 
-impl MutsukiTaskViewModel {
+impl TaskService {
     pub fn new(runtime: Arc<MomoTaskRuntime>) -> Self {
         Self { runtime }
     }
 
-    /// 将命令请求提交给 Momo 自有双 lane runtime，并保留任务产生的进度事件。
-    pub async fn execute<Request>(
+    /// 提交一个内建长任务，阻塞到它结束，交回带类型的结果和它报过的进度事件。失败时交回领域的原话。
+    /// 在宿主的任务线程里调用。
+    pub fn run<P: TaskProtocol>(
         &self,
-        protocol_id: &'static str,
-        request: Request,
-    ) -> Result<(Value, Vec<Value>), String>
-    where
-        Request: Serialize + Send + 'static,
-    {
-        self.runtime.execute(protocol_id, request).await
+        request: P::Request,
+    ) -> Result<TaskOutput<P::Response>, String> {
+        self.runtime.run::<P>(request)
     }
 
     /// 返回当前可取消任务的稳定 ID 列表。

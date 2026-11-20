@@ -7,18 +7,18 @@
 use nana_ui::RuntimeProgramContext;
 
 use crate::MomoBakoApplication;
+use crate::backend::app::PluginService;
 use crate::backend::services::mutsuki_runner::{
-    PROTOCOL_REPOSITORY_ACTION_RUN, PROTOCOL_REPOSITORY_CREATE, PROTOCOL_REPOSITORY_SYNC,
+    RepositoryActionRun, RepositoryCreate, RepositorySync,
 };
 use crate::backend::services::repository::{
     BinaryFileWriteRequest, NeteaseRepositoryCacheConfigureRequest, PlaylistItemsByPathsAddRequest,
     PlaylistMutationRequest, PluginCallRequest, PluginConfigDeleteRequest, PluginConfigSetRequest,
     PluginConfigSnapshot, PluginEnabledRequest, PluginHookExecutionListRequest,
-    PluginInstallRequest, PluginManifest, RepositoryAction, RepositoryActionRunRequest,
+    PluginInstallRequest, PluginManifest, RepositoryActionRunRequest,
     RepositoryBackendConfigUpdateRequest, RepositoryMutationRequest, SyncRequest, SystemLogQuery,
     SystemLogWriteRequest,
 };
-use crate::backend::viewmodels::PluginViewModel;
 use crate::services::NativeServices;
 use crate::shell::admin::api::{self, ApiMessage, HttpRequest};
 use crate::shell::admin::source_download::DownloadOutcome;
@@ -57,8 +57,6 @@ fn admin(message: AdminMessage) -> ShellMessage {
     ShellMessage::Admin(message)
 }
 
-type Executor = std::sync::Arc<tokio::runtime::Runtime>;
-
 fn dispatch_one(
     app: &mut MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
@@ -84,30 +82,22 @@ fn dispatch_one(
         AdminEffect::ClearLogs => clear_logs(app, context),
         AdminEffect::LoadAppSettings => load_app_settings(app, context),
         AdminEffect::LoadPlaylistPlayers => load_players(app, context),
-        AdminEffect::Install(path) => {
-            plugins_task(app, context, "插件安装", move |plugin, executor| {
-                executor
-                    .block_on(
-                        plugin.install_plugin_from_archive(PluginInstallRequest {
-                            package_path: path,
-                        }),
-                    )
-                    .map(|response| response.plugins)
-            })
-        }
+        AdminEffect::Install(path) => plugins_task(app, context, "插件安装", move |plugin| {
+            plugin
+                .install_plugin_from_archive(PluginInstallRequest { package_path: path })
+                .map(|response| response.plugins)
+        }),
         AdminEffect::DeletePlugin(plugin_id) => {
-            plugins_task(app, context, "插件删除", move |plugin, executor| {
-                executor
-                    .block_on(plugin.delete_plugin(plugin_id))
+            plugins_task(app, context, "插件删除", move |plugin| {
+                plugin
+                    .delete_plugin(plugin_id)
                     .map(|response| response.plugins)
             })
         }
         AdminEffect::SetEnabled { plugin_id, enabled } => {
-            plugins_task(app, context, "插件启停", move |plugin, executor| {
-                executor
-                    .block_on(
-                        plugin.set_plugin_enabled(PluginEnabledRequest { plugin_id, enabled }),
-                    )
+            plugins_task(app, context, "插件启停", move |plugin| {
+                plugin
+                    .set_plugin_enabled(PluginEnabledRequest { plugin_id, enabled })
                     .map(|response| response.plugins)
             })
         }
@@ -115,34 +105,23 @@ fn dispatch_one(
             plugin_id,
             key,
             value,
-        } => config_task(
-            app,
-            context,
-            "插件设置保存",
-            move |plugin, executor| {
-                executor.block_on(plugin.set_plugin_config_value(PluginConfigSetRequest {
-                    plugin_id,
-                    key,
-                    value,
-                }))
-            },
-        ),
-        AdminEffect::DeleteConfig { plugin_id, key } => config_task(
-            app,
-            context,
-            "插件设置重置",
-            move |plugin, executor| {
-                executor.block_on(
-                    plugin.delete_plugin_config_value(PluginConfigDeleteRequest { plugin_id, key }),
-                )
-            },
-        ),
-        AdminEffect::LoadConfig(plugin_id) => config_task(
-            app,
-            context,
-            "插件设置读取",
-            move |plugin, executor| executor.block_on(plugin.get_plugin_config(plugin_id)),
-        ),
+        } => config_task(app, context, "插件设置保存", move |plugin| {
+            plugin.set_plugin_config_value(PluginConfigSetRequest {
+                plugin_id,
+                key,
+                value,
+            })
+        }),
+        AdminEffect::DeleteConfig { plugin_id, key } => {
+            config_task(app, context, "插件设置重置", move |plugin| {
+                plugin.delete_plugin_config_value(PluginConfigDeleteRequest { plugin_id, key })
+            })
+        }
+        AdminEffect::LoadConfig(plugin_id) => {
+            config_task(app, context, "插件设置读取", move |plugin| {
+                plugin.get_plugin_config(plugin_id)
+            })
+        }
         AdminEffect::OpenDataDirectory { plugin_id, name } => {
             open_directory(app, context, plugin_id, name)
         }
@@ -214,15 +193,14 @@ fn dispatch_one(
                 step,
                 move |services| {
                     let management = services.repository_management.clone();
-                    let executor = services.executor.clone();
                     move || {
-                        executor
-                            .block_on(management.update_repository_backend_config(
+                        management
+                            .update_repository_backend_config(
                                 RepositoryBackendConfigUpdateRequest {
                                     repo_id,
                                     backend_config,
                                 },
-                            ))
+                            )
                             .and_then(|response| {
                                 serde_json::to_value(response)
                                     .map_err(|error| format!("仓库配置结果无法序列化：{error}"))
@@ -238,15 +216,14 @@ fn dispatch_one(
         } => {
             source_task(app, context, "配置来源缓存", step, move |services| {
                 let management = services.repository_management.clone();
-                let executor = services.executor.clone();
                 move || {
                     let request = NeteaseRepositoryCacheConfigureRequest {
                         repo_id,
                         path,
                         migrate_legacy_cache: true,
                     };
-                    executor
-                        .block_on(management.configure_netease_repository_cache(request))
+                    management
+                        .configure_netease_repository_cache(request)
                         .and_then(|response| {
                             serde_json::to_value(response)
                                 .map_err(|error| format!("缓存配置结果无法序列化：{error}"))
@@ -261,46 +238,57 @@ fn dispatch_one(
             backend_plugin_id,
             backend_config,
         } => {
-            let step = SourceStep::ProvisionCreate {
-                repo_id: repo_id.clone(),
-                name: name.clone(),
-            };
             let request = RepositoryMutationRequest {
                 repo_id: Some(repo_id),
-                name,
+                name: name.clone(),
                 path,
                 backend_plugin_id: Some(backend_plugin_id),
                 backend_config: Some(backend_config),
                 skip_initial_sync: true,
             };
-            source_task(app, context, "来源建仓", step, move |services| {
-                let tasks = services.tasks.clone();
-                let executor = services.executor.clone();
-                move || {
-                    executor
-                        .block_on(tasks.execute(PROTOCOL_REPOSITORY_CREATE, request))
-                        .map(|(output, _)| output)
-                }
-            });
+            let failed_name = name.clone();
+            spawn_service(
+                app.services.as_ref(),
+                context,
+                "来源建仓",
+                move |error| {
+                    admin(AdminMessage::SourceRepositoryCreated {
+                        name: failed_name.clone(),
+                        result: Err(error),
+                    })
+                },
+                |services| {
+                    let tasks = services.tasks.clone();
+                    move || {
+                        let result = tasks
+                            .run::<RepositoryCreate>(request)
+                            .map(|output| output.result.repository);
+                        admin(AdminMessage::SourceRepositoryCreated { name, result })
+                    }
+                },
+            );
         }
         AdminEffect::SyncRepository { repo_id } => {
-            let step = SourceStep::Sync {
-                repo_id: repo_id.clone(),
-            };
-            source_task(
-                app,
+            let failed_repo = repo_id.clone();
+            spawn_service(
+                app.services.as_ref(),
                 context,
                 "来源仓库后台同步",
-                step,
-                move |services| {
+                move |error| {
+                    admin(AdminMessage::SourceRepositorySynced {
+                        repo_id: failed_repo.clone(),
+                        result: Err(error),
+                    })
+                },
+                |services| {
                     let tasks = services.tasks.clone();
-                    let executor = services.executor.clone();
                     move || {
-                        executor
-                            .block_on(
-                                tasks.execute(PROTOCOL_REPOSITORY_SYNC, SyncRequest { repo_id }),
-                            )
-                            .map(|(output, _)| output)
+                        let result = tasks
+                            .run::<RepositorySync>(SyncRequest {
+                                repo_id: repo_id.clone(),
+                            })
+                            .map(|_| ());
+                        admin(AdminMessage::SourceRepositorySynced { repo_id, result })
                     }
                 },
             );
@@ -372,15 +360,14 @@ fn call_plugin(
         failed,
         |services| {
             let plugin = services.plugin.clone();
-            let executor = services.executor.clone();
             move || {
                 let called = method.clone();
-                let result = executor.block_on(plugin.call_plugin(PluginCallRequest {
+                let result = plugin.call_plugin(PluginCallRequest {
                     plugin_id,
                     method,
                     repository_id,
                     payload,
-                }));
+                });
                 let result = match origin {
                     // Playground 显示整个调用结果，和 Vue `ctx.callPlugin` 的返回一致。
                     PluginCallOrigin::Playground => result.and_then(|item| {
@@ -414,11 +401,9 @@ fn create_source_playlist(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
                 let result = (|| {
-                    let existing =
-                        executor.block_on(interaction.list_playlists(repo_id.clone()))?;
+                    let existing = interaction.list_playlists(repo_id.clone())?;
                     if !existing
                         .iter()
                         .any(|playlist| playlist.playlist_id == playlist_id)
@@ -429,16 +414,14 @@ fn create_source_playlist(
                             name,
                             player_type_id,
                         };
-                        executor.block_on(interaction.create_playlist(request))?;
+                        interaction.create_playlist(request)?;
                     }
                     let request = PlaylistItemsByPathsAddRequest {
                         repo_id,
                         playlist_id,
                         paths: vec![path],
                     };
-                    executor
-                        .block_on(interaction.add_playlist_items_by_paths(request))
-                        .map(|_| ())
+                    interaction.add_playlist_items_by_paths(request).map(|_| ())
                 })();
                 admin(AdminMessage::SourcePlaylistFinished(result))
             }
@@ -460,14 +443,13 @@ fn write_logs(
         failed,
         |services| {
             let system = services.system.clone();
-            let executor = services.executor.clone();
             move || {
                 let failures: Vec<String> = requests
                     .into_iter()
                     .filter_map(|request| {
                         let action = request.action.clone();
-                        executor
-                            .block_on(system.write_system_log(request))
+                        system
+                            .write_system_log(request)
                             .err()
                             .map(|error| format!("{action}：{error}"))
                     })
@@ -538,17 +520,15 @@ fn load_bundle(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellM
         |services| {
             let plugin = services.plugin.clone();
             let system = services.system.clone();
-            let executor = services.executor.clone();
             move || {
-                let plugins = executor.block_on(plugin.list_plugins());
-                let hooks = executor.block_on(plugin.list_plugin_hook_executions(Some(
-                    PluginHookExecutionListRequest {
+                let plugins = plugin.list_plugins();
+                let hooks =
+                    plugin.list_plugin_hook_executions(Some(PluginHookExecutionListRequest {
                         plugin_id: None,
                         limit: Some(200),
-                    },
-                )));
-                let api = executor.block_on(plugin.get_api_design_snapshot());
-                let external = executor.block_on(system.get_external_api_connection_status());
+                    }));
+                let api = plugin.get_api_design_snapshot();
+                let external = system.get_external_api_connection_status();
                 admin(AdminMessage::SettingsBundleLoaded {
                     plugins,
                     hooks: hooks.map(|response| response.records),
@@ -572,8 +552,11 @@ fn load_cache(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMe
         |error| admin(AdminMessage::CacheLoaded(Err(error))),
         |services| {
             let plugin = services.plugin.clone();
-            let executor = services.executor.clone();
-            move || admin(AdminMessage::CacheLoaded(executor.block_on(plugin.get_cache_snapshot(repo_id))))
+            move || {
+                admin(AdminMessage::CacheLoaded(
+                    plugin.get_cache_snapshot(repo_id),
+                ))
+            }
         },
     );
 }
@@ -604,10 +587,7 @@ fn load_logs(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMes
         |error| ShellMessage::LogsLoaded(Err(error)),
         |services| {
             let system = services.system.clone();
-            let executor = services.executor.clone();
-            move || {
-                ShellMessage::LogsLoaded(executor.block_on(system.list_system_logs(Some(query))))
-            }
+            move || ShellMessage::LogsLoaded(system.list_system_logs(Some(query)))
         },
     );
 }
@@ -621,12 +601,7 @@ fn clear_logs(app: &MomoBakoApplication, context: &RuntimeProgramContext<ShellMe
         |error| admin(AdminMessage::LogsCleared(Err(error))),
         |services| {
             let system = services.system.clone();
-            let executor = services.executor.clone();
-            move || {
-                admin(AdminMessage::LogsCleared(
-                    executor.block_on(system.clear_system_logs()),
-                ))
-            }
+            move || admin(AdminMessage::LogsCleared(system.clear_system_logs()))
         },
     );
 }
@@ -655,12 +630,7 @@ fn load_players(app: &MomoBakoApplication, context: &RuntimeProgramContext<Shell
         players_failed,
         |services| {
             let plugin = services.plugin.clone();
-            let executor = services.executor.clone();
-            move || {
-                ShellMessage::PlaylistPlayersLoaded(
-                    executor.block_on(plugin.list_playlist_players()),
-                )
-            }
+            move || ShellMessage::PlaylistPlayersLoaded(plugin.list_playlist_players())
         },
     );
 }
@@ -675,7 +645,7 @@ fn plugins_task(
     app: &MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
     label: &'static str,
-    run: impl FnOnce(PluginViewModel, Executor) -> Result<Vec<PluginManifest>, String> + Send + 'static,
+    run: impl FnOnce(PluginService) -> Result<Vec<PluginManifest>, String> + Send + 'static,
 ) {
     spawn_service(
         app.services.as_ref(),
@@ -684,8 +654,7 @@ fn plugins_task(
         |error| admin(AdminMessage::PluginsReplaced(Err(error))),
         |services| {
             let plugin = services.plugin.clone();
-            let executor = services.executor.clone();
-            move || admin(AdminMessage::PluginsReplaced(run(plugin, executor)))
+            move || admin(AdminMessage::PluginsReplaced(run(plugin)))
         },
     );
 }
@@ -695,7 +664,7 @@ fn config_task(
     app: &MomoBakoApplication,
     context: &RuntimeProgramContext<ShellMessage>,
     label: &'static str,
-    run: impl FnOnce(PluginViewModel, Executor) -> Result<PluginConfigSnapshot, String> + Send + 'static,
+    run: impl FnOnce(PluginService) -> Result<PluginConfigSnapshot, String> + Send + 'static,
 ) {
     spawn_service(
         app.services.as_ref(),
@@ -704,8 +673,7 @@ fn config_task(
         |error| ShellMessage::PluginConfigLoaded(Err(error)),
         |services| {
             let plugin = services.plugin.clone();
-            let executor = services.executor.clone();
-            move || ShellMessage::PluginConfigLoaded(run(plugin, executor))
+            move || ShellMessage::PluginConfigLoaded(run(plugin))
         },
     );
 }
@@ -730,10 +698,9 @@ fn open_directory(
         failed,
         |services| {
             let plugin = services.plugin.clone();
-            let executor = services.executor.clone();
             move || {
-                let result = executor
-                    .block_on(plugin.get_plugin_data_directory(plugin_id))
+                let result = plugin
+                    .get_plugin_data_directory(plugin_id)
                     .map(|response| response.path);
                 admin(AdminMessage::DataDirectoryFinished { name, result })
             }
@@ -760,10 +727,8 @@ fn load_actions(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
-                let result =
-                    executor.block_on(interaction.list_repository_actions(repo_id.clone()));
+                let result = interaction.list_repository_actions(repo_id.clone());
                 admin(AdminMessage::ActionsLoaded { repo_id, result })
             }
         },
@@ -785,7 +750,6 @@ fn run_action(
         failed,
         |services| {
             let tasks = services.tasks.clone();
-            let executor = services.executor.clone();
             move || {
                 let request = RepositoryActionRunRequest {
                     repo_id,
@@ -793,22 +757,13 @@ fn run_action(
                     target_paths: Some(paths),
                     asset_ids: None,
                 };
-                let result =
-                    executor.block_on(tasks.execute(PROTOCOL_REPOSITORY_ACTION_RUN, request));
-                admin(AdminMessage::ActionRunFinished {
-                    result: result.and_then(|(value, _)| action_from_value(value)),
-                })
+                let result = tasks
+                    .run::<RepositoryActionRun>(request)
+                    .map(|output| output.result.action);
+                admin(AdminMessage::ActionRunFinished { result })
             }
         },
     );
-}
-
-fn action_from_value(value: serde_json::Value) -> Result<RepositoryAction, String> {
-    let action = value
-        .get("action")
-        .cloned()
-        .ok_or_else(|| "动作结果缺少 action".to_string())?;
-    serde_json::from_value(action).map_err(|error| format!("动作结果无法解析：{error}"))
 }
 
 fn write_file(
@@ -825,10 +780,9 @@ fn write_file(
         failed,
         |services| {
             let system = services.system.clone();
-            let executor = services.executor.clone();
             move || {
-                let result = executor
-                    .block_on(system.write_binary_file(BinaryFileWriteRequest { path, bytes }))
+                let result = system
+                    .write_binary_file(BinaryFileWriteRequest { path, bytes })
                     .map(|_| ());
                 admin(AdminMessage::WriteFinished(result))
             }

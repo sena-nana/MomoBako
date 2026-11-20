@@ -420,22 +420,31 @@ fn new_account_creates_the_repository_without_secrets_then_syncs() {
         other => panic!("unexpected {other:?}"),
     }
     let _ = model.workspace.take_effects();
-    finish(
+    send(
         &mut model,
-        SourceStep::ProvisionCreate {
-            repo_id: REPO.into(),
+        AdminMessage::SourceRepositoryCreated {
             name: "桃子".into(),
+            result: Ok(RepositorySummary {
+                repo_id: REPO.into(),
+                name: "桃子".into(),
+                path: "D:/cache/new".into(),
+                backend: RepositoryBackendSummary {
+                    plugin_id: PLUGIN.into(),
+                    kind: String::new(),
+                    name: String::new(),
+                    capabilities: vec!["read".into()],
+                },
+                status: "ready".into(),
+                asset_count: 0,
+                updated_at: String::new(),
+                local_cache: Some(RepositoryLocalCacheStatus {
+                    required: true,
+                    path: None,
+                    status: "ready".into(),
+                }),
+                authentication: None,
+            }),
         },
-        Ok(json!({
-            "repository": {
-                "repoId": REPO,
-                "name": "桃子",
-                "path": "D:/cache/new",
-                "status": "ready",
-                "backend": { "pluginId": PLUGIN, "capabilities": ["read"] },
-                "localCache": { "required": true, "status": "ready" }
-            }
-        })),
     );
     assert_eq!(model.admin.source_auth.message, "已创建 桃子，正在同步。");
     assert!(model.admin.source_auth.session.is_none());
@@ -463,20 +472,20 @@ fn new_account_creates_the_repository_without_secrets_then_syncs() {
     );
     assert_synced_and_switched(&mut model);
 
-    finish(
+    send(
         &mut model,
-        SourceStep::Sync {
+        AdminMessage::SourceRepositorySynced {
             repo_id: REPO.into(),
+            result: Err("网络断开".into()),
         },
-        Err("网络断开".into()),
     );
     assert_eq!(model.admin.source_auth.error, "后台同步失败：网络断开");
-    finish(
+    send(
         &mut model,
-        SourceStep::Sync {
+        AdminMessage::SourceRepositorySynced {
             repo_id: REPO.into(),
+            result: Ok(()),
         },
-        Ok(Value::Null),
     );
     assert!(
         model

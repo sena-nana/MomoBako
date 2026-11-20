@@ -541,6 +541,17 @@ fn with_no_window(command: &mut Command) -> &mut Command {
     command
 }
 
+/// 非 Windows 上 helper 不托管 LibreOffice 自带的 Python，健康检查报告没有 UNO 运行时。
+#[cfg(not(target_os = "windows"))]
+fn libreoffice_python_path(_soffice_path: &PathBuf) -> Option<PathBuf> {
+    None
+}
+
+#[cfg(not(target_os = "windows"))]
+fn uno_runtime_available(_python_path: &PathBuf) -> bool {
+    false
+}
+
 fn json_response(
     status: StatusCode,
     value: serde_json::Value,

@@ -52,7 +52,7 @@ pub mod host_api;
 pub mod services;
 pub mod theme_map;
 
-use backend::services::mutsuki_runner::{PROTOCOL_REPOSITORY_RELOCATE, PROTOCOL_REPOSITORY_SYNC};
+use backend::services::mutsuki_runner::{RepositoryRelocate, RepositorySync};
 use backend::services::repository::{
     RepositoryDeleteMode, RepositoryDeleteRequest, RepositoryRelocateRequest, SyncRequest,
 };
@@ -403,10 +403,9 @@ fn dispatch_list_repositories(
         failed,
         |services| {
             let query = services.repository_query.clone();
-            let executor = services.executor.clone();
             move || ShellMessage::WorkspaceListLoaded {
                 generation,
-                result: executor.block_on(query.list_repositories()),
+                result: query.list_repositories(),
             }
         },
     );
@@ -455,14 +454,10 @@ fn dispatch_workspace_effects(
                     failed,
                     |services| {
                         let tasks = services.tasks.clone();
-                        let executor = services.executor.clone();
                         move || {
-                            let result = executor
-                                .block_on(
-                                    tasks
-                                        .execute(PROTOCOL_REPOSITORY_SYNC, SyncRequest { repo_id }),
-                                )
-                                .map(|(output, _)| shell::SyncCounts::from_output(&output));
+                            let result = tasks
+                                .run::<RepositorySync>(SyncRequest { repo_id })
+                                .map(|output| shell::SyncCounts::from(&output.result));
                             ShellMessage::RepositorySynced { generation, result }
                         }
                     },
@@ -483,10 +478,9 @@ fn dispatch_workspace_effects(
                     failed,
                     |services| {
                         let query = services.repository_query.clone();
-                        let executor = services.executor.clone();
                         move || ShellMessage::RepositorySnapshotLoaded {
                             generation,
-                            result: executor.block_on(query.get_repository_snapshot(repo_id)),
+                            result: query.get_repository_snapshot(repo_id),
                         }
                     },
                 );
@@ -503,17 +497,13 @@ fn dispatch_workspace_effects(
                     failed,
                     |services| {
                         let tasks = services.tasks.clone();
-                        let query = services.repository_query.clone();
-                        let executor = services.executor.clone();
                         move || {
-                            let result = executor
-                                .block_on(tasks.execute(
-                                    PROTOCOL_REPOSITORY_RELOCATE,
-                                    RepositoryRelocateRequest { repo_id, path },
-                                ))
-                                .and_then(|(output, _)| {
-                                    app_dispatch::mutated_repository(&executor, &query, &output)
-                                });
+                            let result = tasks
+                                .run::<RepositoryRelocate>(RepositoryRelocateRequest {
+                                    repo_id,
+                                    path,
+                                })
+                                .map(|output| output.result.repository);
                             ShellMessage::MissingRelocateFinished(result)
                         }
                     },
@@ -533,11 +523,10 @@ fn dispatch_workspace_effects(
                     failed,
                     |services| {
                         let management = services.repository_management.clone();
-                        let executor = services.executor.clone();
                         move || {
                             let request = RepositoryDeleteRequest { repo_id, mode };
                             ShellMessage::MissingDeleteFinished(
-                                executor.block_on(management.delete_repository(request)),
+                                management.delete_repository(request),
                             )
                         }
                     },

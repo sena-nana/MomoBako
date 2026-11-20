@@ -123,10 +123,9 @@ pub(crate) fn dispatch_silent_list(
         failed,
         |services| {
             let query = services.repository_query.clone();
-            let executor = services.executor.clone();
             move || {
                 ShellMessage::SilentWorkspace(SilentMessage::Repositories(
-                    executor.block_on(query.list_repositories()),
+                    query.list_repositories(),
                 ))
             }
         },
@@ -147,10 +146,9 @@ pub(crate) fn dispatch_silent_snapshot(
         failed,
         |services| {
             let query = services.repository_query.clone();
-            let executor = services.executor.clone();
             move || {
                 ShellMessage::SilentWorkspace(SilentMessage::Snapshot(
-                    executor.block_on(query.get_repository_snapshot(repo_id)),
+                    query.get_repository_snapshot(repo_id),
                 ))
             }
         },

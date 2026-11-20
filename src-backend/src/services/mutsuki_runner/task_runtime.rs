@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{mpsc as std_mpsc, Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant};
 
+use super::protocols::{TaskOutput, TaskProtocol};
 use mutsuki_plugin_api::{plugin_error, PluginHostError, PluginResult, PluginTaskGateway};
 use mutsuki_runtime_contracts::{
     CancelPolicy, RuntimeError, ScalarValue, Task, TaskBatch, TaskHandle, TaskOutcome,
@@ -227,8 +228,9 @@ impl MomoTaskRuntime {
         task_runtime
     }
 
-    /// 把宿主的请求序列化后提交到正确 lane，交回任务输出和进度事件。
-    pub async fn execute<Request>(&self, protocol_id: &'static str, request: Request) -> TaskResult
+    /// 把宿主的请求序列化后提交到正确 lane，阻塞到任务结束，交回任务输出和进度事件。
+    /// 在宿主自己的任务线程里调用；不能在 Tokio 的异步上下文里调用。
+    pub fn execute<Request>(&self, protocol_id: &'static str, request: Request) -> TaskResult
     where
         Request: Serialize + Send + 'static,
     {
@@ -238,7 +240,17 @@ impl MomoTaskRuntime {
             self.state.next_task_id.fetch_add(1, Ordering::Relaxed)
         );
         self.execute_value(task_id, protocol_id.to_string(), payload)
-            .await
+    }
+
+    /// 提交一个类型化的内建任务，阻塞到它结束，把结果解成协议的结果类型。
+    pub fn run<P: TaskProtocol>(
+        &self,
+        request: P::Request,
+    ) -> Result<TaskOutput<P::Response>, String> {
+        let (value, events) = self.execute(P::ID, request)?;
+        let result = serde_json::from_value(value)
+            .map_err(|error| format!("{} 的结果解不开：{error}", P::ID))?;
+        Ok(TaskOutput { result, events })
     }
 
     /// 取消一个已提交或正在等待资源库写锁的任务。
@@ -276,12 +288,7 @@ impl MomoTaskRuntime {
             .unwrap_or_default()
     }
 
-    async fn execute_value(
-        &self,
-        task_id: String,
-        protocol_id: String,
-        payload: Value,
-    ) -> TaskResult {
+    fn execute_value(&self, task_id: String, protocol_id: String, payload: Value) -> TaskResult {
         let cancellation = Arc::new(MomoCancellation::new());
         self.state
             .progress
@@ -320,7 +327,7 @@ impl MomoTaskRuntime {
         } else {
             &self.state.background_tx
         };
-        if let Err(error) = sender.send(request).await {
+        if let Err(error) = sender.blocking_send(request) {
             let error_message = error.to_string();
             self.update_progress(&task_id, |snapshot| {
                 snapshot.status = "failed".into();
@@ -330,7 +337,7 @@ impl MomoTaskRuntime {
             self.remove_task(&task_id);
             return Err(format!("Momo task lane closed: {error_message}"));
         }
-        match result_rx.await {
+        match result_rx.blocking_recv() {
             Ok(result) => result,
             Err(_) => {
                 self.remove_task(&task_id);

@@ -2,13 +2,13 @@
 
 ## Transport
 
-- Primary transport: in-process calls. The Nana host (`src-nana`) starts one repository runtime (`RepositoryRuntime::start_at` on the service directory chosen in `src-nana/src/app_paths.rs`) and builds every ViewModel of `momobako-backend` on it (`NativeServices`, `src-nana/src/services.rs`). The UI reaches the domain only through these ViewModels; long-running operations are Mutsuki tasks submitted through `MutsukiTaskViewModel::execute` with a protocol id such as `momobako.entry.import`. A failed task hands back the domain's own reason (the `message` evidence of its runtime error, for example the reason a Source plugin returned) as the error string, so hosts can show it as is; the protocol, route and full evidence stay in the task snapshot's `error`.
+- Primary transport: in-process calls. The Nana host (`src-nana`) starts one repository runtime (`RepositoryRuntime::start_at` on the service directory chosen in `src-nana/src/app_paths.rs`) and builds every application service of `momobako-backend` on it (`NativeServices`, `src-nana/src/services.rs`). The UI reaches the domain only through these services; long-running operations are Mutsuki tasks run through `TaskService::run::<P>` with a typed protocol `P` (`TaskProtocol`: protocol id such as `momobako.entry.import`, request type and response type, `src-backend/src/services/mutsuki_runner/protocols.rs`). The call returns `TaskOutput { result, events }` with the response already decoded, so hosts never read task results as loose JSON. A failed task hands back the domain's own reason (the `message` evidence of its runtime error, for example the reason a Source plugin returned) as the error string, so hosts can show it as is; the protocol, route and full evidence stay in the task snapshot's `error`.
 - The paths in this document (`GET /repositories`, `POST /repositories/{repoId}/files:import`, …) name operations of a REST-like contract; the host calls them in process. Only the external API below (`/external/v1/*`) is served over HTTP.
-- Runtime execution: ViewModel methods are async. The host runs them on its own Tokio runtime (`NativeServices::executor`) from NanaUI task workers (`src-nana/src/task_guard.rs`); repository reads and writes run on that runtime's blocking pool, writes behind the runtime-wide write lock.
+- Runtime execution: application service methods are synchronous. The host calls them on NanaUI task workers (`src-nana/src/task_guard.rs`), never on the UI thread; repository reads run on the calling thread, writes behind the runtime-wide write lock, and writes that change the repository collection resync the file watcher afterwards (`services/runtime/executor.rs`).
 - Host events: the runtime and the logger push `HostEvent` values (`LogRecorded`, `RepositoryStructureUpdated`) into a `HostEventSink` (`src-backend/src/services/host_events.rs`); the Nana host receives them from `host_event_channel` and turns them into shell messages.
 - External client transport: a loopback HTTP API bound to `127.0.0.1` with a startup-generated bearer token written to the service connection file. The external API is source-neutral; browser extensions, native tools and other local clients all call the same contract.
 - Rust backend layering (`src-backend`, crate `momobako-backend`):
-  - `viewmodels/repository/{management,query,browser,interaction}.rs`, `viewmodels/plugin.rs`, `viewmodels/system.rs`, and `viewmodels/mutsuki_task.rs` act as the ViewModel layer for repository management, read/query flows, file browsing, repository interactions, plugin/cache operations, desktop-system helpers, and long-running tasks.
+  - `app/repository/{management,query,browser,interaction}.rs`, `app/plugin.rs`, `app/system.rs`, and `app/task.rs` are the application service layer (`RepositoryManagementService`, `RepositoryQueryService`, `FileBrowserService`, `RepositoryInteractionService`, `PluginService`, `SystemService`, `TaskService`) for repository management, read/query flows, file browsing, repository interactions, plugin/cache operations, desktop-system helpers, and long-running tasks. The host's views and view models live in `src-nana`; this layer holds no UI state.
   - `services/repository/mod.rs` is the facade over the repository feature modules.
   - `services/repository/state.rs` owns the `RepositoryState` shell, initialization, and other cross-feature state entrypoints.
   - `services/repository/plugin.rs` now owns plugin manifest normalization, dependency resolution, plugin config storage, runtime plugin archive handling, native library loading, and plugin hook execution records.
@@ -49,8 +49,8 @@
 ## Repository API
 
 - Current repository-management implementation follows the backend MVVM split above:
-  - repository-management orchestration lives in the dedicated ViewModel
-  - repository query, file-browser, playback/preview, plugin/cache, playlist/smart-folder/revision/action flows are routed through domain ViewModels before entering the repository runtime
+  - repository-management orchestration lives in the dedicated application service
+  - repository query, file-browser, playback/preview, plugin/cache, playlist/smart-folder/revision/action flows are routed through application services before entering the repository runtime
   - create/import/attach/delete/relocate/backend-config/cache-config/export/sync logic lives in the repository-management service module
   - snapshot/search/playback/file-browser logic lives in dedicated `services/repository/*` modules
   - repository-domain regression tests live in `src-backend/src/tests/repository/*` and `src-backend/src/services/repository/internal_tests.rs`; external asset import and playback preparation run from the centralized test tree
@@ -71,7 +71,7 @@
   - Creating a 网易云 repository uses the selected local cache directory as `path`; `backendConfig` keeps account credentials and defaults, and stores a non-secret `sourceUri: "netease-cloud-music://account/{accountId}"` for provenance.
   - The UI receives only repository summaries and must not depend on the full persisted `backendConfig`; authentication Sources persist only public account state plus `credentialRef`, never raw cookies or other account secrets.
 - `POST /repositories/{repoId}:delete`
-  - ViewModel: `RepositoryManagementViewModel::delete_repository`
+  - Service: `RepositoryManagementService::delete_repository`
   - Request includes `repoId` and `mode`.
   - `mode: "recordOnly"` only removes the registry entry and keeps the repository folder, `.momo`, and any app-managed state.
   - `mode: "deleteMetadata"` removes the registry entry and deletes the repository metadata directory. Local-root repositories delete `.momo` and legacy `.meta`; managed repositories delete the service-side metadata directory for that repo.
@@ -82,7 +82,7 @@
   - The selected folder must contain `.momo/repository.json` whose `repoId` matches the request; folders without metadata or with a different `repoId` are rejected.
   - A successful response returns the updated repository summary and preserves existing repository identity, metadata and smart folders.
 - `POST /repositories/{repoId}:configureNeteaseCache`
-  - ViewModel: `RepositoryManagementViewModel::configure_netease_repository_cache`
+  - Service: `RepositoryManagementService::configure_netease_repository_cache`
   - Request includes `repoId`, `path`, and optional `migrateLegacyCache` (the settings flow sends `true`).
   - Creates the selected cache directory, initializes the normal local repository structure under `.momo`, updates the registry path and repository metadata, and preserves `sourceUri`/account backend config.
   - Response includes `{ repository, migration }`; `migration` reports moved host-managed state files and identifiable old playback cache files, plus skipped and failed playback cache counts.
@@ -232,15 +232,15 @@
   - 网易云 virtual playback is rejected until `localCache.status === "ready"`. When ready, the core passes `managedCacheRoot` to `momobako.netease.source`, and all managed playback files are written under `{cacheRoot}/.momo/cache/netease-playback`.
   - Response carries `localPath`, optional `tempFilePath`, `lyricPath` and `wordLyricPath` as the Source returned them; `sourceUrl` is only set when the Source itself returns a remote address. The host decodes local files only, so it plays `localPath` (or `tempFilePath`); a Source that returns only a remote `sourceUrl` cannot be played.
   - A successful playback-source preparation updates `assets.last_accessed_at` without creating a revision entry. A failed preparation (the Source reports an error) leaves it unchanged.
-  - The task reports `EntryPlaybackProgressEvent` phases for resolving the entry, downloading or reusing the temporary audio, preparing the preview source, and readiness; `MutsukiTaskViewModel::execute` returns these events with the result, so a player can start only after the temporary source is ready.
+  - The task reports `EntryPlaybackProgressEvent` phases for resolving the entry, downloading or reusing the temporary audio, preparing the preview source, and readiness; `TaskService::run` returns these events with the result, so a player can start only after the temporary source is ready.
   - Playback and virtual-source preview flows should prefer this endpoint over `files:preparePreviewSource` when a file may not exist locally.
 - `POST /repositories/{repoId}/files:recordAccess`
-  - ViewModel: `RepositoryInteractionViewModel::record_entry_access`
+  - Service: `RepositoryInteractionService::record_entry_access`
   - Request body includes repository-relative `path`
   - Response returns `{ repoId, path, recordedAt }`
   - Used by direct open flows that hand control to the host OS so the desktop can keep the "最近使用" category in sync without refreshing the whole snapshot. The Nana host also calls it after it reads a local file's bytes directly for preview or playback, because `read_file` does not record access.
 - `POST /repositories/{repoId}/files:clearRecentAccessHistory`
-  - ViewModel: `RepositoryInteractionViewModel::clear_recent_access_history`
+  - Service: `RepositoryInteractionService::clear_recent_access_history`
   - Request body includes `repoId`
   - Response returns `{ repoId, clearedCount }`
   - Clears every non-null `lastAccessedAt` in the current repository so the desktop "最近使用" view becomes empty immediately.
@@ -255,7 +255,7 @@
     - optional `managedCacheRoot` for source repositories whose MomoBako-managed local state lives in a selected cache directory
     - optional playlist-level `sourcePayload`
     - optional `level`
-  - The task reports `DownloaderPlaylistProgressEvent` progress events, returned with the result by `MutsukiTaskViewModel::execute`, with:
+  - The task reports `DownloaderPlaylistProgressEvent` progress events, returned with the result by `TaskService::run`, with:
     - `phase`: `start` | `track` | `complete`
     - `playlistId`
     - optional `playlistName`
@@ -404,7 +404,7 @@
 - 宿主维护统一日志总线，内存保留最近 500 条记录，同时把标准化日志落盘到 `<serviceRoot>/logs/system.current.jsonl`。
 - 当前日志文件超过 `8 MiB` 时会轮转为 `system.1.jsonl` 到 `system.5.jsonl`；`clear_system_logs` 会同时清空内存缓存与全部归档文件。
 - 磁盘文件固定使用 JSONL，不写 ANSI 颜色码；彩色级别、高亮来源和上下文展开都由宿主的日志页负责渲染。
-- 下面三个操作是 `SystemViewModel` 的同名方法。
+- 下面三个操作是 `SystemService` 的同名方法。
 - `list_system_logs`
   - Request shape: `{ query }`
   - `query` 支持 `limit`, `before`, `levels`, `sourceKinds`, `pluginId`, `repoId`, `query`
@@ -541,30 +541,30 @@
   - Runtime plugin calls resolve `requires` and `optional` before dispatch. Missing or disabled required dependencies reject the call with the plugin disable reason; missing or disabled optional dependencies keep the call usable and return `runtime.degraded`, `runtime.degradationReason`, and `runtime.dependencyStatus` alongside the plugin payload.
   - `momobako.netease.source` uses `ncm-api-rs` directly for login, playlists, song URLs, details, lyrics, downloads, and cache management; `momobako.service.downloader` remains provider-neutral.
 - `GET /plugins:hook-executions`
-  - ViewModel: `PluginViewModel::list_plugin_hook_executions`
+  - Service: `PluginService::list_plugin_hook_executions`
   - Returns host-side execution records for declared hook actions; the host only records calls whose method matches a manifest `hooks[].action`
   - Supports optional `pluginId` filtering and `limit`; records are returned newest-first and default to the most recent 50 entries
   - Each record includes `executionId`, `pluginId`, `hookSlot`, `hookAction`, `hookLabel`, `status`, `message`, `target`, `startedAt`, `finishedAt`, and optional `runtime`
 - `GET /plugins/{pluginId}:data-directory`
-  - ViewModel: `PluginViewModel::get_plugin_data_directory`
+  - Service: `PluginService::get_plugin_data_directory`
   - Creates and returns the plugin data directory as `{ pluginId, path }`
   - The plugin manager exposes this from the plugin settings entry and shows the returned directory in the system file manager.
 - `GET /plugins/{pluginId}:config`
-  - ViewModel: `PluginViewModel::get_plugin_config`
+  - Service: `PluginService::get_plugin_config`
   - Creates the plugin data directory if needed and returns `{ pluginId, dataDirectory, schema, values }`
   - `schema` mirrors `manifest.contributes.settings`; `values` contains only stored key-value entries from `config.json`.
 - `PUT /plugins/{pluginId}:config/{key}`
-  - ViewModel: `PluginViewModel::set_plugin_config_value`
+  - Service: `PluginService::set_plugin_config_value`
   - Request body includes `{ pluginId, key, value }`
   - The host validates primitive values against declared schema fields when a matching field exists, then writes the value to `config.json`.
 - `DELETE /plugins/{pluginId}:config/{key}`
-  - ViewModel: `PluginViewModel::delete_plugin_config_value`
+  - Service: `PluginService::delete_plugin_config_value`
   - Request body includes `{ pluginId, key }`
   - Removes the stored value from `config.json`; manifest defaults remain available to the plugin manager's schema form.
 - `GET /api-design:snapshot`
   - Returns the host API test contract consumed by API Playground
   - Each endpoint includes `group`, `transport`, `method`, `path`, `summary`, and optional `pluginId`, `pluginMethod`, `requiresAuth`, and `requestTemplate`
-  - `transport` is `external-http` for loopback HTTP APIs or `plugin-call` for plugin-provided API tests. The in-process ViewModel operations are not listed: no client outside the host can call them.
+  - `transport` is `external-http` for loopback HTTP APIs or `plugin-call` for plugin-provided API tests. The in-process application service operations are not listed: no client outside the host can call them.
   - `tests/apiDesignContract.test.ts` checks that every external HTTP route in `external_api.rs` is listed and that the backend plugins' call methods are declared in their `apiTests`
 - `POST /files:writeBinary`
   - Request body includes absolute `path` and raw `bytes`
@@ -573,6 +573,6 @@
 ## Cache API
 
 - `GET /repositories/{repoId}/cache`
-  - ViewModel: `PluginViewModel::get_cache_snapshot(repo_id)`; implementation `src-backend/src/services/repository/cache_usage.rs`
+  - Service: `PluginService::get_cache_snapshot(repo_id)`; implementation `src-backend/src/services/repository/cache_usage.rs`
   - Returns `{ repoId, entries }`; each entry is `{ kind, label, path, files, bytes, modifiedAt }`, measured on disk: `thumbnails` is the repository thumbnail cache, `cache/<name>` is one subdirectory of `.momo/cache` (Office preview PDFs, 网易云 playback cache, download staging, …), and `cache` collects loose files directly under `.momo/cache`
   - There are no in-memory metadata or query caches to report

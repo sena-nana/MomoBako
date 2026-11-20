@@ -6,8 +6,8 @@
 use nana_ui::runtime::view::{Signal, signal};
 
 use super::super::ShellViewModel;
-use crate::backend::services::repository::CacheSnapshot;
 use super::support;
+use crate::backend::services::repository::CacheSnapshot;
 
 /// 设置页卡片要显示的东西。
 #[derive(Clone, Debug, PartialEq)]
@@ -93,8 +93,16 @@ impl CacheCard {
             .filter(|entry| entry.kind == "thumbnails")
             .map(|entry| entry.files)
             .sum::<u64>();
-        let files = snapshot.entries.iter().map(|entry| entry.files).sum::<u64>();
-        let bytes = snapshot.entries.iter().map(|entry| entry.bytes).sum::<u64>();
+        let files = snapshot
+            .entries
+            .iter()
+            .map(|entry| entry.files)
+            .sum::<u64>();
+        let bytes = snapshot
+            .entries
+            .iter()
+            .map(|entry| entry.bytes)
+            .sum::<u64>();
         let count = snapshot.entries.len();
         Self {
             metrics: [

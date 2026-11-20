@@ -1,4 +1,5 @@
-//! Blocking-task execution helpers for repository runtime operations.
+//! 资源库读写的执行边界：读直接在调用线程上做，写在 Runtime 级写锁后面做，改动资源库集合的写完成后
+//! 重新同步文件监听。宿主在自己的任务线程里调用，这里不再借 Tokio 的阻塞池。
 
 use super::{sync_watched_paths, RepositoryRuntime};
 use crate::services::repository::RepositoryState;
@@ -14,96 +15,51 @@ fn log_runtime_operation_error(action: &str, message: &str, error: &str) {
 }
 
 impl RepositoryRuntime {
-    /// Runs a read-only repository operation on the host Tokio runtime's blocking pool.
-    pub async fn run_read<T, F>(&self, operation: F) -> Result<T, String>
-    where
-        T: Send + 'static,
-        F: FnOnce(&RepositoryState) -> Result<T, String> + Send + 'static,
-    {
-        let repository_state = self.repository_state.clone();
-        match tokio::task::spawn_blocking(move || operation(&repository_state)).await {
-            Ok(result) => {
-                if let Err(error) = &result {
-                    log_runtime_operation_error("readFailed", "资源库读取操作失败。", error);
-                }
-                result
-            }
-            Err(error) => {
-                let error = error.to_string();
-                log_runtime_operation_error("readTaskFailed", "资源库读取任务执行失败。", &error);
-                Err(error)
-            }
+    /// 只读操作。失败记日志后交回原因。
+    pub fn read<T>(
+        &self,
+        operation: impl FnOnce(&RepositoryState) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let result = operation(&self.repository_state);
+        if let Err(error) = &result {
+            log_runtime_operation_error("readFailed", "资源库读取操作失败。", error);
         }
+        result
     }
 
-    /// Runs a write operation behind the runtime-wide write lock.
-    pub async fn run_write<T, F>(&self, operation: F) -> Result<T, String>
-    where
-        T: Send + 'static,
-        F: FnOnce(&RepositoryState) -> Result<T, String> + Send + 'static,
-    {
-        let repository_state = self.repository_state.clone();
-        let write_lock = self.write_lock.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            let _guard = write_lock
-                .lock()
-                .map_err(|_| "repository write lock poisoned".to_string())?;
-            operation(&repository_state)
-        })
-        .await;
-        match result {
-            Ok(result) => {
-                if let Err(error) = &result {
-                    log_runtime_operation_error("writeFailed", "资源库写入操作失败。", error);
-                }
-                result
-            }
-            Err(error) => {
-                let error = error.to_string();
-                log_runtime_operation_error("writeTaskFailed", "资源库写入任务执行失败。", &error);
-                Err(error)
-            }
+    /// 写操作，拿着 Runtime 级写锁做，写入互相排队。
+    pub fn write<T>(
+        &self,
+        operation: impl FnOnce(&RepositoryState) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let result = self
+            .write_lock
+            .lock()
+            .map_err(|_| "repository write lock poisoned".to_string())
+            .and_then(|_guard| operation(&self.repository_state));
+        if let Err(error) = &result {
+            log_runtime_operation_error("writeFailed", "资源库写入操作失败。", error);
         }
+        result
     }
 
-    /// Runs a repository-collection mutation and refreshes runtime watchers afterwards.
-    pub async fn run_repository_collection_write<T, F>(&self, operation: F) -> Result<T, String>
-    where
-        T: Send + 'static,
-        F: FnOnce(&RepositoryState) -> Result<T, String> + Send + 'static,
-    {
-        let repository_state = self.repository_state.clone();
-        let watcher_handle = self.watcher_handle.clone();
-        let write_lock = self.write_lock.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            let _guard = write_lock
-                .lock()
-                .map_err(|_| "repository write lock poisoned".to_string())?;
-            let response = operation(&repository_state)?;
-            sync_watched_paths(&repository_state, &watcher_handle)?;
-            Ok::<T, String>(response)
-        })
-        .await;
-        match result {
-            Ok(result) => {
-                if let Err(error) = &result {
-                    log_runtime_operation_error(
-                        "collectionWriteFailed",
-                        "资源库集合写入操作失败。",
-                        error,
-                    );
-                }
-                result
-            }
-            Err(error) => {
-                let error = error.to_string();
-                log_runtime_operation_error(
-                    "collectionWriteTaskFailed",
-                    "资源库集合写入任务执行失败。",
-                    &error,
-                );
-                Err(error)
-            }
+    /// 改动资源库集合（新建、删除、换位置）的写操作，完成后按新的资源库列表重新同步文件监听。
+    pub fn collection_write<T>(
+        &self,
+        operation: impl FnOnce(&RepositoryState) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let result = self
+            .write_lock
+            .lock()
+            .map_err(|_| "repository write lock poisoned".to_string())
+            .and_then(|_guard| {
+                let response = operation(&self.repository_state)?;
+                sync_watched_paths(&self.repository_state, &self.watcher_handle)?;
+                Ok(response)
+            });
+        if let Err(error) = &result {
+            log_runtime_operation_error("collectionWriteFailed", "资源库集合写入操作失败。", error);
         }
+        result
     }
 }

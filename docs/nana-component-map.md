@@ -55,7 +55,7 @@
 | `WorkspacePanelKey` | `WorkspacePanel`，和启动、加载错误、缺失仓库、空库（`MainRegion`）正交 |
 | 侧栏快捷方式和目录树 | `SidebarFrame` 里的 `ListItem` 行；文件夹树和智能文件夹树是按显示顺序展开的扁平行，用 `keyed(..).each` 建（`src-nana/src/shell/sidebar_view/tree.rs`），不用 `TreeView` |
 | composable 分支 | `ShellMessage` 和 `ShellViewModel`，记在逻辑矩阵 |
-| `repositoryApi` invoke | `NativeServices` 上的 ViewModel |
+| `repositoryApi` invoke | `NativeServices` 上的应用服务 |
 | 宿主事件 | `HostEvent` / `HostEventSink` |
 | 侧栏宽度 220–480，默认 276 | `theme_map::SIDEBAR_MIN_PX` / `SIDEBAR_DEFAULT_PX` / `SIDEBAR_MAX_PX`；工作区资源区的宽度跟着侧栏呈现宽度（`render.rs`、`hot.rs`），宽度存进 `sidebar.json` |
 | CSS 变量 | `theme_map::COLOR_ROLES` 指向的 `SemanticPalette` 字段 |

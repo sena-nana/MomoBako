@@ -6,6 +6,8 @@
 //!
 //! 换仓库（Vue `navigation.ts` 的 `selectRepository` 切到别的仓库）也走这块启动页，见 [`StartupMode`]。
 
+use crate::backend::services::repository::SyncResult;
+
 /// 启动步骤总数。
 pub const STARTUP_TOTAL_STEPS: u8 = 4;
 const STARTUP_LOG_LIMIT: usize = 40;
@@ -82,25 +84,15 @@ pub struct SyncCounts {
     pub hardlink_candidates: i64,
 }
 
-impl SyncCounts {
-    /// 从同步协议的输出（后端 `SyncResult` 的 JSON）里取计数。缺的或不是整数的按 0，并记日志。
-    pub fn from_output(output: &serde_json::Value) -> Self {
-        let read = |key: &str| {
-            output
-                .get(key)
-                .and_then(serde_json::Value::as_i64)
-                .unwrap_or_else(|| {
-                    eprintln!("Nana 同步结果里没有 {key}，按 0 记");
-                    0
-                })
-        };
+impl From<&SyncResult> for SyncCounts {
+    fn from(result: &SyncResult) -> Self {
         Self {
-            scanned_files: read("scannedFiles"),
-            created_assets: read("createdAssets"),
-            updated_assets: read("updatedAssets"),
-            deleted_assets: read("deletedAssets"),
-            created_events: read("createdEvents"),
-            hardlink_candidates: read("hardlinkCandidates"),
+            scanned_files: result.scanned_files,
+            created_assets: result.created_assets,
+            updated_assets: result.updated_assets,
+            deleted_assets: result.deleted_assets,
+            created_events: result.created_events,
+            hardlink_candidates: result.hardlink_candidates,
         }
     }
 }

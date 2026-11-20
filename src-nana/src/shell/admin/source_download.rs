@@ -22,7 +22,9 @@
 
 use serde_json::{Value, json};
 
-use crate::backend::services::repository::{SystemLogLocationInput, SystemLogWriteRequest};
+use crate::backend::services::repository::{
+    FileImportResponse, SystemLogLocationInput, SystemLogWriteRequest,
+};
 
 use super::super::ShellViewModel;
 use super::super::entry_actions::DownloadProgress;
@@ -48,20 +50,12 @@ impl DownloadOutcome {
         }
     }
 
-    /// 插件交回的载荷，加上导入目标资源库的结果里跳过的同名条目（导入结果的 `skippedEntries`，没有这个键时为空）。
-    pub(crate) fn imported(payload: Value, import: &Value) -> Self {
-        let skipped = import
-            .get("skippedEntries")
-            .and_then(Value::as_array)
-            .map(|items| {
-                items
-                    .iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_string)
-                    .collect()
-            })
-            .unwrap_or_default();
-        Self { payload, skipped }
+    /// 插件交回的载荷，加上导入目标资源库时跳过的同名条目。
+    pub(crate) fn imported(payload: Value, import: &FileImportResponse) -> Self {
+        Self {
+            payload,
+            skipped: import.skipped_entries.clone(),
+        }
     }
 }
 

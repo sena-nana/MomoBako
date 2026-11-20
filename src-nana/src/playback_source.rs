@@ -13,21 +13,22 @@
 //! - 后端在播放源准备好时写下访问时间，结果里带上 [`SourcePrep::prepared`]，归约当场改「最近使用」。
 //! - 准备失败（登录失效、网络、缓存目录不可用）记进系统日志，交回来源的原话，预览框和播放条给「重试」。
 
-use serde_json::{Value, json};
+use serde_json::json;
 
+use crate::backend::app::TaskService;
 use crate::backend::services::logging::write_log;
-use crate::backend::services::mutsuki_runner::PROTOCOL_PLAYBACK_PREPARE;
+use crate::backend::services::mutsuki_runner::PlaybackPrepare;
 use crate::backend::services::repository::{
-    EntryPlaybackRequest, SystemLogLocationInput, SystemLogWriteRequest,
+    EntryPlaybackRequest, EntryPlaybackSourceResponse, SystemLogLocationInput,
+    SystemLogWriteRequest,
 };
-use crate::backend::viewmodels::MutsukiTaskViewModel;
 use crate::shell::SourcePrep;
 use crate::shell::inspect_lyrics::{LyricHint, hint_from_prepare};
 
 /// 来源只交回网址、没有本地文件时的原因。
 pub(crate) const URL_ONLY: &str = "来源只交回了网络地址，没有本地文件，无法播放";
 
-/// 是谁要准备播放源：日志里分开写，和 Vue 的 `audioRuntime.prepareSource`、`preview.prepareSource` 对应。
+/// 是谁要准备播放源：日志里分开写成 `player.prepareSource` 和 `preview.prepareSource`。
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Requester {
     Player,
@@ -52,8 +53,7 @@ impl Requester {
 
 /// 在任务线程里准备一条在线条目的播放源并读出字节。成功时附带后端写下的访问；失败交回原因，标成可以重试。
 pub(crate) fn prepare_and_read(
-    tasks: &MutsukiTaskViewModel,
-    executor: &tokio::runtime::Runtime,
+    tasks: &TaskService,
     requester: Requester,
     repo_id: &str,
     path: &str,
@@ -62,19 +62,14 @@ pub(crate) fn prepare_and_read(
         repo_id: repo_id.to_string(),
         path: path.to_string(),
     };
-    let executed = executor.block_on(tasks.execute(PROTOCOL_PLAYBACK_PREPARE, request));
-    let (output, exec_error) = match executed {
-        Ok((output, _)) => (Some(output), None),
-        Err(error) => (None, Some(error)),
-    };
-    let hint = output
+    let prepared = tasks
+        .run::<PlaybackPrepare>(request)
+        .map(|output| output.result);
+    let hint = prepared
         .as_ref()
         .map(hint_from_prepare)
         .unwrap_or(LyricHint::Absent);
-    let local = match output {
-        Some(output) => local_source(&output),
-        None => Err(exec_error.unwrap_or_else(|| "播放源不可用".into())),
-    };
+    let local = prepared.and_then(|response| local_source(&response));
     let local = match local {
         Ok(local) => local,
         Err(error) => {
@@ -101,24 +96,19 @@ pub(crate) fn prepare_and_read(
     }
 }
 
-/// 从准备好的结果（`EntryPlaybackSourceResponse`）里取本地文件：`localPath`，没有时 `tempFilePath`。
-/// 只有网址时没有能读的文件。
-pub(crate) fn local_source(output: &Value) -> Result<String, String> {
-    let Some(fields) = output.as_object() else {
-        return Err(format!("播放源结果无法识别：{output}"));
-    };
-    let filled = |key: &str| {
-        fields
-            .get(key)
-            .and_then(Value::as_str)
+/// 从准备好的结果里取本地文件：本地路径，没有时临时文件。只有网址时没有能读的文件。
+pub(crate) fn local_source(response: &EntryPlaybackSourceResponse) -> Result<String, String> {
+    let filled = |value: &Option<String>| {
+        value
+            .as_deref()
             .map(str::trim)
             .filter(|value| !value.is_empty())
             .map(str::to_string)
     };
-    if let Some(local) = filled("localPath").or_else(|| filled("tempFilePath")) {
+    if let Some(local) = filled(&response.local_path).or_else(|| filled(&response.temp_file_path)) {
         return Ok(local);
     }
-    match filled("sourceUrl") {
+    match filled(&response.source_url) {
         Some(url) => {
             eprintln!("Nana 播放源只有网址，Nana 只解本地文件：{url}");
             Err(URL_ONLY.into())
@@ -155,27 +145,43 @@ fn report_failure(requester: Requester, repo_id: &str, path: &str, error: &str) 
 mod tests {
     use super::*;
 
-    /// 本地文件优先用 `localPath`，没有时用 `tempFilePath`；后端补的回环网址不影响。
-    #[test]
-    fn local_source_prefers_the_local_file() {
-        let output = json!({ "localPath": "D:/cache/a.mp3", "tempFilePath": "D:/cache/b.mp3", "sourceUrl": "http://127.0.0.1/x" });
-        assert_eq!(local_source(&output).as_deref(), Ok("D:/cache/a.mp3"));
-        let output = json!({ "localPath": " ", "tempFilePath": "D:/cache/b.mp3" });
-        assert_eq!(local_source(&output).as_deref(), Ok("D:/cache/b.mp3"));
+    fn response(
+        local: Option<&str>,
+        temp: Option<&str>,
+        url: Option<&str>,
+    ) -> EntryPlaybackSourceResponse {
+        EntryPlaybackSourceResponse {
+            repo_id: "repo".into(),
+            path: "a.mp3".into(),
+            media_type: "audio/mpeg".into(),
+            source_url: url.map(str::to_string),
+            local_path: local.map(str::to_string),
+            temp_file_path: temp.map(str::to_string),
+            lyric_path: None,
+            word_lyric_path: None,
+            expires_at: None,
+            size_bytes: None,
+            modified_at: None,
+        }
     }
 
-    /// 只有网址时不去下载它，按失败交回；什么都没有、结果认不出也是失败。
+    /// 本地文件优先用本地路径，没有时用临时文件。
+    #[test]
+    fn local_source_prefers_the_local_file() {
+        let both = response(Some("D:/cache/a.mp3"), Some("D:/cache/b.mp3"), None);
+        assert_eq!(local_source(&both).as_deref(), Ok("D:/cache/a.mp3"));
+        let temp = response(Some(" "), Some("D:/cache/b.mp3"), None);
+        assert_eq!(local_source(&temp).as_deref(), Ok("D:/cache/b.mp3"));
+    }
+
+    /// 只有网址时不去下载它，按失败交回；什么都没有也是失败。
     #[test]
     fn url_only_or_empty_sources_fail() {
+        let url_only = response(None, None, Some("https://music.example/a.mp3"));
+        assert_eq!(local_source(&url_only), Err(URL_ONLY.to_string()));
         assert_eq!(
-            local_source(&json!({ "sourceUrl": "https://music.example/a.mp3" })),
-            Err(URL_ONLY.to_string())
-        );
-        assert_eq!(local_source(&json!({})), Err("播放源不可用".to_string()));
-        assert!(
-            local_source(&json!("not an object"))
-                .unwrap_err()
-                .starts_with("播放源结果无法识别")
+            local_source(&response(None, None, None)),
+            Err("播放源不可用".to_string())
         );
     }
 }

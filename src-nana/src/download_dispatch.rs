@@ -7,19 +7,16 @@
 //! 导入失败时暂存的文件留着，位置写进系统日志。哪一步失败都把原因交回，不留在进行中。
 
 use std::path::Path;
-use std::sync::Arc;
 
 use nana_ui::RuntimeProgramContext;
 use serde_json::{Value, json};
 
 use crate::MomoBakoApplication;
-use crate::backend::services::mutsuki_runner::{PROTOCOL_ENTRY_IMPORT, PROTOCOL_REPOSITORY_SYNC};
+use crate::backend::app::{FileBrowserService, PluginService, SystemService, TaskService};
+use crate::backend::services::mutsuki_runner::{EntryImport, RepositorySync};
 use crate::backend::services::repository::{
-    FileCreateRequest, FileImportRequest, PluginCallRequest, SyncRequest, SystemLogLocationInput,
-    SystemLogWriteRequest,
-};
-use crate::backend::viewmodels::{
-    FileBrowserViewModel, MutsukiTaskViewModel, PluginViewModel, SystemViewModel,
+    FileCreateRequest, FileImportRequest, FileImportResponse, PluginCallRequest, SyncRequest,
+    SystemLogLocationInput, SystemLogWriteRequest,
 };
 use crate::download_staging::{Cleanup, StagingDir, staging_root};
 use crate::shell::ShellMessage;
@@ -39,8 +36,8 @@ pub(crate) trait DownloadServices {
         parent_path: Option<&str>,
         name: &str,
     ) -> Result<(), String>;
-    /// 把文件导入目标资源库，交回导入结果（`FileImportResponse` 的 JSON）。
-    fn import(&self, request: FileImportRequest) -> Result<Value, String>;
+    /// 把文件导入目标资源库，交回导入结果。
+    fn import(&self, request: FileImportRequest) -> Result<FileImportResponse, String>;
     /// 同步目标资源库。
     fn sync(&self, repo_id: &str) -> Result<(), String>;
     /// 写一条系统日志。写不进去时自己记标准错误。
@@ -75,7 +72,6 @@ pub(crate) fn download_to_repository(
                 browser: services.file_browser.clone(),
                 tasks: services.tasks.clone(),
                 system: services.system.clone(),
-                executor: services.executor.clone(),
             };
             let managed_cache_root = payload.get("managedCacheRoot").and_then(Value::as_str);
             let root = staging_root(
@@ -169,7 +165,7 @@ fn import(
     target: &TargetCandidate,
     paths: &[String],
     parent_path: Option<String>,
-) -> Result<Value, String> {
+) -> Result<FileImportResponse, String> {
     if let Some(folder) = parent_path.as_deref() {
         // `parentPath` 是相对资源库根的完整路径；逐级创建，避免把 `a/b` 当作单个目录名
         // 传给根目录。后端 create_directory 要求父目录已经存在。
@@ -337,17 +333,16 @@ fn log(
 
 /// 产品里的领域服务：都在任务线程里同步等结果。
 struct LiveServices {
-    plugin: PluginViewModel,
-    browser: FileBrowserViewModel,
-    tasks: MutsukiTaskViewModel,
-    system: SystemViewModel,
-    executor: Arc<tokio::runtime::Runtime>,
+    plugin: PluginService,
+    browser: FileBrowserService,
+    tasks: TaskService,
+    system: SystemService,
 }
 
 impl DownloadServices for LiveServices {
     fn call_plugin(&self, request: PluginCallRequest) -> Result<Value, String> {
-        self.executor
-            .block_on(self.plugin.call_plugin(request))
+        self.plugin
+            .call_plugin(request)
             .map(|response| response.payload)
     }
 
@@ -362,32 +357,25 @@ impl DownloadServices for LiveServices {
             parent_path: parent_path.map(str::to_string),
             name: name.to_string(),
         };
-        self.executor
-            .block_on(self.browser.create_directory(request))
-            .map(|_| ())
+        self.browser.create_directory(request).map(|_| ())
     }
 
-    fn import(&self, request: FileImportRequest) -> Result<Value, String> {
-        self.executor
-            .block_on(self.tasks.execute(PROTOCOL_ENTRY_IMPORT, request))
-            .map(|(output, _)| output)
+    fn import(&self, request: FileImportRequest) -> Result<FileImportResponse, String> {
+        self.tasks
+            .run::<EntryImport>(request)
+            .map(|output| output.result)
     }
 
     fn sync(&self, repo_id: &str) -> Result<(), String> {
         let request = SyncRequest {
             repo_id: repo_id.to_string(),
         };
-        self.executor
-            .block_on(self.tasks.execute(PROTOCOL_REPOSITORY_SYNC, request))
-            .map(|_| ())
+        self.tasks.run::<RepositorySync>(request).map(|_| ())
     }
 
     fn log(&self, request: SystemLogWriteRequest) {
         let action = request.action.clone();
-        if let Err(error) = self
-            .executor
-            .block_on(self.system.write_system_log(request))
-        {
+        if let Err(error) = self.system.write_system_log(request) {
             eprintln!("Nana 写系统日志失败：{action}：{error}");
         }
     }

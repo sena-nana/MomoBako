@@ -23,13 +23,16 @@ use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, Stack};
 use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
 
 use super::super::files::{
-    EagleImportReport, EagleImportWarning, EagleSummaryCount, FileContext, FileDialog, FilesMessage,
+    EagleImportReport, EagleImportWarning, FileContext, FileDialog, FilesMessage,
 };
 use super::super::{ShellMessage, ShellViewModel};
 use super::AdminMessage;
 use super::bind::ActionDisabled;
 use super::style::{self, Tone, action, column, label, mono, pad, row, wrapping};
 use super::support::{TOOL_EAGLE_IMPORTER, TOOL_FILE_MANAGER};
+use crate::backend::services::repository::{
+    EagleLibraryImportResponse, EagleLibraryImportSummary, EagleLibraryImportWarning,
+};
 
 mod file_import;
 
@@ -327,169 +330,85 @@ pub(crate) fn import_buttons(page_id: &str) -> Vec<ImportButton> {
     }
 }
 
-/// 有真值 `summary` 才构造结果卡，和 Vue `lastResult?.summary` 一样。
-/// 计数字段缺失或 null 记成 [`EagleSummaryCount::Missing`]，页面显示 0。
-/// 小数、负数和其他不是非负整数的值记成 [`EagleSummaryCount::NotCount`]，行不画。
-pub(crate) fn eagle_import_report(value: &serde_json::Value) -> Option<EagleImportReport> {
-    let summary = value.get("summary")?;
-    if !json_truthy(summary) {
-        return None;
-    }
-    let object = summary.as_object();
-    let count = |key: &str| summary_count(object, key);
-    let (warning_count, warnings) = read_warnings(value);
-    Some(EagleImportReport {
-        imported_files: count("importedFiles"),
-        imported_directories: count("importedDirectories"),
-        warning_count,
-        warnings,
-        imported_trash_entries: count("importedTrashEntries"),
-        imported_shortcuts: count("importedShortcuts"),
-        imported_smart_folders: count("importedSmartFolders"),
-        imported_repository_actions: count("importedRepositoryActions"),
-        imported_tag_groups: count("importedTagGroups"),
-        imported_alias_groups: count("importedAliasGroups"),
-        imported_hardlink_groups: count("importedHardlinkGroups"),
-    })
-}
-
-/// Vue 真值：`null`、`false`、`0`、`""` 不画卡，对象和数组（含空的）画卡。
-fn json_truthy(value: &serde_json::Value) -> bool {
-    match value {
-        serde_json::Value::Null | serde_json::Value::Bool(false) => false,
-        serde_json::Value::Bool(true)
-        | serde_json::Value::Array(_)
-        | serde_json::Value::Object(_) => true,
-        serde_json::Value::String(text) => !text.is_empty(),
-        serde_json::Value::Number(number) => match number.as_f64() {
-            Some(value) => value != 0.0,
-            None => true,
-        },
+/// 导入结果投影成结果卡：计数原样取摘要，警告最多列前 20 条。
+pub(crate) fn eagle_import_report(response: &EagleLibraryImportResponse) -> EagleImportReport {
+    EagleImportReport {
+        summary: response.summary.clone(),
+        warning_count: response.warnings.len(),
+        warnings: response
+            .warnings
+            .iter()
+            .take(20)
+            .map(warning_line)
+            .collect(),
     }
 }
 
-/// 从一个计数字段取值。`summary` 不是对象时全部按缺失，Vue 读到的也是 `undefined`。
-fn summary_count(
-    summary: Option<&serde_json::Map<String, serde_json::Value>>,
-    key: &str,
-) -> EagleSummaryCount {
-    match summary.and_then(|object| object.get(key)) {
-        None | Some(serde_json::Value::Null) => EagleSummaryCount::Missing,
-        Some(value) => json_count(value)
-            .map(EagleSummaryCount::Count)
-            .unwrap_or(EagleSummaryCount::NotCount),
-    }
-}
-
-/// 只接受非负整数。小数和负数留给调用方标成不画。
-fn json_count(value: &serde_json::Value) -> Option<u64> {
-    value.as_u64().or_else(|| {
-        value
-            .as_i64()
-            .filter(|number| *number >= 0)
-            .map(|number| number as u64)
-    })
-}
-
-/// `warnings` 不是数组时当成 Vue 的空数组。条数是数组长度，展示最多前 20 条。
-fn read_warnings(value: &serde_json::Value) -> (u64, Vec<EagleImportWarning>) {
-    let Some(items) = value.get("warnings").and_then(serde_json::Value::as_array) else {
-        return (0, Vec::new());
+/// 一条警告：类型为空时写 `warning`；说明依次取原因、素材 id、来源 id，都没有时写细节 JSON。
+fn warning_line(warning: &EagleLibraryImportWarning) -> EagleImportWarning {
+    let kind = if warning.warning_type.is_empty() {
+        "warning".to_string()
+    } else {
+        warning.warning_type.clone()
     };
-    let count = u64::try_from(items.len()).unwrap_or(u64::MAX);
-    (count, items.iter().take(20).map(warning_line).collect())
+    let text = [&warning.reason, &warning.asset_id, &warning.source_id]
+        .into_iter()
+        .flatten()
+        .find(|text| !text.trim().is_empty())
+        .cloned()
+        .or_else(|| {
+            warning
+                .details
+                .as_ref()
+                .filter(|details| !details.is_null())
+                .map(ToString::to_string)
+        })
+        .unwrap_or_default();
+    EagleImportWarning { kind, text }
 }
 
-/// 一条警告的类型和说明。说明按 Vue 的顺序只取一个字段，不把其余字段拼进去。
-fn warning_line(value: &serde_json::Value) -> EagleImportWarning {
-    EagleImportWarning {
-        kind: warning_kind(value),
-        text: warning_text(value),
-    }
-}
-
-/// `item.type || item.warningType || "warning"`。空字符串继续往后找。
-fn warning_kind(value: &serde_json::Value) -> String {
-    let Some(object) = value.as_object() else {
-        return "warning".into();
-    };
-    for key in ["type", "warningType"] {
-        if let Some(text) = object.get(key).and_then(js_truthy_string) {
-            return text;
-        }
-    }
-    "warning".into()
-}
-
-/// Vue `warningText`：有内容的 `reason`，否则 `assetId`，否则 `sourceId`，否则 `JSON.stringify(details)`。
-fn warning_text(value: &serde_json::Value) -> String {
-    let Some(object) = value.as_object() else {
-        return String::new();
-    };
-    for key in ["reason", "assetId", "sourceId"] {
-        if let Some(serde_json::Value::String(text)) = object.get(key) {
-            if !text.trim().is_empty() {
-                return text.clone();
-            }
-        }
-    }
-    match object.get("details") {
-        Some(details) if !details.is_null() => details.to_string(),
-        _ => String::new(),
-    }
-}
-
-/// `||` 只把空字符串当成没有。空白字符串仍然算有，原样返回，不去掉两端空白。
-fn js_truthy_string(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::String(text) if !text.is_empty() => Some(text.clone()),
-        _ => None,
-    }
-}
-
-/// 协议结果卡。没有真值 `summary` 时整张不出现。眉题是 register.js 的「导入结果」。
-/// 计数缺失时显示 0；小数和负数那一行不出现。警告区只在数组非空时出现。
+/// 导入结果卡：导入完成后出现，九项计数各一行，警告区只在有警告时出现。
 fn eagle_result_card(view: Signal<ImportView>) -> AnyView {
     let shown = move || view.with(|view| view.report.is_some());
     let mut rows = vec![
         widget(style::eyebrow_text("导入结果"))
             .key("admin-tool-eagle-result-eyebrow")
             .into_any(),
-        count_row(view, "文件", "admin-tool-eagle-files", |report| {
-            report.imported_files
+        count_row(view, "文件", "admin-tool-eagle-files", |summary| {
+            summary.imported_files
         }),
-        count_row(view, "目录", "admin-tool-eagle-dirs", |report| {
-            report.imported_directories
+        count_row(view, "目录", "admin-tool-eagle-dirs", |summary| {
+            summary.imported_directories
         }),
-        count_row(view, "回收站", "admin-tool-eagle-trash", |report| {
-            report.imported_trash_entries
+        count_row(view, "回收站", "admin-tool-eagle-trash", |summary| {
+            summary.imported_trash_entries
         }),
         count_row(
             view,
             "快捷入口",
             "admin-tool-eagle-shortcuts",
-            |report| report.imported_shortcuts,
+            |summary| summary.imported_shortcuts,
         ),
         count_row(
             view,
             "智能文件夹",
             "admin-tool-eagle-smart-folders",
-            |report| report.imported_smart_folders,
+            |summary| summary.imported_smart_folders,
         ),
-        count_row(view, "仓库动作", "admin-tool-eagle-actions", |report| {
-            report.imported_repository_actions
+        count_row(view, "仓库动作", "admin-tool-eagle-actions", |summary| {
+            summary.imported_repository_actions
         }),
-        count_row(view, "标签组", "admin-tool-eagle-tag-groups", |report| {
-            report.imported_tag_groups
+        count_row(view, "标签组", "admin-tool-eagle-tag-groups", |summary| {
+            summary.imported_tag_groups
         }),
-        count_row(view, "Alias 组", "admin-tool-eagle-aliases", |report| {
-            report.imported_alias_groups
+        count_row(view, "Alias 组", "admin-tool-eagle-aliases", |summary| {
+            summary.imported_alias_groups
         }),
         count_row(
             view,
             "硬链接组",
             "admin-tool-eagle-hardlinks",
-            |report| report.imported_hardlink_groups,
+            |summary| summary.imported_hardlink_groups,
         ),
         warning_title(view),
     ];
@@ -501,29 +420,19 @@ fn eagle_result_card(view: Signal<ImportView>) -> AnyView {
         .into_any()
 }
 
-/// 结果卡上的一项计数。缺失显示 0，不能当条数的值整行不出现。
+/// 结果卡上的一项计数。
 fn count_row(
     view: Signal<ImportView>,
     name: &'static str,
     key: &'static str,
-    read: fn(&EagleImportReport) -> EagleSummaryCount,
+    read: fn(&EagleLibraryImportSummary) -> usize,
 ) -> AnyView {
-    let text_view = view;
-    let shown_view = view;
     let text = move || {
-        text_view.with(|view| {
+        view.with(|view| {
             view.report
                 .as_ref()
-                .and_then(|report| read(report).label())
+                .map(|report| read(&report.summary).to_string())
                 .unwrap_or_default()
-        })
-    };
-    let shown = move || {
-        shown_view.with(|view| {
-            view.report
-                .as_ref()
-                .and_then(|report| read(report).label())
-                .is_some()
         })
     };
     widget(row(8.0).wrap(true))
@@ -531,7 +440,6 @@ fn count_row(
             widget(label(name, 13.0, 400, Role::Muted)),
             code(text, key.into()),
         ))
-        .visible(shown)
         .into_any()
 }
 
@@ -826,7 +734,7 @@ mod tests {
     use nana_ui_platform::host::WindowCommand;
 
     use super::super::super::files::{
-        EagleImportWarning, EagleSummaryCount, FileContext, FileDialog, FilesEffect, FilesMessage,
+        EagleImportWarning, FileContext, FileDialog, FilesEffect, FilesMessage,
     };
     use super::super::super::input::InputMessage;
     use super::super::super::workspace::WorkspaceRepository;
@@ -834,6 +742,7 @@ mod tests {
     use super::super::AdminMessage;
     use super::super::support::TOOL_EAGLE_IMPORTER;
     use super::{
+        EagleLibraryImportResponse, EagleLibraryImportSummary, EagleLibraryImportWarning,
         ImportView, block_reason, choose_eagle_library, eagle_import_message, eagle_import_report,
         eagle_path_label, eagle_submit_label, import_block_reason,
     };
@@ -1016,50 +925,49 @@ mod tests {
         );
     }
 
+    /// 测试用导入结果：快照随便给一份，结果卡只读摘要和警告。
+    fn response(
+        summary: EagleLibraryImportSummary,
+        warnings: Vec<EagleLibraryImportWarning>,
+    ) -> EagleLibraryImportResponse {
+        EagleLibraryImportResponse {
+            snapshot: crate::shell::data_load_tests::browser("repo"),
+            summary,
+            warnings,
+        }
+    }
+
+    fn warning(kind: &str, reason: Option<&str>) -> EagleLibraryImportWarning {
+        EagleLibraryImportWarning {
+            warning_type: kind.into(),
+            reason: reason.map(Into::into),
+            ..Default::default()
+        }
+    }
+
+    fn settled(summary: EagleLibraryImportSummary) -> ShellMessage {
+        ShellMessage::Files(FilesMessage::EagleImportSettled {
+            result: Ok(eagle_import_report(&response(summary, Vec::new()))),
+        })
+    }
+
     #[test]
-    fn eagle_import_report_follows_the_vue_summary_card() {
-        let value = serde_json::json!({
-            "summary": { "importedFiles": 3, "importedDirectories": 2, "importedShortcuts": 9 },
-            "warnings": [{ "type": "skippedSmartFolder", "reason": "条件为空" }, {}]
-        });
-        let report = eagle_import_report(&value).expect("有 summary 就画卡");
-        assert_eq!(
-            (
-                report.imported_files,
-                report.imported_directories,
-                report.warning_count
-            ),
-            (EagleSummaryCount::Count(3), EagleSummaryCount::Count(2), 2)
-        );
-        assert_eq!(report.imported_shortcuts, EagleSummaryCount::Count(9));
-        assert_eq!(
-            (
-                report.imported_trash_entries,
-                report.imported_smart_folders,
-                report.imported_repository_actions,
-                report.imported_tag_groups,
-                report.imported_alias_groups,
-                report.imported_hardlink_groups,
-            ),
-            (
-                EagleSummaryCount::Missing,
-                EagleSummaryCount::Missing,
-                EagleSummaryCount::Missing,
-                EagleSummaryCount::Missing,
-                EagleSummaryCount::Missing,
-                EagleSummaryCount::Missing,
-            )
-        );
-        assert_eq!(
-            report.imported_trash_entries.label().as_deref(),
-            Some("0"),
-            "缺失显示 Vue 的 0"
-        );
-        assert_ne!(
-            report.imported_trash_entries,
-            EagleSummaryCount::Count(0),
-            "占位 0 不是导入出来的 0"
-        );
+    fn eagle_import_report_keeps_the_summary_and_counts_every_warning() {
+        let summary = EagleLibraryImportSummary {
+            imported_files: 3,
+            imported_directories: 2,
+            imported_shortcuts: 9,
+            ..Default::default()
+        };
+        let report = eagle_import_report(&response(
+            summary.clone(),
+            vec![
+                warning("skippedSmartFolder", Some("条件为空")),
+                warning("", None),
+            ],
+        ));
+        assert_eq!(report.summary, summary);
+        assert_eq!(report.warning_count, 2);
         assert_eq!(
             report.warnings,
             vec![
@@ -1074,163 +982,55 @@ mod tests {
             ]
         );
 
-        let rich = eagle_import_report(&serde_json::json!({
-            "summary": {
-                "importedFiles": 4,
-                "importedDirectories": 1,
-                "importedTrashEntries": 2,
-                "importedShortcuts": 3,
-                "importedSmartFolders": 0,
-                "importedRepositoryActions": 1,
-                "importedTagGroups": 1.5,
-                "importedAliasGroups": 5,
-                "importedHardlinkGroups": -3
-            },
-            "warnings": []
-        }))
-        .expect("空警告数组仍然有卡");
-        assert_eq!(
-            (
-                rich.imported_trash_entries,
-                rich.imported_shortcuts,
-                rich.imported_smart_folders,
-                rich.imported_repository_actions,
-                rich.imported_tag_groups,
-                rich.imported_alias_groups,
-                rich.imported_hardlink_groups,
-            ),
-            (
-                EagleSummaryCount::Count(2),
-                EagleSummaryCount::Count(3),
-                EagleSummaryCount::Count(0),
-                EagleSummaryCount::Count(1),
-                EagleSummaryCount::NotCount,
-                EagleSummaryCount::Count(5),
-                EagleSummaryCount::NotCount,
-            )
-        );
-        assert_eq!(rich.imported_smart_folders.label().as_deref(), Some("0"));
-        assert!(
-            rich.imported_tag_groups.label().is_none(),
-            "小数不画，也不改成 0"
-        );
-        assert!(
-            rich.imported_hardlink_groups.label().is_none(),
-            "负数不画，也不改成 0"
-        );
-        assert_eq!(rich.warning_count, 0);
-        assert!(rich.warnings.is_empty());
-
-        let summary_only = eagle_import_report(&serde_json::json!({ "summary": {} }))
-            .expect("只有 summary 也画卡");
-        assert_eq!(summary_only.imported_files, EagleSummaryCount::Missing);
-        assert_eq!(
-            summary_only.imported_directories.label().as_deref(),
-            Some("0")
-        );
-        assert_eq!(summary_only.warning_count, 0);
-        let mut missing_files = value.clone();
-        missing_files["summary"]
-            .as_object_mut()
-            .unwrap()
-            .remove("importedFiles");
-        let missing_files = eagle_import_report(&missing_files).expect("缺文件数不挡整张卡");
-        assert_eq!(missing_files.imported_files, EagleSummaryCount::Missing);
-        let mut missing_warnings = value.clone();
-        missing_warnings.as_object_mut().unwrap().remove("warnings");
-        let missing_warnings =
-            eagle_import_report(&missing_warnings).expect("没有 warnings 仍画卡");
-        assert_eq!(missing_warnings.warning_count, 0);
-        assert!(missing_warnings.warnings.is_empty());
-        let decimal = eagle_import_report(&serde_json::json!({
-            "summary": { "importedFiles": 1.5, "importedDirectories": 1 },
-            "warnings": "不是数组"
-        }))
-        .expect("小数文件数不挡整张卡");
-        assert_eq!(decimal.imported_files, EagleSummaryCount::NotCount);
-        assert_eq!(decimal.imported_directories, EagleSummaryCount::Count(1));
-        assert_eq!(decimal.warning_count, 0);
-
-        assert!(
-            eagle_import_report(
-                &serde_json::json!({ "warnings": [{ "type": "x", "reason": "y" }] })
-            )
-            .is_none()
-        );
-        assert!(eagle_import_report(&serde_json::json!({ "summary": null })).is_none());
-        assert!(eagle_import_report(&serde_json::json!({ "summary": 0 })).is_none());
-        assert!(eagle_import_report(&serde_json::json!({ "summary": false })).is_none());
-        assert!(eagle_import_report(&serde_json::json!({ "summary": "" })).is_none());
+        let empty = eagle_import_report(&response(Default::default(), Vec::new()));
+        assert_eq!(empty.summary, EagleLibraryImportSummary::default());
+        assert_eq!(empty.warning_count, 0);
+        assert!(empty.warnings.is_empty());
     }
 
     #[test]
-    fn eagle_warning_text_follows_vue_and_stops_at_twenty() {
-        let mut items = Vec::new();
-        for index in 1..=21 {
-            items.push(serde_json::json!({ "type": "overflow", "reason": format!("第{index}条") }));
-        }
-        items[0] = serde_json::json!({
-            "type": "primary",
-            "warningType": "other",
-            "reason": "有原因",
-            "assetId": "asset",
-            "name": "不该出现"
-        });
-        items[1] = serde_json::json!({
-            "type": "",
-            "warningType": "fromFallback",
-            "reason": "  ",
-            "assetId": " asset-9 ",
-            "sourceId": "src",
-            "details": { "folderId": "f-1" }
-        });
-        items[2] = serde_json::json!({
-            "details": { "folderId": "f-1", "reason": "条件" }
-        });
-        items[3] = serde_json::json!({ "type": "missingThumbnail", "name": "封面" });
-        items[4] = serde_json::json!({ "sourceId": "src-2", "details": { "ignored": true } });
-        let report = eagle_import_report(
-            &serde_json::json!({ "summary": { "importedFiles": null }, "warnings": items }),
-        )
-        .expect("有 summary");
-        assert_eq!(report.imported_files, EagleSummaryCount::Missing);
+    fn eagle_warning_text_falls_back_in_order_and_stops_at_twenty() {
+        let mut items: Vec<_> = (1..=21)
+            .map(|index| warning("overflow", Some(&format!("第{index}条"))))
+            .collect();
+        items[0] = EagleLibraryImportWarning {
+            asset_id: Some("asset".into()),
+            name: Some("不该出现".into()),
+            ..warning("primary", Some("有原因"))
+        };
+        items[1] = EagleLibraryImportWarning {
+            asset_id: Some(" asset-9 ".into()),
+            source_id: Some("src".into()),
+            details: Some(serde_json::json!({ "folderId": "f-1" })),
+            ..warning("fromFallback", Some("  "))
+        };
+        items[2] = EagleLibraryImportWarning {
+            details: Some(serde_json::json!({ "folderId": "f-1", "reason": "条件" })),
+            ..warning("", None)
+        };
+        items[3] = EagleLibraryImportWarning {
+            name: Some("封面".into()),
+            ..warning("missingThumbnail", None)
+        };
+        items[4] = EagleLibraryImportWarning {
+            source_id: Some("src-2".into()),
+            ..warning("", None)
+        };
+        let report = eagle_import_report(&response(Default::default(), items));
         assert_eq!(report.warning_count, 21);
         assert_eq!(report.warnings.len(), 20);
-        assert_eq!(
-            report.warnings[0],
-            EagleImportWarning {
-                kind: "primary".into(),
-                text: "有原因".into()
-            }
-        );
-        assert_eq!(
-            report.warnings[1],
-            EagleImportWarning {
-                kind: "fromFallback".into(),
-                text: " asset-9 ".into()
-            }
-        );
+        let line = |kind: &str, text: &str| EagleImportWarning {
+            kind: kind.into(),
+            text: text.into(),
+        };
+        assert_eq!(report.warnings[0], line("primary", "有原因"));
+        assert_eq!(report.warnings[1], line("fromFallback", " asset-9 "));
         assert_eq!(
             report.warnings[2],
-            EagleImportWarning {
-                kind: "warning".into(),
-                text: r#"{"folderId":"f-1","reason":"条件"}"#.into()
-            }
+            line("warning", r#"{"folderId":"f-1","reason":"条件"}"#)
         );
-        assert_eq!(
-            report.warnings[3],
-            EagleImportWarning {
-                kind: "missingThumbnail".into(),
-                text: String::new()
-            }
-        );
-        assert_eq!(
-            report.warnings[4],
-            EagleImportWarning {
-                kind: "warning".into(),
-                text: "src-2".into()
-            }
-        );
+        assert_eq!(report.warnings[3], line("missingThumbnail", ""));
+        assert_eq!(report.warnings[4], line("warning", "src-2"));
         assert_eq!(report.warnings[19].text, "第20条");
         assert!(report.warnings.iter().all(|item| item.text != "第21条"));
         assert!(
@@ -1249,21 +1049,17 @@ mod tests {
                 .report
                 .is_none()
         );
-        send(
-            &mut model,
-            ShellMessage::Files(FilesMessage::EagleImportSettled { result: Ok(None) }),
+        let payload = response(
+            EagleLibraryImportSummary {
+                imported_files: 4,
+                imported_directories: 1,
+                ..Default::default()
+            },
+            vec![EagleLibraryImportWarning {
+                name: Some("封面".into()),
+                ..warning("missingThumbnail", Some("缺图"))
+            }],
         );
-        assert!(
-            ImportView::project(&model, TOOL_EAGLE_IMPORTER)
-                .report
-                .is_none(),
-            "没有 summary 不画卡"
-        );
-        assert!(model.files.error.is_empty());
-        let payload = serde_json::json!({
-            "summary": { "importedFiles": 4, "importedDirectories": 1 },
-            "warnings": [{ "type": "missingThumbnail", "name": "封面", "reason": "缺图" }]
-        });
         send(
             &mut model,
             ShellMessage::Files(FilesMessage::EagleImportSettled {
@@ -1275,14 +1071,13 @@ mod tests {
             .expect("结果卡用响应里的字段");
         assert_eq!(
             (
-                report.imported_files,
-                report.imported_directories,
+                report.summary.imported_files,
+                report.summary.imported_directories,
+                report.summary.imported_shortcuts,
                 report.warning_count
             ),
-            (EagleSummaryCount::Count(4), EagleSummaryCount::Count(1), 1)
+            (4, 1, 0, 1)
         );
-        assert_eq!(report.imported_shortcuts, EagleSummaryCount::Missing);
-        assert_eq!(report.imported_shortcuts.label().as_deref(), Some("0"));
         assert_eq!(
             report.warnings,
             vec![EagleImportWarning {
@@ -1350,7 +1145,7 @@ mod tests {
     }
 
     #[test]
-    fn eagle_notice_and_copy_label_follow_vue_and_stay_honest() {
+    fn eagle_notice_and_copy_label_stay_honest() {
         let open = FileContext {
             repo_id: Some("repo".into()),
             writable: true,
@@ -1384,13 +1179,10 @@ mod tests {
             ),
             ("处理中...", "剪切导入")
         );
-        send(
-            &mut model,
-            ShellMessage::Files(FilesMessage::EagleImportSettled { result: Ok(None) }),
-        );
+        send(&mut model, settled(Default::default()));
         let copied = ImportView::project(&model, TOOL_EAGLE_IMPORTER);
         assert_eq!(copied.notice, "复制导入完成，目标目录：inbox");
-        assert!(!copied.busy && copied.report.is_none());
+        assert!(!copied.busy && copied.report.is_some());
         assert_eq!(eagle_submit_label(&copied, "copy"), "复制导入");
 
         let mut moved = writable();
@@ -1404,10 +1196,7 @@ mod tests {
             eagle_submit_label(&ImportView::project(&moved, TOOL_EAGLE_IMPORTER), "move"),
             "剪切导入"
         );
-        send(
-            &mut moved,
-            ShellMessage::Files(FilesMessage::EagleImportSettled { result: Ok(None) }),
-        );
+        send(&mut moved, settled(Default::default()));
         assert_eq!(
             ImportView::project(&moved, TOOL_EAGLE_IMPORTER).notice,
             "剪切导入完成，目标目录：inbox/covers"
@@ -1440,10 +1229,7 @@ mod tests {
             &mut model,
             ShellMessage::Admin(AdminMessage::RunEagleImport("copy".into())),
         );
-        send(
-            &mut model,
-            ShellMessage::Files(FilesMessage::EagleImportSettled { result: Ok(None) }),
-        );
+        send(&mut model, settled(Default::default()));
         assert_eq!(
             ImportView::project(&model, TOOL_EAGLE_IMPORTER).notice,
             "复制导入完成，目标目录：/"
@@ -1457,15 +1243,17 @@ mod tests {
         );
         send(
             &mut model,
-            ShellMessage::Files(FilesMessage::EagleImportSettled {
-                result: Ok(eagle_import_report(
-                    &serde_json::json!({ "summary": { "importedFiles": 1 } }),
-                )),
+            settled(EagleLibraryImportSummary {
+                imported_files: 1,
+                ..Default::default()
             }),
         );
         let root = ImportView::project(&model, TOOL_EAGLE_IMPORTER);
         assert_eq!(root.notice, "复制导入完成，目标目录：/");
-        assert!(root.report.is_some(), "有 summary 仍画卡");
+        assert_eq!(
+            root.report.map(|report| report.summary.imported_files),
+            Some(1)
+        );
 
         send(
             &mut model,
@@ -1486,10 +1274,7 @@ mod tests {
             "取消选择不改已经写出的完成提示"
         );
         model.files.current_path = "inbox".into();
-        send(
-            &mut model,
-            ShellMessage::Files(FilesMessage::EagleImportSettled { result: Ok(None) }),
-        );
+        send(&mut model, settled(Default::default()));
         assert_eq!(
             ImportView::project(&model, TOOL_EAGLE_IMPORTER).notice,
             "复制导入完成，目标目录：/",

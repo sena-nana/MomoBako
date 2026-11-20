@@ -7,6 +7,12 @@ mod protocols;
 mod task_runtime;
 
 pub use protocols::{
+    ArchiveImport, EagleImport, EntryCopy, EntryDelete, EntryImport, EntryMove, PlaybackPrepare,
+    PlaylistDownload, RepositoryActionRun, RepositoryAttach, RepositoryCreate, RepositoryExport,
+    RepositoryImport, RepositoryRelocate, RepositorySync, TaskOutput, TaskProtocol,
+    ThumbnailRequestTask,
+};
+pub use protocols::{
     PROTOCOL_ARCHIVE_IMPORT, PROTOCOL_EAGLE_IMPORT, PROTOCOL_ENTRY_COPY, PROTOCOL_ENTRY_DELETE,
     PROTOCOL_ENTRY_IMPORT, PROTOCOL_ENTRY_MOVE, PROTOCOL_PLAYBACK_PREPARE,
     PROTOCOL_PLAYLIST_DOWNLOAD, PROTOCOL_REPOSITORY_ACTION_RUN, PROTOCOL_REPOSITORY_ATTACH,

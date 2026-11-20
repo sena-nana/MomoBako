@@ -8,8 +8,7 @@
 use nana_ui::RuntimeProgramContext;
 
 use crate::MomoBakoApplication;
-use crate::backend::services::repository::{FileBrowserRequest, RepositorySummary};
-use crate::backend::viewmodels::RepositoryQueryViewModel;
+use crate::backend::services::repository::FileBrowserRequest;
 use crate::shell::ShellMessage;
 use crate::task_guard::spawn_service;
 
@@ -21,31 +20,6 @@ pub(crate) fn dispatch_services(
 ) {
     dispatch_playlists(app, message, context);
     dispatch_browse_and_preview(app, message, context);
-}
-
-/// 附加、新建或重定向资源库的协议只回 JSON：按 `repository.repoId` 认出这个仓库，再从资源库列表里取出
-/// 它的摘要（领域的仓库摘要不能从 JSON 读回）。在服务任务里调用。
-pub(crate) fn mutated_repository(
-    executor: &tokio::runtime::Runtime,
-    query: &RepositoryQueryViewModel,
-    output: &serde_json::Value,
-) -> Result<RepositorySummary, String> {
-    let Some(repo_id) = output
-        .get("repository")
-        .and_then(|repository| repository.get("repoId"))
-        .and_then(serde_json::Value::as_str)
-    else {
-        eprintln!("Nana 资源库操作的结果里没有仓库标识：{output}");
-        return Err("资源库操作没有返回仓库标识".into());
-    };
-    let items = executor.block_on(query.list_repositories())?;
-    items
-        .into_iter()
-        .find(|item| item.repo_id == repo_id)
-        .ok_or_else(|| {
-            eprintln!("Nana 资源库列表里没有刚处理的仓库：{repo_id}");
-            format!("资源库列表里没有刚处理的仓库：{repo_id}")
-        })
 }
 
 /// 播放集页移除条目。
@@ -81,10 +55,9 @@ fn dispatch_playlists(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
                 ShellMessage::Player(crate::shell::player::PlayerMessage::ItemsChanged(
-                    executor.block_on(interaction.remove_playlist_item(request)),
+                    interaction.remove_playlist_item(request),
                 ))
             }
         },
@@ -116,12 +89,7 @@ fn dispatch_browse_and_preview(
             failed,
             |services| {
                 let browser = services.file_browser.clone();
-                let executor = services.executor.clone();
-                move || {
-                    ShellMessage::FileBrowserLoaded(
-                        executor.block_on(browser.get_file_browser(request)),
-                    )
-                }
+                move || ShellMessage::FileBrowserLoaded(browser.get_file_browser(request))
             },
         );
     }
@@ -140,11 +108,8 @@ fn dispatch_browse_and_preview(
             failed,
             |services| {
                 let query = services.repository_query.clone();
-                let executor = services.executor.clone();
                 move || {
-                    ShellMessage::AssetDetailLoaded(
-                        executor.block_on(query.get_asset_detail(repository_id, asset_id)),
-                    )
+                    ShellMessage::AssetDetailLoaded(query.get_asset_detail(repository_id, asset_id))
                 }
             },
         );
@@ -173,12 +138,7 @@ pub(crate) fn dispatch_first_screen(
         failed,
         |services| {
             let browser = services.file_browser.clone();
-            let executor = services.executor.clone();
-            move || {
-                ShellMessage::FileBrowserLoaded(
-                    executor.block_on(browser.get_file_browser(request)),
-                )
-            }
+            move || ShellMessage::FileBrowserLoaded(browser.get_file_browser(request))
         },
     );
 }

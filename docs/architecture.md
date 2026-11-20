@@ -77,7 +77,7 @@
 - Caches are files on disk under each repository's `.momo/`: `thumbnails/` and the subdirectories of `cache/` (Office preview PDFs, 网易云 playback cache, download staging). Metadata and queries are read from SQLite each time; there is no in-memory LRU.
 - The Settings page shows the active repository's cache usage (file count and bytes per cache directory), measured on disk by `cache_usage.rs`.
 - Thumbnail cache files use sha256 hex filenames. The backend generates thumbnails for images, videos and audio covers; custom thumbnails (local file, remote URL or image bytes) are saved through the thumbnail API.
-- Prepared preview and playback sources are local files; the Nana host reads their bytes in process through the query ViewModel. The runtime serves no preview URLs.
+- Prepared preview and playback sources are local files; the Nana host reads their bytes in process through the query service (`RepositoryQueryService`). The runtime serves no preview URLs.
 
 ## Plugin Architecture
 
@@ -109,7 +109,7 @@
 - "Worker finalizing" is non-terminal. Core publishes the cancelled terminal state only after the worker has stopped and discards any result or progress events produced after cancellation was requested.
 - Batch operations use one item as the atomic boundary. Completed items remain on disk and in the index, while unstarted items have no side effects. File copies and archive extraction write to temporary siblings and publish with a rename only after the complete file is written.
 - Native filesystem loops check cancellation between items and I/O chunks. External plugin calls cannot be interrupted in-process; cancellation is observed as soon as the call returns, after any required repository consistency cleanup.
-- Hosts request cancellation through `MutsukiTaskViewModel::cancel` and wait for the real terminal outcome. The Nana task popover has no cancel entry yet.
+- Hosts request cancellation through `TaskService::cancel` and wait for the real terminal outcome. The Nana task popover has no cancel entry yet.
 
 - The repository runtime caches a catalog snapshot and invalidates it from plugin directory/config metadata, so normal plugin calls no longer reopen every ZIP. It maps `callPlugin` methods to declared `momobako.*` protocols and target bindings.
 - Executable artifacts are staged atomically into a whole-package-hash-isolated runtime cache. Candidate generations are fully loaded before swap; any load failure keeps the current generation, while a successful swap drains calls before disposing ABI sessions or terminating process runners. Companion artifacts such as the Office helper are declared in `plugin.toml` instead of extracted by product-specific host code.

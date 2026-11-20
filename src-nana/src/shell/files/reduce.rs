@@ -255,13 +255,7 @@ pub(in crate::shell) fn reduce_message(
     }
     if let FilesMessage::EagleImportSettled { result } = message {
         super::super::admin::note_eagle_import_settled(model, result.is_ok());
-        if result.as_ref().ok().is_some_and(|report| report.is_none()) {
-            eprintln!("Nana Eagle 导入响应里没有可显示的 summary，不显示结果");
-        }
-        model.admin.eagle_import = match &result {
-            Ok(report) => report.clone(),
-            Err(_) => None,
-        };
+        model.admin.eagle_import = result.as_ref().ok().cloned();
         let reload = result.is_ok();
         let protocol = match result {
             Ok(_) => Ok(()),

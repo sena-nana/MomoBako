@@ -236,6 +236,16 @@ pub enum AdminMessage {
         step: SourceStep,
         result: Result<serde_json::Value, String>,
     },
+    /// 来源资源库建好了（或建失败）。
+    SourceRepositoryCreated {
+        name: String,
+        result: Result<RepositorySummary, String>,
+    },
+    /// 来源资源库的后台同步结束。
+    SourceRepositorySynced {
+        repo_id: String,
+        result: Result<(), String>,
+    },
     /// 下载服务设置里的「刷新」：再读一次 `downloader.getRuntimeStatus`。
     RefreshDownloaderStatus,
     /// 下载服务运行状态回来了。

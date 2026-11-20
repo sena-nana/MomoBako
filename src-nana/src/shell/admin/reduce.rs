@@ -426,6 +426,12 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
             }
         }
         AdminMessage::SourceStepFinished { step, result } => flow::finish(model, step, result),
+        AdminMessage::SourceRepositoryCreated { name, result } => {
+            flow::finish_created(model, &name, result)
+        }
+        AdminMessage::SourceRepositorySynced { repo_id, result } => {
+            flow::finish_synced(model, &repo_id, result)
+        }
     }
 }
 
@@ -753,8 +759,7 @@ fn apply_bundle(
 ) {
     model.admin.loading_settings = false;
     // 首屏启动在等的设置包：成功时插件列表换新、接着读播放器类型，启动等它回来；失败照 Vue 吃掉错误，启动就此结束。
-    let complete =
-        plugins.is_ok() && hooks.is_ok() && api.is_ok() && external.is_ok();
+    let complete = plugins.is_ok() && hooks.is_ok() && api.is_ok() && external.is_ok();
     model.workspace.note_settings_loaded(complete);
     match (plugins, hooks, api, external) {
         (Ok(plugins), Ok(hooks), Ok(api), Ok(external)) => {
@@ -768,16 +773,11 @@ fn apply_bundle(
             let _ = super::api::selected(model);
         }
         (plugins, hooks, api, external) => {
-            let error = [
-                plugins.err(),
-                hooks.err(),
-                api.err(),
-                external.err(),
-            ]
-            .into_iter()
-            .flatten()
-            .next()
-            .unwrap_or_default();
+            let error = [plugins.err(), hooks.err(), api.err(), external.err()]
+                .into_iter()
+                .flatten()
+                .next()
+                .unwrap_or_default();
             eprintln!("Nana 设置页数据读取失败：{error}");
             model.admin.load_error = error;
         }

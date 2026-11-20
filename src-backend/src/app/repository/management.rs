@@ -7,40 +7,33 @@ use crate::services::repository::{
 use crate::services::runtime::RepositoryRuntime;
 
 #[derive(Clone)]
-pub struct RepositoryManagementViewModel {
+pub struct RepositoryManagementService {
     runtime: RepositoryRuntime,
 }
 
-impl RepositoryManagementViewModel {
+impl RepositoryManagementService {
     pub fn new(runtime: RepositoryRuntime) -> Self {
         Self { runtime }
     }
 
-    pub async fn delete_repository(&self, request: RepositoryDeleteRequest) -> Result<(), String> {
+    pub fn delete_repository(&self, request: RepositoryDeleteRequest) -> Result<(), String> {
         self.runtime
-            .run_repository_collection_write(move |state| state.delete_repository(request))
-            .await
+            .collection_write(move |state| state.delete_repository(request))
     }
 
-    pub async fn update_repository_backend_config(
+    pub fn update_repository_backend_config(
         &self,
         request: RepositoryBackendConfigUpdateRequest,
     ) -> Result<RepositoryMutationResponse, String> {
         self.runtime
-            .run_repository_collection_write(move |state| {
-                state.update_repository_backend_config(request)
-            })
-            .await
+            .collection_write(move |state| state.update_repository_backend_config(request))
     }
 
-    pub async fn configure_netease_repository_cache(
+    pub fn configure_netease_repository_cache(
         &self,
         request: NeteaseRepositoryCacheConfigureRequest,
     ) -> Result<NeteaseRepositoryCacheConfigureResponse, String> {
         self.runtime
-            .run_repository_collection_write(move |state| {
-                state.configure_netease_repository_cache(request)
-            })
-            .await
+            .collection_write(move |state| state.configure_netease_repository_cache(request))
     }
 }

@@ -46,14 +46,13 @@ fn dispatch_record_access(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
                 let request = EntryAccessRecordRequest {
                     repo_id: repo_id.clone(),
                     path: path.clone(),
                 };
-                let result = executor
-                    .block_on(interaction.record_entry_access(request))
+                let result = interaction
+                    .record_entry_access(request)
                     .map(|response| response.recorded_at);
                 if let Err(error) = &result {
                     momobako_backend::app_log!(

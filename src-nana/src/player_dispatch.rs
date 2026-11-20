@@ -85,10 +85,9 @@ fn dispatch_memberships(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
-                let result = executor
-                    .block_on(interaction.list_playlist_memberships(repo_id.clone()))
+                let result = interaction
+                    .list_playlist_memberships(repo_id.clone())
                     .map(|index| index.memberships);
                 player(PlayerMessage::MembershipsLoaded { repo_id, result })
             }
@@ -109,10 +108,9 @@ fn dispatch_set_membership(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
                 player(PlayerMessage::MembershipSaved(
-                    executor.block_on(interaction.set_playlist_membership(request)),
+                    interaction.set_playlist_membership(request),
                 ))
             }
         },
@@ -132,10 +130,9 @@ fn dispatch_add_paths(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
                 player(PlayerMessage::PathsAdded(
-                    executor.block_on(interaction.add_playlist_items_by_paths(request)),
+                    interaction.add_playlist_items_by_paths(request),
                 ))
             }
         },
@@ -155,10 +152,9 @@ fn dispatch_reorder(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
                 player(PlayerMessage::ItemsChanged(
-                    executor.block_on(interaction.reorder_playlist_items(request)),
+                    interaction.reorder_playlist_items(request),
                 ))
             }
         },
@@ -179,11 +175,10 @@ fn dispatch_restore(
         failed,
         |services| {
             let interaction = services.repository_interaction.clone();
-            let executor = services.executor.clone();
             move || {
-                player(PlayerMessage::RestoreDetail(executor.block_on(
+                player(PlayerMessage::RestoreDetail(
                     interaction.get_playlist_detail(repo_id, playlist_id),
-                )))
+                ))
             }
         },
     );
@@ -238,16 +233,15 @@ fn dispatch_load_item(
         |services| {
             let query = services.repository_query.clone();
             let tasks = services.tasks.clone();
-            let executor = services.executor.clone();
             move || {
                 let (bytes, prep, _) = if virtual_entry {
-                    prepare_and_read(&tasks, &executor, Requester::Player, &repo_id, &path)
+                    prepare_and_read(&tasks, Requester::Player, &repo_id, &path)
                 } else {
-                    let bytes = executor
-                        .block_on(query.read_file(FileReadRequest {
+                    let bytes = query
+                        .read_file(FileReadRequest {
                             repo_id: repo_id.clone(),
                             path: path.clone(),
-                        }))
+                        })
                         .map_err(|error| {
                             eprintln!("Nana 播放当前项读取失败：{path}：{error}");
                             format!("无法读取当前项：{error}")

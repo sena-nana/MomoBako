@@ -103,6 +103,9 @@ mod tests {
         assert_eq!(tray.tooltip, "MomoBako");
         assert_eq!(tray.primary, Some(TRAY_OPEN));
         assert_eq!(tray.menu.len(), 2);
-        assert!(image::load_from_memory(&tray.icon_png).is_ok(), "托盘图标是 PNG");
+        assert!(
+            image::load_from_memory(&tray.icon_png).is_ok(),
+            "托盘图标是 PNG"
+        );
     }
 }

@@ -36,7 +36,7 @@ pub struct TaskProgressSnapshot {
     pub updated_at: String,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryBackendSummary {
     pub plugin_id: String,
@@ -45,7 +45,7 @@ pub struct RepositoryBackendSummary {
     pub capabilities: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositorySummary {
     pub repo_id: String,
@@ -61,7 +61,7 @@ pub struct RepositorySummary {
     pub authentication: Option<RepositoryAuthenticationStatus>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryLocalCacheStatus {
     pub required: bool,
@@ -94,7 +94,7 @@ pub struct AssetSummary {
     pub local_absolute_path: Option<String>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryAuthenticationStatus {
     pub required: bool,
@@ -342,7 +342,7 @@ pub struct RepositoryActionRunRequest {
     pub asset_ids: Option<Vec<String>>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryActionRunResponse {
     pub action: RepositoryAction,
@@ -470,7 +470,7 @@ pub struct RepositoryTreeSnapshot {
     pub tree: Vec<FileTreeNode>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FileBrowserEntry {
     pub path: String,
@@ -514,7 +514,7 @@ pub struct SourceRepositoryStateSnapshot {
     pub trash_entries: Vec<SourceTrashEntry>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FileBrowserSnapshot {
     pub repo_id: String,
@@ -539,6 +539,28 @@ pub struct FileBrowserSnapshot {
     pub entries: Vec<FileBrowserEntry>,
 }
 
+/// 长任务 `momobako.entry.delete` 的请求：一条（同 [`FileDeleteRequest`]）或同一资源库的一批路径。
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(untagged)]
+pub enum EntryDeleteRequest {
+    Single(FileDeleteRequest),
+    Batch {
+        #[serde(rename = "repoId")]
+        repo_id: String,
+        paths: Vec<String>,
+        mode: Option<String>,
+    },
+}
+
+/// 长任务 `momobako.entry.delete` 的结果：删了几条，以及最后一次删除后的目录快照。
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct EntryDeleteResponse {
+    pub repo_id: String,
+    pub deleted_count: usize,
+    pub snapshot: Option<FileBrowserSnapshot>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct EntryPlaybackRequest {
@@ -546,7 +568,7 @@ pub struct EntryPlaybackRequest {
     pub path: String,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct EntryPlaybackSourceResponse {
     pub repo_id: String,
@@ -726,7 +748,7 @@ pub struct RepositoryExportRequest {
     pub git: Option<RepositoryGitExportOptions>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryExportResponse {
     pub repository: RepositorySummary,
@@ -1083,7 +1105,7 @@ pub struct FileImportRequest {
 
 /// 导入的结果：导入以后目标文件夹的目录快照，加上因为同名跳过的条目。快照的字段摊平在同一层，只认目录快照的
 /// 调用方照旧能读。
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FileImportResponse {
     #[serde(flatten)]
@@ -1110,7 +1132,7 @@ pub struct EagleLibraryImportRequest {
     pub mode: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct EagleLibraryImportSummary {
     pub imported_files: usize,
@@ -1160,7 +1182,7 @@ pub struct EagleLibraryPluginImportResponse {
     pub warnings: Vec<EagleLibraryImportWarning>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct EagleLibraryImportResponse {
     pub snapshot: FileBrowserSnapshot,
@@ -1294,7 +1316,7 @@ pub struct FileMoveRequest {
     pub parent_path: String,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct FileDeleteRequest {
     pub repo_id: String,
@@ -1412,7 +1434,7 @@ pub(super) struct HardlinkAssetRecord {
     pub(super) size_bytes: i64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RepositoryMutationResponse {
     pub repository: RepositorySummary,
@@ -1436,7 +1458,7 @@ pub struct ThumbnailRequest {
     pub media_type: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThumbnailResponse {
     pub repo_id: String,
@@ -1449,7 +1471,7 @@ pub struct ThumbnailResponse {
     pub metadata: Option<BTreeMap<String, serde_json::Value>>,
 }
 
-#[derive(Debug, Serialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncResult {
     pub repo_id: String,

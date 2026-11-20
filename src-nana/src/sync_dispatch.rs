@@ -1,11 +1,11 @@
-//! 把文件夹树「刷新」的服务请求交给领域服务：同步仓库走启动时同一条 `PROTOCOL_REPOSITORY_SYNC`，
+//! 把文件夹树「刷新」的服务请求交给领域服务：同步仓库走启动时同一个长任务 `RepositorySync`，
 //! 同步完以后在一个后台任务里重读仓库摘要、硬链接候选和目录树。结果作为 `ShellMessage::TreeSync`
 //! 回到 `update` 归约。服务没起来、任务排不进去或任务 panic 时按失败写回（`task_guard.rs`），刷新不会停在进行中。
 
 use nana_ui::RuntimeProgramContext;
 
 use crate::MomoBakoApplication;
-use crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_SYNC;
+use crate::backend::services::mutsuki_runner::RepositorySync;
 use crate::backend::services::repository::SyncRequest;
 use crate::shell::tree_sync::{TreeSyncEffect, TreeSyncMessage, TreeSyncRefresh};
 use crate::shell::{HardlinkPrompt, ShellMessage, SidebarTree};
@@ -42,19 +42,10 @@ fn dispatch_sync(
         move |error| synced(token, Err(error)),
         |services| {
             let tasks = services.tasks.clone();
-            let executor = services.executor.clone();
             move || {
-                let result = executor
-                    .block_on(tasks.execute(PROTOCOL_REPOSITORY_SYNC, SyncRequest { repo_id }))
-                    .map(|(output, _)| {
-                        let scanned = output
-                            .get("scannedFiles")
-                            .and_then(serde_json::Value::as_u64);
-                        if scanned.is_none() {
-                            eprintln!("Nana 仓库同步结果里没有扫描数：{output}");
-                        }
-                        scanned.unwrap_or_default()
-                    });
+                let result = tasks
+                    .run::<RepositorySync>(SyncRequest { repo_id })
+                    .map(|output| u64::try_from(output.result.scanned_files).unwrap_or_default());
                 synced(token, result)
             }
         },
@@ -80,26 +71,26 @@ fn dispatch_refresh(
             let query = services.repository_query.clone();
             let interaction = services.repository_interaction.clone();
             let browser = services.file_browser.clone();
-            let executor = services.executor.clone();
             move || {
-                let snapshot = executor.block_on(query.get_repository_snapshot(repo_id.clone()));
-                let hardlinks = executor
-                    .block_on(interaction.list_hardlink_candidates(repo_id.clone()))
-                    .map(|response| {
-                        response
-                            .candidates
-                            .into_iter()
-                            .map(|candidate| HardlinkPrompt {
-                                id: candidate.candidate_id,
-                                new_path: candidate.new_path,
-                                existing_path: candidate.existing_path,
-                                size_label: candidate.size_label,
-                            })
-                            .collect()
-                    });
+                let snapshot = query.get_repository_snapshot(repo_id.clone());
+                let hardlinks =
+                    interaction
+                        .list_hardlink_candidates(repo_id.clone())
+                        .map(|response| {
+                            response
+                                .candidates
+                                .into_iter()
+                                .map(|candidate| HardlinkPrompt {
+                                    id: candidate.candidate_id,
+                                    new_path: candidate.new_path,
+                                    existing_path: candidate.existing_path,
+                                    size_label: candidate.size_label,
+                                })
+                                .collect()
+                        });
                 let tree = tree.then(|| {
-                    executor
-                        .block_on(browser.get_repository_tree(repo_id))
+                    browser
+                        .get_repository_tree(repo_id)
                         .map(|snapshot| SidebarTree::from_nodes(&snapshot.tree))
                 });
                 refreshed(

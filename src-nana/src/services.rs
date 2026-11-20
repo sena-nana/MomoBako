@@ -1,7 +1,7 @@
 //! Nana 宿主使用的共享应用服务组合。
 //!
-//! 每个 ViewModel 都由同一个 `RepositoryRuntime` 构造，保证读写锁、事件 sink、
-//! 预览服务和任务 runner 只有一份所有权；页面层只持有这个组合。
+//! 每个应用服务都由同一个 `RepositoryRuntime` 构造，保证读写锁、事件 sink 和任务 runner 只有一份所有权；
+//! 派发层在任务线程里同步调用它们。
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -10,25 +10,23 @@ use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::backend::RepositoryRuntime;
-use crate::backend::services::mutsuki_runner::MomoTaskRuntime;
-use crate::backend::viewmodels::{
-    FileBrowserViewModel, MutsukiTaskViewModel, PluginViewModel, RepositoryInteractionViewModel,
-    RepositoryManagementViewModel, RepositoryQueryViewModel, SystemViewModel,
+use crate::backend::app::{
+    FileBrowserService, PluginService, RepositoryInteractionService, RepositoryManagementService,
+    RepositoryQueryService, SystemService, TaskService,
 };
+use crate::backend::services::mutsuki_runner::MomoTaskRuntime;
 use crate::settings::{self, ApplicationSettings, SettingsStore};
 
 /// Nana Runtime 的领域服务依赖集合。
 pub struct NativeServices {
-    /// 领域服务依赖 Tokio；Nana 自身的 pollster 任务线程不提供 reactor。
-    pub executor: Arc<tokio::runtime::Runtime>,
     pub runtime: RepositoryRuntime,
-    pub repository_query: RepositoryQueryViewModel,
-    pub file_browser: FileBrowserViewModel,
-    pub repository_interaction: RepositoryInteractionViewModel,
-    pub repository_management: RepositoryManagementViewModel,
-    pub plugin: PluginViewModel,
-    pub system: SystemViewModel,
-    pub tasks: MutsukiTaskViewModel,
+    pub repository_query: RepositoryQueryService,
+    pub file_browser: FileBrowserService,
+    pub repository_interaction: RepositoryInteractionService,
+    pub repository_management: RepositoryManagementService,
+    pub plugin: PluginService,
+    pub system: SystemService,
+    pub tasks: TaskService,
     pub settings: SettingsStore,
     host_events: Mutex<Option<mpsc::Receiver<crate::backend::services::host_events::HostEvent>>>,
     /// 宿主事件线程的停止标记和句柄，服务销毁时在运行时关闭前回收。
@@ -40,15 +38,9 @@ pub struct NativeServices {
 }
 
 impl NativeServices {
-    /// 启动一次领域 Runtime，并将所有页面 ViewModel 绑定到同一实例。服务目录按布局取（`app_paths.rs`）；
+    /// 启动一次领域 Runtime，所有应用服务绑定到同一实例。服务目录按布局取（`app_paths.rs`）；
     /// 日志器起来以后接上随附插件和插件宿主（`plugin_host.rs`）。
     pub fn start() -> Result<Self, String> {
-        let executor = Arc::new(
-            tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .map_err(|error| format!("领域异步执行器启动失败：{error}"))?,
-        );
         let locations = crate::app_paths::current();
         let runtime = RepositoryRuntime::start_at(locations.service_root.clone())?;
         let (sink, receiver) = crate::backend::services::host_events::host_event_channel();
@@ -85,14 +77,13 @@ impl NativeServices {
             );
         }
         Ok(Self {
-            executor,
-            repository_query: RepositoryQueryViewModel::new(runtime.clone()),
-            file_browser: FileBrowserViewModel::new(runtime.clone()),
-            repository_interaction: RepositoryInteractionViewModel::new(runtime.clone()),
-            repository_management: RepositoryManagementViewModel::new(runtime.clone()),
-            plugin: PluginViewModel::new(runtime.clone()),
-            system: SystemViewModel::new(runtime.clone()),
-            tasks: MutsukiTaskViewModel::new(task_runtime),
+            repository_query: RepositoryQueryService::new(runtime.clone()),
+            file_browser: FileBrowserService::new(runtime.clone()),
+            repository_interaction: RepositoryInteractionService::new(runtime.clone()),
+            repository_management: RepositoryManagementService::new(runtime.clone()),
+            plugin: PluginService::new(runtime.clone()),
+            system: SystemService::new(runtime.clone()),
+            tasks: TaskService::new(task_runtime),
             settings: SettingsStore::new(settings::default_path()),
             runtime,
             host_events: Mutex::new(Some(receiver)),

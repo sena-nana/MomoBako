@@ -354,15 +354,11 @@ fn abi_dispatch_submit_returns_handle_before_cancelled_task_finishes() {
 fn awaited_task_failure_returns_the_domain_message() {
     let fixture = RuntimeFixture::new("task-failure-message");
     let runtime = MomoTaskRuntime::new(fixture.runtime.clone());
-    let executor = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .expect("test executor should start");
-    let error = executor
-        .block_on(runtime.execute(
+    let error = runtime
+        .execute(
             PROTOCOL_PLAYBACK_PREPARE,
             serde_json::json!({ "repoId": 1, "path": "missing.mp3" }),
-        ))
+        )
         .expect_err("invalid playback payload should fail");
     assert!(
         error.starts_with("invalid momobako.playback.prepare payload:"),
