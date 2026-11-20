@@ -33,5 +33,5 @@
 
 - 按影响范围运行最小必要验证: `yarn test`、`cargo test -p momobako-nana --locked --lib`、`cargo check -p momobako-backend -p momobako-nana --all-targets --locked`、`yarn test:backend` 或 `yarn verify`。
 - 改动 `src-backend/` 时运行 `yarn test:backend`;它不在 `yarn verify` 里,由 CI 单独执行。
-- 文档、注释、配置说明等低风险改动可不跑测试;涉及数据模型、持久化、文件同步、宿主调用的 ViewModel 接口、构建配置或用户关键路径时,优先运行最小必要验证。
+- 文档、注释、配置说明等低风险改动可不跑测试;涉及数据模型、持久化、文件同步、宿主调用的应用服务接口、构建配置或用户关键路径时,优先运行最小必要验证。
 - 若未运行测试、构建或验证,在最终说明里写清楚原因;若验证无法运行,写清楚阻塞原因和剩余风险。
