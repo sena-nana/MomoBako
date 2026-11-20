@@ -1,7 +1,6 @@
 //! 工作台状态机。
 //!
-//! 对应 Vue `AppShell.vue`、`workspace/lifecycle.ts`、`workspace/state.ts`、
-//! `MissingRepositoryState.vue`、`EmptyRepositoryState.vue` 和缺失仓库动作。
+//! 覆盖首屏启动、仓库生命周期和状态、缺失仓库页、空库页和缺失仓库动作。
 //! 这里是工作台的状态、主区和侧栏偏好，页面控件只消费结果。按流程分在子模块里：首屏启动在
 //! `shell/workspace/launch.rs`（步骤条和加载日志的数据在 `shell/workspace/startup.rs`），换仓库和同一个仓库的刷新在
 //! `shell/workspace/switch.rs`，缺失仓库的动作和删除对话框在 `shell/workspace/missing.rs`，记住上次打开的资源库在
@@ -15,9 +14,9 @@ use crate::theme_map::{SIDEBAR_DEFAULT_PX, SIDEBAR_MAX_PX, SIDEBAR_MIN_PX};
 
 use super::repo_operation::OperationRequests;
 
-/// 与 Vue `momobako.sidebarCollapsed` 相同的存储键。
+/// 侧栏折叠状态的存储键。
 pub const SIDEBAR_COLLAPSED_KEY: &str = "momobako.sidebarCollapsed";
-/// 与 Vue `momobako.sidebarWidth` 相同的存储键。
+/// 侧栏宽度的存储键。
 pub const SIDEBAR_WIDTH_KEY: &str = "momobako.sidebarWidth";
 
 mod startup;
@@ -132,13 +131,13 @@ impl WorkspaceRepository {
         self.cache_required && self.cache_status != "ready"
     }
 
-    /// 来源认证或本地缓存不可用（Vue `actionDisabled` 的仓库部分）：登录过期、没有登录，或者要本地缓存但缓存
+    /// 来源认证或本地缓存不可用（仓库这一侧）：登录过期、没有登录，或者要本地缓存但缓存
     /// 没就绪。这时来源条目动作禁用。
     pub fn source_unavailable(&self) -> bool {
         self.login_expired || self.logged_out || self.is_source_cache_issue()
     }
 
-    /// 能当下载目标：就绪，而且可写（Vue 目标资源库对话框的 `requireReady`、`requireWritable`）。
+    /// 能当下载目标：就绪，而且可写。
     pub fn accepts_downloads(&self) -> bool {
         self.status == "ready"
             && self
@@ -236,9 +235,9 @@ pub struct WorkspaceState {
     pub stop_playback: bool,
     /// 列表和同步请求的代次。重试或新的刷新会使旧结果失效。
     pub list_generation: u64,
-    /// 启动以后在刷新资源库（Vue `isLoadingRepositories`）：从重读列表到选完仓库。
+    /// 启动以后在刷新资源库：从重读列表到选完仓库。
     pub list_loading: bool,
-    /// 在选仓库（Vue `isLoadingSnapshot`）：换仓库或同一个仓库的同步、摘要和重读目录，整轮结束时放下。
+    /// 在选仓库：换仓库或同一个仓库的同步、摘要和重读目录，整轮结束时放下。
     pub snapshot_loading: bool,
     /// 进行中的同仓库刷新，见 `shell/workspace/switch.rs`。
     pub refresh: Option<RefreshRun>,
@@ -302,7 +301,7 @@ impl WorkspaceState {
         self.relocating || self.deleting_mode.is_some()
     }
 
-    /// 刷新资源库，读完列表照 Vue 选当前仓库（不在列表里选第一项），见 [`Self::refresh_repositories`]。
+    /// 刷新资源库，读完列表选当前仓库（不在列表里选第一项），见 [`Self::refresh_repositories`]。
     pub fn request_repository_refresh(&mut self) {
         self.refresh_repositories(None);
     }
@@ -316,7 +315,7 @@ impl WorkspaceState {
         self.sidebar_width = clamp_sidebar_width(width);
     }
 
-    /// 对应 Vue 的 `@resize-end`：拖动过程中只夹取，松手后才写入。
+    /// 拖动侧栏边缘结束：拖动过程中只夹取，松手后才写入。
     pub fn commit_sidebar_width(&mut self) {
         self.sidebar_width = clamp_sidebar_width(self.sidebar_width);
         self.effects.push(WorkspaceEffect::PersistSidebar);
@@ -408,7 +407,7 @@ pub fn sidebar_prefs_path() -> std::path::PathBuf {
     settings::default_path().with_file_name("sidebar.json")
 }
 
-/// 把侧栏宽度限制在 Vue 的 220–480，非法值回到 276。
+/// 把侧栏宽度限制在 220–480，非法值回到 276。
 pub fn clamp_sidebar_width(width: f32) -> f32 {
     if !width.is_finite() {
         SIDEBAR_DEFAULT_PX

@@ -1,7 +1,6 @@
 //! 设置、插件、日志、任务和仓库动作的状态。
 //!
-//! 结构对应 Vue 的 `Settings.vue`、`PluginManagerPanel.vue`、`SourceAuthenticationSettings.vue`、
-//! `WorkspaceLogsPanel.vue`、`TaskPopover.vue`、`ExtensionsPanel.vue` 和 `RepositoryActionsPanel.vue`。
+//! 覆盖设置页、插件管理、来源登录、系统日志、任务弹层、拓展页和仓库动作面板。
 //! 消息在 `admin_reduce` 里归约，副作用由 `admin_dispatch` 交给领域服务。
 
 use std::collections::BTreeMap;
@@ -99,8 +98,7 @@ pub enum AdminMessage {
         key: String,
         value: String,
     },
-    /// 单行字段回车，单行和 JSON 字段失焦：草稿和现在的值不同才提交（Vue 文本框的 `@change`、JSON 文本域的
-    /// `@blur`）。
+    /// 单行字段回车，单行和 JSON 字段失焦：草稿和现在的值不同才提交。
     CommitDraft {
         plugin_id: String,
         key: String,
@@ -147,7 +145,7 @@ pub enum AdminMessage {
     SetLogPaused(bool),
     /// 展开或收起一条日志的上下文。
     ToggleLogContext(String),
-    /// 清空系统日志的结果。成功照 Vue `clearSystemLogsInWorkspace` 直接把手上的日志清空，不再重读。
+    /// 清空系统日志的结果。成功直接把手上的日志清空，不再重读。
     LogsCleared(Result<(), String>),
     ToggleTaskPopover,
     /// 弹层头部的关闭按钮和弹层外的点击层。Escape 走全局的 [`crate::shell::escape_layer`]。
@@ -193,7 +191,7 @@ pub enum AdminMessage {
     ChooseDownloadRepository(String),
     /// 「选择目标资源库」的取消、点外面和 Escape。
     CancelDownloadRepository,
-    /// 文件右键里的「创建播放列表」：在本地建来源歌单对应的播放集，再把目录加进去（Vue `runPlaylistAction`）。
+    /// 文件右键里的「创建播放列表」：在本地建来源歌单对应的播放集，再把目录加进去。
     CreateSourcePlaylist {
         playlist: super::entry_actions::SourcePlaylist,
         repository_id: Option<String>,
@@ -316,13 +314,13 @@ pub struct ToolPageEntry {
 #[derive(Clone, Debug)]
 pub enum AdminEffect {
     LoadSettingsBundle,
-    /// 读最近 200 条系统日志。每次切到日志面板都读，和 Vue `setActivePanel('logs')` 一致。
+    /// 读最近 200 条系统日志。每次切到日志面板都读。
     LoadLogs,
     /// 清空系统日志的持久化文件，结果回 [`AdminMessage::LogsCleared`]。
     ClearLogs,
     /// 读设置目录里的应用设置（主题、缓存上限、关闭行为）。打开设置页时读一次。
     LoadAppSettings,
-    /// 读插件登记的播放器类型。插件列表换新以后读，和 Vue 同步前端插件注册表的时机一致。
+    /// 读插件登记的播放器类型。插件列表换新以后读。
     LoadPlaylistPlayers,
     Install(String),
     DeletePlugin(String),
@@ -439,7 +437,7 @@ pub struct AdminState {
     pub field_drafts: BTreeMap<String, BTreeMap<String, String>>,
     pub action_message: String,
     pub action_error: String,
-    /// 设置页数据读取失败的原因，对应 Vue `useWorkspaceProgress().error`。
+    /// 设置页数据读取失败的原因。
     pub load_error: String,
     pub hook_executions: Vec<PluginHookExecutionRecord>,
     pub managing: bool,
@@ -459,9 +457,9 @@ pub struct AdminState {
     /// 最近一次仓库列表的完整摘要。来源认证页要读登录状态和本地缓存路径。
     pub repository_summaries: Vec<RepositorySummary>,
     pub logs: Vec<SystemLogRecord>,
-    /// 在读历史日志（Vue `isLoadingLogs`）。
+    /// 在读历史日志。
     pub logs_loading: bool,
-    /// 在清空系统日志（Vue `isClearingLogs`）：「清空日志」禁用并换成加载图标。
+    /// 在清空系统日志：「清空日志」禁用并换成加载图标。
     pub logs_clearing: bool,
     pub log_levels: Vec<String>,
     pub log_kinds: Vec<String>,
@@ -631,7 +629,7 @@ impl AdminState {
         self.pending_failure = None;
     }
 
-    /// 写失败文案。Vue 先用全局错误，空了才用这一步的兜底文案。
+    /// 写失败文案。先用全局错误，空了才用这一步的兜底文案。
     fn apply_failure(&mut self, error: &str) {
         self.pending_notice = None;
         let fallback = self.pending_failure.take().unwrap_or_default();
@@ -733,13 +731,13 @@ impl AdminState {
         self.note_log_scroll();
     }
 
-    /// 切到日志面板：读最近 200 条历史日志（Vue `loadSystemLogsInWorkspace`）。
+    /// 切到日志面板：读最近 200 条历史日志。
     pub(super) fn begin_logs_load(&mut self) {
         self.logs_loading = true;
         self.effects.push(AdminEffect::LoadLogs);
     }
 
-    /// 历史日志读回：整份换掉，照 Vue `sortSystemLogs` 按时间再 id 降序。
+    /// 历史日志读回：整份换掉，按时间再 id 降序。
     pub(super) fn replace_logs(&mut self, mut records: Vec<SystemLogRecord>) {
         sort_logs(&mut records);
         self.logs = records;
@@ -762,7 +760,7 @@ impl AdminState {
     }
 }
 
-/// 日志按时间再 id 降序，和 Vue `sortSystemLogs` 一致。
+/// 日志按时间再 id 降序。
 fn sort_logs(records: &mut [SystemLogRecord]) {
     records.sort_by(|left, right| {
         right
@@ -774,14 +772,14 @@ fn sort_logs(records: &mut [SystemLogRecord]) {
 
 impl ShellViewModel {
     /// 日志面板在追踪模式下让日志列表跟随末尾：新记录进来滚到底，暂停后停在原位。
-    /// Vue 的跟随滚的是不定高的日志列表本身，列表不会出现滚动，实际没有效果；这里给列表定高再跟随。
+    /// 日志列表定高，跟随才有效果；不定高的列表不会出现滚动。
     pub(super) fn admin_logs_follow_end(&self) -> bool {
         self.admin_workspace_visible(WorkspacePanel::Logs)
             && self.admin.log_would_scroll
             && !self.admin.log_paused
     }
 
-    /// 首页的日志、拓展和动作面板在显示：启动完成、不在设置页，主区有仓库或者还没有资源库（Vue 的这几个面板
+    /// 首页的日志、拓展和动作面板在显示：启动完成、不在设置页，主区有仓库或者还没有资源库（这几个面板
     /// 不要求仓库；资源库丢失时主区是缺失页）。和主区路由（`RouteKey::of`）同一口径。
     pub(super) fn admin_workspace_visible(&self, panel: WorkspacePanel) -> bool {
         self.workspace.startup.status == super::StartupStatus::Ready
@@ -797,7 +795,7 @@ impl ShellViewModel {
     }
 
     /// 任务弹层的行：仓库操作加运行中的任务，按更新时间降序。侧栏「任务」的计数也是这些行的个数，
-    /// 和 Vue `TaskPopover.vue` 的 `activeTaskCount` 一样。仓库操作只有一个槽位，见 `repo_operation.rs`。
+    /// 仓库操作只有一个槽位，见 `repo_operation.rs`。
     pub(crate) fn task_rows(&self) -> Vec<support::PopoverRow> {
         support::popover_rows(&self.task_progress, self.operation.shown())
     }

@@ -1,4 +1,4 @@
-//! 换仓库和同一个仓库的刷新，对照 Vue `selectRepository` / `loadRepositories`：从切换列表、附加、新建、
+//! 换仓库和同一个仓库的刷新：从切换列表、附加、新建、
 //! 删除、来源动作完成以后的刷新和重定向这些入口走，送回服务结果，看启动页、侧栏、任务弹层、状态区和
 //! 最后的工作区。搜索命中在别的仓库见 `shell/inspect/search/tests.rs`。
 
@@ -267,7 +267,7 @@ fn switching_from_the_list_walks_the_startup_page_and_brings_the_sidebar_back() 
 }
 
 /// 换仓库失败停在启动页：当前步骤标成失败、写出原因、给「重试」，侧栏仍然收起，任务弹层这一行取消；
-/// 「重试」照 Vue `ensureRepositoryWorkspace` 走完整的首屏启动（写启动日志、结束时读设置包）。
+/// 「重试」走完整的首屏启动（写启动日志、结束时读设置包）。
 #[test]
 fn a_failed_switch_stays_on_the_startup_page_until_retry_succeeds() {
     let mut model = ready_on_alpha();
@@ -339,7 +339,7 @@ fn a_failed_switch_stays_on_the_startup_page_until_retry_succeeds() {
     assert_eq!(body_mode(&model), BodyMode::Workbench);
 }
 
-/// 附加本地文件夹成功（Vue `attachRepository`）：任务弹层先是「挂载资源库」，成功以后新仓库放进列表、
+/// 附加本地文件夹成功：任务弹层先是「挂载资源库」，成功以后新仓库放进列表、
 /// 切过去，换仓库接手这一行。失败时回到添加菜单，这一行取消。
 #[test]
 fn attaching_a_folder_switches_to_the_new_repository() {
@@ -397,7 +397,7 @@ fn attaching_a_folder_switches_to_the_new_repository() {
     assert!(operation_row(&model).is_none());
 }
 
-/// 新建资源库（Eagle Library，Vue `createNewRepository`）：「创建资源库 · 初始化资源库并扫描文件」，
+/// 新建资源库（Eagle Library）：「创建资源库 · 初始化资源库并扫描文件」，
 /// 建完走到「切换到新资源库」再由换仓库接手。
 #[test]
 fn creating_a_repository_switches_to_it() {
@@ -422,7 +422,7 @@ fn creating_a_repository_switches_to_it() {
     assert!(sync_requested(&mut model, "eagle"));
 }
 
-/// 删除当前资源库以后（Vue `selectNextRepositoryAfterRemoval`）换到下一个仓库；删到没有仓库时回到空库页。
+/// 删除当前资源库以后换到下一个仓库；删到没有仓库时回到空库页。
 #[test]
 fn deleting_the_current_repository_switches_to_the_next_one() {
     let mut model = ready_on_alpha();
@@ -451,7 +451,7 @@ fn deleting_the_current_repository_switches_to_the_next_one() {
     assert_eq!(RouteKey::of(&model), RouteKey::Empty);
 }
 
-/// 来源动作完成以后刷新（Vue `context.refreshRepo()` = `loadRepositories`）：同一个仓库先读列表、再同步、
+/// 来源动作完成以后刷新：同一个仓库先读列表、再同步、
 /// 读摘要、重读当前目录；整轮状态区写「正在同步仓库状态」，任务弹层先「加载资源库」，重读目录时
 /// 换成「读取目录」。不回启动页，侧栏留着并在后台重读。
 #[test]
@@ -564,7 +564,7 @@ fn refreshing_the_same_repository_syncs_then_rereads_the_current_directory() {
     );
 }
 
-/// 重读当前目录失败时照 Vue 退回根目录再读一次，读完收尾。
+/// 重读当前目录失败时退回根目录再读一次，读完收尾。
 #[test]
 fn a_failed_reread_falls_back_to_the_root_directory() {
     let mut model = ready_on_alpha();
@@ -616,7 +616,7 @@ fn a_failed_reread_falls_back_to_the_root_directory() {
     assert_eq!(StatusLine::project(&model), StatusLine::Hidden);
 }
 
-/// 刷新时同步失败：原因写进状态区，放下忙碌，任务弹层这一行照 Vue 完成（`loadRepositories` 的完成）。
+/// 刷新时同步失败：原因写进状态区，放下忙碌，任务弹层这一行照常完成。
 #[test]
 fn a_failed_refresh_sync_lands_in_the_status_area() {
     let mut model = ready_on_alpha();
@@ -647,7 +647,7 @@ fn a_failed_refresh_sync_lands_in_the_status_area() {
     );
 }
 
-/// 刷新以后当前仓库已经不在列表里：照 Vue 选第一项，是一次换仓库。
+/// 刷新以后当前仓库已经不在列表里：选第一项，是一次换仓库。
 #[test]
 fn a_refresh_without_the_current_repository_switches_to_the_first() {
     let mut model = ready_on_alpha();
@@ -670,7 +670,7 @@ fn a_refresh_without_the_current_repository_switches_to_the_first() {
     assert!(sync_requested(&mut model, BETA));
 }
 
-/// 重定向缺失的仓库（Vue `relocateMissingRepository`）：「重定向资源库 · 校验资源库位置」，成功走到
+/// 重定向缺失的仓库：「重定向资源库 · 校验资源库位置」，成功走到
 /// 「更新资源库状态」，换上返回的摘要，再原地同步、读摘要、读目录；缺失页换成文件页，侧栏重新绑定。
 #[test]
 fn relocating_a_missing_repository_resyncs_it_in_place() {
@@ -727,7 +727,7 @@ fn relocating_a_missing_repository_resyncs_it_in_place() {
     assert_eq!(model.files.rows.len(), 1);
 }
 
-/// 同一个仓库刷新读完摘要（Vue `selectRepository` 原地分支）：当前素材还在就重读它，详情卡叠层先清掉，
+/// 同一个仓库刷新读完摘要：当前素材还在就重读它，详情卡叠层先清掉，
 /// 选中路径和预览页不动。编辑器没有未保存改动时换成服务器上的注释；改过的草稿留着。当前素材不在摘要里时
 /// 改记第一个，但不把编辑器换到那一条。重读失败只记日志，不把整页改成错误。
 #[test]

@@ -1,11 +1,11 @@
 //! 仓库摘要里的素材：侧栏快捷方式的计数，以及访问记录的当场更新。
 //!
-//! 对应 Vue `activeSnapshot.assets`。计数照 `useSidebarShortcutsUi.ts`：只看没删的素材，未分类是路径里没有 `/`，
+//! 计数只看没删的素材，未分类是路径里没有 `/`，
 //! 未标签是没有标签，最近使用是有访问时间。
 //!
-//! 预览、播放和「打开」记下访问以后照 Vue `patchActiveSnapshotAssetAccess` 当场改这一条的访问时间，只留最近的
-//! 50 条（和后端 `MAX_RECENT_ACCESS_ENTRIES` 一样），侧栏「最近使用」的计数跟着变，不重读摘要；「清空记录」成功照
-//! `clearActiveSnapshotRecentAccess` 全部清掉。后端已经写了访问时间的（预览源、在线条目的播放源）只改这里；本地
+//! 预览、播放和「打开」记下访问以后当场改这一条的访问时间，只留最近的
+//! 50 条（和后端 `MAX_RECENT_ACCESS_ENTRIES` 一样），侧栏「最近使用」的计数跟着变，不重读摘要；「清空记录」成功后
+//! 全部清掉。后端已经写了访问时间的（预览源、在线条目的播放源）只改这里；本地
 //! 文件直接读字节、后端没有经手的，排一次 `record_entry_access`，回来再改这里。分类视图的列表也从这份摘要筛，
 //! 不另读目录。
 
@@ -54,7 +54,7 @@ impl LibraryAssets {
         self.assets.clear();
     }
 
-    /// 照 Vue `patchActiveSnapshotAssetAccess` 记下一次访问：别的仓库、摘要里没有这一条（或已经删掉）时不动；
+    /// 记下一次访问：别的仓库、摘要里没有这一条（或已经删掉）时不动；
     /// 改完只留最近的 50 条访问时间。返回素材有没有变。
     pub(super) fn note_access(&mut self, repo_id: &str, path: &str, recorded_at: &str) -> bool {
         if self.repo_id.as_deref() != Some(repo_id) {
@@ -75,7 +75,7 @@ impl LibraryAssets {
         true
     }
 
-    /// 照 Vue `clearActiveSnapshotRecentAccess`：「清空记录」成功以后去掉所有访问时间。返回素材有没有变。
+    /// 「清空记录」成功以后去掉所有访问时间。返回素材有没有变。
     pub(super) fn clear_access(&mut self, repo_id: &str) -> bool {
         if self.repo_id.as_deref() != Some(repo_id) || !self.assets.iter().any(accessed) {
             return false;
@@ -86,7 +86,7 @@ impl LibraryAssets {
         true
     }
 
-    /// Vue `libraryCategoryEntries`：没删的素材按分类筛。最近使用再按访问时间倒序。没有对应条目时是空的。
+    /// 没删的素材按分类筛。最近使用再按访问时间倒序。没有对应条目时是空的。
     pub(super) fn category_assets(&self, category: LibraryCategory) -> Vec<AssetSummary> {
         let mut assets: Vec<&AssetSummary> = self
             .assets
@@ -118,7 +118,7 @@ impl LibraryAssets {
             .collect()
     }
 
-    /// 算法：有访问时间的素材按 Vue `compareRecentAssetAccess` 排好，第 50 条以后的访问时间清掉，和后端写入时的
+    /// 算法：有访问时间的素材按 `compare_recent` 排好，第 50 条以后的访问时间清掉，和后端写入时的
     /// 修剪一致。
     fn prune_recent(&mut self) {
         let mut ranked: Vec<usize> = (0..self.assets.len())
@@ -141,8 +141,8 @@ fn accessed(asset: &AssetSummary) -> bool {
         .is_some_and(|value| !value.trim().is_empty())
 }
 
-/// Vue `compareRecentAssetAccess`：访问时间倒序，再修改时间倒序，再文件名的中文顺序。时间是 RFC 3339 原文，
-/// 和 Vue、后端一样按文本比。
+/// 访问时间倒序，再修改时间倒序，再文件名的中文顺序。时间是 RFC 3339 原文，
+/// 和后端一样按文本比。
 fn compare_recent(left: &AssetSummary, right: &AssetSummary) -> Ordering {
     let left_access = left.last_accessed_at.as_deref().unwrap_or_default();
     let right_access = right.last_accessed_at.as_deref().unwrap_or_default();
@@ -192,7 +192,7 @@ impl ShellViewModel {
         }
     }
 
-    /// 分类视图的列表照 Vue 从已经读回的仓库摘要筛出来。不在分类视图时清掉，避免下次进去还留着上一份。
+    /// 分类视图的列表从已经读回的仓库摘要筛出来。不在分类视图时清掉，避免下次进去还留着上一份。
     /// 同一张缩略图已经能画时接着用，重筛不把卡片闪回类型图标；行换了就让生成队列再看一眼还没有图的文件。
     pub(super) fn sync_category_rows(&mut self) {
         let showing = self.workspace.panel == WorkspacePanel::Files

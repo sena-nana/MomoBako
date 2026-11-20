@@ -1,11 +1,10 @@
-//! 验收场景共用的工作区底子：Vue 夹具 `tmp/vue-mock/fixtures.ts` 的 `base()`。
+//! 验收场景共用的工作区底子。
 //!
 //! 资源库「默认资源库」在 `C:/acceptance`，根目录有 assets 文件夹、cover.png（2400000 B）和 notes/page.pdf
-//! （1820 B，和 Vue 模拟一样也列在根目录），目录树 assets → covers，网格展示；侧栏计数是全部 2、未分类 1、
+//! （1820 B，也列在根目录），目录树 assets → covers，网格展示；侧栏计数是全部 2、未分类 1、
 //! 未标签 2。起步照产品启动走真实消息：读资源库列表、同步、读仓库摘要、读首屏目录，启动结束时读设置包、
-//! 插件列表到了再读播放器类型，再让侧栏读完目录树、智能文件夹和播放集，所有应答都和 Vue 模拟 IPC
-//! （`ipc.ts`）的一致：插件是全部内置插件（`pluginFilter: () => true`）。场景要别的条目、目录树、
-//! 播放集、播放器或仓库时改 [`Base`] 里对应的字段。
+//! 插件列表到了再读播放器类型，再让侧栏读完目录树、智能文件夹和播放集，应答都是固定夹具，插件是全部内置插件。
+//! 场景要别的条目、目录树、播放集、播放器或仓库时改 [`Base`] 里对应的字段。
 
 use std::collections::BTreeMap;
 
@@ -27,12 +26,12 @@ use super::plugin_fixtures::{bundle_failed, bundle_loaded, bundled_plugins, cach
 pub(super) const REPO_ID: &str = "acceptance-repo";
 pub(super) const REPO_NAME: &str = "默认资源库";
 pub(super) const REPO_PATH: &str = "C:/acceptance";
-/// Vue 夹具 `NOW`。
+/// 夹具的固定时刻。
 pub(super) const NOW: &str = "2026-10-08T08:00:00Z";
 const BACKEND_PLUGIN_ID: &str = "momobako.source.local-filesystem";
-/// 夹具固定时刻 2026-10-08T08:00:00Z 在 UTC+8 的本地时间。Vue 截图时把浏览器时钟固定在同一时刻。
+/// 夹具固定时刻 2026-10-08T08:00:00Z 在 UTC+8 的本地时间。截图时钟固定在这一刻。
 const FIXED_CLOCK: &str = "16:00:00";
-/// 内置插件清单里声明的播放器。Vue 对照页按真实清单加载插件，播放器列表也从这里来。
+/// 内置插件清单里声明的播放器。验收场景按真实清单加载插件，播放器列表也从这里来。
 const PLAYER_MANIFESTS: [&str; 2] = [
     include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -44,7 +43,7 @@ const PLAYER_MANIFESTS: [&str; 2] = [
     )),
 ];
 
-/// 一个场景的工作区底子。默认就是 Vue `base()`。
+/// 一个场景的工作区底子。默认是「默认资源库」：根目录三条、目录树 assets → covers、网格展示。
 pub(super) struct Base {
     /// 当前资源库的名字。
     pub name: &'static str,
@@ -191,7 +190,7 @@ impl Base {
             .collect()
     }
 
-    /// Vue 模拟 IPC 的 `get_repository_snapshot` 应答，总大小照模拟写死。
+    /// 仓库快照应答，总大小写死。
     fn snapshot(&self) -> RepositorySnapshot {
         let assets = self.assets();
         RepositorySnapshot {
@@ -224,7 +223,7 @@ impl Base {
     }
 }
 
-/// 回答启动排下的管理读取：绑定仓库时的仓库动作（Vue 模拟 IPC 答空列表）、首屏启动在第 4 步等的设置包，
+/// 回答启动排下的管理读取：绑定仓库时的仓库动作（夹具答空列表）、首屏启动在第 4 步等的设置包，
 /// 以及插件列表到了以后的播放器类型；这两样都回来，首屏启动才结束。`plugins_error` 有值时设置包读失败，插件列表
 /// 没到也就不读播放器类型。没排下的读取不编造应答，只记日志：说明产品启动已经不读它们了。
 /// 后台的硬链接候选和成员索引在夹具里都是空的，不回答也是同样的状态。
@@ -274,7 +273,7 @@ pub(super) fn answer_admin_reads(
     model.reduce(ShellMessage::PlaylistPlayersLoaded(Ok(players.to_vec())));
 }
 
-/// 验收用的空白壳层：上次打开的是夹具仓库，和 Vue 的 `lastActiveRepositoryId` 一致。
+/// 验收用的空白壳层：上次打开的是夹具仓库。
 pub(super) fn acceptance_model() -> ShellViewModel {
     let mut model = ShellViewModel::default();
     model.acceptance_scene = true;
@@ -296,7 +295,7 @@ pub(super) fn settle(model: &mut ShellViewModel) {
     }
 }
 
-/// Vue 夹具 `repository(name, status)`：本地文件系统仓库，素材数照夹具写 2。
+/// 仓库摘要夹具：本地文件系统仓库，素材数写 2。
 pub(super) fn summary(name: &str, status: &str) -> RepositorySummary {
     RepositorySummary {
         repo_id: REPO_ID.into(),
@@ -326,17 +325,17 @@ pub(super) fn summary(name: &str, status: &str) -> RepositorySummary {
     }
 }
 
-/// Vue 夹具 `dir(path)`。
+/// 目录条目夹具。
 pub(super) fn dir(path: &str) -> FileBrowserEntry {
     entry(path, "directory", None)
 }
 
-/// Vue 夹具 `file(path, sizeBytes)`：大小写成「N B」，素材 id 把 `/` 换成 `-`，状态 ready。
+/// 文件条目夹具：大小写成「N B」，素材 id 把 `/` 换成 `-`，状态 ready。
 pub(super) fn file(path: &str, size_bytes: i64) -> FileBrowserEntry {
     entry(path, "file", Some(size_bytes))
 }
 
-/// 带标签和文本元数据的文件，Vue 场景里 `{ ...file(..), tags, metadata }` 的写法。
+/// 带标签和文本元数据的文件。
 pub(super) fn tagged_file(
     path: &str,
     size_bytes: i64,
@@ -394,7 +393,7 @@ fn tree_node(path: &str, children: Vec<FileTreeNode>) -> FileTreeNode {
     }
 }
 
-/// Vue 夹具 `asset(entry)`：仓库摘要里的一条素材。
+/// 仓库摘要里的一条素材。
 fn asset(entry: &FileBrowserEntry) -> AssetSummary {
     AssetSummary {
         asset_id: entry.asset_id.clone().unwrap_or_default(),
@@ -420,7 +419,7 @@ fn asset(entry: &FileBrowserEntry) -> AssetSummary {
     }
 }
 
-/// 根目录的浏览结果。和 Vue 模拟一样，notes/page.pdf 也列在根目录。
+/// 根目录的浏览结果。notes/page.pdf 也列在根目录。
 fn browser(entries: Vec<FileBrowserEntry>) -> FileBrowserSnapshot {
     FileBrowserSnapshot {
         repo_id: REPO_ID.into(),

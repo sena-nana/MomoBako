@@ -1,10 +1,10 @@
-//! 工作区拖放的纯函数，对应 Vue `dragBehavior.ts` 和路径拼接。
+//! 工作区拖放的纯函数和路径拼接。
 //!
-//! 几何、父子路径和“拖到自己身上”的过滤都不碰窗口。阈值 72 与 Vue 相同。
+//! 几何、父子路径和“拖到自己身上”的过滤都不碰窗口。拖动阈值是 72。
 
 use nana_ui::{FileDialogKind, FileDialogRequest, FileFilter};
 
-/// 内部拖放改走系统拖出的距离，对应 `externalDragSwitchDistance`。
+/// 内部拖放改走系统拖出的距离。
 pub const EXTERNAL_DRAG_SWITCH_DISTANCE: f32 = 72.0;
 /// 外部连接导出对话框。完成事件用这个编号认领。
 pub const DIALOG_EXPORT_ID: u64 = 1;
@@ -239,7 +239,7 @@ pub fn dropped_source_paths(paths: &[String]) -> Vec<String> {
 
 /// 保存外部连接 JSON 的系统对话框请求。
 ///
-/// 标题和类型过滤照 Vue `Settings.vue` 的 `saveDialog`：「导出外部 API 连接 JSON」，只留 JSON。
+/// 标题是「导出外部 API 连接 JSON」，只留 JSON。
 pub fn save_export_request() -> FileDialogRequest {
     FileDialogRequest::new(DIALOG_EXPORT_ID, FileDialogKind::SaveFile)
         .title("导出外部 API 连接 JSON")
@@ -249,7 +249,7 @@ pub fn save_export_request() -> FileDialogRequest {
 
 /// 选择一个插件包的系统对话框请求。
 ///
-/// 标题和类型过滤照 Vue `PluginManagerPanel.vue` 的 `choosePluginArchive`：「选择 .momoplug 插件包」，只留 momoplug。
+/// 标题是「选择 .momoplug 插件包」，只留 momoplug。
 pub fn open_plugin_request() -> FileDialogRequest {
     FileDialogRequest::new(DIALOG_PLUGIN_ID, FileDialogKind::OpenFile)
         .title("选择 .momoplug 插件包")
@@ -263,8 +263,8 @@ pub fn pick_folder_request() -> FileDialogRequest {
 
 /// 选择一个文件夹来添加资源库。只构造请求，不打开系统对话框。
 ///
-/// 本地文件夹的标题照 Vue `chooseLocalFolderAndCreate`：「选择资源库文件夹」。
-/// Eagle 的标题照 Vue `chooseEagleLibraryAndCreate`：「选择 Eagle Library 目录」。
+/// 本地文件夹的标题是「选择资源库文件夹」。
+/// Eagle 的标题是「选择 Eagle Library 目录」。
 /// 两者都是单选目录，没有类型过滤。不改导入页那一个对话框。
 pub fn attach_folder_request(eagle: bool) -> FileDialogRequest {
     let title = if eagle {
@@ -309,7 +309,7 @@ pub fn download_folder_request() -> FileDialogRequest {
 
 /// 选择来源缓存目录。只构造请求，不打开系统对话框。
 ///
-/// 标题照 Vue `chooseCachePath`：`选择${manifest.name}缓存目录`。名称去掉首尾空白后为空时退回「选择缓存目录」。
+/// 标题是「选择{插件名}缓存目录」。名称去掉首尾空白后为空时退回「选择缓存目录」。
 pub fn source_cache_folder_request(plugin_name: &str) -> FileDialogRequest {
     let name = plugin_name.trim();
     let title = if name.is_empty() {
@@ -326,7 +326,7 @@ pub fn eagle_library_folder_request() -> FileDialogRequest {
         .title("选择 EagleLibrary 目录")
 }
 
-/// 选择一个要导入的文件夹。只构造请求，不打开系统对话框。Vue 是单选目录。
+/// 选择一个要导入的文件夹。只构造请求，不打开系统对话框。单选目录。
 pub fn import_folder_request() -> FileDialogRequest {
     FileDialogRequest::new(DIALOG_IMPORT_FOLDER_ID, FileDialogKind::PickFolder)
         .title("选择导入文件夹")

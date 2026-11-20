@@ -447,7 +447,7 @@ fn finish(vertices: Vec<[f32; 3]>, triangles: Vec<[u32; 3]>) -> Option<MeshData>
     })
 }
 
-/// Vue `Box3.getSize` 再 `toFixed(2)`：三轴跨度，每轴至少 0.01。
+/// 三轴跨度保留两位小数，每轴至少 0.01。
 ///
 /// 只统计有限顶点。一个有限顶点都没有时记日志并返回空串，不编一个尺寸。
 pub(super) fn extent_label(mesh: &MeshData) -> String {

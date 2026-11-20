@@ -5,7 +5,7 @@
 //! 节点留着、不占布局。路径输入框用 `.model` 受控，ViewModel 的草稿相对上次投影变了才写回信号。
 //! 按钮只发意图消息，主按钮在点击时现读「是不是来源缓存问题」。
 //!
-//! 版式照 `MissingRepositoryState.vue`：警示图标、眉题、仓库名、说明、路径框、错误和三个操作。
+//! 版式：警示图标、眉题、仓库名、说明、路径框、错误和三个操作。
 
 use std::sync::Arc;
 
@@ -22,9 +22,9 @@ use super::sidebar_view::parts::primary_button;
 use super::startup_view::{ROOT_LINE_HEIGHT, eyebrow, fill_section, line, margin, wrapping};
 use super::{ShellMessage, ShellViewModel};
 
-/// 缺失仓库页内容最宽 560px（`.missing-repository-page__panel`）。
+/// 缺失仓库页内容最宽 560px。
 const MISSING_PANEL_WIDTH: f32 = 560.0;
-/// Vue `--font-mono` 的字体栈。
+/// 等宽字体栈。
 const MONO_FONTS: &str = "ui-monospace, \"SF Mono\", \"Cascadia Mono\", \"Cascadia Code\", \"JetBrains Mono\", Menlo, Consolas, \"Liberation Mono\", monospace";
 /// 来源资源库缺缓存或要重新认证时的说明。
 const CACHE_SUMMARY: &str =
@@ -127,7 +127,7 @@ pub(super) fn view(signals: MissingSignals) -> AnyView {
     )
 }
 
-/// 给一个节点套上外边距。Vue 用 `margin` 微调的几处间距照搬。
+/// 给一个节点套上外边距，用来微调几处间距。
 fn with_margin(child: AnyView, top: f32, bottom: f32) -> AnyView {
     widget(margin(top, bottom)).children((child,)).into_any()
 }

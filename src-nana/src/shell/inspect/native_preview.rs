@@ -34,7 +34,7 @@ const OLE_MAGIC: [u8; 8] = [0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1];
 const OLE_MIN_CHARS: usize = 2;
 
 /// 扩展名有内置绘制时返回它的视图和种类名：压缩包、PDF、Office 和模型。不分大小写，前导的点去掉。
-/// Office 的种类名照 Vue `officeKindLabel`，顶栏第一枚芯片用它。
+/// Office 的种类名给顶栏第一枚芯片用。
 pub fn builtin_view(extension: &str) -> Option<(&'static str, &'static str)> {
     let extension = extension
         .trim()
@@ -58,7 +58,7 @@ pub fn builtin_view(extension: &str) -> Option<(&'static str, &'static str)> {
     None
 }
 
-/// Office 顶栏种类，照 Vue `officeKindLabel`：文字是 Word，表格是 Excel，演示是 PowerPoint。
+/// Office 顶栏种类：文字是 Word，表格是 Excel，演示是 PowerPoint。
 /// 不是这三组扩展名时返回 `None`，不给内置 Office 视图。
 fn office_kind_label(extension: &str) -> Option<&'static str> {
     const WORD: &[&str] = &["docx", "docm", "doc", "dotx", "dotm", "dot"];
@@ -126,7 +126,7 @@ pub(super) fn paint_mesh(mesh: &MeshData, yaw: f32, zoom: f32) -> PageFrame {
     mesh::raster(mesh, yaw, zoom)
 }
 
-/// 模型左下角的尺寸：三轴包围盒跨度，格式和 Vue `modelInfo` 一样。
+/// 模型左下角的尺寸：三轴包围盒跨度，每轴保留两位小数。
 pub(super) fn model_extent_label(mesh: &MeshData) -> String {
     mesh::extent_label(mesh)
 }

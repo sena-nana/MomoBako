@@ -859,8 +859,8 @@ fn the_player_bar_stays_on_one_row_in_the_standard_files_page() {
     );
 }
 
-/// 文件列的状态框（「正在处理文件」）和侧栏的忙碌行（「正在同步仓库状态」）照 Vue 撑满所在的列：两处在 Vue 里都写
-/// `inline-flex`，但都是纵向 flex 容器的子项，被拉满宽度。状态框左右各留 20，忙碌行占满侧栏内容宽。
+/// 文件列的状态框（「正在处理文件」）和侧栏的忙碌行（「正在同步仓库状态」）撑满所在的列：
+/// 两处都是纵向容器的子项，被拉满宽度。状态框左右各留 20，忙碌行占满侧栏内容宽。
 #[test]
 fn state_rows_fill_their_column_like_vue() {
     let mut harness = ShellHarness::mount(scene("file-operation-progress"));
@@ -911,7 +911,7 @@ fn resize_reports_do_not_rebuild_the_player_island() {
     );
 }
 
-/// 文件变更进行中，工具栏「建文件」禁用，新建文件名输入框照 Vue 仍可改。
+/// 文件变更进行中，工具栏「建文件」禁用，新建文件名输入框仍可改。
 /// 再点「建文件」不另发一次新建；写进去的名字留在输入框里。
 #[test]
 fn create_name_stays_editable_while_a_move_is_in_flight() {

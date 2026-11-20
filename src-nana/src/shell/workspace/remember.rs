@@ -1,7 +1,6 @@
-//! 上次打开的资源库：记在设置目录旁边的 `last-repository.json`，冷启动时照 Vue 先选它。
+//! 上次打开的资源库：记在设置目录旁边的 `last-repository.json`，冷启动时先选它。
 //!
-//! 对应 Vue `lifecycle.ts` 的 `readLastActiveRepositoryId` / `rememberLastActiveRepository`（本地存储键
-//! `momobako.lastActiveRepositoryId`）：
+//! 规则：
 //! - 读：启动时读一次，选仓库的顺序是当前仓库、记住的仓库（还在列表里时）、列表第一项；
 //! - 写：读完仓库摘要以后记住这个仓库（启动、换仓库、同一个仓库的刷新）；选中的仓库缺失时立即记住；
 //!   列表空了（启动、刷新、删掉最后一个资源库）时清掉。
@@ -16,7 +15,7 @@ use crate::settings;
 
 use super::{WorkspaceEffect, WorkspaceState};
 
-/// 与 Vue `LAST_ACTIVE_REPOSITORY_STORAGE_KEY` 相同的存储键。
+/// 上次打开的资源库的存储键。
 pub const LAST_ACTIVE_REPOSITORY_KEY: &str = "momobako.lastActiveRepositoryId";
 
 /// 记住的资源库文件：和 `settings.json` 放在同一个目录。
@@ -49,7 +48,7 @@ impl WorkspaceState {
         };
     }
 
-    /// 写下记住的资源库；没有记住时写一个不带键的对象（Vue `removeItem`）。失败只记日志。
+    /// 写下记住的资源库；没有记住时写一个不带键的对象。失败只记日志。
     pub fn save_last_repository_file(&self, path: &Path) {
         let mut value = serde_json::Map::new();
         if let Some(repo_id) = &self.last_active_repo_id {

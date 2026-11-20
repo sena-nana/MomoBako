@@ -1,7 +1,7 @@
-//! 设置、插件、日志和工具页的 Vue 版式原语。
+//! 设置、插件、日志和工具页的版式原语。
 //!
-//! 字号、字重、行高、内边距、间距和控件高度照 Vue 的计算样式写；颜色只用主题角色。
-//! Vue 里带主题相关透明度或 `color-mix` 的柔和底色交给 [`SoftFill`]，在绘制时按当前
+//! 字号、字重、行高、内边距、间距和控件高度写成固定值；颜色只用主题角色。
+//! 带主题相关透明度或混色的柔和底色交给 [`SoftFill`]，在绘制时按当前
 //! 主题解析。圆角一律用 `RadiusTier`，形状和半径基数由渲染层统一生效。
 
 use std::hash::{Hash, Hasher};
@@ -16,9 +16,9 @@ use nana_ui_core::{
     Icon, LineHeightSpec, OverflowWrapSpec, RadiusTier, SemanticColorMix, SemanticColorRole as Role,
 };
 
-/// Vue `:root { line-height: 1.55 }`。
+/// 正文行高倍数。
 pub(crate) const LINE: f32 = 1.55;
-/// Vue `--font-mono` 在 Windows 上解析到的字体。
+/// 等宽字体在 Windows 上用的字体。
 pub(crate) const MONO_FAMILY: &str = "Cascadia Mono";
 /// `border-radius: var(--radius-pill)`。
 pub(crate) const PILL: f32 = 999.0;
@@ -28,12 +28,12 @@ pub(crate) fn bound(node: Text, value: impl IntoProp<String>) -> El<Text> {
     widget(node).prop::<String, fields::text::value>(value)
 }
 
-/// 一段文字：字号、字重、颜色，行高按 Vue 默认的 1.55 倍。
+/// 一段文字：字号、字重、颜色，行高按默认的 1.55 倍。
 pub(crate) fn label(value: impl Into<String>, size: f32, weight: u16, color: Role) -> Text {
     label_lh(value, size, weight, color, LINE)
 }
 
-/// 指定行高倍数的文字。标题 1.25、说明 1.45 或 1.5 这类按 Vue 单独写。
+/// 指定行高倍数的文字。标题 1.25、说明 1.45 或 1.5 这类单独写。
 pub(crate) fn label_lh(
     value: impl Into<String>,
     size: f32,
@@ -50,7 +50,7 @@ pub(crate) fn label_lh(
     text
 }
 
-/// 行高写成像素的文字，对应 Vue 里写死 `line-height: 24px` 一类的标签。
+/// 行高写成像素的文字，用于行高固定为 24px 一类的标签。
 pub(crate) fn label_px(
     value: impl Into<String>,
     size: f32,
@@ -63,7 +63,7 @@ pub(crate) fn label_px(
     text
 }
 
-/// 等宽文字，对应 Vue `font-family: var(--font-mono)`。
+/// 等宽文字。
 pub(crate) fn mono(value: impl Into<String>, size: f32, weight: u16, color: Role) -> Text {
     mono_lh(value, size, weight, color, LINE)
 }
@@ -90,13 +90,13 @@ pub(crate) fn wrapping(mut text: Text) -> Text {
     text
 }
 
-/// 右对齐。Vue `.kv` 的值列和 `<output>` 用它。
+/// 右对齐。键值表的值列和输出值用它。
 pub(crate) fn align_end(mut text: Text) -> Text {
     text.style.text_horizontal_alignment = TextHorizontalAlignment::End;
     text
 }
 
-/// 固定 RGBA 的前景色。只给 Vue 写死、两套主题共用的颜色（日志级别）用。
+/// 固定 RGBA 的前景色。只给写死、两套主题共用的颜色（日志级别）用。
 pub(crate) fn fixed_color(mut text: Text, rgb: [u8; 3]) -> Text {
     Arc::make_mut(&mut text.style.layout).color = Some(rgba(rgb));
     text
@@ -116,8 +116,8 @@ pub(crate) fn glyph(icon: Icon, size: f32, color: Role) -> IconGlyph {
     IconGlyph::new(icon).size(size).role(color)
 }
 
-/// Vue 按钮的语气。裸 `class="primary"` 和 `ghost danger` 在 Vue 里没有样式，
-/// 这里按 DESIGN.md 5.1 画：主操作低饱和蓝，危险操作红字。
+/// 按钮的语气。
+/// 按 DESIGN.md 5.1 画：主操作低饱和蓝，危险操作红字。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Tone {
     /// 普通按钮：透明底、正文色。
@@ -128,7 +128,7 @@ pub(crate) enum Tone {
     Danger,
 }
 
-/// Vue 原生 `<button>`：高 32、左右内边距 10、字 14/500、图标 14、间距 6、圆角 sm。
+/// 普通按钮：高 32、左右内边距 10、字 14/500、图标 14、间距 6、圆角 sm。
 /// 禁用时整体 45% 不透明，不换颜色。要绑定禁用时用 `bind::ActionDisabled`，透明度一起换。
 pub(crate) fn action(
     text: impl Into<String>,
@@ -332,7 +332,7 @@ pub(crate) fn rounded(stack: Stack, tier: Option<RadiusTier>) -> Stack {
     }
 }
 
-/// `.asset-stat`：高 26、左右 10、药丸、主背景、弱色 12/500。文字可以绑定。
+/// 计数胶囊：高 26、左右 10、药丸、主背景、弱色 12/500。文字可以绑定。
 pub(crate) fn stat(text: impl IntoProp<String>, key: impl Into<String>) -> AnyView {
     let body = fixed(row(0.0), None, Some(26.0));
     widget(rounded(pad(body, 0.0, 10.0, 0.0, 10.0), None).surface(Role::Background))
@@ -340,7 +340,7 @@ pub(crate) fn stat(text: impl IntoProp<String>, key: impl Into<String>) -> AnyVi
         .into_any()
 }
 
-/// `.workspace-hints__chip`：高 28、左右 10、药丸、主背景、1px 边线、弱色 12/500。文字可以绑定；
+/// 提示芯片：高 28、左右 10、药丸、主背景、1px 边线、弱色 12/500。文字可以绑定；
 /// 返回元素，调用方还能再绑显隐。
 pub(crate) fn hint_chip(
     text: impl IntoProp<String>,
@@ -355,7 +355,7 @@ pub(crate) fn hint_chip(
     .children((bound(label(String::new(), 12.0, 500, Role::Muted), text).key(key.into()),))
 }
 
-/// `.asset-card__pill` 的四种语气。
+/// 状态胶囊的四种语气。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PillTone {
     /// 已启用：`accent-soft` 底、强调色。
@@ -368,7 +368,7 @@ pub(crate) enum PillTone {
     Warning,
 }
 
-/// `.asset-card__pill` 的外框和字色：高 24、左右 8、药丸，底色按语气。
+/// 状态胶囊的外框和字色：高 24、左右 8、药丸，底色按语气。
 pub(crate) fn pill_look(tone: PillTone) -> (Stack, Role) {
     let body = rounded(
         pad(fixed(row(0.0), None, Some(24.0)), 0.0, 8.0, 0.0, 8.0),
@@ -394,7 +394,7 @@ pub(crate) fn pill_look(tone: PillTone) -> (Stack, Role) {
     }
 }
 
-/// `.search-workbench__panel`：`bg-elev` 底、`--radius-2xl`、1px 透明边加 22 内边距、竖排间距 16，
+/// 工作区面板：`bg-elev` 底、`--radius-2xl`、1px 透明边加 22 内边距、竖排间距 16，
 /// 撑满主区剩余高度。
 pub(crate) fn workbench_panel(body: Vec<AnyView>, key: &'static str) -> AnyView {
     let panel = pad(Stack::fill_column(16.0), 23.0, 23.0, 23.0, 23.0)
@@ -409,7 +409,7 @@ pub(crate) fn workbench_panel(body: Vec<AnyView>, key: &'static str) -> AnyView 
     widget(panel).children(body).key(key).into_any()
 }
 
-/// `.search-workbench__header`：左边眉题、24/700 标题和说明，右边统计和操作，顶对齐。
+/// 面板页头：左边眉题、24/700 标题和说明，右边统计和操作，顶对齐。
 pub(crate) fn workbench_header(
     eyebrow: &str,
     title: &str,
@@ -457,7 +457,7 @@ pub(crate) fn workbench_header(
         .into_any()
 }
 
-/// `.asset-browser__eyebrow`：11/600 弱色、大写、字距 0.4。
+/// 眉题：11/600 弱色、大写、字距 0.4。
 pub(crate) fn eyebrow_text(value: &str) -> Text {
     let mut text = label(value.to_uppercase(), 11.0, 600, Role::Faint);
     Arc::make_mut(&mut text.style.layout)
@@ -469,7 +469,7 @@ pub(crate) fn eyebrow_text(value: &str) -> Text {
 /// 提示块外层：外边距 16/20/0，内容靠左。
 pub(crate) type NoticeEl = El<Stack, (El<Stack, (El<Text>,)>,)>;
 
-/// `.asset-browser__state`：外边距 16/20/0、内边距 10/12、xl 圆角、1px 边线、弱色字。
+/// 状态框：外边距 16/20/0、内边距 10/12、xl 圆角、1px 边线、弱色字。
 /// 错误时换成危险色柔和底和危险色字。文字可以绑定；返回元素，调用方还能再绑显隐。
 pub(crate) fn state_notice(
     text: impl IntoProp<String>,
@@ -505,7 +505,7 @@ pub(crate) fn state_notice(
 /// 虚线空状态：标题和说明。
 pub(crate) type EmptyEl = El<Stack, (El<Text>, El<Text>)>;
 
-/// `.search-workbench__empty`：虚线 `border-strong`、xl 圆角、内边距 24、`bg-subtle`，
+/// 空状态：虚线 `border-strong`、xl 圆角、内边距 24、`bg-subtle`，
 /// 18 号粗体标题和弱色说明竖排，间距 8，竖直居中并占满剩余高度。文字可以绑定。
 pub(crate) fn dashed_empty(
     title: impl IntoProp<String>,
@@ -534,7 +534,7 @@ pub(crate) fn dashed_empty(
         .key(key)
 }
 
-/// `.search-workbench__field`：主背景、1px 边线、lg 圆角，最小高 38，左右 12，间距 8，弱色。
+/// 输入框外框：主背景、1px 边线、lg 圆角，最小高 38，左右 12，间距 8，弱色。
 pub(crate) fn field_frame() -> Stack {
     pad(Stack::fill_row(8.0), 0.0, 12.0, 0.0, 12.0)
         .surface(Role::Background)
@@ -569,16 +569,16 @@ pub(crate) fn bare_input(input: TextInput) -> TextInput {
     input.style(style)
 }
 
-/// Vue 原生 `<input>`：高 32、内边距 6/10、sm 圆角、1px `border-strong`、`bg-subtle`，
+/// 单行输入框：高 32、内边距 6/10、sm 圆角、1px `border-strong`、`bg-subtle`，
 /// 聚焦时换主背景。
 pub(crate) fn native_input(input: TextInput) -> TextInput {
     input.style(native_field_style(32.0))
 }
 
-/// Vue 原生勾选框的配色：主背景、`border-strong` 边线。尺寸由调用方的布局给，不吃主题的控件最小高。
+/// 勾选框的配色：主背景、`border-strong` 边线。尺寸由调用方的布局给，不吃主题的控件最小高。
 ///
 /// 选中后 NanaUI 画「✓」，颜色取主题勾选框配方的选中字色（强调色上的字色），不读这里给的前景，
-/// 所以选中底用强调色，勾才看得见。Vue 是 `accent-soft` 底上强调色的 7 见方小方块，底色和形状的差异留着。
+/// 所以选中底用强调色，勾才看得见。
 pub(crate) fn native_checkbox(
     mut checkbox: nana_ui::runtime::Checkbox,
     size: f32,
@@ -642,7 +642,7 @@ pub(crate) fn native_field_style(height: f32) -> NodeStyle {
     style
 }
 
-/// Vue 里只能在绘制时按主题算的柔和底色。
+/// 只能在绘制时按主题算的柔和底色。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum Soft {
     /// `--ok-soft`：浅色主题 10%、深色主题 14% 的成功色。
@@ -653,7 +653,7 @@ pub(crate) enum Soft {
     Alpha { role: Role, alpha: f32 },
     /// `color-mix(in srgb, <role> N%, <base>)`。
     RoleMix { role: Role, ratio: f32, base: Role },
-    /// `color-mix(in srgb, #rrggbb N%, <base>)`，Vue 写死的日志级别色。
+    /// `color-mix(in srgb, #rrggbb N%, <base>)`，日志级别的固定色。
     RgbMix {
         rgb: [u8; 3],
         ratio: f32,

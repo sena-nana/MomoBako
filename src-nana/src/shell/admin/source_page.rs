@@ -1,6 +1,6 @@
 //! 来源账号与仓库设置区。
 //!
-//! 照 `SourceAuthenticationSettings.vue`：页头「账号与仓库」和「连接新账号」，下面每个来源仓库
+//! 页头「账号与仓库」和「连接新账号」，下面每个来源仓库
 //! 一行（名称、登录状态和路径，检查、重新登录、退出），扫码会话打开时多一块流程区（缓存目录、
 //! 二维码、取消、刷新二维码、检查登录结果），最后是提示或错误。插件设置区展开时挂在设置头下面。
 //!
@@ -48,7 +48,7 @@ pub(crate) struct SessionView {
     pub cache_path: String,
     /// 二维码的扫码地址：有就重新编码画出来。
     pub qr_url: Option<String>,
-    /// 会话里的二维码图片（`data:image/…` 的 data URL）：没有扫码地址时照 Vue 直接画这张图。
+    /// 会话里的二维码图片（`data:image/…` 的 data URL）：没有扫码地址时直接画这张图。
     pub qr_image: Option<String>,
     pub can_poll: bool,
     /// 「刷新二维码」重新登录的仓库。
@@ -127,7 +127,7 @@ impl SourceAuthView {
     }
 }
 
-/// 会话里的扫码地址。Vue 画会话里的二维码图片；Nana 有地址时用它重新编码，内容一致、边缘清楚。
+/// 会话里的扫码地址。有地址时用它重新编码，内容一致、边缘清楚。
 fn qr_url(session: &serde_json::Value) -> Option<String> {
     ["qrUrl", "qrurl"]
         .into_iter()
@@ -141,7 +141,7 @@ fn qr_url(session: &serde_json::Value) -> Option<String> {
         .map(str::to_string)
 }
 
-/// 会话里的二维码图片（Vue `qrImage ?? qrimg`）。只认 `data:image/` 开头的 data URL：网址要联网取，宿主不取。
+/// 会话里的二维码图片（`qrImage` 或 `qrimg`）。只认 `data:image/` 开头的 data URL：网址要联网取，宿主不取。
 /// 有图片却画不了（不是 data URL）、也没有扫码地址时记日志。
 fn qr_image(session: &serde_json::Value) -> Option<String> {
     let image = ["qrImage", "qrimg"].into_iter().find_map(|key| {
@@ -234,7 +234,7 @@ fn head(plugin_id: &str, busy: impl Fn() -> bool + Send + 'static) -> AnyView {
 /// 仓库行在 Store 里的句柄。
 type RepoItem = Item<Store<Vec<SourceRepoRow>>, String, SourceRepoRow>;
 
-/// `.source-auth-settings__repository`：内边距 12、`border-soft` 边线、md 圆角、`bg-subtle`。
+/// 来源仓库行：内边距 12、`border-soft` 边线、md 圆角、`bg-subtle`。
 /// 行的身份是仓库 id（建行时取，之后不变），按钮带着它和插件 id。
 fn repository_row(
     plugin_id: &str,
@@ -351,7 +351,7 @@ fn session_value<R: Default + 'static>(
 fn session_flow(plugin_id: &str, source: Signal<Option<SourceAuthView>>) -> AnyView {
     let pid = style::key_part(plugin_id);
     let busy = move || source.with(|view| view.as_ref().is_some_and(|view| view.busy));
-    // 流程区是网格，Vue 的按钮被拉满整行，文字居中。
+    // 流程区是网格，按钮拉满整行，文字居中。
     let mut cache = action("选择缓存目录", None, Tone::Plain, false);
     std::sync::Arc::make_mut(&mut cache.style.layout).width = Some(LengthSpec::Fill);
     let cache = widget(cache)
@@ -390,7 +390,7 @@ fn session_flow(plugin_id: &str, source: Signal<Option<SourceAuthView>>) -> AnyV
             ().into_any()
         }
     };
-    // 没有扫码地址时照 Vue `.source-auth-settings__qr` 画会话里的二维码图片：180 见方、白底、`--radius-sm`。
+    // 没有扫码地址时画会话里的二维码图片：180 见方、白底、`--radius-sm`。
     let frame = Stack::column(0.0)
         .width(LengthSpec::Px(QR_SIZE))
         .height(LengthSpec::Px(QR_SIZE))

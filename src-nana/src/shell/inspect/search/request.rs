@@ -1,7 +1,6 @@
 //! 搜索请求的组装和筛选输入解析。
 //!
-//! 对应 Vue `composables/workspace/search.ts` 的 `buildSearchRequest`、`hasSearchCriteria`
-//! 和 `filterInputs.ts` 的各个解析函数：逗号、全角逗号和换行都是分隔符，
+//! 筛选输入的解析规则：逗号、全角逗号和换行都是分隔符，
 //! 空键、空值和两端都为空的范围直接丢掉，不向服务发半截条件。
 
 use super::{DateBound, FilterList, NumberBound, SearchFilters, SearchRequestDraft, SortDirection};
@@ -57,7 +56,7 @@ pub(crate) fn build_search_request(
     }
 }
 
-/// Vue `toggleFilterValue`：原值不在列表里就加入去空白后的值，否则移除去空白后的值。
+/// 切换一个筛选值：原值不在列表里就加入去空白后的值，否则移除去空白后的值。
 /// 去空白后为空时不改列表。
 pub(crate) fn toggle_filter(filters: &mut SearchFilters, key: FilterList, value: &str) {
     let normalized = value.trim();
@@ -93,7 +92,7 @@ fn normalize_values(values: &[String]) -> Vec<String> {
     unique
 }
 
-/// Vue `splitListInput`：按逗号、全角逗号和换行拆开，保序去重。
+/// 按逗号、全角逗号和换行拆开，保序去重。
 pub(crate) fn split_list(value: &str) -> Vec<String> {
     let mut unique = Vec::new();
     for item in value.split([',', '，', '\n']) {
@@ -203,12 +202,12 @@ fn parse_paths(value: &str) -> Vec<String> {
 }
 
 impl SearchFilters {
-    /// 与 Vue `hasActiveFilters` 相同：排除关键词、排除路径和数值日期排除不单独把搜索收进当前仓库。
+    /// 排除关键词、排除路径和数值日期排除不单独把搜索收进当前仓库。
     pub fn has_active_filters(&self) -> bool {
         self.active_count() > 0
     }
 
-    /// Vue `activeFilterCount`：列表条件按条数计，文本条件非空计一条。
+    /// 列表条件按条数计，文本条件非空计一条。
     /// 排除关键词、排除路径、排除数值和排除日期不计数。
     pub fn active_count(&self) -> usize {
         self.tags.len()
@@ -228,7 +227,7 @@ impl SearchFilters {
 }
 
 impl SearchRequestDraft {
-    /// Vue `hasSearchCriteria`：没有任何条件时不发请求。
+    /// 没有任何条件时不发请求。
     pub fn has_criteria(&self) -> bool {
         !self.query.trim().is_empty()
             || !self.tags.is_empty()

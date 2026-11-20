@@ -1,10 +1,10 @@
 //! 压缩包名单上的文件大小。
 //!
-//! 对齐 Vue `preview-archive` 的 `formatByteCount`（`1948ed9:External/Plugins/preview-archive/src/register.js`）。
+//! 写法和 `preview-archive` 插件的 `formatByteCount`（`1948ed9:External/Plugins/preview-archive/src/register.js`）相同。
 //! 只格式化已经从压缩包读到的字节数。目录不经过这里，仍写「目录」。
 //! 没有大小字段时不要调用本函数编一个数。
 
-/// 把已经读到的字节数写成 Vue 压缩包名单的大小。
+/// 把已经读到的字节数写成压缩包名单上的大小。
 ///
 /// 0 字节是空文件，写「0 B」，不是大小未知。其余按 1024 进到 KB、MB、GB，到 GB 不再进位。
 /// 单位仍是 B，或换算后不小于 10 时不留小数；换算后小于 10 留一位小数。
@@ -16,7 +16,7 @@ pub(super) fn format_archive_entry_size(size: u64) -> String {
     const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
     let mut current = size as f64;
     let mut unit = 0usize;
-    // 和 Vue 一样：当前值不小于 1024 就进一档，停在 GB。
+    // 当前值不小于 1024 就进一档，停在 GB。
     while current >= 1024.0 && unit + 1 < UNITS.len() {
         current /= 1024.0;
         unit += 1;

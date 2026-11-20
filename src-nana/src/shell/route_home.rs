@@ -1,4 +1,4 @@
-//! 主区路由共用的页面外框：首页（`Home.vue` 的 `.workspace-page`）和整页滚动。
+//! 主区路由共用的页面外框：首页和整页滚动。
 //!
 //! 首页各路由（文件、搜索、播放集、管理面板、缺失和空库）都放在同一个外框里（[`home_page`]）：有仓库的
 //! 首页路由在上面嵌常驻筛选栏，下面是主体。文件面板主体固定高度，由面板内部自己滚；其余面板的主体是
@@ -24,7 +24,7 @@ pub(super) fn home_page(filter: Option<AnyView>, body: AnyView) -> AnyView {
     .into_any()
 }
 
-/// 首页的纵向滚动主体（`.workspace-page__body` 的 `overflow: auto`）。`key` 写区域和面板，换面板时
+/// 首页的纵向滚动主体。`key` 写区域和面板，换面板时
 /// 从顶部开始。
 pub(super) fn home_scroll(key: &'static str, panel: AnyView) -> AnyView {
     widget(scroll_view()).children((panel,)).key(key).into_any()

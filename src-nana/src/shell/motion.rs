@@ -1,4 +1,4 @@
-//! Vue 样式表里真正绘制的过渡。
+//! 壳层真正绘制的过渡。
 //!
 //! 时钟留在 `ShellViewModel` 上。界面按 `hot::MotionFrame` 取样，逐帧只改绑定的字段；
 //! 内容重挂后进行中的轨道还在，按已经走过的时间取样，不会从 0 重新开始。减少动效时全部立刻停在终点。
@@ -8,23 +8,23 @@ use nana_ui::runtime::view::{AnyView, IntoView, widget};
 
 use super::hot::{LayerPaint, LayerPaintField};
 
-/// 面板透明度。`.panel-enter-active` 的 `opacity 0.14s ease`。
+/// 面板透明度：`opacity 0.14s ease`。
 pub const PANEL_OPACITY_MS: u64 = 140;
 /// 面板上移。同一条规则里的 `transform 0.16s ease`，距离 4px。
 pub const PANEL_RISE_MS: u64 = 160;
-/// 启动条和任务弹层进度条的宽度。`.progress-bar__fill` 的 `transition: width 0.18s ease`。
+/// 启动条和任务弹层进度条的宽度：`transition: width 0.18s ease`。
 pub const PROGRESS_WIDTH_MS: u64 = 180;
 /// 不确定进度呼吸。`progress-pulse 1.15s ease-in-out`。
 pub const PULSE_MS: u64 = 1150;
 /// 准备卡色条扫动。`media-preview-progress-sweep 1.05s ease-in-out infinite`。
 pub const PREVIEW_SWEEP_MS: u64 = 1050;
-/// 忙指示旋转。`.spin` 的 `spin 0.8s linear`。
+/// 忙指示旋转：`spin 0.8s linear`。
 pub const SPINNER_MS: u64 = 800;
-/// 侧栏分组工具。`.sb-section__tools` 的 `opacity 0.12s ease`。
+/// 侧栏分组工具：`opacity 0.12s ease`。
 pub const SIDEBAR_TOOL_FADE_MS: u64 = 120;
-/// 底栏按钮。`.workspace-footer__btn` 的 `opacity 0.35s ease`。
+/// 底栏按钮：`opacity 0.35s ease`。
 pub const FOOTER_FADE_MS: u64 = 350;
-/// 侧栏折叠。Lilia 工作区 `grid-template-columns 0.24s cubic-bezier(0.2, 0.8, 0.2, 1)`。
+/// 侧栏折叠：`grid-template-columns 0.24s cubic-bezier(0.2, 0.8, 0.2, 1)`。
 pub const SIDEBAR_COLLAPSE_MS: u64 = 240;
 /// 文件夹拖放悬停后展开并打开的等待。
 pub const FOLDER_HOVER_MS: u64 = 450;
@@ -143,7 +143,7 @@ impl MotionState {
         }
     }
 
-    /// 还有轨道需要下一帧。准备卡扫动不在 Vue 的减少动态效果名单里，减少动态效果时它仍要帧。
+    /// 还有轨道需要下一帧。准备卡扫动不受减少动态效果影响，减少动态效果时它仍要帧。
     pub fn active(&self) -> bool {
         let sweep = self
             .sweep
@@ -234,7 +234,7 @@ impl MotionState {
         });
     }
 
-    /// 任务弹层各行进度条的目标宽度（行键、百分比），弹层关着时传空。照 `.progress-bar__fill` 的
+    /// 任务弹层各行进度条的目标宽度（行键、百分比），弹层关着时传空。宽度按
     /// `transition: width 0.18s ease`：新出现的行直接停在目标宽度（CSS 过渡不在挂载时播），目标变了从这一刻的宽度
     /// 走到新目标，没有了的行一起拿掉。减少动态效果时直接停在目标。
     pub fn set_task_fills(&mut self, targets: &[(String, f32)]) {
@@ -714,7 +714,7 @@ pub struct SidebarResizeFrame {
 }
 
 /// `extent` 是工作区资源区的尺寸。资源区比侧栏宽度少一条发丝间隙，这里加回来，
-/// 存下的仍是 Vue `momobako.sidebarWidth` 的口径。
+/// 存下的是侧栏本身的宽度（`momobako.sidebarWidth`）。
 pub fn note_sidebar_resize(
     was_dragging: bool,
     dragging: bool,

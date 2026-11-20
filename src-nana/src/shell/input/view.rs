@@ -36,7 +36,7 @@ pub(crate) fn file_drop_flags(model: &ShellViewModel) -> FileDropFlags {
     }
 }
 
-/// 把 Nana 的文件拖放收成和 Vue `onDragDropEvent` 一样的宿主拖放消息。
+/// 把 Nana 的文件拖放收成宿主拖放消息。
 pub(crate) fn file_drop_message(flags: &FileDropFlags, event: &FileDropEvent) -> ShellMessage {
     let phase = match event {
         FileDropEvent::Hovered { .. } => HostDragPhase::Over,

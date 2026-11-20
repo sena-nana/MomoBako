@@ -1,7 +1,7 @@
 //! 启动页和缺失仓库页共用的排版零件：占满可见高度的一节、写成像素行高的文字、眉题和外边距。
 //!
-//! 两个页面本身在 `route_startup.rs` 和 `route_missing.rs`（都是常驻路由）。行高按 Vue 根字号的
-//! `line-height: 1.55` 和各类自己的行高换算成像素。
+//! 两个页面本身在 `route_startup.rs` 和 `route_missing.rs`（都是常驻路由）。行高按根字号的
+//! 1.55 倍和各类自己的行高换算成像素。
 
 use std::sync::Arc;
 
@@ -11,13 +11,13 @@ use nana_ui::runtime::{AlignSpec, JustifySpec, LengthSpec, SemanticColorRole, St
 use super::render::{PRIMARY_INSET_Y, TITLE_BAR_PX};
 use super::sidebar_view::parts::label_text;
 
-/// Vue 根元素的行高倍数。
+/// 根元素的行高倍数。
 pub(super) const ROOT_LINE_HEIGHT: f32 = 1.55;
 
 /// 占满主区可见高度、内容居中的一节，内边距 24px。
 ///
-/// 对应 Vue `.workspace-startup`、`.missing-repository-page` 和 `.empty-state-page` 的
-/// `min-height: 100%`：主区可见高度是窗口高减去标题栏和主区上下内边距。窗口矮时内容
+/// 启动页、缺失仓库页和空库页都用它，最小高度占满主区可见高度：
+/// 窗口高减去标题栏和主区上下内边距。窗口矮时内容
 /// 撑高这一节，交给外层滚动。
 pub(crate) fn fill_section() -> Stack {
     Stack::column(0.0)
@@ -58,7 +58,7 @@ pub(super) fn wrapping(
     node
 }
 
-/// 眉题：11px、600、弱色、字距 0.4px。Vue 用 `text-transform: uppercase`，英文直接写大写。
+/// 眉题：11px、600、弱色、字距 0.4px。英文直接写大写。
 pub(super) fn eyebrow(value: &str, key: &'static str) -> AnyView {
     let mut node = line(
         value,
@@ -73,7 +73,7 @@ pub(super) fn eyebrow(value: &str, key: &'static str) -> AnyView {
     widget(node).key(key).into_any()
 }
 
-/// 带外边距的一层。Vue 用 `margin` 微调的几处间距照搬。
+/// 带外边距的一层，用来微调几处间距。
 pub(super) fn margin(top: f32, bottom: f32) -> Stack {
     Stack::column(0.0)
         .width(LengthSpec::Fill)

@@ -1,6 +1,6 @@
 //! 系统日志面板的投影和常驻信号。
 //!
-//! [`LogsView`] 按 `WorkspaceLogsPanel.vue` 算好计数、工具条、筛选芯片的选中态、空状态和日志行；
+//! [`LogsView`] 算好计数、工具条、筛选芯片的选中态、空状态和日志行；
 //! [`LogsSignals`] 建在主区块的常驻作用域里，日志行放进 Store 按日志 id 做键。追踪时新日志到达，
 //! 只插入新的那一行（缓存满了再删掉掉出去的最旧一行），已有行的节点和绑定都不动。
 
@@ -30,7 +30,7 @@ pub(crate) struct LogsToolbar {
     pub paused: bool,
     /// 没有生效的筛选时「重置筛选」禁用。
     pub no_filters: bool,
-    /// 「清空日志」禁用：正在清空，或者手上没有日志也不在读（Vue `isClearing || (!records.length && !isLoading)`）。
+    /// 「清空日志」禁用：正在清空，或者手上没有日志也不在读。
     pub clear_disabled: bool,
     /// 正在清空：按钮图标换成加载图标。
     pub clearing: bool,

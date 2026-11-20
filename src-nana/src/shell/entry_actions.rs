@@ -2,15 +2,15 @@
 //!
 //! 清单 `contributes.source.entryActions[]` 的 operation 只有 `docs/api-design.md` 约定的五种：
 //! 宿主负责每一种的目录选择、进度、导入和刷新，声明不能让宿主执行别的命令。
-//! 能直接调用的方法接到现有 `call_plugin`。下载照 Vue `downloadTargets` 分「到本地」和「到其他资源库」两项
+//! 能直接调用的方法接到现有 `call_plugin`。下载分「到本地」和「到其他资源库」两项
 //! （声明了 `targets` 时只出声明的）：到本地先要系统目录对话框，到其他资源库先选目标资源库（`shell/admin/source_target.rs`），
-//! 选好才带上 `destination` 调用。清理缓存、重新获取播放资源和下载的载荷照 Vue 带上当前资源库的本地缓存目录
+//! 选好才带上 `destination` 调用。清理缓存、重新获取播放资源和下载的载荷带上当前资源库的本地缓存目录
 //! （`managedCacheRoot`），网易云插件据此找到真正的播放缓存和暂存目录。
-//! 「创建播放列表」（`playlist-from-directory`）照 Vue `runPlaylistAction` 不调用插件：在本地建一个以来源
+//! 「创建播放列表」（`playlist-from-directory`）不调用插件：在本地建一个以来源
 //! 歌单命名的播放集（已经有就不建），把这个目录加进去，再刷新资源库（`shell/admin/reduce.rs`）。约定以外的 operation
-//! 和没写 scope 的声明不出菜单，只记日志（Vue 把约定以外的 operation 一律当成「创建播放列表」，是缺陷）。
+//! 和没写 scope 的声明不出菜单，只记日志，也不当成「创建播放列表」。
 //!
-//! 来源认证或本地缓存不可用时（Vue `actionDisabled`：登录过期、没有登录、要本地缓存但没就绪，或者条目自己标了
+//! 来源认证或本地缓存不可用时（登录过期、没有登录、要本地缓存但没就绪，或者条目自己标了
 //! 登录过期），这些动作都禁用，菜单里写出原因；没有能下载到的其他资源库时「到其他资源库」禁用。
 
 use serde_json::{Map, Value};
@@ -20,7 +20,7 @@ use crate::backend::services::repository::PluginManifest;
 use super::files::FileRow;
 use super::player::AUDIO_SEQUENCE_TYPE;
 
-/// 来源认证或本地缓存不可用时，禁用的来源动作下面写的原因（Vue `actionDisabled` 的 `confirmLabel`）。
+/// 来源认证或本地缓存不可用时，禁用的来源动作下面写的原因。
 pub const SOURCE_UNAVAILABLE: &str = "来源认证或本地缓存不可用";
 /// 没有就绪、可写的其他资源库时，「下载到其他资源库」下面写的原因。
 pub const NO_TARGET_REPOSITORY: &str = "没有可下载到的其他资源库";
@@ -62,7 +62,7 @@ pub enum FilePluginDispatch {
         progress: DownloadProgress,
     },
     /// 下载到其他资源库：选好目标资源库，把 `destination` 写进载荷再调用；下载回来的文件导入目标资源库并同步它。
-    /// `parent_path` 是导入到目标资源库的哪个文件夹：下载目录时是以歌单命名的文件夹（Vue `playlistName`），没有时
+    /// `parent_path` 是导入到目标资源库的哪个文件夹：下载目录时是以歌单命名的文件夹，没有时
     /// 先建，单曲放在根目录。
     AskRepository {
         plugin_id: String,
@@ -71,7 +71,7 @@ pub enum FilePluginDispatch {
         progress: DownloadProgress,
         parent_path: Option<String>,
     },
-    /// 来源目录建成本地播放集（Vue `runPlaylistAction`），不调用插件。
+    /// 来源目录建成本地播放集，不调用插件。
     CreatePlaylist(SourcePlaylist),
 }
 
@@ -98,7 +98,7 @@ impl DownloadTarget {
         }
     }
 
-    /// Vue `targetLabel`。
+    /// 去处在菜单里的名字。
     fn label(self) -> &'static str {
         match self {
             Self::LocalDirectory => "本地",
@@ -118,7 +118,7 @@ pub struct SourcePlaylist {
 }
 
 impl SourcePlaylist {
-    /// 照 Vue `runPlaylistAction` 从动作声明和目录行算出要建的播放集。
+    /// 从动作声明和目录行算出要建的播放集。
     fn of(action: &Value, row: &FileRow) -> Self {
         let provider = row.provider_id.clone().unwrap_or_else(|| "source".into());
         let item = source_identifier(row, "playlistId");
@@ -132,9 +132,9 @@ impl SourcePlaylist {
     }
 }
 
-/// 来源下载在任务弹层里的进度行（Vue `runDownloadAction`）：种类是动作名；选好去处先是「准备下载 …」，调用插件时
-/// 「正在下载 …」。下载目录（歌单）也一样：Vue 先分页列出目录里的文件、写「正在处理 N 个文件」，把曲目作为 `tracks`
-/// 交给插件；Nana 不列目录、不带 `tracks`，由插件按歌单标识取来源里完整的歌单（理由见 `docs/nana-vue-parity.md`），
+/// 来源下载在任务弹层里的进度行：种类是动作名；选好去处先是「准备下载 …」，调用插件时
+/// 「正在下载 …」。下载目录（歌单）也一样：不列目录、不带 `tracks`，由插件按歌单标识取来源里完整的歌单，
+/// 因为要下的是来源里的这个歌单，不是目录里此刻列出的那几行（目录分页回源，可能不全也不新）；
 /// 调用插件这一段就是在下载。
 #[derive(Clone, Debug, PartialEq)]
 pub struct DownloadProgress {
@@ -313,7 +313,7 @@ fn prepare(
     }
 }
 
-/// 下载的去处（Vue `downloadTargets`）：声明了 `targets` 就只出声明的，没声明时两种都出。约定以外的去处不出，
+/// 下载的去处：声明了 `targets` 就只出声明的，没声明时两种都出。约定以外的去处不出，
 /// 只记日志。
 fn download_targets(action: &Value, plugin_id: &str, action_id: &str) -> Vec<DownloadTarget> {
     let Some(declared) = action
@@ -360,7 +360,7 @@ fn action_method(plugin: &PluginManifest, action: &Value, operation: &str) -> Op
         .map(str::to_string)
 }
 
-/// 声明和这一行对得上：`scope` 和条目类型相同（Vue `action.scope !== entry.kind` 就跳过，没写 scope 的声明不出），
+/// 声明和这一行对得上：`scope` 和条目类型相同（没写 scope 的声明不出），
 /// 声明了来源时来源相同，声明了 `entryKind` 时来源载荷的条目种类相同（老载荷按歌曲、歌单标识认）。
 fn matches_row(action: &Value, row: &FileRow) -> bool {
     let scope = action
@@ -393,7 +393,7 @@ fn matches_row(action: &Value, row: &FileRow) -> bool {
     }
 }
 
-/// 条目自己标了登录过期（来源载荷或元数据里的 `loginExpired`，Vue `actionDisabled` 的条目部分）。
+/// 条目自己标了登录过期（来源载荷或元数据里的 `loginExpired`）。
 fn entry_login_expired(row: &FileRow) -> bool {
     let flagged = |value: Option<&Value>| value.and_then(Value::as_bool) == Some(true);
     flagged(
@@ -403,9 +403,9 @@ fn entry_login_expired(row: &FileRow) -> bool {
     ) || flagged(row.metadata.get("loginExpired"))
 }
 
-/// 调用插件的载荷，照 Vue 各动作的载荷：歌曲、歌单标识，音质，公开的来源载荷，以及当前资源库的本地缓存目录
+/// 调用插件的载荷：歌曲、歌单标识，音质，公开的来源载荷，以及当前资源库的本地缓存目录
 /// （`managedCacheRoot`，没有时写 null）；重新获取播放资源多一个 `forceRefresh`，下载多一个歌单名。下载的
-/// `destination` 选好去处以后再写。下载目录不带 `tracks`（Vue 带目录里列出的曲目），插件按歌单标识自己取。
+/// `destination` 选好去处以后再写。下载目录不带 `tracks`，插件按歌单标识自己取。
 fn call_payload(row: &FileRow, operation: &str, context: &SourceContext) -> Value {
     let mut payload = Map::new();
     if let Some(song_id) = source_number(row, "songId") {
@@ -438,7 +438,7 @@ fn call_payload(row: &FileRow, operation: &str, context: &SourceContext) -> Valu
     Value::Object(payload)
 }
 
-/// 来源歌单名，没有时用条目名（Vue `sourceString(entry, "playlistName") ?? entry.name`）。
+/// 来源歌单名，没有时用条目名。
 fn playlist_name(row: &FileRow) -> String {
     source_string(row, "playlistName").unwrap_or_else(|| row.name.clone())
 }
@@ -471,8 +471,8 @@ fn public_payload(payload: Option<&Value>) -> Value {
 }
 
 /// 条目在来源里的数字标识：先看来源载荷，再看元数据。都没有时，只有条目自己那一种标识退回它的来源标识
-/// （`providerItemId`，条目在来源里的标识）：单曲的 `songId`、歌单目录的 `playlistId`。Vue `sourceNumber` 不分键，
-/// 单曲没有 `playlistId` 时也拿歌曲的标识去填，这里不照抄。
+/// （`providerItemId`，条目在来源里的标识）：单曲的 `songId`、歌单目录的 `playlistId`。别的键不拿它填，
+/// 免得单曲没有 `playlistId` 时拿歌曲的标识去填。
 fn source_number(row: &FileRow, key: &str) -> Option<i64> {
     row.source_payload
         .as_ref()
@@ -482,7 +482,7 @@ fn source_number(row: &FileRow, key: &str) -> Option<i64> {
         .or_else(|| own_item_id(row, key).and_then(|id| id.parse().ok()))
 }
 
-/// 来源标识的文字（Vue `sourceNumber(..) ?? entry.providerItemId`）：数字标识照 [`source_number`]；条目自己那一种
+/// 来源标识的文字：数字标识照 [`source_number`]；条目自己那一种
 /// 标识不是数字时原样用它的来源标识。
 fn source_identifier(row: &FileRow, key: &str) -> Option<String> {
     source_number(row, key)

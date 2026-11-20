@@ -2,7 +2,7 @@
 //!
 //! 照 `service-downloader` 的 `register.js`：展开「下载服务」时调用 `downloader.getRuntimeStatus`，
 //! 页头是「Downloader / aria2 运行状态」和「刷新」，有状态才画运行时、aria2、版本、RPC、任务数、
-//! 下载目录和下载源。还没有结果时只写 Vue 的空说明，不编任务数、目录或下载源。aria2 状态里的
+//! 下载目录和下载源。还没有结果时只写空说明，不编任务数、目录或下载源。aria2 状态里的
 //! `secret` 丢掉，不进状态也不进界面。
 
 use std::sync::Arc;
@@ -21,14 +21,14 @@ use super::{AdminEffect, AdminMessage, PluginCallOrigin};
 pub(super) const PLUGIN_ID: &str = "momobako.service.downloader";
 /// 读取运行状态的插件方法，和清单 `apiTests` 里的方法一致。
 const METHOD: &str = "downloader.getRuntimeStatus";
-/// 还没有状态时的说明，和 Vue 在 `status` 为空时写的那句一样。
+/// 还没有状态时的说明。
 pub(super) const WAITING: &str = "查看 aria2 运行时、任务队列和下载目录状态。";
 /// 页底说明，一直在。
 const FOOTER: &str = "音乐下载、歌词导出与 LibreOffice 运行时下载统一复用这套 aria2 任务层。";
 /// 状态卡标题。
 pub(super) const TITLE: &str = "aria2 运行状态";
 
-/// 一次运行状态读取。收起设置或换到别的插件时清空，对应 Vue 组件卸载。
+/// 一次运行状态读取。收起设置或换到别的插件时清空。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct DownloaderRuntime {
     /// 正在等 `downloader.getRuntimeStatus`。
@@ -116,7 +116,7 @@ pub(super) fn finish(model: &mut ShellViewModel, result: Result<Value, String>) 
     }
 }
 
-/// 插件交回的状态行。只在真有状态对象时调用；缺的字段用 Vue 的占位词，不另造一条来源。
+/// 插件交回的状态行。只在真有状态对象时调用；缺的字段用占位词，不另造一条来源。
 fn status_rows(status: &Value) -> Vec<(String, String)> {
     let aria2 = status.get("aria2").filter(|item| !item.is_null());
     vec![
@@ -163,7 +163,7 @@ fn aria2_running(aria2: Option<&Value>) -> String {
     nonempty(aria2.get("error")).unwrap_or_else(|| "未运行".into())
 }
 
-/// 任务数只认插件交回的数字。字段不在时照 Vue `queueSize ?? 0` 写 0，不在没有状态对象时调用。
+/// 任务数只认插件交回的数字。字段不在时写 0，不在没有状态对象时调用。
 fn queue_size(value: Option<&Value>) -> String {
     match value.and_then(Value::as_u64) {
         Some(count) => count.to_string(),
@@ -272,7 +272,7 @@ fn head(loading: bool) -> AnyView {
         .into_any()
 }
 
-/// 警告色说明。错误、空状态和页底说明都用 Vue `.repository-add-popover__note` 的浅底。
+/// 警告色说明。错误、空状态和页底说明都用警告色浅底。
 fn note(text: &str, key: &'static str) -> AnyView {
     let fill = style::SoftFill::new(
         style::Soft::Alpha {

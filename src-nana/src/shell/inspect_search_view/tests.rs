@@ -244,7 +244,7 @@ fn session_nodes(session: &nana_ui_devtools::agent::RuntimeAgentSession) -> Vec<
         .project_accessibility_in_viewport(session.document().document())
 }
 
-/// 没有资源库的搜索页：画出 Vue 的标题和空文案，不画出仓库、命中或关键词结果。
+/// 没有资源库的搜索页：画出空状态的标题和说明，不画出仓库、命中或关键词结果。
 #[test]
 fn search_no_library_draws_the_vue_empty_copy() {
     let nodes = nodes("search-no-library");

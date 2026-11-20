@@ -1,11 +1,11 @@
 //! 预览与播放的对照场景：播放集页、底部播放条、当前队列和预览页。
 //!
-//! 场景名和 `tmp/vue-mock/scenes/player.ts` 同名，数据和 Vue 夹具保持一致：
+//! 数据来自固定夹具：
 //! 演示播放列表、两首 `music/track-0N.mp3`、内置插件清单登记的播放器，侧栏播放集默认收起。
 //! 工作区从 `shell/acceptance/base_scene.rs` 的共用底子起步，播放集也经侧栏的读取结果进来。
 //! 15 页里的「播放集」「播放中」也由这里填数据，状态都走产品归约，不手写会话字段。
-//! 预览场景的文件字节（`preview_fixtures/cover.png`、`audio_fixtures/tone.mp3`、文本）和 Vue 夹具逐字节相同。
-//! 没有音频播放插件时的预览和 `tmp/vue-mock/scenes/states.ts` 同名。
+//! 预览场景的文件字节在 `preview_fixtures/cover.png`、`audio_fixtures/tone.mp3` 和文本常量里。
+//! 没有音频播放插件时的预览场景也在这里。
 
 use std::collections::BTreeMap;
 
@@ -23,15 +23,15 @@ use super::super::{ShellMessage, ShellPage, ShellViewModel, SidebarMessage, Sour
 use super::base_scene::{Base, NOW, REPO_ID, playlist_players, tagged_file};
 
 const PLAYLIST_ID: &str = "playlist-demo";
-/// 文本预览的内容。Vue 场景的 `SETTINGS_JSON` 是同一段。
+/// 文本预览的内容。
 const TEXT_FIXTURE: &str =
     "{\n  \"name\": \"MomoBako\",\n  \"theme\": \"light\",\n  \"corners\": \"smooth\"\n}\n";
-/// 图片预览的字节。Vue 场景的 `COVER_PNG` 解出来是同一份。
+/// 图片预览的字节。
 const COVER_PNG: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/fixtures/cover.png"
 ));
-/// 音频预览的字节。Vue 场景的 `TONE_MP3` 解出来是同一份。
+/// 音频预览的字节。
 const TONE_MP3: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/fixtures/tone.mp3"
@@ -41,7 +41,7 @@ const CLIP_AVI: &[u8] = include_bytes!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/tests/fixtures/clip.avi"
 ));
-/// Vue 夹具里 `cover.png` 登记的大小。
+/// 夹具里 `cover.png` 登记的大小。
 const COVER_SIZE: i64 = 2_400_000;
 
 /// 本面板的离屏对照场景。和 15 页同名的「playlists」「playback-running」不在这里登记。
@@ -64,13 +64,13 @@ pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
 /// 15 页的播放集：点开了演示播放列表，详情还在读取，主区停在「选择一个播放集」。
 pub(super) fn seed_playlists(model: &mut ShellViewModel) {
     demo_base().seed(model);
-    // Vue 在打开新建对话框时才选默认播放器类型，页面上还没有选中值。
+    // 打开新建对话框时才选默认播放器类型，页面上还没有选中值。
     model.selected_new_playlist_player_type_id = None;
     open_playlist(model, &demo_summary(), None);
 }
 
 /// 15 页的播放中：点开演示播放列表后双击第一条。`audio` 类型没有播放插件，
-/// 会话停在「缺少对应播放插件」，播放意图仍在，和 Vue 的 `isPlaying` 一致。
+/// 会话停在「缺少对应播放插件」，播放意图仍在。
 pub(super) fn seed_playback(model: &mut ShellViewModel) {
     demo_base().seed(model);
     open_playlist(model, &demo_summary(), Some(demo_items()));
@@ -86,7 +86,7 @@ fn playlist_open_scene() -> ShellViewModel {
     model
 }
 
-/// Vue `playlistOpen()` 的底子：`base()` 加上演示播放列表。
+/// 播放集场景的底子：共用底子加上演示播放列表。
 fn demo_base() -> Base {
     Base {
         playlists: vec![demo_summary()],
@@ -133,7 +133,7 @@ fn outside_playback_scene() -> ShellViewModel {
     single_item_playback(summary, "media/voice.wma", players)
 }
 
-/// Vue `singleItemPlayback`：只有一个条目的播放集，点开后按页眉的「播放」从第一条开始。
+/// 只有一个条目的播放集，点开后按页眉的「播放」从第一条开始。
 fn single_item_playback(
     summary: PlaylistSummary,
     path: &str,
@@ -178,7 +178,7 @@ fn fail_pending_loads(model: &mut ShellViewModel) {
     model.player.requeue_effects(kept);
 }
 
-/// 点开侧栏里的播放集（Vue 侧栏的播放集默认收起，点的是收起态里那颗按钮），再按夹具送回详情；
+/// 点开侧栏里的播放集（侧栏的播放集默认收起，点的是收起态里那颗按钮），再按夹具送回详情；
 /// `items` 为空时详情还没回来。
 pub(super) fn open_playlist(
     model: &mut ShellViewModel,
@@ -225,7 +225,7 @@ pub(super) fn play_first(model: &mut ShellViewModel) {
 
 const FOREIGN_TYPE: &str = "momobako.playlist.foreign";
 
-/// 第三方插件登记的 wma 播放器。Vue 场景用同一份清单挂一个测试插件。
+/// 第三方插件登记的 wma 播放器，用同一份清单挂一个测试插件。
 fn foreign_player() -> PlaylistPlayerContribution {
     PlaylistPlayerContribution {
         player_type_id: FOREIGN_TYPE.into(),
@@ -259,7 +259,7 @@ fn demo_items() -> Vec<PlaylistItem> {
     vec![item(0, "music/track-01.mp3"), item(1, "music/track-02.mp3")]
 }
 
-/// 播放列表条目。编号从 01 开始，和 Vue 夹具的 `item-01` 一致。
+/// 播放列表条目。编号从 01 开始。
 fn item(index: usize, path: &str) -> PlaylistItem {
     let filename = path.rsplit('/').next().unwrap_or(path).to_string();
     let extension = filename
@@ -332,13 +332,13 @@ fn live_asmr_scene() -> ShellViewModel {
     model
 }
 
-/// 预览场景的起点：Vue `previewScene` 在 `base()` 的根目录里补上这个文件（仓库摘要的素材跟着多一条），
+/// 预览场景的起点：在共用底子的根目录里补上这个文件（仓库摘要的素材跟着多一条），
 /// 像双击一样选中它并读回素材详情。之后的读取请求由各场景用夹具字节回答，和宿主派发后送回的消息一样走产品归约。
 fn preview_scene(path: &str, size_bytes: i64) -> ShellViewModel {
     preview_scene_with(path, size_bytes, &[])
 }
 
-/// 同上，文件条目和素材详情都带上给定的文本元数据（Vue 夹具里条目的 `metadata`）。
+/// 同上，文件条目和素材详情都带上给定的文本元数据。
 fn preview_scene_with(path: &str, size_bytes: i64, metadata: &[(&str, &str)]) -> ShellViewModel {
     let mut base = Base::default();
     if !base.entries.iter().any(|entry| entry.path == path) {
@@ -370,7 +370,7 @@ fn preview_scene_with(path: &str, size_bytes: i64, metadata: &[(&str, &str)]) ->
     model
 }
 
-/// 素材详情和 Vue 夹具 `file()` / `asset()` 同一组字段：大小写成「N B」，修改时间是 NOW。
+/// 素材详情和夹具的文件条目、素材同一组字段：大小写成「N B」，修改时间是 NOW。
 fn preview_detail(path: &str, size_bytes: i64) -> AssetDetail {
     let filename = path.rsplit('/').next().unwrap_or(path).to_string();
     let extension = filename
@@ -469,14 +469,14 @@ fn preview_image_scene() -> ShellViewModel {
 }
 
 /// 音频预览：根目录的 track-01.mp3。读好后插成临时条目接管播放条；自动播放要宿主派发，
-/// 截图停在 0:00 暂停，和 Vue 场景截图前把播放暂停到开头一致。
+/// 截图停在 0:00 暂停。
 fn preview_audio_scene() -> ShellViewModel {
     let mut model = preview_scene("track-01.mp3", TONE_MP3.len() as i64);
     answer_media(&mut model);
     model
 }
 
-/// 没有视频播放插件（Vue 场景滤掉了 `momobako.preview.media`，只剩音频播放器）时预览 clip.avi：播放条不接管，
+/// 没有视频播放插件（滤掉了 `momobako.preview.media`，只剩音频播放器）时预览 clip.avi：播放条不接管，
 /// 第二行写「没有可用于播放此媒体的插件」。音频不一样：Nana 有内置解码器认领 mp3 这些格式，没有音频插件也照常
 /// 接管播放条，所以这里用视频。预览自己解 AVI，不靠插件。离屏没有宿主纹理，不挂 `file-preview` 槽，
 /// 按播放头把已经解出的那一帧画进预览框。有宿主纹理的真窗口仍走纹理槽。
@@ -544,7 +544,7 @@ fn park_on_later_frame(model: &mut ShellViewModel) {
 }
 
 /// 音频预览解不开：`voice.opus` 的字节认不出容器，Nana 没有原生解码器。预览框里是失败浮层，写
-/// 「无法预览该音频」和原因。Vue 的文件预览把这类失败写在播放条上，预览框里仍是唱片，没有对照图。
+/// 「无法预览该音频」和原因。
 fn preview_audio_failed_scene() -> ShellViewModel {
     const BROKEN_AUDIO: &[u8] = b"not an audio container";
     let mut model = preview_scene("voice.opus", BROKEN_AUDIO.len() as i64);

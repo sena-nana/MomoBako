@@ -1,4 +1,4 @@
-//! 仓库操作槽位的爬升、收起和编号规则，对照 Vue `tasks.ts`。
+//! 仓库操作槽位的爬升、收起和编号规则。
 
 use super::{
     CLIMB_CEILING, CLIMB_INTERVAL_MS, FINISH_LINGER_MS, OperationPatch, OperationRequests,

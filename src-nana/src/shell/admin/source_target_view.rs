@@ -1,9 +1,8 @@
-//! 「选择目标资源库」对话框：来源条目「下载到其他资源库」有几个候选时弹出（Vue `Home.vue` 的
-//! `.repository-picker-dialog`）。宽 `min(560px, 92vw)`；每个候选一张卡片，名称下面一行路径，都按省略号收尾；
+//! 「选择目标资源库」对话框：来源条目「下载到其他资源库」有几个候选时弹出。
+//! 宽 `min(560px, 92vw)`；每个候选一张卡片，名称下面一行路径，都按省略号收尾；
 //! 底栏只有「取消」。点卡片开始下载，取消、点外面和 Escape 不下载（`shell/admin/source_target.rs`）。
 //!
-//! Vue 的卡片是 `<button>`，被 Lilia 全局 `button { height: 32px }` 压扁，名称和路径叠在一起；悬停描边用了
-//! 没有定义的 `--accent-weak`。这里按内容高画卡片，悬停描强调色，和别的悬停行一致。
+//! 卡片按内容高画，名称和路径不叠在一起；悬停描强调色，和别的悬停行一致。
 
 use std::sync::Arc;
 
@@ -20,7 +19,7 @@ use super::super::{ShellMessage, ShellViewModel};
 use super::AdminMessage;
 use super::source_target::TargetCandidate;
 
-/// `.repository-picker-dialog { width: min(560px, 92vw) }`。
+/// 对话框宽 `min(560px, 92vw)`。
 const PICKER_DIALOG: DialogSize = DialogSize::capped(560.0, 92.0);
 
 fn cancel() -> ShellMessage {
@@ -56,7 +55,7 @@ pub(crate) fn target_dialog(model: &ShellViewModel) -> Option<AnyView> {
     )
 }
 
-/// 一个候选：`.repository-picker-dialog__item`，内边距 12、`--radius-lg`、`--bg` 底、`--border-soft` 描边，悬停换底色、
+/// 一个候选：内边距 12、`--radius-lg`、`--bg` 底、`--border-soft` 描边，悬停换底色、
 /// 描强调色；名称 14px 600，路径 12px 弱色，都是单行省略。点它发选中这个资源库。
 fn candidate_card(candidate: &TargetCandidate) -> AnyView {
     let mut style = NodeStyle::default();

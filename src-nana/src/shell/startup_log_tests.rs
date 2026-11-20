@@ -1,4 +1,4 @@
-//! 首屏加载日志照 Vue `lifecycle.ts` 的 `emitStartupLog`：从启动消息走一遍首屏启动，逐条比对日志的级别、
+//! 首屏加载日志：从启动消息走一遍首屏启动，逐条比对日志的级别、
 //! 消息和明细（`键: 值 · 键: 值`）。设置包在启动结束时读，回来以后记「应用配置与插件设置加载完成」和
 //! 「首屏启动流程完成」；同步记录的明细是记录的 `context`。
 
@@ -94,7 +94,7 @@ fn entry(level: &'static str, message: &str, detail: &str) -> (&'static str, Str
     (level, message.to_string(), detail.to_string())
 }
 
-/// 一个就绪仓库的首屏启动：14 条日志和 Vue 一条不差，同步、摘要、首屏目录、设置和流程完成都带明细。
+/// 一个就绪仓库的首屏启动：14 条日志一条不差，同步、摘要、首屏目录、设置和流程完成都带明细。
 #[test]
 fn a_launch_logs_every_vue_startup_entry_with_its_detail() {
     let mut model = ShellViewModel::default();
@@ -211,7 +211,7 @@ fn a_launch_logs_every_vue_startup_entry_with_its_detail() {
     );
 }
 
-/// 没有资源库和资源库缺失的启动也读设置包：设置包读失败也照 Vue 记完两条（不再等播放器类型），流程完成的素材数和
+/// 没有资源库和资源库缺失的启动也读设置包：设置包读失败也记完两条（不再等播放器类型），流程完成的素材数和
 /// 播放集数是 0。
 #[test]
 fn empty_and_missing_launches_close_the_log_after_the_settings_bundle() {
@@ -284,7 +284,7 @@ fn empty_and_missing_launches_close_the_log_after_the_settings_bundle() {
     );
 }
 
-/// 「首屏启动流程失败。」照 Vue 带 `activeRepoId`：读完摘要以前还是这一轮开始时的值（冷启动是空的，只写
+/// 「首屏启动流程失败。」带 `activeRepoId`：读完摘要以前还是这一轮开始时的值（冷启动是空的，只写
 /// `targetRepoId`），读完摘要以后是这次的仓库；重试时「流程开始」和这一轮的失败都带着上一轮已经换上的仓库。
 #[test]
 fn a_failed_launch_logs_the_active_repository_once_the_summary_is_read() {

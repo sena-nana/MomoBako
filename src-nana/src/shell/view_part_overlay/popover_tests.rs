@@ -244,7 +244,7 @@ fn fill_opacity(harness: &ShellHarness, task_id: &str) -> Option<f32> {
         .and_then(|style| style.layout.opacity)
 }
 
-/// 不确定进度（Vue `.progress-bar--indeterminate`）的填充照 `progress-pulse 1.15s` 呼吸，确定进度的不呼吸；
+/// 不确定进度的填充照 `progress-pulse 1.15s` 呼吸，确定进度的不呼吸；
 /// 呼吸只改填充的透明度，不重建这一行。减少动态效果时停在不透明；弹层关上以后不再为呼吸要帧。
 #[test]
 fn indeterminate_progress_breathes_in_the_task_popover() {
@@ -315,7 +315,7 @@ fn fill_width(harness: &ShellHarness, task_id: &str) -> f32 {
     }
 }
 
-/// 进度条填充照 `.progress-bar__fill` 的 `transition: width 0.18s ease`：新出现的行直接是目标宽度，进度推进时从原来的
+/// 进度条填充按 `transition: width 0.18s ease` 过渡：新出现的行直接是目标宽度，进度推进时从原来的
 /// 宽度过渡过去，走完 180ms 停在新值；过渡只改填充的宽度，不重建这一行。减少动态效果时直接跳到新值。
 #[test]
 fn task_progress_widths_transition_like_vue() {

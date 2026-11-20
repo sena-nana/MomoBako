@@ -40,7 +40,7 @@ pub(crate) fn row_draft(read: impl Fn() -> Option<String> + 'static) -> ModelFie
     draft
 }
 
-/// `style::action` 按钮的禁用：Vue 原生按钮禁用时整体 45% 不透明，不换颜色，所以和禁用标志一起写透明度。
+/// `style::action` 按钮的禁用：整体 45% 不透明，不换颜色，所以和禁用标志一起写透明度。
 pub(crate) struct ActionDisabled;
 
 impl FieldWrite<Button, bool> for ActionDisabled {

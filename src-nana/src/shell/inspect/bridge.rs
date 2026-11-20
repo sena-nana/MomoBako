@@ -194,7 +194,7 @@ pub(super) fn apply(model: &mut ShellViewModel, follow: Follow) {
     }
 }
 
-/// 和 Vue 预览页挂载后 `playEntry` 一样开始播放。只在预览仍是这个文件、播放器仍在放它、
+/// 预览页打开后自动开始播放。只在预览仍是这个文件、播放器仍在放它、
 /// 而且停着的时候生效；用户在此之前已经点过播放或换了文件就不再动。
 fn autoplay(model: &mut ShellViewModel, path: &str, generation: u64) {
     let current = generation == model.inspect.generation

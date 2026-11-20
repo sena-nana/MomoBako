@@ -1,4 +1,4 @@
-//! 资源筛选栏，对应 Vue `pages/workspace/search/WorkspaceFilterBar.vue`。
+//! 资源筛选栏。
 //!
 //! 头部是「当前资源库筛选」和仓库名，右侧是条件数、清除和关闭。下面按组排：
 //! 格式、标签只在有候选时出现，是候选芯片；颜色、形状是候选芯片加输入框和「添加」；
@@ -41,7 +41,7 @@ struct AdvancedInput {
     wide: bool,
 }
 
-/// Vue 高级区输入的顺序和文案。排序方向下拉在「排序字段」之后，「结果数量」之前。
+/// 高级区输入的顺序和文案。排序方向下拉在「排序字段」之后，「结果数量」之前。
 const ADVANCED_INPUTS: [AdvancedInput; 12] = [
     AdvancedInput {
         field: AdvancedField::ExcludeQuery,
@@ -460,7 +460,7 @@ fn shortcut_key(
     )
 }
 
-/// 库类型：每个快捷方式一个芯片，点下去改写元数据和排序。芯片不显示选中态，和 Vue 一致。
+/// 库类型：每个快捷方式一个芯片，点下去改写元数据和排序。芯片不显示选中态。
 /// 没有匹配条目时整组不显示。
 fn shortcut_group(shortcuts: Signal<Vec<SearchShortcut>>) -> AnyView {
     let chips = each(shortcuts, shortcut_key, |shortcut: SearchShortcut| {
@@ -538,8 +538,7 @@ fn advanced_group(signals: FilterBarSignals) -> AnyView {
 }
 
 /// 高级区的输入胶囊，输入框填满整个格子，受控于这个字段的草稿。
-/// Vue 的内层网格把输入框卡在 120px，占两列的宽输入也只用左边 120px、长占位被截断，
-/// 这是给颜色形状输入写的列宽误用到了高级区，这里按设计意图让输入框用满格子。
+/// 不沿用颜色形状输入的 120px 列宽，否则占两列的宽输入也只用左边 120px、长占位被截断。
 fn advanced_input(input: &AdvancedInput, draft: ModelField) -> AnyView {
     let field = input.field;
     let pill = widgets::input_pill(true).with_layout(|layout| {

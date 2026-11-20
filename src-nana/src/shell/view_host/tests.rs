@@ -349,7 +349,7 @@ fn incremental_sync_matches_a_fresh_mount_step_by_step() {
 
 /// `mount_shell` 在同一线程上同时开着两份文档时，按标记认出各自的骨架：同步谁只改谁，
 /// 文档里始终只有一棵壳层。
-/// 照 Vue 根文档的 `lang="zh-CN"`：测试 harness 和离屏验收文档（截图场景）都经 `ShellView::mount` 挂，
+/// 文档语言是 `zh-CN`：测试 harness 和离屏验收文档（截图场景）都经 `ShellView::mount` 挂，
 /// 和生产窗口一样，挂好的文字按简体中文排。
 #[test]
 fn every_mount_shapes_text_in_simplified_chinese() {

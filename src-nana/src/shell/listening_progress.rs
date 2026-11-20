@@ -1,8 +1,8 @@
 //! ASMR 音频的收听进度。对齐 `library-asmr` 对 `media.playback` 的处理
 //! （`asmrLibrary.js` 的 `shouldPersistListeningProgress` / `buildListeningProgressMetadata`）。
 //!
-//! Vue 的音频预览组件在时长就绪、播放推进、暂停和结束时发出这条事件，插件再写元数据。
-//! 文件预览对音频走播放器挂载，不挂那个组件，所以真窗口里播放条自己的运行时并不发事件。
+//! 插件在时长就绪、播放推进、暂停和结束时收到这条事件，写进元数据。
+//! 播放条自己的运行时并不发这条事件。
 //! Nana 没有插件前端：预览页正在放这条 ASMR 音频时，由宿主按同一套规则写入。离开预览页就停。
 //! 验收场景是停住的画面，不在这里写，免得截图停在「保存中」。
 
@@ -115,7 +115,7 @@ fn note(
     model.mark_surface_dirty();
 }
 
-/// 按 Vue 的规则决定要不要写，并排一次元数据保存。写了返回真。
+/// 按插件的规则决定要不要写，并排一次元数据保存。写了返回真。
 ///
 /// 只在预览页正在放这条、而且 ASMR 资源库插件开着时写。验收场景跳过。
 /// 时长就绪只写 `trackDurationMs`；其余状态写收听进度、状态、时间和位置。
@@ -213,7 +213,7 @@ fn unix_now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// 是不是 ASMR 音频（Vue `isAsmrAudioEntry` 的元数据部分）。种类由调用方确认是文件。
+/// 是不是 ASMR 音频（只看元数据）。种类由调用方确认是文件。
 fn is_asmr_audio(custom: &BTreeMap<String, Value>) -> bool {
     text(custom, "asmrEntryKind") == "audio"
         && (text(custom, "libraryKind") == "asmr"
@@ -262,7 +262,7 @@ fn should_persist(
     }
 }
 
-/// JSON 数字和时长是同一个数。字符串不算（Vue 用 `!==`，`"120000" !== 120000`）。
+/// JSON 数字和时长是同一个数。字符串不算，`"120000"` 和 120000 不同。
 fn same_number(value: &Value, duration: u64) -> bool {
     value.as_u64() == Some(duration)
         || value.as_i64() == Some(duration as i64)
@@ -318,7 +318,7 @@ mod tests {
 
     const PATH: &str = "voice/track.wav";
 
-    /// 预览页放 ASMR 音频时，按 Vue 的节流把收听进度写进元数据。
+    /// 预览页放 ASMR 音频时，按节流间隔把收听进度写进元数据。
     /// 插件停用、离开预览、间隔不够都不写。听完写成已听完。
     #[test]
     fn asmr_preview_playback_writes_listening_progress() {

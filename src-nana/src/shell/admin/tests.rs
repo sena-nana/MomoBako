@@ -1,6 +1,6 @@
 //! 设置、插件、日志、任务、仓库动作和工具页的状态机测试。
 //!
-//! 期望值来自对应的 Vue 组件。不启动仓库服务，服务调用只检查留下的副作用。
+//! 不启动仓库服务，服务调用只检查留下的副作用。
 
 use std::collections::BTreeMap;
 
@@ -735,7 +735,7 @@ fn repository_backends_and_audio_player_choices() {
     );
     assert_eq!(support::backend_summary(&[]), "无");
 
-    // 原生候选登记了音频能力时照 Vue：插件名从清单里找，偏好不可用时回退到官方实现；什么都没有才报缺失。
+    // 原生候选登记了音频能力时：插件名从清单里找，偏好不可用时回退到官方实现；什么都没有才报缺失。
     let mut official = plugin("momobako.player.audio", "builtin", "preview", "preview");
     official.name = "官方音频播放器".into();
     let plugins = [official];
@@ -790,7 +790,7 @@ fn repository_backends_and_audio_player_choices() {
     );
 }
 
-/// 生产里的原生候选只有内置解码器，音频能力的实现来自插件清单：装了官方音频播放器就和 Vue 一样显示它；
+/// 生产里的原生候选只有内置解码器，音频能力的实现来自插件清单：装了官方音频播放器就显示它；
 /// 没装、停用或只有没选的第三方实现时，音频由内置解码器播放，下拉框如实写出它，不报缺失。
 #[test]
 fn audio_card_reads_plugin_players_and_falls_back_to_the_builtin_decoder() {
@@ -1097,7 +1097,7 @@ fn repository_actions_follow_selection_and_refuse_when_not_runnable() {
         model.admin.take_effects().pop(),
         Some(AdminEffect::RunAction { action_id, paths, .. }) if action_id == "copy" && paths == ["a.txt"]
     ));
-    // Vue `refreshWorkspaceAfterMutation`：执行完重读摘要和当前目录，任务弹层出「读取目录」。
+    // 执行完重读摘要和当前目录，任务弹层出「读取目录」。
     model.workspace.present_repository(WorkspaceRepository {
         repo_id: "repo".into(),
         name: "库".into(),
@@ -1452,7 +1452,7 @@ fn file_plugin_call_keeps_repository_and_writes_activity() {
         }
         other => panic!("unexpected {other:?}"),
     }
-    // Vue 来源动作完成后 `context.refreshRepo()`：重读资源库列表。
+    // 来源动作完成后重读资源库列表。
     model.workspace.take_effects();
     send(
         &mut model,
@@ -1475,7 +1475,7 @@ fn file_plugin_call_keeps_repository_and_writes_activity() {
     assert_eq!(model.files.error, "media.clearTrackCache 调用失败。");
 }
 
-/// 「创建播放列表」照 Vue `runPlaylistAction` 在本地建播放集，不调用插件；建好以后刷新资源库，
+/// 「创建播放列表」在本地建播放集，不调用插件；建好以后刷新资源库，
 /// 缺仓库或缺歌单标识时只报错，失败写进文件列表的错误。
 #[test]
 fn source_playlist_is_created_locally_then_the_repository_refreshes() {

@@ -1,4 +1,4 @@
-//! 来源条目动作在产品路径上的行为，对照 Vue `sourceEntryActions.ts` 和 `useEntryActionRepositoryDialog.ts`：从网易云
+//! 来源条目动作在产品路径上的行为：从网易云
 //! 资源库的右键菜单出发，看菜单项的禁用和原因、清理缓存的载荷、「下载到其他资源库」选目标、开始下载和收尾。
 
 use serde_json::json;
@@ -65,7 +65,7 @@ fn note(text: &str) -> (String, bool, bool) {
     (text.to_string(), false, true)
 }
 
-/// 登录过期：照 Vue `actionDisabled`，网易云的条目动作都禁用，紧跟着一行写「来源认证或本地缓存不可用」，只写一次；
+/// 登录过期：网易云的条目动作都禁用，紧跟着一行写「来源认证或本地缓存不可用」，只写一次；
 /// 别的菜单项不受影响。
 #[test]
 fn an_expired_login_disables_source_actions_and_says_why() {
@@ -109,7 +109,7 @@ fn an_expired_login_disables_source_actions_and_says_why() {
     assert!(disabled, "禁用的菜单项点不了");
 }
 
-/// 清理播放缓存和重新获取播放资源照 Vue 带上当前资源库的本地缓存目录（`managedCacheRoot`），网易云插件据此清到、
+/// 清理播放缓存和重新获取播放资源带上当前资源库的本地缓存目录（`managedCacheRoot`），网易云插件据此清到、
 /// 取到真正的播放缓存，不退回插件自己的临时目录。
 #[test]
 fn clearing_the_cache_passes_the_managed_cache_root() {
@@ -145,7 +145,7 @@ fn clearing_the_cache_passes_the_managed_cache_root() {
 }
 
 /// 下载单曲到其他资源库：有两个候选时弹出「选择目标资源库」；选第三资源库以后对话框关掉，任务弹层是「下载单曲 ·
-/// 正在下载 晴天.mp3」，载荷的去处写成第三资源库；插件交回以后照 Vue `context.refreshRepo()` 刷新当前资源库，
+/// 正在下载 晴天.mp3」，载荷的去处写成第三资源库；插件交回以后刷新当前资源库，
 /// 刷新的「加载资源库」接着占住进度行。
 #[test]
 fn downloading_to_another_repository_asks_for_the_target_first() {
@@ -240,7 +240,7 @@ fn downloading_to_another_repository_asks_for_the_target_first() {
 }
 
 /// 第三方来源的单曲：来源载荷里只有条目种类、没有歌曲标识。右键清理播放缓存、下载到其他资源库时，`songId` 退回条目
-/// 的来源标识（`providerItemId`），`playlistId` 不退回（Vue 把歌曲的标识也填成歌单标识）。
+/// 的来源标识（`providerItemId`），`playlistId` 不退回，免得把歌曲的标识填成歌单标识。
 #[test]
 fn a_track_without_a_song_id_is_identified_by_its_provider_item_id() {
     let mut model = menu_open();
@@ -342,7 +342,7 @@ fn cancelling_or_failing_downloads_nothing_more() {
     );
 }
 
-/// 只有一个候选时照 Vue 直接用它，不弹选择；一个都没有时菜单里「下载单曲到其他资源库」禁用，写出原因，别的照常。
+/// 只有一个候选时直接用它，不弹选择；一个都没有时菜单里「下载单曲到其他资源库」禁用，写出原因，别的照常。
 #[test]
 fn the_number_of_targets_decides_whether_to_ask() {
     let mut single = menu_open();

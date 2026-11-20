@@ -645,7 +645,7 @@ fn node_disabled(harness: &ShellHarness, id: StableNodeId) -> bool {
         .any(|node| node.id == id && node.disabled)
 }
 
-/// 重命名文件夹的「保存」已经发出、文件服务还没回来时，名称输入框照 Vue 仍可改。
+/// 重命名文件夹的「保存」已经发出、文件服务还没回来时，名称输入框仍可改。
 /// 「保存」和「取消」禁用；再按回车或再点「保存」不另发一次重命名，改过的名字留在输入框里。
 #[test]
 fn folder_rename_name_stays_editable_while_the_save_is_in_flight() {
@@ -717,7 +717,7 @@ fn folder_rename_name_stays_editable_while_the_save_is_in_flight() {
     assert!(harness.model.files.mutating && harness.model.sidebar.folder_dialog.submitting);
 }
 
-/// 复制到文件夹的「复制」已经发出、文件服务还没回来时，目标目录照 Vue 仍可改。
+/// 复制到文件夹的「复制」已经发出、文件服务还没回来时，目标目录仍可改。
 /// 「复制」（此时写成「处理中...」）和「取消」禁用；再按回车或再点主按钮不另发一次复制。
 /// 已经发出的请求仍用提交当时的目录。
 #[test]

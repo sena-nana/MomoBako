@@ -1,5 +1,5 @@
-//! 来源条目动作的声明匹配、载荷和禁用，对照 Vue `sourceEntryActions.ts`：清单声明换成菜单项，载荷照 Vue 带上
-//! `managedCacheRoot`，下载照 `downloadTargets` 分到本地和到其他资源库，来源认证或本地缓存不可用时禁用。
+//! 来源条目动作的声明匹配、载荷和禁用：清单声明换成菜单项，载荷带上
+//! `managedCacheRoot`，下载分到本地和到其他资源库，来源认证或本地缓存不可用时禁用。
 
 use std::collections::BTreeMap;
 
@@ -116,7 +116,7 @@ fn payload_of(action: &FilePluginAction) -> Option<&Value> {
     }
 }
 
-/// 单曲：清理缓存和重新获取播放资源直接调用插件，载荷照 Vue 带上本地缓存目录（`managedCacheRoot`），网易云插件
+/// 单曲：清理缓存和重新获取播放资源直接调用插件，载荷带上本地缓存目录（`managedCacheRoot`），网易云插件
 /// 据此清到、取到真正的播放缓存；不公开 cookie。下载没声明去处，分「到本地」「到其他资源库」两项，都先问去处。
 #[test]
 fn track_actions_carry_the_managed_cache_root_and_split_downloads_by_target() {
@@ -225,7 +225,7 @@ fn a_declared_target_is_the_only_download_entry() {
     }
 }
 
-/// 来源认证或本地缓存不可用（登录过期、没有登录、缓存没就绪，或者条目自己标了登录过期）：照 Vue `actionDisabled`
+/// 来源认证或本地缓存不可用（登录过期、没有登录、缓存没就绪，或者条目自己标了登录过期）：
 /// 全部禁用，原因是「来源认证或本地缓存不可用」；没有能下载到的其他资源库时只有「到其他资源库」禁用。
 #[test]
 fn unavailable_sources_disable_every_action_with_the_reason() {
@@ -283,7 +283,7 @@ fn unavailable_sources_disable_every_action_with_the_reason() {
     );
 }
 
-/// 「创建播放列表」照 Vue `runPlaylistAction` 在本地建播放集：标识是「来源-歌单」，名称取来源的歌单名，
+/// 「创建播放列表」在本地建播放集：标识是「来源-歌单」，名称取来源的歌单名，
 /// 播放器类型取动作声明的；没有声明时是音频顺序播放，没有歌单名时用目录名。不再调用插件。
 #[test]
 fn playlist_from_directory_builds_a_local_playlist() {
@@ -321,8 +321,8 @@ fn playlist_from_directory_builds_a_local_playlist() {
 }
 
 /// 来源载荷和元数据里没有标识时（第三方来源的条目），只有条目自己那一种标识退回它的来源标识（`providerItemId`）：
-/// 单曲的 `songId`、歌单目录的 `playlistId`。Vue `sourceNumber` 不分键，单曲的 `playlistId` 也填成歌曲标识、歌单
-/// 目录的 `songId` 也填成歌单标识，插件会拿错的标识去取；这里不填。
+/// 单曲的 `songId`、歌单目录的 `playlistId`。别的键不拿它填：单曲的 `playlistId` 填成歌曲标识、歌单
+/// 目录的 `songId` 填成歌单标识，插件会拿错的标识去取。
 #[test]
 fn only_the_entry_own_identifier_falls_back_to_the_provider_item_id() {
     let mut track = row();
@@ -376,7 +376,7 @@ fn only_the_entry_own_identifier_falls_back_to_the_provider_item_id() {
     assert_eq!(playlist.playlist_id, None, "空白的来源标识不算，点了只报错");
 }
 
-/// 老载荷没写条目种类：照 Vue `actionMatches` 的老规则，文件有歌曲标识才算单曲、目录有歌单标识才算歌单目录，
+/// 老载荷没写条目种类：按老规则，文件有歌曲标识才算单曲、目录有歌单标识才算歌单目录，
 /// 标识可以是条目自己的来源标识；文件的来源标识不会让它被当成歌单目录。
 #[test]
 fn legacy_payloads_match_by_the_entry_own_identifier() {
@@ -412,8 +412,8 @@ fn legacy_payloads_match_by_the_entry_own_identifier() {
     );
 }
 
-/// 插件 SDK 只约定了五种 operation 和两种下载去处。约定以外的 operation 不出菜单，声明了 method 也不调用（Vue
-/// 一律当成「创建播放列表」，拿单曲也会建播放集，是缺陷）；没写 scope 的声明也不出（Vue 要求 scope 和条目类型
+/// 插件 SDK 只约定了五种 operation 和两种下载去处。约定以外的 operation 不出菜单，声明了 method 也不调用，
+/// 也不当成「创建播放列表」（否则拿单曲也会建播放集）；没写 scope 的声明也不出（scope 要和条目类型
 /// 相同）；约定以外的下载去处不出那一项。
 #[test]
 fn declarations_outside_the_sdk_contract_are_not_offered() {

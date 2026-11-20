@@ -1298,7 +1298,7 @@ fn take(
         .unwrap_or_else(|error| panic!("{entry}：{error}"))
 }
 
-/// 名单还在时，旁边的提示跟 Vue `renderInternalPreview`：空闲写当前目录和「选择内部文件进行预览」，
+/// 名单还在时，旁边的提示：空闲写当前目录和「选择内部文件进行预览」，
 /// 不能内联的类型不取字节、写文件名和「无法内联预览该文件类型」，正在取写「准备内部文件」，
 /// 取出失败写「无法预览内部文件」和原因并留在名单上。点目录后舞台改写目录名和「无法内联预览该文件类型」。
 /// 打开成功的那条见并排测试。
@@ -1567,7 +1567,7 @@ fn archive_breadcrumb_root_is_the_archive_filename() {
     );
 }
 
-/// 空压缩包和空目录仍写 Vue 工具条的「0 项」，列表里只有「空目录」。根上第一段是带扩展名的文件名。
+/// 空压缩包和空目录的工具条仍写「0 项」，列表里只有「空目录」。根上第一段是带扩展名的文件名。
 #[test]
 fn archive_empty_directory_shows_vue_zero_count() {
     let empty = opened_archive(&sample_zip(&[]), "empty.zip");
@@ -1635,7 +1635,7 @@ fn node_texts(harness: &crate::shell::view_harness::ShellHarness) -> Vec<String>
         .collect()
 }
 
-/// 名单行首照 Vue `fileKindLabel`：目录写 DIR，扩展名前四位大写，没有扩展名写 FILE。大小和「目录」仍在行尾。
+/// 名单行首：目录写 DIR，扩展名前四位大写，没有扩展名写 FILE。大小和「目录」仍在行尾。
 #[test]
 fn archive_row_icons_use_vue_file_kind_label() {
     let zip = sample_zip(&[

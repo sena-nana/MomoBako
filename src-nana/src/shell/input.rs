@@ -27,7 +27,7 @@ pub(super) fn repository_absolute(root: &str, relative: &str) -> String {
     support::join_repository_path(root, relative, None)
 }
 
-/// 打开和定位要用的绝对路径，对照 Vue `resolveWorkspaceEntryPath`。
+/// 打开和定位要用的绝对路径。
 ///
 /// 有去掉空白后的本机路径就用它。否则虚拟条目，或当前仓库不是本地文件系统时，返回空串：
 /// 不把仓库根拼到虚拟路径上，打开和定位都不发出。列表、播放集、播放队列和已经读回的素材详情
@@ -120,7 +120,7 @@ mod open_tests;
 #[cfg(test)]
 mod tests;
 
-/// 宿主文件拖入的四个阶段。
+/// 宿主文件拖放的四个阶段。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HostDragPhase {
     Enter,
@@ -244,7 +244,7 @@ pub enum InputMessage {
         paths: Vec<String>,
         append: bool,
     },
-    /// 用系统程序打开条目。`path` 是仓库内相对路径，打开的同时照 Vue `openWorkspaceEntry` 记一次访问。
+    /// 用系统程序打开条目。`path` 是仓库内相对路径，打开的同时记一次访问。
     OpenEntry {
         has_repo: bool,
         absolute_path: String,
@@ -306,7 +306,7 @@ struct InternalSession {
 }
 
 /// 最近一次指针或按键事件按着的修饰键。运行时路由完输入以后由宿主记下（文档不保留修饰键），
-/// 点选条目和框选照 Vue 的 `shiftKey`、`ctrlKey || metaKey` 读它。
+/// 点选条目和框选按它判断 Shift、Ctrl 或 Meta。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct HeldModifiers {
     pub shift: bool,
@@ -315,7 +315,7 @@ pub struct HeldModifiers {
 }
 
 impl HeldModifiers {
-    /// Vue `selectionModeFromEvent`：Shift 是范围选择，Ctrl / Meta 是切换，否则替换。
+    /// Shift 是范围选择，Ctrl / Meta 是切换，否则替换。
     pub(crate) fn selection_mode(self) -> super::files::SelectionMode {
         if self.shift {
             super::files::SelectionMode::Range
@@ -330,7 +330,7 @@ impl HeldModifiers {
 /// 和 `pointer_gesture` 一样只跟主键指针。别的指针离开窗口不打断这次拖动。
 const PRIMARY_POINTER: u64 = 1;
 
-/// Vue `useWorkspaceDragDrop` 的 `handleWindowPointerLeave`：鼠标离开窗口时，
+/// 鼠标离开窗口时，
 /// 把内部拖动的最后位置交给已有的 `WindowPointerLeave`。拖得不够 72px 时那条归约什么都不做。
 ///
 /// 离开事件不带坐标，运行时路由完又会清掉指针位置，所以用这次拖动记下的最后一点。

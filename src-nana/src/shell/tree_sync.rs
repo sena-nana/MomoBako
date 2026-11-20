@@ -1,17 +1,16 @@
-//! 文件夹树的「刷新」：同步整个仓库再刷新工作区，对应 Vue `refreshFileBrowserTree`
-//! （`composables/workspace/sync.ts`）。
+//! 文件夹树的「刷新」：同步整个仓库再刷新工作区。
 //!
 //! 一轮刷新分三段，状态都在归约里推进，服务请求交给宿主（`sync_dispatch.rs`）：
 //! 1. 同步：开操作进度「刷新文件树 / 同步并读取目录结构」，同步进度停在「扫描文件夹结构」1/3，
 //!    宿主走启动时同一条 `PROTOCOL_REPOSITORY_SYNC`。刷新开始时忙碌标志由假变真，状态区清掉上一次失败；
 //! 2. 刷新：同步完成后进度经「写入索引结果」2/3 到「刷新文件夹树」3/3，宿主一起重读仓库摘要、硬链接
 //!    候选和目录树（回收站面板不读树）；
-//! 3. 读目录：照 Vue 非静默地重读当前目录（回收站读回收站），任务弹层的仓库操作行由这次读目录接手，
+//! 3. 读目录：非静默地重读当前目录（回收站读回收站），任务弹层的仓库操作行由这次读目录接手，
 //!    换成「读取目录」（「读取回收站」）；读完进度是「刷新完成」。
 //!
 //! 任何一段失败：失败写进全局状态区（来源 [`FailureSource::Sync`]），操作进度取消，同步进度标成失败。
 //! 同步进度的扫描、写入、刷新三档在侧栏状态区显示（失败和忙碌优先）。刷新期间文件夹分组的刷新按钮
-//! 转圈并禁用，条件和 Vue 一样看「正在读目录」（[`loading_file_browser`]）。
+//! 转圈并禁用，条件看「正在读目录」（[`loading_file_browser`]）。
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -23,10 +22,10 @@ use super::sidebar::SidebarTree;
 use super::status::FailureSource;
 use super::{ShellMessage, ShellViewModel, StartupStatus, WorkspacePanel};
 
-/// Vue `SYNC_TOTAL_STEPS`。
+/// 同步一共几步。
 const SYNC_TOTAL_STEPS: u8 = 3;
 
-/// 同步进度的阶段，Vue `RepositorySyncProgress.phase`。
+/// 同步进度的阶段。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SyncPhase {
     #[default]
@@ -38,7 +37,7 @@ pub enum SyncPhase {
     Error,
 }
 
-/// Vue `syncProgress`（`RepositorySyncProgress`）：阶段、文案、第几步、一共几步和四舍五入的百分比。
+/// 同步进度：阶段、文案、第几步、一共几步和四舍五入的百分比。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SyncProgress {
     pub phase: SyncPhase,
@@ -49,7 +48,7 @@ pub struct SyncProgress {
 }
 
 impl Default for SyncProgress {
-    /// Vue `createInitialSyncProgress`：空闲，0 / 3 步。
+    /// 初值：空闲，0 / 3 步。
     fn default() -> Self {
         Self {
             phase: SyncPhase::Idle,
@@ -62,7 +61,7 @@ impl Default for SyncProgress {
 }
 
 impl SyncProgress {
-    /// Vue `setSyncProgress`：一共 [`SYNC_TOTAL_STEPS`] 步，百分比是 `round(current / total * 100)`。
+    /// 一共 [`SYNC_TOTAL_STEPS`] 步，百分比是 `round(current / total * 100)`。
     fn set(&mut self, phase: SyncPhase, label: impl Into<String>, current: u8) {
         let total = SYNC_TOTAL_STEPS;
         let percent = (f32::from(current) / f32::from(total) * 100.0).round() as u8;
@@ -75,7 +74,7 @@ impl SyncProgress {
         };
     }
 
-    /// 扫描、写入、刷新三档在状态区显示（Vue `isShowingSyncProgress`），返回文案和百分比。
+    /// 扫描、写入、刷新三档在状态区显示，返回文案和百分比。
     pub fn shown(&self) -> Option<(&str, u8)> {
         matches!(
             self.phase,
@@ -118,7 +117,7 @@ pub struct TreeSyncState {
 }
 
 impl TreeSyncState {
-    /// 正在刷新：从点下刷新到读完目录（Vue 这段时间 `isLoadingFileBrowser` 为真）。
+    /// 正在刷新：从点下刷新到读完目录。
     pub fn running(&self) -> bool {
         self.run.is_some()
     }
@@ -168,12 +167,12 @@ pub struct TreeSyncRefresh {
     pub tree: Option<Result<SidebarTree, String>>,
 }
 
-/// Vue `isLoadingFileBrowser`：非静默地读目录，或者正在刷新文件夹树。
+/// 正在读目录：非静默地读目录，或者正在刷新文件夹树。
 pub(crate) fn loading_file_browser(model: &ShellViewModel) -> bool {
     model.files.loading || model.tree_sync.running()
 }
 
-/// 「刷新文件夹树」不可用：照 Vue 没有仓库（启动完成前 Vue 不写活动仓库）、仓库缺失或正在读目录时
+/// 「刷新文件夹树」不可用：没有仓库（启动完成前没有活动仓库）、仓库缺失或正在读目录时
 /// 禁用；目录树自己在读时按钮转圈，也一起禁用。按钮的禁用和归约的拦截都读它，点得动就一定会刷新。
 pub(crate) fn refresh_blocked(model: &ShellViewModel) -> bool {
     model.workspace.active_repo_id.is_none()
@@ -272,7 +271,7 @@ fn synced(model: &mut ShellViewModel, token: u64, result: Result<u64, String>) {
     });
 }
 
-/// 重读结果：照 Vue `Promise.all`，成功的几份先写进去，任何一份失败整轮按失败收尾；都成功时读当前目录。
+/// 重读结果：成功的几份先写进去，任何一份失败整轮按失败收尾；都成功时读当前目录。
 fn refreshed(model: &mut ShellViewModel, token: u64, result: TreeSyncRefresh) {
     if !model.tree_sync.awaiting(token, Stage::Refreshing) {
         eprintln!("Nana 忽略过期的文件夹树刷新结果：第 {token} 轮");
@@ -332,7 +331,7 @@ fn current_repo(model: &mut ShellViewModel) -> Option<String> {
 }
 
 /// 收尾：进度「刷新完成」，操作进度走到 100% 再收起。重读目录时进度行已经换成「读取目录」，
-/// 这一轮的完成不再碰它（Vue `finishOperationProgress` 对过期编号什么也不做）。
+/// 这一轮的完成不再碰它（过期编号的完成什么也不做）。
 fn complete(model: &mut ShellViewModel) {
     if let Some(run) = model.tree_sync.run.take() {
         model.operation.finish(run.operation);

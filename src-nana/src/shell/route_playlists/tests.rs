@@ -367,7 +367,7 @@ fn row_buttons_click_their_own_actions() {
     );
 }
 
-/// 和 Vue 一样双击行（按钮以外的地方，这里点拖动柄）从这一条播放，单击只是选中；连点两行不算双击，三连击的
+/// 双击行（按钮以外的地方，这里点拖动柄）从这一条播放，单击只是选中；连点两行不算双击，三连击的
 /// 第三下也不再算。没有对应的播放插件时和行上禁用的「播放」一样，双击不播。
 #[test]
 fn double_clicking_a_row_plays_from_it() {
@@ -435,7 +435,7 @@ fn double_clicking_a_row_plays_from_it() {
     );
 }
 
-/// 文件名单击只打开预览。400 毫秒内再点同一行的文件名，照 Vue 整行 `@dblclick` 再从这一条播放。
+/// 文件名单击只打开预览。400 毫秒内再点同一行的文件名，按整行双击再从这一条播放。
 /// 没有播放插件时第二下仍只打开预览。播放按钮上的连点不走这套双击。
 #[test]
 fn double_clicking_the_title_plays_after_opening_the_preview() {
@@ -495,7 +495,7 @@ fn double_clicking_the_title_plays_after_opening_the_preview() {
     );
 }
 
-/// 扩展名方块单击只打开预览。400 毫秒内再点同一块，照 Vue 整行 `@dblclick` 先打开预览再从这一条播放。
+/// 扩展名方块单击只打开预览。400 毫秒内再点同一块，按整行双击先打开预览再从这一条播放。
 /// 没有播放插件、或这一条不能播时，第二下仍只打开预览。三连击的第三下不再播。计时和文件名分开。
 #[test]
 fn double_clicking_the_cover_plays_after_opening_the_preview() {
@@ -579,7 +579,7 @@ fn double_clicking_the_cover_plays_after_opening_the_preview() {
     );
 }
 
-/// 从按钮上按下拖动会拖动这一行（和 Vue 整行都能拖一样）：拖到第一条上面发排序消息，按钮自己的动作不发。
+/// 从按钮上按下拖动会拖动这一行（整行都能拖）：拖到第一条上面发排序消息，按钮自己的动作不发。
 #[test]
 fn dragging_from_a_row_button_reorders_instead_of_clicking() {
     for key in [

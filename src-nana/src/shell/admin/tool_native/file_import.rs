@@ -74,7 +74,7 @@ pub(super) fn directory_label(model: &ShellViewModel) -> String {
     }
 }
 
-/// 文件夹按钮的文字。进行中是「处理中...」，ZIP 导入进行中也是这句，和 Vue 共用的 `isBusy` 一样。
+/// 文件夹按钮的文字。进行中是「处理中...」，ZIP 导入进行中也是这句，两者共用同一个忙碌标志。
 pub(super) fn folder_button_label(busy: bool) -> &'static str {
     if busy {
         "处理中..."

@@ -40,7 +40,7 @@ use super::view_part::{
 };
 use super::{MainRegion, ShellPage, ShellViewModel, WorkspacePanel};
 
-/// 主区显示哪一种页面。和对应 Vue 路由的取舍一致：启动未就绪（含启动失败）只显示启动页；
+/// 主区显示哪一种页面：启动未就绪（含启动失败）只显示启动页；
 /// 就绪后设置页走设置路由，其余按区域和工作区面板分到首页的各个路由。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum RouteKey {
@@ -70,8 +70,8 @@ pub(crate) enum RouteKey {
 
 impl RouteKey {
     /// 按 ViewModel 取当前路由。有仓库时按面板分：文件、回收站和智能文件夹是文件路由，其余面板各是
-    /// 一条路由。还没有资源库时搜索、日志、拓展和动作照样是各自的路由（Vue `Home.vue` 里只有文件和播放集
-    /// 面板要 `hasRepository`，筛选栏没有仓库时自己藏起来），其余面板是空库页。页面身份只区分设置页，其余的
+    /// 一条路由。还没有资源库时搜索、日志、拓展和动作照样是各自的路由（只有文件和播放集
+    /// 面板要有仓库，筛选栏没有仓库时自己藏起来），其余面板是空库页。页面身份只区分设置页，其余的
     /// （播放集页、插件设置页、任务页）只给验收场景起名用。
     pub(crate) fn of(model: &ShellViewModel) -> Self {
         let settings_page = matches!(model.page, ShellPage::Settings | ShellPage::SettingsError);

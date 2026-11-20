@@ -1,6 +1,6 @@
 //! 搜索与筛选的对照场景：搜索面板和资源筛选栏。
 //!
-//! 场景名和 `tmp/vue-mock/scenes/search.ts` 的 Vue 场景同名，数据和 Vue 夹具保持一致：
+//! 数据来自固定夹具：
 //! 仓库「默认资源库」，根目录有 `assets/`、`cover.png` 和 `notes/page.pdf`（`shell/acceptance/base_scene.rs` 的底子）。
 //! 带标签的夹具里 cover.png 是「封面、参考」、红色横版，page.pdf 是「文档」、#3fa796 竖版，标签和扩展名
 //! 候选经仓库摘要进来；搜索固定命中 cover.png，元数据带 4 星评分。
@@ -60,7 +60,7 @@ fn search_results_scene() -> ShellViewModel {
 /// 没有资源库时的搜索页。
 ///
 /// 空库启动走完以后资源库列表是空的，再切到搜索面板。不写入仓库、查询、命中或时间。
-/// 空状态照 Vue `SearchPanel.vue`：没有仓库时标题是「还没有可搜索的资源库」，
+/// 空状态：没有仓库时标题是「还没有可搜索的资源库」，
 /// 说明是「先在资源库页面添加一个仓库，再执行跨仓库搜索。」，优先于「等待搜索条件」。
 fn search_no_library_scene() -> ShellViewModel {
     let mut model = ShellViewModel::for_page(ShellPage::EmptyRepository);
@@ -139,7 +139,7 @@ fn search_empty_scene() -> ShellViewModel {
     model
 }
 
-/// 文件列表页切到搜索面板。`tagged` 时用 Vue `tagged()` 的夹具，标签、颜色和形状经仓库摘要和根目录
+/// 文件列表页切到搜索面板。`tagged` 时用带标签的夹具，标签、颜色和形状经仓库摘要和根目录
 /// 条目进来，筛选栏的候选由它们算出。
 fn search_page(tagged: bool) -> ShellViewModel {
     let base = if tagged {

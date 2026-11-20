@@ -49,7 +49,7 @@ pub(crate) struct ViewStats {
     pub deferred: u64,
 }
 
-/// 应用的语言，照 Vue 根文档的 `<html lang="zh-CN">`。
+/// 应用的语言：简体中文。
 const APP_LANGUAGE: &str = "zh-CN";
 
 /// 标记节点的文字前缀；后面是进程内唯一的编号。

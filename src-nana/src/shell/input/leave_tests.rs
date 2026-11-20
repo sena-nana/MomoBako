@@ -1,6 +1,6 @@
 //! 指针离开窗口时，把内部拖动交给已有的 `WindowPointerLeave`。
 //!
-//! 对应 Vue `useWorkspaceDragDrop` 的 `handleWindowPointerLeave`：拖够 72px 再离开窗口就交给系统拖放，
+//! 拖够 72px 再离开窗口就交给系统拖放，
 //! 没拖够则留下会话。测试只走消息，不开窗口、不开声卡。
 
 use nana_ui::InputPayload;

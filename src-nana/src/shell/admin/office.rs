@@ -20,7 +20,7 @@ use crate::backend::services::repository::RepositorySummary;
 
 /// Office 转换插件。只有这一张设置页挂运行状态和缓存清理。
 pub(super) const PLUGIN_ID: &str = "momobako.service.office-convert";
-/// 还没有状态时的说明，和 Vue 在 `status` 为空时写的那句一样。
+/// 还没有状态时的说明。
 pub(super) const WAITING: &str = "读取当前转换器、自带运行时与守护进程状态。";
 /// 页头标题。
 pub(super) const TITLE: &str = "运行状态与缓存";
@@ -33,7 +33,7 @@ const CACHE_NOTE: &str = "转换后的 PDF 缓存位于资源库 .momo/cache/off
 /// 没选资源库时「当前资源库」写这个，不拿别的仓库顶上。
 const NO_REPO: &str = "未选择";
 
-/// 一次设置页会话。收起设置或换到别的插件时清空，对应 Vue 组件卸载。
+/// 一次设置页会话。收起设置或换到别的插件时清空。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct OfficeRuntime {
     /// 正在等 `officeConvert.getRuntimeStatus`。
@@ -345,7 +345,7 @@ fn daemon_running(state: &OfficeRuntime) -> bool {
         == Some(true)
 }
 
-/// 成功调用交回的那句话。清理条数只认插件字段，缺了才按 Vue 写成 0，调用失败时不会走到这里。
+/// 成功调用交回的那句话。清理条数只认插件字段，缺了才写成 0，调用失败时不会走到这里。
 fn action_message(call: OfficeCall, value: &Value) -> String {
     match call {
         OfficeCall::SelfCheck => {
@@ -367,7 +367,7 @@ fn action_message(call: OfficeCall, value: &Value) -> String {
     }
 }
 
-/// `removed` 缺席或不是数字时用 0，和 Vue `payload?.removed ?? 0` 一样。这只发生在调用已经成功之后。
+/// `removed` 缺席或不是数字时用 0。这只发生在调用已经成功之后。
 fn removed_count(value: &Value) -> String {
     let Some(removed) = value.get("removed").filter(|item| !item.is_null()) else {
         return "0".into();
@@ -382,7 +382,7 @@ fn removed_count(value: &Value) -> String {
     "0".into()
 }
 
-/// 状态行。只在真有状态对象时调用；缺的字段用 Vue 的占位词，不另造进程或时间。
+/// 状态行。只在真有状态对象时调用；缺的字段用占位词，不另造进程或时间。
 fn status_rows(status: &Value) -> Vec<(String, String)> {
     let daemon = status.get("daemon").filter(|item| item.is_object());
     let check = daemon
@@ -636,7 +636,7 @@ fn text_of(value: Option<&Value>) -> Option<String> {
     (!text.is_empty()).then(|| text.to_string())
 }
 
-/// 数字 0 和空字符串在 Vue 里是假值，端口和 PID 因此写成「未分配 / 未上报」。
+/// 数字 0 和空字符串都算没有值，端口和 PID 因此写成「未分配 / 未上报」。
 fn truthy_token(value: Option<&Value>) -> Option<String> {
     let value = value?;
     match value {
@@ -873,7 +873,7 @@ fn repo_options(repos: &[(String, String)]) -> Vec<SelectOption> {
     options
 }
 
-/// 警告色说明。错误、结果、空状态和页底说明都用 Vue `.repository-add-popover__note` 的浅底。
+/// 警告色说明。错误、结果、空状态和页底说明都用警告色浅底。
 fn note(text: &str, key: &'static str) -> AnyView {
     let fill = style::SoftFill::new(
         style::Soft::Alpha {

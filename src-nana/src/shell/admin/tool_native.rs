@@ -1,8 +1,7 @@
 //! 拓展页里的文件导入和 Eagle 导入工具页。
 //!
 //! 内容照 `External/Plugins/{file-manager,eagle-importer}/src/register.js`：眉题、插件名标题、
-//! 说明、目标仓库和目录、不能导入的原因、导入按钮和备注。Vue 的 `.tool-page-shell` 没有任何
-//! 样式（内容贴着面板边、标题是浏览器默认 2em），这里按 API Playground 的版式画：内边距 18、
+//! 说明、目标仓库和目录、不能导入的原因、导入按钮和备注。按 API Playground 的版式画：内边距 18、
 //! 22 号标题、卡片包住目标信息。文件导入走系统选择器。从这一页提交成功后，文件夹按钮写成
 //! 「处理中...」，协议成功再写「文件夹导入完成。 目标目录：…」或「ZIP 导入完成。 目标目录：…」。
 //!
@@ -11,9 +10,9 @@
 //! Eagle 导入协议。协议真正成功才写「复制导入完成，目标目录：…」或「剪切导入完成，目标目录：…」。
 //! 根目录和只有斜杠的路径，完成提示跟卡片一样写成「/」。失败和取消不写。
 //! 复制按钮只在这次导入进行中写成「处理中...」，剪切按钮始终是「剪切导入」。
-//! 结果卡和 Vue 一样，只要响应里的 `summary` 是真值就出现，眉题写「导入结果」。
-//! 九个计数缺了或是 null 时显示 Vue 的 0，这个 0 不是导入出来的条数；小数和负数不画。
-//! 警告区只在 `warnings` 是非空数组时出现，类型和说明按 Vue `warningText` 取，最多 20 条。
+//! 结果卡只要响应里的 `summary` 是真值就出现，眉题写「导入结果」。
+//! 九个计数缺了或是 null 时显示 0，这个 0 不是导入出来的条数；小数和负数不画。
+//! 警告区只在 `warnings` 是非空数组时出现，每条写类型和一句说明，最多 20 条。
 //!
 //! 页面按工具页 id 建一次，只读 [`ImportSignals`]：标题、目标、原因、错误和按钮能不能点都是绑定；
 //! 按钮的处理器点下去时现读能不能导入，不能时不进文件状态机。
@@ -256,10 +255,10 @@ fn code(text: impl nana_ui::runtime::view::IntoProp<String>, key: String) -> Any
     .into_any()
 }
 
-/// 不能导入时返回和 Vue 相同的原因。导入进行中只禁用按钮，不当成不能导入。
+/// 不能导入时返回原因。导入进行中只禁用按钮，不当成不能导入。
 pub fn import_block_reason(model: &ShellViewModel) -> Option<&'static str> {
     let ctx = FileContext::from_model(model);
-    // `can_import` 把进行中也算不能导入。Vue 的 disabledReason 不含 loading，这里把进行中仍看成目标可用。
+    // `can_import` 把进行中也算不能导入。这里的原因不看进行中，把进行中仍看成目标可用。
     let mut allowed = model.files.can_import(&ctx) || model.files.mutating;
     // 四条原因看的是面板。文件快照仍是回收站、面板已经离开时，那四条都对不上，
     // 这次又不能按普通目录导入，落到「当前目标不可导入。」。进行中不改这句。
@@ -273,7 +272,7 @@ pub fn import_block_reason(model: &ShellViewModel) -> Option<&'static str> {
     block_reason(&ctx, allowed)
 }
 
-/// 四条具体原因对不上、目标又确实不能导入时，用 Vue 的「当前目标不可导入。」。
+/// 四条具体原因对不上、目标又确实不能导入时，用「当前目标不可导入。」。
 fn block_reason(ctx: &FileContext, allowed: bool) -> Option<&'static str> {
     if ctx
         .repo_id
@@ -443,7 +442,7 @@ fn count_row(
         .into_any()
 }
 
-/// Vue 的 `警告 ${warnings.length}`。数组为空时不画。
+/// 「警告 N」，N 是警告数组的长度。数组为空时不画。
 fn warning_title(view: Signal<ImportView>) -> AnyView {
     let text_view = view;
     let shown_view = view;
@@ -469,7 +468,7 @@ fn warning_title(view: Signal<ImportView>) -> AnyView {
         .into_any()
 }
 
-/// 一条警告：类型在左，`warningText` 在右。超过 20 条的不建这一行。
+/// 一条警告：类型在左，说明在右。超过 20 条的不建这一行。
 fn warning_row(view: Signal<ImportView>, index: usize) -> AnyView {
     let kind_view = view;
     let text_view = view;
@@ -597,7 +596,7 @@ pub(super) fn run_import(model: &mut ShellViewModel, mode: &str) {
         eprintln!("Nana Eagle 导入没有提交，不显示完成提示");
         return;
     }
-    // Vue 在请求发出时清掉上一次的提示，成功回来才按这次的模式和目录重写。
+    // 请求发出时清掉上一次的提示，成功回来才按这次的模式和目录重写。
     model.admin.eagle_notice.clear();
     model.admin.eagle_importing = true;
     model.admin.eagle_pending_mode = mode.to_string();
@@ -633,7 +632,7 @@ pub(crate) fn note_import_settled(model: &mut ShellViewModel, succeeded: bool) {
     }) else {
         return;
     };
-    // Vue `targetDirectoryLabel`：空路径在目标卡片上是「/」，完成提示写同一个字。
+    // 空路径在目标卡片上是「/」，完成提示写同一个字。
     let directory = if directory.is_empty() {
         "/".to_string()
     } else {

@@ -196,7 +196,7 @@ fn file_failures_give_way_to_the_file_list() {
     );
 }
 
-/// 设置数据读不到（Vue 的设置包 `Promise.all` 整批失败）：设置页上没有就近的位置，状态区照 Vue 显示原文；
+/// 设置数据读不到（设置包整批失败）：设置页上没有就近的位置，状态区显示原文；
 /// 拓展页的插件面板和 API 调试页已经写着，状态区让位；重读成功、字段清掉时一起清。
 #[test]
 fn settings_data_failures_show_where_the_page_has_no_place_for_them() {

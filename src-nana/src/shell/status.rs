@@ -1,5 +1,5 @@
-//! 全局状态区：最近一次失败和它的来源，对齐 Vue `WorkspaceSidebarStatus` 读的全局 `error`，
-//! 以及没有失败时的忙碌行（Vue `isBusy`）和同步进度。显示在侧栏顶部，见 `sidebar_view::status_line`。
+//! 全局状态区：最近一次失败和它的来源，
+//! 以及没有失败时的忙碌行和同步进度。显示在侧栏顶部，见 `sidebar_view::status_line`。
 //!
 //! **记什么。** 只有一个槽位，后记的失败顶替先记的。记的是没有就近显示的失败：
 //! - 各领域在失败处直接 [`StatusState::fail`]：宿主打开、定位、拖出，最小化到托盘，资源库列表和摘要，
@@ -10,18 +10,18 @@
 //!   和设置数据（`admin.load_error`：插件、钩子、缓存、API 契约和外部连接的读取）四个领域字段：新写了一次
 //!   就记一次，字段清掉时它记下的那一条一起清。文件操作失败本来就写在文件列表里，设置数据的失败写在拓展页的
 //!   插件面板和 API 调试页里，显示着的时候状态区不重复显示（[`StatusLine::project`]）；在设置页上没有就近的
-//!   位置，状态区显示，和 Vue 一样。
+//!   位置，状态区显示。
 //!
 //! 对话框里的错误行、搜索面板、缺失仓库页、空库页、启动页、插件操作、导出对话框、预览和播放条这些已经
 //! 就近显示的失败不进这里。要提醒、但不算失败的结果（来源下载一项也没有下载到）用 [`StatusState::warn`] 记进
 //! 同一个槽位，清除的时机一样，状态区用警告色。
 //!
-//! **什么时候清。** 照 Vue `error.value = null` 的时机：用户开始一个会写全局错误的操作时清掉上一次失败，
+//! **什么时候清。** 用户开始一个会写全局错误的操作时清掉上一次失败，
 //! 成功不专门清。开始的迹象有两种（[`starts_operation`]、[`Activity`]）：打开、定位、拖出，选仓库、
 //! 重试启动、打开智能文件夹这几条消息；以及读目录、文件变更、刷新文件夹树、选中别的文件、
 //! 保存元数据、搜索、导出、智能文件夹增改删、插件操作、执行仓库动作、刷新资源库和选仓库这些操作的忙碌
 //! 标志由假变真。后台的静默刷新不算。同一次归约里新记的失败不会被这次清掉。来源下载记下失败条目以后
-//! 接着刷新资源库（Vue `context.refreshRepo()`），这一轮刷新是下载的收尾、不是用户开始的新操作
+//! 接着刷新资源库，这一轮刷新是下载的收尾、不是用户开始的新操作
 //! （[`RefreshRun::keeps_status`](super::workspace::RefreshRun)），它读列表、同步和重读目录也不清。
 //!
 //! 没有失败时依次是忙碌行和同步进度（文件夹树刷新时的扫描、写入、刷新三档）。
@@ -147,7 +147,7 @@ impl StatusState {
         }
     }
 
-    /// `source` 的操作这次成功了：它记下的失败作废。只给没有 Vue 对应、成功就该收起提示的托盘用。
+    /// `source` 的操作这次成功了：它记下的失败作废。只给成功就该收起提示的托盘用。
     pub(crate) fn resolve(&mut self, source: FailureSource) {
         self.clear_source(source);
     }
@@ -165,11 +165,11 @@ impl StatusState {
 }
 
 /// 会写全局错误的操作开始时置真的忙碌标志，以及正在看的文件。标志由假变真、换了文件，就是用户开始了
-/// 一个操作（Vue 在这些操作开始时 `error.value = null`）。
+/// 一个操作。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Activity {
     busy: [bool; 11],
-    /// 正在看的文件：换成别的文件对应 Vue `selectAsset`。
+    /// 正在看的文件：换成别的文件算开始一个操作。
     selection: Option<String>,
 }
 
@@ -195,11 +195,11 @@ impl Activity {
                 model.files.export.busy,
                 // 智能文件夹的增改删。
                 model.sidebar.smart_draft.busy,
-                // 插件操作、执行仓库动作。结构更新后台重读动作列表不算：Vue 那条路径顺带清掉错误，
-                // 用户还没看到的失败会被后台刷新抹掉，这里不照抄。
+                // 插件操作、执行仓库动作。结构更新后台重读动作列表不算：
+                // 用户还没看到的失败不该被后台刷新抹掉。
                 model.admin.managing,
                 model.admin.actions_running,
-                // 刷新资源库（Vue `loadRepositories`）和选仓库（`selectRepository`）开始时都清错误：附加、
+                // 刷新资源库和选仓库开始时都清错误：附加、
                 // 新建、删除以后切过去，来源动作完成以后的刷新都从这里开始。
                 model.workspace.list_loading && !follow_up,
                 model.workspace.snapshot_loading && !follow_up,
@@ -218,7 +218,7 @@ impl Activity {
     }
 }
 
-/// 不靠忙碌标志、由消息本身表示的操作开始：打开、定位、拖出，选仓库、重试启动和打开智能文件夹。打开、定位和拖出照 Vue 先过守卫（有仓库、有路径、能拖出），守卫拦下的请求不清。
+/// 不靠忙碌标志、由消息本身表示的操作开始：打开、定位、拖出，选仓库、重试启动和打开智能文件夹。打开、定位和拖出先过守卫（有仓库、有路径、能拖出），守卫拦下的请求不清。
 /// 刷新文件夹树看忙碌标志（[`Activity`]），被拦下的点击不清。
 pub(super) fn starts_operation(message: &ShellMessage) -> bool {
     let filled = |text: &str| !text.trim().is_empty();
@@ -280,7 +280,7 @@ impl ShellViewModel {
     }
 }
 
-/// 状态区显示什么。顺序照 Vue：失败（或提醒）> 忙碌 > 同步进度。同步进度来自文件夹树的「刷新」（`tree_sync.rs`），
+/// 状态区显示什么。顺序：失败（或提醒）> 忙碌 > 同步进度。同步进度来自文件夹树的「刷新」（`tree_sync.rs`），
 /// 启动时的同步进度在启动页上。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum StatusLine {
@@ -342,7 +342,7 @@ fn shown_in_place(model: &ShellViewModel, source: FailureSource) -> bool {
     }
 }
 
-/// Vue `isBusy`：在刷新资源库（从读列表到选完仓库）、选仓库（同步、读摘要到重读目录）或读素材详情。
+/// 在刷新资源库（从读列表到选完仓库）、选仓库（同步、读摘要到重读目录）或读素材详情。
 /// 启动和换仓库由启动页显示进度，侧栏收着，不显示这一行。
 pub(crate) fn busy(model: &ShellViewModel) -> bool {
     let workspace = &model.workspace;

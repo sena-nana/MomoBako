@@ -1,6 +1,6 @@
 //! 来源登录与建仓流程。
 //!
-//! 照 `SourceAuthenticationSettings.vue`：连接新账号或重新登录先建扫码会话；检查登录结果后，
+//! 连接新账号或重新登录先建扫码会话；检查登录结果后，
 //! 仓库标识、名称和路径都从登录结果与 `repositoryProvisioning` 推出。已有仓库就更新后端配置
 //! （需要本地缓存时再配置缓存目录）并切过去；没有就跳过首次同步建仓再切过去。随后在后台同步，
 //! 完成后刷新仓库，失败写「后台同步失败：…」。cookie、密码、secret、token 一类字段一律丢掉。
@@ -37,7 +37,7 @@ pub enum SourceStep {
     ProvisionCache { repo_id: String, name: String },
 }
 
-/// 一个来源插件设置页的状态。收起设置或换插件时重置，对应 Vue 组件卸载。
+/// 一个来源插件设置页的状态。收起设置或换插件时重置。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct SourceAuthState {
     pub plugin_id: String,
@@ -52,7 +52,7 @@ pub struct SourceAuthState {
     pub status_by_repo: BTreeMap<String, Value>,
     /// 退出时先读到的登录状态，退出调用回来后再用。
     pending_clear_status: Option<Value>,
-    /// 建仓在任务弹层里的「创建资源库」行（Vue `createNewRepository`）。
+    /// 建仓在任务弹层里的「创建资源库」行。
     create_operation: Option<OperationId>,
 }
 
@@ -177,7 +177,7 @@ fn plugin_of(model: &ShellViewModel, plugin_id: &str) -> Option<PluginManifest> 
 
 /// 选择缓存目录时系统对话框要用的插件显示名。
 ///
-/// 照 Vue `chooseCachePath` 的 `props.manifest.name`。找不到当前来源插件，或名称去掉空白后是空的，记日志并返回空串，标题退回「选择缓存目录」。
+/// 用插件清单的名称。找不到当前来源插件，或名称去掉空白后是空的，记日志并返回空串，标题退回「选择缓存目录」。
 pub(crate) fn cache_dialog_plugin_name(model: &ShellViewModel) -> String {
     let plugin_id = model.admin.source_auth.plugin_id.as_str();
     match model
@@ -491,7 +491,7 @@ pub(crate) fn finish(model: &mut ShellViewModel, step: SourceStep, result: Resul
                     step: SourceStep::ProvisionCache { repo_id, name },
                 });
             } else {
-                // Vue：先 `refreshRepositoryWorkspace()` 再 `selectRepository(repoId)`，这里合成一次读列表、读完切过去。
+                // 先刷新资源库列表，读完再切过去，合成一次。
                 model.workspace.refresh_repositories(Some(repo_id.clone()));
                 complete(
                     model,
@@ -586,7 +586,7 @@ fn provision(model: &mut ShellViewModel, plugin: &PluginManifest, result: Value)
             } else {
                 cache
             };
-            // Vue `createNewRepository(.., { skipInitialSync: true })`：「创建资源库 · 初始化资源库」8%。
+            // 跳过首次同步建仓：「创建资源库 · 初始化资源库」8%。
             let operation = model.operation.start(
                 OperationStart::new("创建资源库", "初始化资源库", 8.0)
                     .runs(&[crate::backend::services::mutsuki_runner::PROTOCOL_REPOSITORY_CREATE]),
@@ -687,7 +687,7 @@ pub(crate) fn account_id(payload: &Value) -> Option<String> {
 }
 
 /// 可以存进仓库的后端配置：去掉敏感字段，补账号、凭据引用、来源地址、缓存目录和同步时间。
-/// 没有凭据引用就拒绝，和 Vue 同一句话。
+/// 没有凭据引用就拒绝。
 pub(crate) fn public_backend_config(
     plugin: &PluginManifest,
     result: &Value,
@@ -729,7 +729,7 @@ pub(crate) fn public_backend_config(
     Ok(config)
 }
 
-/// Vue 的过滤规则：含 cookie、password、secret，或恰好是 token。
+/// 过滤规则：含 cookie、password、secret，或恰好是 token。
 fn secret_key(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
     key.contains("cookie") || key.contains("password") || key.contains("secret") || key == "token"

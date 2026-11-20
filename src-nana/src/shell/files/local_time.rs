@@ -1,4 +1,4 @@
-//! 时间戳按本机时区显示，和 Vue `new Date(value).toLocaleString("zh-CN")` 同一种写法：
+//! 时间戳按本机时区显示：
 //! `2026/10/8 16:00:00`（年月日不补零，时分秒补零，24 小时制）。
 //!
 //! 只解析 RFC 3339 / ISO 8601 的 `YYYY-MM-DDTHH:MM:SS[.fff][Z|±HH:MM]`。Windows 上用

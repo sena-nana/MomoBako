@@ -15,7 +15,7 @@ pub struct PreparedAccess {
 /// 一次装载附带的播放源准备结果。本地文件没有这一步，保持默认。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SourcePrep {
-    /// 播放源准备好了：后端在这一刻写下了访问时间，归约照 Vue `emitRepositoryEntryAccess` 当场改「最近使用」；
+    /// 播放源准备好了：后端在这一刻写下了访问时间，归约当场改「最近使用」；
     /// 结果过期了也改，因为后端已经写了。
     pub accessed: Option<PreparedAccess>,
     /// 失败出在准备播放源（来源登录失效、网络不通、缓存目录不可用、准备好的文件读不出）：可以重试。

@@ -1,6 +1,6 @@
 //! 插件管理面板。
 //!
-//! 结构照 `src/components/PluginManagerPanel.vue`：页头（眉题、标题、说明、插件数、刷新、
+//! 结构：页头（眉题、标题、说明、插件数、刷新、
 //! 安装）、提示、筛选框、按分类分组的插件卡片，卡片里可展开插件设置。设置页和拓展页
 //! 共用，只换标题文案。删除确认是壳层浮层，见 [`delete_dialog`]。
 //!
@@ -144,7 +144,7 @@ pub(crate) fn manager_panel(signals: PluginPanelSignals, copy: &'static PanelCop
     style::workbench_panel(body, "admin-plugin-panel")
 }
 
-/// `.search-workbench__field`：主背景、1px 边线、lg 圆角，最小高 38，左右 12。输入框受控。
+/// 筛选框：主背景、1px 边线、lg 圆角，最小高 38，左右 12。输入框受控。
 fn search_field(keyword: ModelField, placeholder: &'static str) -> AnyView {
     let value = keyword.signal();
     let input = style::bare_input(
@@ -234,7 +234,7 @@ impl PluginDeleteView {
     }
 }
 
-/// 删除确认浮层。Vue 的 Lilia `ConfirmDialog`（`danger`）：标题「删除插件」前一个警告三角、用危险色，
+/// 删除确认浮层，危险样式：标题「删除插件」前一个警告三角、用危险色，
 /// 确认「删除」，忙时「删除中...」，`min(520px, 92vw)` 宽。外壳走统一对话框框架，常驻，忙碌和文案
 /// 按字段原地改。
 pub(crate) fn delete_dialog(model: &ShellViewModel) -> Option<AnyView> {

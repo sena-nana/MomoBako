@@ -1,7 +1,7 @@
 //! 设置、插件、日志页用到的 lucide 图标。
 //!
-//! Vue 用 `@lucide/vue`，Nana 内置的是 Tabler。图标形状要和 Vue 一致，这里把用到的
-//! lucide 源 SVG（ISC 许可，与前端依赖同源）包成宿主 `IconData`，由 Nana 的图标栅格化
+//! Nana 内置的是 Tabler，这些页面用的是 lucide 的图标形状，这里把用到的
+//! lucide 源 SVG（ISC 许可）包成宿主 `IconData`，由 Nana 的图标栅格化
 //! 路径按 `currentColor` 着色。只收录本模块真正用到的图标。
 
 use nana_ui_core::{Icon, IconData, IconShape};

@@ -1,4 +1,4 @@
-//! 语义色的浅底：Vue 的 `--err-soft`、`--ok-soft` 这类带透明度的底色。
+//! 语义色的浅底：`--err-soft`、`--ok-soft` 这类带透明度的底色。
 //!
 //! 这类底色是语义色叠一层透明度，浅色和深色主题的透明度不同（`--err-soft` 浅色 0.10、
 //! 深色 0.14）。Nana 调色板没有对应的静止角色，这里用节点自绘按当前主题模式取透明度，
@@ -19,7 +19,7 @@ pub(crate) struct SoftFill {
 }
 
 impl SoftFill {
-    /// Vue `--err-soft`。
+    /// `--err-soft`。
     pub(crate) fn err() -> Self {
         Self {
             role: SemanticColorRole::Danger,
@@ -30,7 +30,7 @@ impl SoftFill {
         }
     }
 
-    /// Vue `--ok-soft`。
+    /// `--ok-soft`。
     pub(crate) fn ok() -> Self {
         Self {
             role: SemanticColorRole::Success,

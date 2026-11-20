@@ -1,7 +1,7 @@
 //! 实况文档上的指针拖动和框选。
 //!
 //! Nana 视图没有通用的拖动事件。每帧 `prepare`（`window_host::prepare_motion`）读主键指针的按下目标和
-//! 坐标，再交给已经对照过 Vue 的输入归约。卡片里的 `momobako-entry:{kind}:{path}` 文本是命中标记。
+//! 坐标，再交给输入归约。卡片里的 `momobako-entry:{kind}:{path}` 文本是命中标记。
 
 use nana_ui::runtime::{LayoutBox, RuntimeDocument, StableNodeId, UiWorld};
 
@@ -10,7 +10,7 @@ use super::{ShellMessage, ShellViewModel, WorkspacePanel, WorkspaceRepository};
 
 const POINTER_ID: u64 = 1;
 const PATH_MARK: &str = "momobako-entry:";
-/// Vue `useFileBrowserPanelViewModel.ts` 的 `dragStartThreshold`。
+/// 文件条目拖动起步的阈值。
 const ENTRY_DRAG_PX: f32 = 7.0;
 /// 同一文件里框选开始移动的阈值：任一轴超过 3px。
 const BOX_DRAG_PX: f32 = 3.0;
@@ -61,7 +61,7 @@ pub fn observe_live_pointer(model: &mut ShellViewModel, document: &RuntimeDocume
     let hit = pressed.expect("按下目标");
     let on_row = row_at(world, hit, &rows).or_else(|| row_at_point(&rows, x, y));
     let (width, height) = viewport_size(world, document_id);
-    // Vue 框选的 `additive`：按下时按着 Ctrl 或 Meta。
+    // 框选按下时按着 Ctrl 或 Meta 就是追加。
     let append = model.input.modifiers.command;
 
     if model.input.live_gesture.is_none() {
@@ -300,7 +300,7 @@ fn file_rows_should_be_mounted(model: &ShellViewModel) -> bool {
         )
 }
 
-/// 本地插件和 `localRootPath` 能力都按 Vue 的 filesystem 拖放处理。
+/// 本地插件和 `localRootPath` 能力都按文件系统拖放处理。
 fn drag_backend_kind(repository: &WorkspaceRepository) -> String {
     if repository.backend_plugin_id == "filesystem"
         || repository.backend_plugin_id == "local"
@@ -912,7 +912,7 @@ mod tests {
             })
     }
 
-    /// Vue `.workspace-sidebar__footer:hover`：悬停任一底部入口，整排从半透明变成不透明。
+    /// 悬停任一底部入口，整排从半透明变成不透明。
     #[test]
     fn hovering_a_footer_button_lights_up_the_whole_footer() {
         let mut model = files_model();
@@ -985,7 +985,7 @@ mod tests {
                 &mut NanaTextShaper::default(),
             )
             .expect("布局");
-        // Vue `getPopoverPosition`：左边对齐仓库头按钮，顶边在按钮下方 6px，左右留 8px 视口边距。
+        // 弹层左边对齐仓库头按钮，顶边在按钮下方 6px，左右留 8px 视口边距。
         let row = labeled_bounds(&window, "切换资源库 动画素材");
         assert!(
             row.x >= 8.0 && row.x + row.width <= 420.0 - 8.0,

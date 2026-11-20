@@ -1,5 +1,5 @@
 //! 设置、插件、日志、任务弹层和拓展页用到的规则：插件分组和筛选、插件设置字段的规范化、音频播放器
-//! 候选、日志筛选、任务弹层的行和各处文案，规则照 Vue 对应组件。
+//! 候选、日志筛选、任务弹层的行和各处文案。
 //!
 //! 除了圆角偏好文件（`corners.json`）的读写，这里都是纯函数。服务调用留在调度器，失败不会被写成已保存。
 
@@ -185,7 +185,7 @@ pub fn plugin_source_label(source: &str) -> &'static str {
     }
 }
 
-/// 运行时芯片，照 Vue `pluginRuntimeLabel`：原生动态库、Vue 模块、仅清单，其余是「未知运行时」。
+/// 运行时芯片：清单认得的三种运行时各有中文名，其余是「未知运行时」。
 pub fn plugin_runtime_label(runtime: &str) -> &'static str {
     match runtime {
         "native-dylib" => "原生动态库",
@@ -339,7 +339,7 @@ pub fn grouped_plugin_ids(
         .collect()
 }
 
-/// 插件声明的设置字段。和 Vue 一样只认 `contributes.settings.fields`，缺键或名称的跳过。
+/// 插件声明的设置字段。只认 `contributes.settings.fields`，缺键或名称的跳过。
 pub fn settings_fields(plugin: &PluginManifest) -> Vec<ConfigField> {
     let Some(fields) = plugin
         .contributes
@@ -446,7 +446,7 @@ pub fn has_source_authentication(plugin: &PluginManifest) -> bool {
         .is_some_and(|item| !item.is_null())
 }
 
-/// Vue `normalizeConfigFieldInput`。数字和选项的空值是重置。
+/// 规范化设置字段的输入。数字和选项的空值是重置。
 pub fn normalize_field_input(
     field: &ConfigField,
     text: &str,
@@ -601,19 +601,19 @@ pub struct AudioView {
     pub choices: Vec<AudioChoice>,
     /// 下拉框当前值：偏好，其次解析出的播放器；由内置解码器播放时为空串。
     pub selected: String,
-    /// 有插件或原生候选实现了音频能力才能选，和 Vue 一样。
+    /// 有插件或原生候选实现了音频能力才能选。
     pub selectable: bool,
     /// 回退提示（弱色）或缺失提示（危险色）。
     pub notice: Option<(String, bool)>,
 }
 
-/// 照 `Settings.vue`：候选是音频能力的实现，按名称排序；偏好的实现不在候选里时先放一项「（不可用）」。
-/// 标签是「插件名 · 插件标识」。实现取自已启用插件清单的 `playlistPlayers`（Vue 注册表的来源，
+/// 候选是音频能力的实现，按名称排序；偏好的实现不在候选里时先放一项「（不可用）」。
+/// 标签是「插件名 · 插件标识」。实现取自已启用插件清单的 `playlistPlayers`（
 /// Nana 用自己的音视频会话播放这些类型），以及登记了音频能力的原生候选。
 ///
-/// 和 Vue 不同的一点：Nana 自带内存解码器（WAV、MP3、FLAC、Ogg，Windows 上还有媒体基础解的 M4A、AAC、Opus），
+/// Nana 自带内存解码器（WAV、MP3、FLAC、Ogg，Windows 上还有媒体基础解的 M4A、AAC、Opus），
 /// 没有选中也没有官方实现时音频由它播放。这时下拉框写内置解码器、回退提示指向它，不报「音频播放暂不可用」；
-/// 连内置解码器都没有才照 Vue 报缺失。
+/// 连内置解码器都没有才报缺失。
 pub fn audio_view(
     candidates: &[PlayerCandidate],
     plugins: &[PluginManifest],
@@ -688,7 +688,7 @@ pub fn audio_view(
     }
 }
 
-/// 实现音频能力的播放器和它所属插件的名字，按 Vue 的标签、插件名、插件标识排序。
+/// 实现音频能力的播放器和它所属插件的名字，按标签、插件名、插件标识排序。
 /// 插件只取启用且状态不是 error 的，和后端登记播放器类型的口径一致，也就是 Nana 真能放的那些。
 fn audio_implementations(
     candidates: &[PlayerCandidate],
@@ -781,7 +781,7 @@ pub fn level_label(level: &str) -> String {
     }
 }
 
-/// 来源种类的显示名。不认识的种类原样显示，和 Vue 一样。
+/// 来源种类的显示名。不认识的种类原样显示。
 pub fn source_kind_label(kind: &str) -> String {
     match kind {
         "host" => "宿主".into(),
@@ -938,7 +938,7 @@ pub struct PopoverRow {
 /// 认不出协议的后台任务的标题。宿主的任务只跑下面 [`task_protocol_label`] 列出的协议，正常碰不到。
 pub const TASK_LABEL_FALLBACK: &str = "后台任务";
 
-/// 后台任务的协议写成用户看得懂的中文。仓库和文件操作沿用 Vue 进度行的叫法（`operationProgress` 的
+/// 后台任务的协议写成用户看得懂的中文。仓库和文件操作沿用进度行的叫法（
 /// 「同步资源库」「复制文件」等），其余照后端协议说明（`docs/api-design.md`）。
 pub fn task_protocol_label(protocol_id: &str) -> Option<&'static str> {
     use crate::backend::services::mutsuki_runner::{
@@ -970,10 +970,10 @@ pub fn task_protocol_label(protocol_id: &str) -> Option<&'static str> {
     Some(label)
 }
 
-/// 任务弹层的行：仓库操作那一行，加上排队、运行和取消中的后台任务，一起按更新时间倒序，和 Vue
-/// `TaskPopover.vue` 的排序一样。任务快照的更新时间是 RFC 3339，换成毫秒再比；读不出的排在最后。
+/// 任务弹层的行：仓库操作那一行，加上排队、运行和取消中的后台任务，一起按更新时间倒序。
+/// 任务快照的更新时间是 RFC 3339，换成毫秒再比；读不出的排在最后。
 ///
-/// Vue 只列仓库操作（和前端登记的任务）；Nana 多列宿主观察到的后台任务，规则是：
+/// 除了仓库操作，也列宿主观察到的后台任务，规则是：
 /// - 标题是任务自己报的标题，没有时按协议写（[`task_protocol_label`]），不写泛泛的「进度」；
 /// - 仓库操作那一行已经表示的同一件事不再单列：这次操作在后台跑的协议（`OperationProgress::protocols`，
 ///   例如加载资源库的同步、复制文件的复制）的任务不出行，侧栏「任务」的计数也只算剩下的行。
@@ -1083,7 +1083,7 @@ pub fn is_builtin_tool_page(id: &str) -> bool {
 }
 
 /// 拓展页的工具：已启用、状态可用的插件里 `contributes.toolPages` 的条目，
-/// 按 `order`（缺省 100）、名称、标识排序，和 Vue 的注册表一致。页面由宿主画，插件只声明。
+/// 按 `order`（缺省 100）、名称、标识排序。页面由宿主画，插件只声明。
 pub fn tool_pages_from_plugins(plugins: &[PluginManifest]) -> Vec<super::ToolPageEntry> {
     let mut pages = Vec::new();
     for plugin in plugins {

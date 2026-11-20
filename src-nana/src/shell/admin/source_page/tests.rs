@@ -1,5 +1,5 @@
 //! 来源账号区的扫码二维码：会话里有扫码地址时重新编码画出来；只有二维码图片（`qrImage`、`qrimg` 的
-//! data URL）、没有扫码地址时照 Vue `<img :src="qrImage">` 直接画这张图。
+//! data URL）、没有扫码地址时直接画这张图。
 
 use nana_ui_core::BackgroundImage;
 use serde_json::json;

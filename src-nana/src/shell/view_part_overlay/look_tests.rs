@@ -1,4 +1,4 @@
-//! 对话框外观的回归：每个对话框照 Vue 自己的宽度类给宽度、危险对话框用 NanaUI 的危险口气、Vue 标题前
+//! 对话框外观的回归：每个对话框照自己的宽度类给宽度、危险对话框用 NanaUI 的危险口气、标题前
 //! 有图标的放进标题图标槽；装上 MomoBako 主题以后卡片按配方距顶 12vh，窄窗口下宽度按 CSS 的
 //! `min(..)` 让给窗口。
 
@@ -17,14 +17,14 @@ use crate::shell::ShellMessage;
 use crate::shell::files::{FileDialog, FilesMessage};
 use crate::shell::view_harness::ShellHarness;
 
-/// 一个对话框在 Vue 里的样子：宽度类、是不是危险口气、标题前的图标。
+/// 一个对话框应有的样子：宽度类、是不是危险口气、标题前的图标。
 struct Look {
     size: DialogSize,
     danger: bool,
     icon: Option<Icon>,
 }
 
-/// `.smart-folder-dialog { width: min(720px, calc(100vw - 40px)) }`。
+/// 智能文件夹对话框宽 `min(720px, calc(100vw - 40px))`。
 fn smart_folder() -> DialogSize {
     DialogSize::Width(LengthSpec::min2(
         LengthAtom::Px(720.0),
@@ -36,7 +36,7 @@ fn smart_folder() -> DialogSize {
     ))
 }
 
-/// 照 Vue 各对话框的模板和样式：`.modal-card` 520，导出 560，智能文件夹 720；处理文件夹、删除
+/// 各对话框的期望：默认 520，导出 560，智能文件夹 720；处理文件夹、删除
 /// 智能文件夹、删除资源库和删除插件是危险口气；复制、硬链接、导出和删除插件标题前有图标。
 fn vue_look(name: &str) -> Look {
     let plain = |size| Look {
@@ -123,7 +123,7 @@ fn every_dialog_takes_its_vue_width_tone_and_title_icon() {
     }
 }
 
-/// 重命名文件是 `.workspace-rename-dialog`：460 宽，标题前一支铅笔。
+/// 重命名文件对话框 460 宽，标题前一支铅笔。
 #[test]
 fn rename_dialog_is_narrower_and_has_a_pencil() {
     let mut model = scene("copy-dialog");

@@ -20,7 +20,7 @@ use crate::backend::services::repository::ApiDefinition;
 
 const HTTP_METHODS: [&str; 5] = ["GET", "POST", "PATCH", "DELETE", "HEAD"];
 
-/// 一个规范化后的端点。字段同 `normalizeEndpoint`。
+/// 一个规范化后的端点：传输方式、方法和路径都已补齐。
 #[derive(Clone, Debug, PartialEq)]
 pub struct Endpoint {
     pub group: String,
@@ -97,7 +97,7 @@ impl Endpoint {
         endpoint
     }
 
-    /// 补齐传输方式、方法和路径，同 Vue `normalizeEndpoint`。
+    /// 补齐传输方式、方法和路径。
     fn normalize(&mut self) {
         if self.transport.trim().is_empty() {
             self.transport = if self.plugin_id.is_some()
@@ -118,7 +118,7 @@ impl Endpoint {
     }
 }
 
-/// 快照为空时的三个外部 API，和 Vue 的 `FALLBACK_ENDPOINTS` 一致。
+/// 快照为空时的三个外部 API。
 fn fallback_endpoints() -> Vec<Endpoint> {
     let http =
         |method: &str, path: &str, summary: &str, auth: bool, template: Option<Value>| Endpoint {
@@ -259,7 +259,7 @@ pub(crate) fn selected_ref(model: &ShellViewModel) -> Option<Endpoint> {
         .or_else(|| list.first().cloned())
 }
 
-/// 按筛选条件留下的端点。没有命中时下拉框仍列全部，和 Vue 一致。
+/// 按筛选条件留下的端点。没有命中时下拉框仍列全部。
 pub(crate) fn visible(model: &ShellViewModel) -> Vec<Endpoint> {
     let state = &model.admin.api;
     let query = state.keyword.trim().to_lowercase();

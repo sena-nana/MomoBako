@@ -1,9 +1,9 @@
 //! 缩略图色板。
 //!
 //! 元数据里的 `thumbnailPalette` 或 `palette` 优先，最多五枚 `#RRGGBB`。都没有时，缩略图解码出像素以后
-//! 按 Vue `extractPaletteFromImageElement` 从画面里取最多五种（`sample_rgba`），画在详情预览和预览页的
+//! 从画面里取最多五种（`sample_rgba`），画在详情预览和预览页的
 //! 色板槽上。元数据「调色板」一行仍只认元数据，不把取样结果写进去。
-//! 画法：详情预览下面是 34×12 的药丸（`ThumbnailPalette.vue`），元数据一行是右对齐的 14×14 小方块。
+//! 画法：详情预览下面是 34×12 的药丸，元数据一行是右对齐的 14×14 小方块。
 
 use std::collections::BTreeMap;
 
@@ -48,9 +48,9 @@ pub(super) fn swatch_colors(
     files.sampled_palette(thumbnail)
 }
 
-/// 从缩略图像素里取最多五种颜色，对应 Vue `extractPaletteFromImageElement`。
+/// 从缩略图像素里取最多五种颜色。
 ///
-/// 算法：缩到宽 40、高按原比例且不超过 40 的采样格（最近邻，实色和 Vue 的 `drawImage` 一致），
+/// 算法：缩到宽 40、高按原比例且不超过 40 的采样格（最近邻），
 /// 跳过 alpha 小于 24 的像素，按 16 级色桶累计，桶内平均后按出现次数从多到少取，
 /// 和已经选中的颜色距离小于 30 的丢掉。尺寸和字节对不上时记日志并返回空，不编造颜色。
 pub(super) fn sample_rgba(width: u32, height: u32, rgba: &[u8]) -> Vec<String> {
@@ -159,7 +159,7 @@ fn nearest(
     ]
 }
 
-/// Vue `colorDistance`：已选颜色和候选平均色的欧氏距离。
+/// 已选颜色和候选平均色的欧氏距离。
 fn color_distance(hex: &str, rgb: (u8, u8, u8)) -> f64 {
     let channel = |index: usize| u8::from_str_radix(&hex[index..index + 2], 16).unwrap_or(0) as f64;
     let left = (channel(1), channel(3), channel(5));
@@ -169,7 +169,7 @@ fn color_distance(hex: &str, rgb: (u8, u8, u8)) -> f64 {
     (dr * dr + dg * dg + db * db).sqrt()
 }
 
-/// `ThumbnailPalette.vue`：一排 34×12 的药丸，间距 8，带 `--border-soft` 描边。没有合法颜色时不占一行。
+/// 一排 34×12 的药丸，间距 8，带 `--border-soft` 描边。没有合法颜色时不占一行。
 pub(super) fn swatches(colors: &[String], prefix: &str) -> Option<AnyView> {
     let chips: Vec<AnyView> = colors
         .iter()

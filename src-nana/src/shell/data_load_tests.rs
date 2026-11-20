@@ -1,5 +1,5 @@
 //! 产品路径上的数据读取：从启动消息或用户操作出发，断言归约排下了哪些服务读取，
-//! 再把读取结果送回，看界面要读的状态有没有接上。时机照 Vue 各 composable 读数据的时候。
+//! 再把读取结果送回，看界面要读的状态有没有接上。
 
 use crate::backend::services::repository::{
     ApiDesignSnapshot, FileBrowserSnapshot, PlaylistPlayerContribution, PlaylistSummary,
@@ -98,7 +98,7 @@ pub(super) fn start(model: &mut ShellViewModel, repo_id: &str) {
 }
 
 /// 照产品启动走到首屏目录：读资源库列表、同步、读摘要、读首屏目录。每一步之前先清掉管理副作用，断言读完首屏目录
-/// 以前没有提前读设置包；读完以后启动停在第 4 步等设置包（Vue `await loadSettingsData()`）。排下的别的管理读取留着。
+/// 以前没有提前读设置包；读完以后启动停在第 4 步等设置包。排下的别的管理读取留着。
 pub(super) fn launch(model: &mut ShellViewModel, repo_id: &str) {
     let generation = model.workspace.prepare_initial_list();
     let steps = [
@@ -216,7 +216,7 @@ fn admin_effects(model: &mut ShellViewModel) -> Vec<AdminEffect> {
     model.admin.take_effects()
 }
 
-/// Vue 首屏启动在离开启动页之前 `await loadSettingsData()`：读完首屏目录停在第 4 步、换上说明，读设置包；插件列表
+/// 首屏启动在离开启动页之前等设置包：读完首屏目录停在第 4 步、换上说明，读设置包；插件列表
 /// 到了再等播放器类型，都回来才进工作区。进工作区时播放集分组已经能新建，不会先写一句「没有可用的播放插件类型」。
 #[test]
 fn startup_waits_for_the_settings_bundle_and_player_types() {
@@ -267,7 +267,7 @@ fn startup_waits_for_the_settings_bundle_and_player_types() {
     assert_eq!(playlists.hint, Some("还没有播放集。"));
 }
 
-/// 设置包读失败照 Vue 吃掉错误：插件列表没换、不读播放器类型，启动照样结束，错误留在插件面板。
+/// 设置包读失败时吞掉错误：插件列表没换、不读播放器类型，启动照样结束，错误留在插件面板。
 #[test]
 fn a_failed_settings_bundle_still_finishes_the_startup() {
     let mut model = ShellViewModel::default();
@@ -414,7 +414,7 @@ fn a_missing_repository_lands_after_the_settings_bundle() {
     );
 }
 
-/// 首屏启动读完首屏目录、只在等设置包的这段，外面来的结构更新照常静默刷新（Vue 读完摘要以后就处理结构更新），
+/// 首屏启动读完首屏目录、只在等设置包的这段，外面来的结构更新照常静默刷新（读完摘要以后就处理结构更新），
 /// 读首屏目录以前的照旧忽略。
 #[test]
 fn structure_updates_while_waiting_for_settings_refresh_silently() {
@@ -503,7 +503,7 @@ fn plugin_lists_lead_to_player_types() {
     );
 }
 
-/// 侧栏底部的「设置」：进设置页，读设置包和应用设置，和 Vue 设置页挂载时一样。
+/// 侧栏底部的「设置」：进设置页，读设置包和应用设置。
 #[test]
 fn opening_settings_reads_the_bundle_and_app_settings() {
     let mut model = started(REPO);
@@ -523,7 +523,7 @@ fn opening_settings_reads_the_bundle_and_app_settings() {
     );
 }
 
-/// 缺失仓库的「打开来源设置」：照 Vue `/settings?plugin=` 进设置页并展开来源插件的设置，
+/// 缺失仓库的「打开来源设置」：进设置页并展开来源插件的设置，
 /// 不再走宿主副作用。
 #[test]
 fn source_cache_issue_opens_the_source_plugin_settings() {
@@ -638,7 +638,7 @@ fn the_sidebar_playlist_list_reaches_the_player() {
     assert_eq!(model.player.playlists.len(), 1, "别的仓库的旧结果不写");
 }
 
-/// 新建播放集：对话框打开时清空名称、默认选第一个类型；读回的列表进侧栏和播放器，并照 Vue 接着点开
+/// 新建播放集：对话框打开时清空名称、默认选第一个类型；读回的列表进侧栏和播放器，并接着点开
 /// 新建的那个。删除以后点开的那个不在了，回到文件面板。
 #[test]
 fn a_created_playlist_is_listed_and_opened() {
@@ -852,7 +852,7 @@ fn log_record(id: &str, timestamp: &str) -> SystemLogRecord {
     }
 }
 
-/// 侧栏「日志」切到日志面板：每次都读最近 200 条历史日志（Vue `setActivePanel('logs')`）。
+/// 侧栏「日志」切到日志面板：每次都读最近 200 条历史日志。
 /// 读的时候手上还没有日志就写「正在加载系统日志」，读回以后按时间再 id 降序整份换上。
 #[test]
 fn opening_the_logs_panel_reads_history() {
@@ -910,8 +910,8 @@ fn opening_the_logs_panel_reads_history() {
     assert_eq!(model.admin.logs.len(), 3, "读失败保留手上的日志");
 }
 
-/// 日志页「清空日志」：点下去以后按钮禁用并换成加载图标，只清空持久化文件；成功后照 Vue
-/// `clearSystemLogsInWorkspace` 直接把手上的日志清空，不再重读。失败时日志留着，原因写进状态区。
+/// 日志页「清空日志」：点下去以后按钮禁用并换成加载图标，只清空持久化文件；成功后
+/// 直接把手上的日志清空，不再重读。失败时日志留着，原因写进状态区。
 #[test]
 fn clearing_logs_empties_the_list_without_reading_again() {
     let mut model = started(REPO);
@@ -972,8 +972,8 @@ fn clearing_logs_empties_the_list_without_reading_again() {
     assert_eq!(view.empty.map(|(title, _)| title), Some("还没有系统日志"));
 }
 
-/// 宿主观察到的运行中任务整份换上：任务弹层的行是仓库操作加这些任务，侧栏「任务」的计数是行数
-/// （Vue `activeTaskCount = tasks.length`）；任务结束后宿主交来空列表，计数回到只剩仓库操作。
+/// 宿主观察到的运行中任务整份换上：任务弹层的行是仓库操作加这些任务，侧栏「任务」的计数是行数；
+/// 任务结束后宿主交来空列表，计数回到只剩仓库操作。
 #[test]
 fn running_tasks_feed_the_popover_and_the_footer_count() {
     let mut model = started(REPO);
@@ -1063,7 +1063,7 @@ fn repository_action(action_id: &str) -> RepositoryAction {
     }
 }
 
-/// 启动或换仓库绑定侧栏时，照 Vue `queueRepositoryBackgroundLoads` 在后台读仓库动作和硬链接候选：
+/// 启动或换仓库绑定侧栏时，在后台读仓库动作和硬链接候选：
 /// 读回的动作让侧栏多出「动作」入口；候选在没有别的对话框时弹出确认，后台读取失败只记日志。
 /// 同一个仓库再绑一次不重读。
 #[test]

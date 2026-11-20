@@ -10,8 +10,8 @@ fn unsaved_edit_page_keeps_the_draft_dirty() {
     assert!(model.close_is_dirty());
 }
 
-/// 和 Vue `playlistDialogDisabled` 一样，名称为空或没有选类型时提交（含回车）不建、对话框留着；
-/// 能建时排下请求，对话框也留着，等结果回来再关（Vue `submitPlaylistDialog`）。
+/// 名称为空或没有选类型时提交（含回车）不建、对话框留着；
+/// 能建时排下请求，对话框也留着，等结果回来再关。
 #[test]
 fn playlist_creation_requires_name_and_player_type() {
     let created = |model: &mut ShellViewModel| {

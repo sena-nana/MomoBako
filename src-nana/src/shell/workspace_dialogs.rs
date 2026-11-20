@@ -1,10 +1,9 @@
 //! 文件页的对话框：重命名、复制到文件夹、导入路径和硬链接确认，导出资源库在
 //! `shell/workspace_dialogs/export.rs`。它们是浮层槽位里的一块（`OverlayKey::FileDialog` /
 //! `OverlayKey::ExportDialog`），外壳走统一对话框框架：文件变更进行中三种关闭手势都不关，
-//! 点外面等于取消，硬链接确认点外面等于跳过（Vue `@click.self`）。
+//! 点外面等于取消，硬链接确认点外面等于跳过。
 //!
-//! 文案、字段和按钮照 Vue `WorkspaceFilesSurface.vue`、`CopyTargetDialog.vue` 和
-//! `HardlinkCandidateDialog.vue`。对话框常驻：同一种对话框打开期间只改绑定的字段，输入框用
+//! 对话框常驻：同一种对话框打开期间只改绑定的字段，输入框用
 //! `.model` 加草稿信号受控；换一种对话框时浮层块按身份换块。
 
 use std::sync::Arc;
@@ -72,13 +71,13 @@ fn import_draft(files: &FilesState) -> &str {
     &files.import_draft
 }
 
-/// `.workspace-rename-dialog { width: min(460px, 92vw) }`。
+/// 重命名对话框宽 `min(460px, 92vw)`。
 const RENAME_DIALOG: DialogSize = DialogSize::capped(460.0, 92.0);
 
 /// 文本对话框的配置。硬链接确认和关着的时候是 `None`。
 ///
-/// 宽度和标题图标照 Vue：重命名是 `PencilLine`、460 宽，复制是 `CopyTargetDialog` 的 `Copy`，其余
-/// `.modal-card` 宽。三种导入 Vue 里没有对话框（原生选择器），图标按动作取，和文件页别的对话框一样
+/// 宽度和标题图标：重命名是 `PencilLine`、460 宽，复制是 `Copy`，其余是默认宽。三种导入的
+/// 图标按动作取，和文件页别的对话框一样
 /// 标题前都有图标。
 fn text_dialog_spec(dialog: FileDialog) -> Option<TextDialog> {
     let spec = |title, size, icon, label, placeholder, submit, draft| TextDialog {
@@ -176,8 +175,8 @@ pub(super) fn file_dialog(model: &ShellViewModel) -> Option<AnyView> {
 
 /// 一个输入框的对话框：字段标签、输入，底部取消和主操作。回车提交。
 ///
-/// 复制到文件夹的目标目录照 Vue `CopyTargetDialog` 没有 `disabled`，复制进行中仍可改下一份路径；
-/// 已经发出的请求用提交当时的目录。重命名文件的输入框照 Vue 在变更中保持禁用，导入对话框同样锁住输入。
+/// 复制到文件夹的目标目录不禁用，复制进行中仍可改下一份路径；
+/// 已经发出的请求用提交当时的目录。重命名文件的输入框在变更中保持禁用，导入对话框同样锁住输入。
 fn text_dialog(model: &ShellViewModel, dialog: FileDialog) -> Option<AnyView> {
     let spec = text_dialog_spec(dialog)?;
     let view = signal(TextDialogView::project(model)?);
@@ -229,7 +228,7 @@ pub(crate) struct HardlinkView {
     pub message: String,
     pub existing_path: String,
     pub new_path: String,
-    /// 确认请求在途，或者确认以后的候选重读还没回来（Vue `isMutatingFiles` 包着整轮刷新）。
+    /// 确认请求在途，或者确认以后的候选重读还没回来（整轮刷新都算在变更里）。
     pub busy: bool,
     pub confirm: String,
 }

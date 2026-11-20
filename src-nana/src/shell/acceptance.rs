@@ -1,6 +1,6 @@
 //! 15 个验收页使用和产品窗口同一套表面。
 //!
-//! 只填已经存在的仓库、预览、播放和任务状态，不发新的领域请求。有仓库的页面都从 Vue 夹具 `base()`
+//! 只填已经存在的仓库、预览、播放和任务状态，不发新的领域请求。有仓库的页面都从共用夹具底子
 //! 的工作区起步（`shell/acceptance/base_scene.rs`），状态经过真实消息归约。
 
 use super::{InspectEffect, ShellPage, ShellViewModel};
@@ -36,7 +36,7 @@ pub(super) fn seed(model: &mut ShellViewModel) {
     }
 }
 
-/// 铺上 Vue `base()` 的工作区：默认资源库、根目录三条、目录树 assets → covers、网格展示。
+/// 铺上共用底子的工作区：默认资源库、根目录三条、目录树 assets → covers、网格展示。
 fn seed_base(model: &mut ShellViewModel) {
     Base::default().seed(model);
 }

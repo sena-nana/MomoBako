@@ -1,6 +1,6 @@
 //! 设置页。
 //!
-//! 结构照 `src/pages/Settings.vue`：页头、音频播放、外观、仓库服务、外部素材接入、
+//! 结构：页头、音频播放、外观、仓库服务、外部素材接入、
 //! 插件管理、缓存、API 设计。页根是普通竖排，外边距和纵向滚动由壳层的主区提供。
 //!
 //! 页面只建一次，只读 [`SettingsSignals`] 和插件管理面板的信号：卡片里的文字、下拉框、滑杆和
@@ -45,14 +45,14 @@ pub(crate) fn settings_page(signals: SettingsSignals, plugins: PluginPanelSignal
         .into_any()
 }
 
-/// 给块加下外边距，对应 Vue `.card { margin-bottom: 12px }` 和页头的 16。
+/// 给块加下外边距：卡片之间 12，页头 16。
 fn spaced(view: AnyView, bottom: f32) -> AnyView {
     widget(pad(column(0.0), 0.0, 0.0, bottom, 0.0))
         .children((view,))
         .into_any()
 }
 
-/// `.page-header`：18/600 标题，下面 13 号弱色说明，间距 4。
+/// 页头：18/600 标题，下面 13 号弱色说明，间距 4。
 fn page_header() -> AnyView {
     widget(column(4.0))
         .children((
@@ -69,7 +69,7 @@ fn page_header() -> AnyView {
         .into_any()
 }
 
-/// `.card`：`bg-elev` 底、md 圆角、1px 透明边加 14/16 内边距。
+/// 卡片：`bg-elev` 底、md 圆角、1px 透明边加 14/16 内边距。
 pub(crate) fn card(key: &'static str, children: Vec<AnyView>) -> AnyView {
     widget(
         pad(column(0.0), 15.0, 17.0, 15.0, 17.0)
@@ -81,7 +81,7 @@ pub(crate) fn card(key: &'static str, children: Vec<AnyView>) -> AnyView {
     .into_any()
 }
 
-/// `.card h2`：13/600 弱色、大写、字距 0.5，下边距 8。
+/// 卡片标题：13/600 弱色、大写、字距 0.5，下边距 8。
 pub(crate) fn card_title(text: &str, key: &'static str) -> AnyView {
     let mut title = label(text.to_uppercase(), 13.0, 600, Role::Muted);
     Arc::make_mut(&mut title.style.layout)
@@ -92,7 +92,7 @@ pub(crate) fn card_title(text: &str, key: &'static str) -> AnyView {
         .into_any()
 }
 
-/// `.settings-row` 的位置：首行上内边距 4，末行下内边距 4 且没有分割线。
+/// 设置行的位置：首行上内边距 4，末行下内边距 4 且没有分割线。
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RowPlace {
     Middle,
@@ -116,7 +116,7 @@ fn row_frame(place: RowPlace) -> Stack {
     }
 }
 
-/// `.settings-row`：左边粗体标签加弱色说明，右边控件。`caption` 给没有自己名字的控件当读屏名称。
+/// 设置行：左边粗体标签加弱色说明，右边控件。`caption` 给没有自己名字的控件当读屏名称。
 fn settings_row(
     title: &str,
     hint: &str,
@@ -150,7 +150,7 @@ fn settings_row(
         .key(key)
 }
 
-/// 设置卡里的提示行，对应 `.settings-notice`，错误时用危险色。文字和颜色可以绑定。
+/// 设置卡里的提示行，错误时用危险色。文字和颜色可以绑定。
 fn notice(
     text: impl IntoProp<String>,
     error: impl Fn() -> bool + Send + 'static,
@@ -181,7 +181,7 @@ fn audio_card(signals: SettingsSignals) -> AnyView {
     {
         let layout = Arc::make_mut(&mut select.style.layout);
         layout.width = Some(LengthSpec::Shrink);
-        // 没有可选项时 Vue 的空下拉框仍有内边距和箭头，约 42 宽。
+        // 没有可选项时空下拉框仍有内边距和箭头，约 42 宽。
         layout.min_width = Some(LengthSpec::Px(42.0));
         layout.height = Some(LengthSpec::Px(32.0));
         layout.font_size = Some(14.0);
@@ -210,7 +210,7 @@ fn audio_card(signals: SettingsSignals) -> AnyView {
                 }),
         ))
         .into_any();
-    // 下面有提示时这一行不是卡片最后一个子元素，Vue 的 `:last-child` 规则不生效：保留分割线和 12 的下内边距。
+    // 下面有提示时这一行不是卡片最后一个子元素：保留分割线和 12 的下内边距。
     let place = move || {
         if audio.with(|audio| audio.notice.is_some()) {
             RowPlace::Middle
@@ -251,7 +251,7 @@ fn audio_card(signals: SettingsSignals) -> AnyView {
     )
 }
 
-/// 外观：主题、圆角样式和圆角半径。主题比 Vue 的暗色、浅色多一档「跟随系统」（默认）。
+/// 外观：主题、圆角样式和圆角半径。主题有暗色、浅色和「跟随系统」（默认）三档。
 fn appearance_card(signals: SettingsSignals) -> AnyView {
     let theme = segmented(
         vec![
@@ -308,7 +308,7 @@ fn appearance_card(signals: SettingsSignals) -> AnyView {
     )
 }
 
-/// `.segmented`：主背景、1px 边线、md 圆角、内边距 2、间距 2、高 34。
+/// 分段控件：主背景、1px 边线、md 圆角、内边距 2、间距 2、高 34。
 fn segmented(items: Vec<AnyView>, key: &'static str) -> AnyView {
     let body = style::fixed(row(2.0), None, Some(34.0));
     let stack = pad(body, 2.0, 2.0, 2.0, 2.0)
@@ -417,8 +417,8 @@ fn theme_segment(
         .into_any()
 }
 
-/// `.radius-control`：220 宽滑杆加 44 宽右对齐的「Npx」。滑杆的值和文字跟着已保存的半径。
-/// Vue 的滑杆轨道因 `appearance: none` 看不见，这里保留轨道，按设计意图画出。
+/// 圆角控件：220 宽滑杆加 44 宽右对齐的「Npx」。滑杆的值和文字跟着已保存的半径。
+/// 滑杆保留轨道，按设计意图画出。
 fn radius_control(radius: Signal<f64>) -> AnyView {
     let mut range = RangeField::new(
         radius.get_untracked(),
@@ -447,7 +447,7 @@ fn radius_control(radius: Signal<f64>) -> AnyView {
     .key("admin-radius-value"),));
     widget(row(10.0))
         .children((
-            // Vue `Settings.vue` 圆角 range 听 `@input`：拖动中每一格都写入。只听 `RangeInput`。
+            // 拖动中每一格都写入，所以只听 `RangeInput`。
             // 松手的 `RangeChanged` 是同一格的提交，再听一次会把这次拖动写两遍。范围仍是 0 到 20。
             widget(range)
                 .prop::<f64, fields::slider::value>(radius)
@@ -471,7 +471,7 @@ fn format_radius(radius: f64) -> String {
     }
 }
 
-/// `.kv li`：左边弱色标签，右边正文色值，上下 6，分割线 `border-soft`，末行无线。值可以绑定。
+/// 键值表的一行：左边弱色标签，右边正文色值，上下 6，分割线 `border-soft`，末行无线。值可以绑定。
 pub(crate) fn kv_row(
     name: &str,
     value: impl IntoProp<String>,
@@ -501,7 +501,7 @@ pub(crate) fn kv_row(
         .into_any()
 }
 
-/// 按内容做键的一列 `.kv` 行：条目没有编号，内容或末行变了那一行重建。
+/// 按内容做键的一列键值行：条目没有编号，内容或末行变了那一行重建。
 fn kv_rows(rows: impl Fn() -> Vec<KvRow> + Send + 'static) -> AnyView {
     let rows = nana_ui::runtime::view::computed(rows);
     each(rows, KvRow::clone, |row: KvRow| {
@@ -669,7 +669,7 @@ fn badge_look(ready: bool) -> (Stack, Role) {
     }
 }
 
-/// `.settings-status`：高 24、左右 8、药丸、12/600，图标 13；就绪时成功色柔和底。
+/// 状态胶囊：高 24、左右 8、药丸、12/600，图标 13；就绪时成功色柔和底。
 fn status_badge(external: Signal<ExternalCard>) -> AnyView {
     let ready = move || external.with(|card| card.ready);
     let (body, color) = badge_look(ready());
@@ -750,7 +750,7 @@ fn cache_card(signals: SettingsSignals) -> AnyView {
     )
 }
 
-/// `.settings-metric`：主背景、lg 圆角、内边距 12，数据库图标 16，数字 14/700 加 12 号弱色名称。
+/// 缓存容量格：主背景、lg 圆角、内边距 12，数据库图标 16，数字 14/700 加 12 号弱色名称。
 fn metric(value: impl Fn() -> String + Send + 'static, name: &str, key: &'static str) -> AnyView {
     widget(
         pad(row(10.0), 12.0, 12.0, 12.0, 12.0)

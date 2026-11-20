@@ -1,11 +1,11 @@
 //! 文件页的对照场景：文件工具栏、文件列表、右侧详情、元数据编辑、右键菜单，以及复制、重命名、从文件夹导入、从 ZIP 导入、Eagle 导入、硬链接和导出对话框。
 //!
-//! 场景名和 `tmp/vue-mock/scenes/files.ts` 的 Vue 场景同名，数据和 Vue 夹具 `fixtures.base()` 一致：
+//! 数据来自共用夹具：
 //! 资源库「默认资源库」，根目录下 assets 文件夹、cover.png（2400000 B）和 notes/page.pdf（1820 B），
 //! 修改时间都是 2026-10-08T08:00:00Z，目录树 assets → covers 不展开，默认网格展示。工作区从
 //! `shell/acceptance/base_scene.rs` 的共用底子起步。
 //! 15 页里的「冲突」「未保存」也在这里，都在同一个文件页上走单击选中、读回详情和编辑注释的产品归约。
-//! 文件操作进行中和 Ctrl / Shift 多选两个场景和 `tmp/vue-mock/scenes/states.ts` 同名。
+//! 文件操作进行中和 Ctrl / Shift 多选两个场景也在这里。
 
 use std::collections::BTreeMap;
 
@@ -26,7 +26,7 @@ use super::super::{
     SidebarMessage, SidebarSmartFolder, WorkspacePanel,
 };
 use super::base_scene::{Base, NOW, REPO_ID, REPO_PATH, dir, file, settle, tagged_file};
-/// Vue `scenes/files.ts` 的右键落点。
+/// 右键菜单的落点。
 const MENU_POINT: (f32, f32) = (400.0, 470.0);
 /// 「未保存」页注释框里还没自动保存的草稿。离屏验收按这段文字找注释输入框。
 const UNSAVED_COMMENT: &str = "第 2 页的表格还要核对。";
@@ -69,7 +69,7 @@ pub(super) fn models() -> Vec<(&'static str, ShellViewModel)> {
     ]
 }
 
-/// 与 Vue `base()` 相同的文件页：网格、根目录、没有选择。
+/// 共用底子的文件页：网格、根目录、没有选择。
 fn files_base_scene() -> ShellViewModel {
     Base::default().model()
 }
@@ -137,14 +137,14 @@ fn live_files_scene() -> ShellViewModel {
     model
 }
 
-/// 单击选中一条：只选中、读元数据，不进入预览页。和 Vue 单击后右侧详情一致。
+/// 单击选中一条：只选中、读元数据，不进入预览页，右侧显示详情。
 fn selected_scene(path: &str) -> ShellViewModel {
     let mut model = files_base_scene();
     select_entry(&mut model, path);
     model
 }
 
-/// 带完整元数据的 cover.png：色板、注释、链接、评分、标签组、尺寸、时间和索引标签。和 Vue 一样
+/// 带完整元数据的 cover.png：色板、注释、链接、评分、标签组、尺寸、时间和索引标签。
 /// cover.png 有标签「封面」，仓库摘要里它不算未标签。
 fn metadata_scene() -> ShellViewModel {
     let mut base = Base::default();
@@ -160,7 +160,7 @@ fn metadata_scene() -> ShellViewModel {
     model
 }
 
-/// 右键 cover.png。菜单落点和 Vue 场景派发 contextmenu 的坐标一致。
+/// 右键 cover.png，菜单落点固定。
 fn live_menu_scene() -> ShellViewModel {
     let mut model = files_base_scene();
     model.files.set_drag_selection(
@@ -262,14 +262,14 @@ fn import_folder_dialog_scene() -> ShellViewModel {
 
 /// `import-zip-dialog`：在夹具文件页打开「从 ZIP 导入」。
 ///
-/// Vue 点这项会弹出原生「选择 ZIP 压缩包」。夹具里没有压缩包，路径留空，不把占位符写进输入框，也不提交。
+/// 点这项会弹出原生「选择 ZIP 压缩包」。夹具里没有压缩包，路径留空，不把占位符写进输入框，也不提交。
 fn import_zip_dialog_scene() -> ShellViewModel {
     empty_import_scene(FileDialog::ImportArchive, "ZIP 导入")
 }
 
 /// `import-eagle-dialog`：在夹具文件页打开「从 Eagle 复制导入」。
 ///
-/// Vue 的复制和剪切都会弹出原生「选择 EagleLibrary 目录」。这里没有选中文件，路径留空。
+/// 复制和剪切都会弹出原生「选择 EagleLibrary 目录」。这里没有选中文件，路径留空。
 /// 模式记成复制，标题才是这一句。不提交，不写完成提示、条数或目标目录。
 fn import_eagle_dialog_scene() -> ShellViewModel {
     let mut model = files_base_scene();
@@ -280,7 +280,7 @@ fn import_eagle_dialog_scene() -> ShellViewModel {
 
 /// `import-eagle-move-dialog`：同一个 Eagle 对话框，单独打开剪切模式。
 ///
-/// Vue `handleImportEagle` 不区分对话框，标题都是「选择 EagleLibrary 目录」，模式只在选中路径之后
+/// 选目录时不区分模式，标题都是「选择 EagleLibrary 目录」，模式只在选中路径之后
 /// 交给导入。离屏打不开系统选目录，标题用这个对话框在 `move` 时的那句「从 Eagle 剪切导入」。
 /// 字段和按钮与复制相同。路径留空，不提交，不写完成提示、条数或目标目录。
 fn import_eagle_move_dialog_scene() -> ShellViewModel {
@@ -339,7 +339,7 @@ fn hardlink_dialog_scene() -> ShellViewModel {
     model
 }
 
-/// 导出对话框本身。Vue 首页没有入口，对照场景直接挂 `RepositoryExportDialog.vue`。
+/// 导出对话框本身。首页没有入口，场景直接挂导出对话框。
 fn export_dialog_scene() -> ShellViewModel {
     let mut model = files_base_scene();
     model.files.present_export();
@@ -353,7 +353,7 @@ fn mode_scene(mode: DisplayMode) -> ShellViewModel {
 }
 
 /// 把 cover.png 拖进 assets，移动协议还没回来：任务弹层里「移动文件 · 移动到目标文件夹」从 36 每 220ms
-/// 往上爬，停在上限 88；文件列写「正在处理文件」。和 Vue 场景一样点「任务」打开弹层。
+/// 往上爬，停在上限 88；文件列写「正在处理文件」。点「任务」打开弹层。
 fn file_operation_progress_scene() -> ShellViewModel {
     let mut model = files_base_scene();
     model.reduce(ShellMessage::Input(InputMessage::BeginEntryDrag {
@@ -426,7 +426,7 @@ fn climb_to_ceiling(model: &mut ShellViewModel) {
     }
 }
 
-/// `files.ts` 的 `metadataScene` 写在 cover.png 上的元数据。
+/// 元数据场景写在 cover.png 上的元数据。
 fn cover_metadata() -> BTreeMap<String, Value> {
     let mut metadata = BTreeMap::new();
     metadata.insert(
@@ -466,7 +466,7 @@ fn select_entry(model: &mut ShellViewModel, path: &str) {
     note_selection(model, path);
 }
 
-/// 文件选中后读到的素材详情：和 Vue `get_asset_detail` 应答同样的摘要和元数据。
+/// 文件选中后读到的素材详情：摘要和元数据。
 fn note_selection(model: &mut ShellViewModel, path: &str) {
     let Some(row) = model
         .files
@@ -488,7 +488,7 @@ fn note_selection(model: &mut ShellViewModel, path: &str) {
     let _ = model.inspect.take_effects();
 }
 
-/// Vue `get_asset_detail` 对这一行的应答。
+/// `get_asset_detail` 对这一行的应答。
 pub(super) fn asset_detail(row: &FileRow) -> AssetDetail {
     let size_bytes = row
         .size_label
@@ -542,7 +542,7 @@ fn value_type(value: &Value) -> &'static str {
     }
 }
 
-/// 侧栏点一个分类视图。摘要里已经有的素材按 Vue 的规则筛进列表，点快捷方式不再读目录。
+/// 侧栏点一个分类视图。摘要里已经有的素材按分类规则筛进列表，点快捷方式不再读目录。
 ///
 /// 夹具没有访问时间，最近使用就是空列表。不另造文件、时间和标签。
 fn category_scene(id: ShortcutId) -> ShellViewModel {
@@ -577,11 +577,11 @@ fn trash_scene() -> ShellViewModel {
 /// 打开智能文件夹以后的结果页。
 ///
 /// 页头、空状态和列表都走现有查询协议：打开时排 `QuerySmartFolder`，查回来的行写进
-/// `virtual_rows`，摘要写「N 条结果」和有值的条件（Vue `smartFolderSummary`）。夹具侧栏读回的
-/// 智能文件夹是空列表，和 Vue 模拟 IPC 一样。没有文件夹就不查，也不编条目、条件和命中数；
-/// 列表保持空。右侧空文案照 Vue `FileBrowserPanel.vue` 的只读虚拟视图：眉题「智能文件夹」，
+/// `virtual_rows`，摘要写「N 条结果」和有值的条件。夹具侧栏读回的
+/// 智能文件夹是空列表。没有文件夹就不查，也不编条目、条件和命中数；
+/// 列表保持空。右侧空文案是只读虚拟视图的那组：眉题「智能文件夹」，
 /// 「选择一个文件或文件夹」，「在中间列表中选择目标查看详情。」页头眉题是「分类视图」，
-/// 名字查回来以前标题是「智能文件夹」，摘要行留空。播放条留在列表下面，Vue 仍把它当文件浏览面板。
+/// 名字查回来以前标题是「智能文件夹」，摘要行留空。播放条留在列表下面，这里仍算文件浏览面板。
 fn smart_folder_scene() -> ShellViewModel {
     let mut model = Base::default().model();
     match model.sidebar.smart_folders.first().cloned() {
@@ -616,9 +616,9 @@ fn open_loaded_smart_folder(model: &mut ShellViewModel, folder: SidebarSmartFold
 
 /// `assets-directory`：侧栏打开夹具目录树里的 assets，再交回这一层真实存在的子项。
 ///
-/// 页头眉题是「当前目录」，面包屑是「根目录」加上路径段（Vue `FileBrowserPanel.vue`）。
+/// 页头眉题是「当前目录」，面包屑是「根目录」加上路径段。
 /// 没有选中、又不是回收站或分类视图时，右侧是目录摘要：目录名、路径、直属文件、直属子文件夹、
-/// 当前视图总条目。列表没有条目时 Vue 不另写一句空文案，两组卡片都不出现。
+/// 当前视图总条目。列表没有条目时不另写一句空文案，两组卡片都不出现。
 /// 子项只从夹具目录树和根目录条目里取。播放条留在文件浏览面板下面。
 fn assets_directory_scene() -> ShellViewModel {
     let base = Base::default();
@@ -641,7 +641,7 @@ fn assets_directory_scene() -> ShellViewModel {
 /// `covers-directory`：从夹具目录树进入 assets/covers，只画这一层真实存在的子项。
 ///
 /// 夹具树里 covers 没有子文件夹，根目录条目也没有路径正好落在这一层的文件，所以列表是空的。
-/// Vue `FileBrowserPanel.vue` 在普通目录没有条目时不另写空文案，两组卡片都不出现；没有选中、
+/// 普通目录没有条目时不另写空文案，两组卡片都不出现；没有选中、
 /// 又不是回收站或分类视图时，右侧仍是目录摘要（目录名、路径、直属计数）。面包屑是「根目录」
 /// 加上 assets、covers。侧栏停在 covers。播放条留在文件浏览面板下面。
 fn covers_directory_scene() -> ShellViewModel {
@@ -876,7 +876,7 @@ mod smart_folder_scene_tests {
             .collect()
     }
 
-    /// 夹具没有智能文件夹：结果页是空列表，空文案用 Vue 的详情，不写命中数。
+    /// 夹具没有智能文件夹：结果页是空列表，空文案用只读虚拟视图的详情，不写命中数。
     #[test]
     fn smart_folder_results_stay_empty_without_a_fixture_folder() {
         let model = smart_folder_scene();

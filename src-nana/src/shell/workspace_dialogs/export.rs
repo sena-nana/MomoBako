@@ -1,5 +1,5 @@
-//! 导出资源库对话框，照 Vue `RepositoryExportDialog.vue`：仓库名和路径、压缩包 / Git 分段、
-//! 各自的字段，底部取消和导出，标题右侧有关闭位。Vue 首页没有入口，这里只在显式打开时出现。
+//! 导出资源库对话框：仓库名和路径、压缩包 / Git 分段、
+//! 各自的字段，底部取消和导出，标题右侧有关闭位。首页没有入口，这里只在显式打开时出现。
 //!
 //! 外壳走统一对话框框架，导出中三种关闭手势都不关。对话框常驻：压缩包和 Git 两组字段都建好，
 //! 按分段 `.visible` 切换；加密开着时才显示密码。输入框、密码和输出路径各有一份草稿信号，
@@ -250,7 +250,7 @@ fn repository_box(view: Signal<ExportView>) -> AnyView {
     .into_any()
 }
 
-/// 压缩包和 Git 两段切换（`.segmented`）：白底描边，选中段是 `--bg-active` 底。
+/// 压缩包和 Git 两段切换：白底描边，选中段是 `--bg-active` 底。
 fn segmented(view: Signal<ExportView>) -> AnyView {
     let tab = |label: &'static str, icon: Icon, value: &'static str, archive: bool| {
         widget(style::styled_button(label, Some(icon), segment_look(false)))
@@ -318,7 +318,7 @@ impl FieldWrite<Button, bool> for SegmentActive {
     }
 }
 
-/// 压缩包保存位置。Vue 的导出对话框没有入口也没有这一项；Nana 的导出协议必须带输出路径，
+/// 压缩包保存位置。导出协议必须带输出路径，
 /// 这里用路径框和系统保存对话框让用户选，导出时还没选就先弹保存对话框。值跟着草稿信号。
 fn output_field(
     path: Signal<String>,

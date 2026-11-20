@@ -10,9 +10,9 @@
 //! 这块留在浮层层里直到退场放完再卸。宿主自己关掉它（停放、被顶替）时 `.model` 把信号写回假，
 //! 不同步回 ViewModel：开合只听归约，ViewModel 还要它开着时下一帧照样写真、重新打开。
 //!
-//! 外观照 Vue `.modal-card` / `.dialog-card__*`：每个对话框照自己的宽度类给 CSS 宽度，危险对话框用
-//! NanaUI 的危险口气，Vue 标题前有图标的放进标题图标槽；遮罩、分隔线、内边距、距顶 12vh、卡片圆角
-//! 和开合动效由主题配方决定（`appearance.rs`），差异见 `docs/nana-vue-parity.md`。
+//! 外观：每个对话框照自己的宽度类给 CSS 宽度，危险对话框用
+//! NanaUI 的危险口气，标题前有图标的放进标题图标槽；遮罩、分隔线、内边距、距顶 12vh、卡片圆角
+//! 和开合动效由主题配方决定（`appearance.rs`）。
 
 use std::sync::Arc;
 
@@ -40,10 +40,10 @@ pub(crate) type BusyFn = Arc<dyn Fn() -> bool + Send + Sync>;
 /// 现做一条壳层消息。`ShellMessage` 不能克隆，每次手势现做。
 pub(crate) type MessageFn = Arc<dyn Fn() -> ShellMessage + Send + Sync>;
 
-/// `.modal-card { width: min(520px, 92vw) }`：没有自己宽度类的对话框都这么宽。
+/// 默认对话框宽 `min(520px, 92vw)`：没有自己宽度类的对话框都这么宽。
 pub(crate) const MODAL_CARD: DialogSize = DialogSize::capped(520.0, 92.0);
 
-/// 标题前的图标：Vue 头部的图标都是 14px。
+/// 标题前的图标都是 14px。
 const TITLE_ICON_SIZE: f32 = 14.0;
 
 /// 一个对话框的外壳：键、标题、口气、宽度、标题图标、处理中和关闭时发的消息。
@@ -77,20 +77,20 @@ impl DialogFrame {
         }
     }
 
-    /// 危险口气（Vue `.dialog-card__header--danger`）：标题和标题前的图标用主题的危险色，正文不变。
+    /// 危险口气：标题和标题前的图标用主题的危险色，正文不变。
     pub(crate) fn danger(mut self, danger: bool) -> Self {
         self.danger = danger;
         self
     }
 
-    /// 卡片宽度，照 Vue 这个对话框的宽度类写成 CSS 长度，例如 `min(560px, 92vw)` 是
+    /// 卡片宽度，写成 CSS 长度，例如 `min(560px, 92vw)` 是
     /// `DialogSize::capped(560.0, 92.0)`。
     pub(crate) fn size(mut self, size: DialogSize) -> Self {
         self.size = size;
         self
     }
 
-    /// 标题前的图标（Vue 标题前的 Lucide 图标换成对应的 Tabler 图标）。
+    /// 标题前的图标，用 Tabler 图标。
     pub(crate) fn title_icon(mut self, icon: Icon) -> Self {
         self.icon = Some(icon);
         self
@@ -214,7 +214,7 @@ impl DialogFrame {
     }
 }
 
-/// 标题前的图标：14px，颜色跟着标题走（Vue 的图标继承头部的文字色，危险口气时是 `--err`）。
+/// 标题前的图标：14px，颜色跟着标题走（危险口气时是 `--err`）。
 fn title_icon(icon: Icon, danger: bool) -> AnyView {
     let role = if danger {
         SemanticColorRole::Danger
@@ -290,11 +290,11 @@ impl OverlaySession for Presence {
     }
 }
 
-/// 标题右侧的关闭位：24 见方、弱色叉号，悬停换 `--bg-hover` 底和正文色（`.repository-export-dialog__close`）。
+/// 标题右侧的关闭位：24 见方、弱色叉号，悬停换 `--bg-hover` 底和正文色。
 /// 点它由框架变成关闭请求，按钮自己不发消息；处理中显示为禁用。
 ///
 /// 颜色照写的来（`colors_from_style`）：按种类配色会把叉号换成 `--text-muted`，停用时还会整枚按线性空间
-/// 淡到 50%。悬停、按下和焦点沿用 `IconButton` 自带的样子；停用照 Vue `button:disabled` 的 0.45 和卡片底色
+/// 淡到 50%。悬停、按下和焦点沿用 `IconButton` 自带的样子；停用按 0.45 不透明度和卡片底色
 /// （`--bg-elev`）在 sRGB 里混。
 fn close_affordance(busy: BusyFn) -> AnyView {
     let mut button = IconButton::new(X, "关闭")
@@ -310,7 +310,7 @@ fn close_affordance(busy: BusyFn) -> AnyView {
         .into_any()
 }
 
-/// 底栏：左边可放一段说明（处理中），按钮靠右、间距 8。对应 `.dialog-card__actions`。
+/// 底栏：左边可放一段说明（处理中），按钮靠右、间距 8。
 pub(crate) fn footer(leading: Option<AnyView>, buttons: Vec<AnyView>) -> AnyView {
     let mut children = Vec::with_capacity(buttons.len() + 2);
     children.extend(leading);
@@ -386,8 +386,8 @@ fn button_view(
         .prop::<bool, fields::button::disabled>(disabled)
 }
 
-/// 正文里的一段说明：13px、行高 1.5、占满宽度、任意处折行（`.dialog-card__body p`）。
-/// `muted` 时用次要文字色（`.folder-dialog__summary`）。
+/// 正文里的一段说明：13px、行高 1.5、占满宽度、任意处折行。
+/// `muted` 时用次要文字色。
 pub(crate) fn paragraph(copy: impl IntoProp<String>, muted: bool, key: &'static str) -> AnyView {
     let color = if muted {
         SemanticColorRole::Muted
@@ -442,7 +442,7 @@ pub(crate) fn wrapping_text(size: f32, line_height: f32, color: SemanticColorRol
     node
 }
 
-/// 行和卡片（`ListItem`）的禁用：连同 Vue `button:disabled` 的 0.45 整体透明度一起换。
+/// 行和卡片（`ListItem`）的禁用：连同 0.45 的整体透明度一起换。
 /// 禁用的行框架不派发点击。对话框的选项卡片和弹层的菜单行共用。
 pub(crate) struct DimmedDisabled;
 

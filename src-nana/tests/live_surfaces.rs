@@ -97,7 +97,7 @@ fn assert_import_tool() {
     let _ = shot(&mut session, "import-tool-picker");
 }
 
-/// 来源账号区照 `SourceAuthenticationSettings.vue`：点「连接新账号」先建扫码会话，
+/// 来源账号区：点「连接新账号」先建扫码会话，
 /// 会话回来后出现二维码、提示和「检查登录结果」。
 fn assert_source_login() {
     let mut model = login_settings();
@@ -420,7 +420,7 @@ fn has(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode], label: &str) ->
     })
 }
 
-/// 文件预览和搜索面板互斥，和 Vue `Home.vue` 的 `v-else-if` 一样：窄屏预览页上不叠搜索说明。
+/// 文件预览和搜索面板互斥：窄屏预览页上不叠搜索说明。
 fn assert_preview_owns_the_page(nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode]) {
     assert!(
         nodes

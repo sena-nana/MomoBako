@@ -48,7 +48,7 @@ fn pixel(pixels: &crate::shell::PreviewPixels, x: u32, y: u32) -> [u8; 4] {
     pixels.rgba[index..index + 4].try_into().expect("一个像素")
 }
 
-/// 手机照片 EXIF 写着「顺时针转 90°」：预览摆正成竖图，原来左边的红色转到上面。Vue 的 `<img>` 默认这样摆正。
+/// 手机照片 EXIF 写着「顺时针转 90°」：预览摆正成竖图，原来左边的红色转到上面。
 #[test]
 fn a_photo_is_turned_upright_by_its_exif_orientation() {
     let pixels = decode_preview_pixels(&sideways_jpeg(6)).expect("JPEG 能解");

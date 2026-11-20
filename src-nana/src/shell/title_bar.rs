@@ -1,6 +1,6 @@
 //! 全壳共用的 Nana 标题栏。
 //!
-//! 结构照 Vue `AppShell.vue` 和 `WorkspaceTitleBarSearch.vue`：左侧折叠侧栏按钮，中间是全局搜索
+//! 结构：左侧折叠侧栏按钮，中间是全局搜索
 //! 和筛选开关。搜索框 `--bg-subtle` 底、无描边、占位文字居中，悬停或聚焦换 `--bg-hover`；
 //! 筛选开关 28×28，筛选栏打开或有筛选条件时 `--accent-soft` 底、强调色，并在右上角显示条件数。
 //! 窗口按钮用 `AppTitleBar` 自带的自定义控件：指针点击由 Nana 宿主执行（关闭经 `close_requested`
@@ -24,7 +24,7 @@ use super::sidebar_view::parts;
 use super::workspace::WorkspacePanel;
 use super::{InspectMessage, ShellMessage};
 
-/// 搜索框宽度：Vue 搜索组 392px，其中筛选开关 28px、间距 4px。
+/// 搜索框宽度：搜索组 392px，扣掉筛选开关 28px、间距 4px。
 const SEARCH_WIDTH: f32 = 360.0;
 const CONTROL_EDGE: f32 = 28.0;
 
@@ -104,8 +104,8 @@ impl FieldWrite<IconButton, bool> for SidebarToggleField {
     }
 }
 
-/// 标题栏图标按钮：28×28、`--radius-sm`、`--text-muted`，悬停 `--bg-hover`。对应 `.titlebar__btn`。
-/// 和 Vue 的侧栏开关一样从不停用，所以没有停用的样子；要停用时得照所在底色写 `interaction.disabled`，
+/// 标题栏图标按钮：28×28、`--radius-sm`、`--text-muted`，悬停 `--bg-hover`。
+/// 侧栏开关从不停用，所以没有停用的样子；要停用时得照所在底色写 `interaction.disabled`，
 /// `colors_from_style` 的按钮 NanaUI 不会替它淡化。
 fn chrome_button(icon: Icon, label: &'static str) -> IconButton {
     let mut button = IconButton::new(icon, label)
@@ -163,7 +163,7 @@ impl FieldWrite<IconButton, FilterLook> for FilterLookField {
     }
 }
 
-/// 筛选开关。打开或有条件时强调色底；条件数大于 0 时右上角 14px 角标。对应 `.titlebar__filter-btn`。
+/// 筛选开关。打开或有条件时强调色底；条件数大于 0 时右上角 14px 角标。
 /// 角标常驻，没有条件时藏起来。
 fn filter_toggle(signals: TitleSignals) -> AnyView {
     let mut button = IconButton::new(ADJUSTMENTS_HORIZONTAL, filter_label(false))

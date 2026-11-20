@@ -1,8 +1,6 @@
 //! 搜索面板和筛选栏的展示数据：候选项、色块颜色、结果芯片、范围和摘要文案、空结果说明、库类型快捷方式。
 //!
-//! 对应 Vue `useSearchUi.ts` 的 `rebuildFilterOptions`、`filterColorStyle`、`searchResultContext`、
-//! `searchResultScopeLabel`、`searchSummary`，以及 `useWorkspaceViewState.ts` 的
-//! `activeLibrarySearchShortcuts`。这里只读状态，不改状态。
+//! 这里只读状态，不改状态。
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -27,10 +25,10 @@ pub(crate) struct FilterOptions {
     pub shapes: Vec<String>,
 }
 
-/// Vue `rebuildFilterOptions`：格式和标签来自当前仓库摘要的素材和搜索结果，
+/// 筛选候选：格式和标签来自当前仓库摘要的素材和搜索结果，
 /// 颜色和形状来自搜索结果和当前目录条目的元数据。
 ///
-/// 已选的值也并进候选：Vue 只从数据里取候选，手动「添加」一个数据里没有的颜色或形状后
+/// 已选的值也并进候选：只从数据里取候选的话，手动「添加」一个数据里没有的颜色或形状后
 /// 条件生效却没有芯片，只能整体清除。DESIGN.md 要求筛选可撤销，这里让每个已选条件都能单独点掉。
 pub(crate) fn filter_options(model: &ShellViewModel) -> FilterOptions {
     let inspect = &model.inspect;
@@ -89,7 +87,7 @@ pub(crate) enum SwatchColor {
     Accent,
 }
 
-/// Vue `filterColorStyle`。颜色名先按小写查，再按原文查。
+/// 色块颜色。颜色名先按小写查，再按原文查。
 pub(crate) fn swatch_color(name: &str) -> SwatchColor {
     let trimmed = name.trim();
     if let Some(rgb) = parse_hex(trimmed) {
@@ -109,7 +107,7 @@ fn parse_hex(value: &str) -> Option<[u8; 3]> {
     Some([channel(0)?, channel(2)?, channel(4)?])
 }
 
-/// Vue `filterColorMap`。
+/// 颜色名对应的色值。
 fn named_color(name: &str) -> Option<[u8; 3]> {
     let hex = match name {
         "red" | "红色" => "#e05252",
@@ -140,7 +138,7 @@ pub(crate) fn result_format(row: &SearchRow) -> String {
         .unwrap_or_default()
 }
 
-/// Vue `searchResultContext`：格式（没有时写「文件」）、前三个标签、颜色、形状和评分。
+/// 结果芯片：格式（没有时写「文件」）、前三个标签、颜色、形状和评分。
 pub(crate) fn result_context(row: &SearchRow) -> Vec<String> {
     let format = result_format(row);
     let mut items = vec![if format.is_empty() {
@@ -162,7 +160,7 @@ pub(crate) fn result_context(row: &SearchRow) -> Vec<String> {
     items.into_iter().filter(|item| !item.is_empty()).collect()
 }
 
-/// Vue `metadataText`：字符串原样，数字和布尔转成文字，其余为空串。
+/// 元数据的文字：字符串原样，数字和布尔转成文字，其余为空串。
 pub(crate) fn metadata_text(metadata: &BTreeMap<String, Value>, key: &str) -> String {
     match metadata.get(key) {
         Some(Value::String(text)) => text.clone(),
@@ -190,7 +188,7 @@ fn repository_name(model: &ShellViewModel) -> String {
         .unwrap_or_else(|| "当前资源库".into())
 }
 
-/// Vue `searchResultScopeLabel`。
+/// 搜索范围的文案。
 pub(crate) fn scope_label(model: &ShellViewModel) -> String {
     if model.inspect.filters.has_active_filters() {
         format!("{}内筛选", repository_name(model))
@@ -199,7 +197,7 @@ pub(crate) fn scope_label(model: &ShellViewModel) -> String {
     }
 }
 
-/// Vue `searchSummary`。
+/// 搜索摘要的文案。
 pub(crate) fn summary(model: &ShellViewModel) -> String {
     let query = &model.inspect.query;
     if model.inspect.filters.has_active_filters() {
@@ -239,7 +237,7 @@ pub(crate) fn empty_result(model: &ShellViewModel) -> Option<(&'static str, Stri
     ))
 }
 
-/// Vue `activeLibrarySearchShortcuts`：当前视图的文件或搜索结果里有该库类型的条目时，
+/// 当前视图的文件或搜索结果里有该库类型的条目时，
 /// 才显示这个库类型贡献的快捷方式。
 pub(crate) fn active_shortcuts(model: &ShellViewModel) -> Vec<SearchShortcut> {
     let shortcuts = &model.inspect.shortcuts;

@@ -1,6 +1,6 @@
 //! API Playground 的界面。
 //!
-//! 版式照 `.api-playground`：页头（眉题、22 号标题、等宽副标题，右侧刷新契约和发送）、
+//! 版式：页头（眉题、22 号标题、等宽副标题，右侧刷新契约和发送）、
 //! 提示、四个元信息块，下面左右两栏：左栏请求（传输与搜索、端点与方法、说明、目标、鉴权、
 //! 请求 JSON、复制和发送），右栏响应（状态、耗时、响应头和响应体）。
 //!
@@ -560,7 +560,7 @@ fn request_column(signals: PlaygroundSignals) -> AnyView {
             })
             .into_any(),
     );
-    // `.api-playground__check input` 是 16 见方。勾选框没有自己的文字，用旁边那段说明当读屏名称。
+    // 勾选框 16 见方。勾选框没有自己的文字，用旁边那段说明当读屏名称。
     let auth_caption = node_ref();
     let checkbox = style::native_checkbox(Checkbox::new("", initial.include_auth), 16.0);
     let auth = widget(row(8.0))

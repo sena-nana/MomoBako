@@ -1,7 +1,6 @@
 //! 搜索与筛选状态机测试。
 //!
-//! 分支来自 Vue `search.ts`、`useSearchUi.ts`、`useWorkspaceFilterShortcuts.ts` 和
-//! `openSearchHit`。不启动仓库服务，也不写用户目录。
+//! 不启动仓库服务，也不写用户目录。
 
 use std::collections::BTreeMap;
 
@@ -232,7 +231,7 @@ fn toggling_checks_the_raw_value_and_stores_the_trimmed_one() {
             value: "red".into(),
         },
     );
-    // Vue 用原值判断是否已选：带空白的同名值不在列表里，只会再加一次（去重后不变）。
+    // 按原值判断是否已选：带空白的同名值不在列表里，只会再加一次（去重后不变）。
     state.reduce(
         true,
         Some("repo"),
@@ -706,7 +705,7 @@ fn opening_a_hit_browses_its_folder_then_loads_the_asset() {
     ));
 }
 
-/// Vue `openSearchHit`：目录快照里找到文件后立刻 `setPreviewFilePath`，不等 `selectAsset`。
+/// 打开搜索命中：目录快照里找到文件后立刻打开预览，不等选中素材。
 /// 单击选中的同一条也要打开。目录还没读回来时预览保持收起。
 #[test]
 fn opening_a_search_file_shows_the_preview_before_the_detail() {
@@ -757,7 +756,7 @@ fn opening_a_search_file_shows_the_preview_before_the_detail() {
     );
 }
 
-/// Vue `openSearchHit`：命中在别的仓库时先 `await selectRepository`，换仓库走完（启动页三步）以后才读
+/// 命中在别的仓库时先换仓库，换仓库走完（启动页三步）以后才读
 /// 命中所在的目录（带目录树，任务弹层是「读取文件树」），读到了选中命中并读详情。搜索在换仓库时清空。
 #[test]
 fn opening_a_hit_in_another_repository_switches_first_and_resets_search() {

@@ -1,10 +1,10 @@
 //! 首屏启动的步骤和加载日志。
 //!
-//! 对应 Vue `AppShell.vue` 的启动区块和 `workspace/lifecycle.ts` 的 `emitStartupLog`：四个步骤、
+//! 包括四个步骤、
 //! 当前步骤的标题和说明、进度百分比，以及「加载日志」里最近 8 条记录。日志文案、级别和
-//! `键: 值 · 键: 值` 的明细格式与 Vue 一致；时间是本地时钟的「时:分:秒」。
+//! `键: 值 · 键: 值` 的明细格式固定；时间是本地时钟的「时:分:秒」。
 //!
-//! 换仓库（Vue `navigation.ts` 的 `selectRepository` 切到别的仓库）也走这块启动页，见 [`StartupMode`]。
+//! 换仓库也走这块启动页，见 [`StartupMode`]。
 
 use crate::backend::services::repository::SyncResult;
 
@@ -32,7 +32,7 @@ pub enum StartupStatus {
 
 /// 这一轮加载是首屏启动还是换仓库。
 ///
-/// 换仓库照 Vue `selectRepository`：从「切换资源库」起步，不写首屏启动日志（之前的日志留着，同步日志照常
+/// 换仓库从「切换资源库」起步，不写首屏启动日志（之前的日志留着，同步日志照常
 /// 追加），第 4 步的说明不同，失败停在启动页给「重试」，结束时不重读设置包。重试走完整的首屏启动。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum StartupMode {
@@ -41,9 +41,9 @@ pub enum StartupMode {
     Switch,
 }
 
-/// 首屏启动第 4 步等的设置数据，照 Vue `ensureRepositoryWorkspace` 在离开启动页之前 `await loadSettingsData()`：
-/// 读完首屏目录（空库、缺失仓库是选定以后）先等设置包，插件列表到了再等插件登记的播放器类型（Vue 在
-/// `loadSettingsData` 里同步前端插件注册表），都回来（失败也算）才结束启动。换仓库不读设置包，不等。
+/// 首屏启动第 4 步等的设置数据，离开启动页之前要等它：
+/// 读完首屏目录（空库、缺失仓库是选定以后）先等设置包，插件列表到了再等插件登记的播放器类型（播放器
+/// 跟着插件列表变），都回来（失败也算）才结束启动。换仓库不读设置包，不等。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum SettingsWait {
     /// 不等：还没走到这一步，或者是换仓库。
@@ -73,7 +73,7 @@ pub struct StartupStepItem {
     pub state: StartupStepState,
 }
 
-/// 同步写回的计数（Vue `lastSyncResult`），「首屏启动文件变化同步完成。」的明细用。
+/// 同步写回的计数，「首屏启动文件变化同步完成。」的明细用。
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct SyncCounts {
     pub scanned_files: i64,
@@ -97,7 +97,7 @@ impl From<&SyncResult> for SyncCounts {
     }
 }
 
-/// 读完仓库摘要时记下的数（Vue `activeSnapshot`、`playlists` 和 `activeAssetId`），摘要、首屏目录和流程完成
+/// 读完仓库摘要时记下的数（素材数、播放集数和默认预览对象），摘要、首屏目录和流程完成
 /// 三条日志的明细用。
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct IndexCounts {
@@ -133,10 +133,10 @@ pub struct StartupState {
     pub index: Option<IndexCounts>,
     /// 首屏启动第 4 步还在等的设置数据，见 [`SettingsWait`]。
     pub settings: SettingsWait,
-    /// 这一轮开始时加载日志里的活动仓库（Vue `ensureRepositoryWorkspace` 开始时的 `activeRepoId`）。
+    /// 这一轮开始时加载日志里的活动仓库。
     pub base_repo_id: Option<String>,
-    /// 这一轮已经换上了活动仓库：首屏启动读完摘要、选中缺失仓库或列表为空时，换仓库一开始就换（Vue 在这些时候
-    /// 写 `activeRepoId`）。换上以前，加载日志里的活动仓库还是 [`Self::base_repo_id`]。
+    /// 这一轮已经换上了活动仓库：首屏启动读完摘要、选中缺失仓库或列表为空时，换仓库一开始就换。
+    /// 换上以前，加载日志里的活动仓库还是 [`Self::base_repo_id`]。
     pub active_applied: bool,
 }
 
@@ -186,7 +186,7 @@ impl StartupState {
         );
     }
 
-    /// 换仓库：回到第 1 步「切换资源库」（Vue `setWorkspaceStartupProgress(1, "切换资源库", …)`）。
+    /// 换仓库：回到第 1 步「切换资源库」。
     /// 已有的加载日志留着，这一轮不再写首屏启动日志。
     pub fn begin_switch(&mut self) {
         self.mode = StartupMode::Switch;
@@ -199,7 +199,7 @@ impl StartupState {
         );
     }
 
-    /// 第 4 步「读取首屏目录」的说明：启动和换仓库各照 Vue 的原文。
+    /// 第 4 步「读取首屏目录」的说明：启动和换仓库各有一句。
     pub fn first_screen_detail(&self) -> &'static str {
         match self.mode {
             StartupMode::Launch => "加载根目录、播放列表和首屏关联数据。",
@@ -207,7 +207,7 @@ impl StartupState {
         }
     }
 
-    /// 进入指定步骤。百分比按当前步除以总步数，和 Vue 一致。步骤本身不记日志。
+    /// 进入指定步骤。百分比按当前步除以总步数。步骤本身不记日志。
     pub fn set_progress(&mut self, step: u8, label: impl Into<String>, detail: impl Into<String>) {
         let step = step.clamp(1, STARTUP_TOTAL_STEPS);
         self.status = StartupStatus::Loading;
@@ -262,7 +262,7 @@ impl StartupState {
         self.error = None;
     }
 
-    /// 步骤条规则与 `AppShell.vue` 的 `startupStepItems` 相同。
+    /// 步骤条的四项：编号、标题、说明和状态（当前步失败是失败，之前的步或启动就绪是完成）。
     pub fn step_items(&self) -> [StartupStepItem; 4] {
         std::array::from_fn(|index| {
             let number = u8::try_from(index + 1).unwrap_or(1);
@@ -291,7 +291,7 @@ impl StartupState {
         }
     }
 
-    /// 首屏启动开始等设置数据（Vue 第 4 步 `loadSettingsData` 之前）：换上第 4 步的说明，记「首屏启动开始加载应用
+    /// 首屏启动开始等设置数据：换上第 4 步的说明，记「首屏启动开始加载应用
     /// 配置与插件设置。」，明细带第 4 步和活动仓库。设置包和播放器类型都回来再由 [`Self::finish_launch`] 收尾。
     pub fn await_settings(&mut self, repo_id: Option<&str>) {
         self.set_progress(4, "读取首屏目录", "加载应用配置、插件设置和首屏辅助数据。");
@@ -303,7 +303,7 @@ impl StartupState {
         );
     }
 
-    /// 设置数据都回来了（失败也算，和 Vue `loadSettingsData` 吃掉错误一样）：首屏启动结束，记「首屏启动应用配置与
+    /// 设置数据都回来了（失败也算，错误不报）：首屏启动结束，记「首屏启动应用配置与
     /// 插件设置加载完成。」和「首屏启动流程完成。」，后者明细带活动仓库、素材数和播放集数（没读到摘要时都是 0）。
     pub fn finish_launch(&mut self, repo_id: Option<&str>) {
         self.settings = SettingsWait::None;
@@ -334,7 +334,7 @@ impl StartupState {
         self.logs.iter().rev().take(STARTUP_VISIBLE_LOGS).collect()
     }
 
-    /// 启动仍在加载时追加一条同步日志，明细照 Vue `appendStartupSyncLog` 取记录的 `context`。其它状态忽略。
+    /// 启动仍在加载时追加一条同步日志，明细取记录的 `context`。其它状态忽略。
     pub(crate) fn append_sync_log(
         &mut self,
         level: &str,
@@ -353,8 +353,7 @@ impl StartupState {
         self.push(level, message.into(), context_detail(context));
     }
 
-    /// 记一条日志。明细按 Vue `appendStartupLog` 去掉空值，用「 · 」连接。换仓库不写首屏启动日志
-    /// （Vue `selectRepository` 不调 `emitStartupLog`）。
+    /// 记一条日志。明细去掉空值，用「 · 」连接。换仓库不写首屏启动日志。
     pub(crate) fn log(
         &mut self,
         level: &'static str,
@@ -394,7 +393,7 @@ impl StartupState {
     }
 }
 
-/// 同步记录 `context` 的明细，照 Vue `appendStartupLog`：去掉 null 和空串，对象和数组写成紧凑 JSON，其余写成
+/// 同步记录 `context` 的明细：去掉 null 和空串，对象和数组写成紧凑 JSON，其余写成
 /// 字面值，`键: 值` 用「 · 」连接。不是对象或没有可写的键时为 `None`。
 fn context_detail(context: &serde_json::Value) -> Option<String> {
     let entries = context.as_object()?;
@@ -415,7 +414,7 @@ fn context_detail(context: &serde_json::Value) -> Option<String> {
     (!detail.is_empty()).then_some(detail)
 }
 
-/// 本地时间「时:分:秒」，和 Vue `toLocaleTimeString("zh-CN", { hour12: false })` 的写法一致。
+/// 本地时间「时:分:秒」，24 小时制。
 pub fn local_clock() -> String {
     #[cfg(windows)]
     {

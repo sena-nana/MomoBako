@@ -13,7 +13,7 @@ use super::{
 };
 
 impl ShellViewModel {
-    /// 变更以后刷新工作区（Vue `refreshWorkspaceAfterMutation`，仓库动作执行完、确认硬链接以后）：静默重读
+    /// 变更以后刷新工作区（仓库动作执行完、确认硬链接以后）：静默重读
     /// 仓库摘要；当前不在回收站、也不是智能文件夹时非静默地重读当前目录，选择留着，任务弹层出「读取目录」。
     /// 已经换了仓库就不读。
     pub(super) fn reload_after_mutation(&mut self, repo_id: &str) {
@@ -133,9 +133,9 @@ impl ShellViewModel {
                 self.repository_id = Some(repo_id.clone());
                 self.apply_snapshot_sidebar(&snapshot);
                 if refreshing {
-                    // Vue `selectRepository` 同一个仓库读完摘要也 `rememberLastActiveRepository`。
+                    // 同一个仓库读完摘要也记成上次打开的资源库。
                     self.workspace.remember_repository(Some(repo_id.clone()));
-                    // Vue `selectRepository` 同一个仓库：摘要一到就重读素材详情，选中路径先不动。
+                    // 同一个仓库：摘要一到就重读素材详情，选中路径先不动。
                     self.reload_asset_after_refresh(&snapshot);
                     self.reload_repository_side_data(&repo_id);
                     self.begin_refresh_directory();
@@ -160,8 +160,7 @@ impl ShellViewModel {
         }
     }
 
-    /// 启动日志里摘要的计数（Vue `applyRepositorySnapshotState` 以后的 `activeSnapshot`、`playlists` 和
-    /// `activeAssetId`）：素材数、播放集数，默认预览对象是之前选中的素材（还在这份摘要里时），否则是第一个素材。
+    /// 启动日志里摘要的计数：素材数、播放集数，默认预览对象是之前选中的素材（还在这份摘要里时），否则是第一个素材。
     fn index_counts(&self, snapshot: &RepositorySnapshot) -> IndexCounts {
         let selected = self
             .inspect
@@ -213,7 +212,7 @@ impl ShellViewModel {
         }
         self.browser_entries = browser.entries;
         self.current_directory = browser.current_path.clone();
-        // Vue `applyFileBrowserSnapshot`：快照带着树才换侧栏，没有树时不动。过期快照在上面已经返回。
+        // 快照带着树才换侧栏，没有树时不动。过期快照在上面已经返回。
         if let Some(tree) = browser.tree.as_deref() {
             self.sidebar
                 .apply_tree(&browser.repo_id, Ok(super::SidebarTree::from_nodes(tree)));
@@ -233,7 +232,7 @@ impl ShellViewModel {
 
     /// 快捷访问点的文件：父目录快照已经写进列表以后，才把这一行选成当前项。
     ///
-    /// Vue `openQuickAccess` 先等 `loadFileBrowserForDirectory` 读完父目录，再 `selectWorkspaceEntry`。
+    /// 先等父目录读完，再选中这一行。
     /// 和单击同一条一样只选中、读素材详情，不打开预览。这一页没有该文件时不选，记一条日志。
     fn land_quick_file(&mut self) {
         let Some(path) = self
@@ -315,7 +314,7 @@ impl ShellViewModel {
         self.settle_repository_refresh();
     }
 
-    /// Vue `resetActiveRepositoryContent`：清掉上一个仓库的目录、选择、预览、搜索和侧栏内容。
+    /// 清掉上一个仓库的目录、选择、预览、搜索和侧栏内容。
     /// 换仓库还在走时侧栏先清空，读完摘要（同步以后）再绑定新仓库；缺失、空库和启动以后的直接绑定。
     fn reset_repository_content(&mut self) {
         self.files.reset_for_repository();
@@ -355,7 +354,7 @@ impl ShellViewModel {
         }
     }
 
-    /// 同一个仓库刷新时照 Vue `queueRepositoryBackgroundLoads` 在后台重读侧栏（目录树、智能文件夹、播放集）、
+    /// 同一个仓库刷新时在后台重读侧栏（目录树、智能文件夹、播放集）、
     /// 仓库动作和硬链接候选。
     fn reload_repository_side_data(&mut self, repo_id: &str) {
         let panel = self.workspace.panel;
@@ -377,7 +376,7 @@ impl ShellViewModel {
         }
     }
 
-    /// 同仓库刷新在等目录：目录不再在读时收尾。读当前目录失败、又不是根目录时，照 Vue 先退回根目录再读一次。
+    /// 同仓库刷新在等目录：目录不再在读时收尾。读当前目录失败、又不是根目录时，先退回根目录再读一次。
     fn settle_repository_refresh(&mut self) {
         if self.workspace.refresh_stage() != Some(RefreshStage::Directory) || self.files.loading {
             return;

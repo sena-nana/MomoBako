@@ -1,6 +1,6 @@
 //! 设置页卡片的投影和常驻信号（插件管理面板另有自己的，见 `shell/admin/plugins_state.rs`）。
 //!
-//! [`SettingsView`] 按 `Settings.vue` 算好音频、外观、仓库服务、外部素材接入、缓存和 API 设计
+//! [`SettingsView`] 算好音频、外观、仓库服务、外部素材接入、缓存和 API 设计
 //! 各卡片要显示的文字；[`SettingsSignals`] 每张卡片一个信号，同步时只写变了的那张。
 
 use nana_ui::runtime::view::{Signal, signal};
@@ -62,7 +62,7 @@ pub(crate) struct ExternalCard {
     pub message: String,
 }
 
-/// `.kv` 的一行：名称、值，末行没有分割线。没有编号，身份是内容加位置。
+/// 键值表的一行：名称、值，末行没有分割线。没有编号，身份是内容加位置。
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct KvRow {
     pub key: String,

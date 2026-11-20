@@ -1,6 +1,6 @@
 //! 压缩包嵌套层数。
 //!
-//! 对齐 Vue `preview-archive` 的 `nestedDepthExceeded` 和
+//! 对齐 `preview-archive` 插件的 `nestedDepthExceeded` 和
 //! `service-archive-preview` 的默认 `maxNestedDepth`（提交 `1948ed9`，默认 5）。
 //! 外层压缩包不算一层。点进第 5 个 zip、cbz 或 7z 以后，这一层里的 zip、cbz 和 7z 不再展开：
 //! 行尾写「嵌套深度已达上限」，点开停在名单上，舞台写「无法预览内部文件」。
@@ -8,10 +8,10 @@
 
 use super::super::super::{ArchiveFileNotice, InspectState};
 
-/// Vue 默认嵌套上限。扫到这一层里的压缩包文件就不再解开。
+/// 默认嵌套上限。扫到这一层里的压缩包文件就不再解开。
 const MAX_NESTED_DEPTH: usize = 5;
 
-/// 行尾替换大小的那句。和 Vue 名单上的说明同一句。
+/// 行尾替换大小的那句。
 const DEPTH_NOTE: &str = "嵌套深度已达上限";
 
 /// 这一层已经到上限时，把 zip、cbz 和 7z 行尾的大小换成「嵌套深度已达上限」。
@@ -28,14 +28,14 @@ pub(super) fn limit_layer_text(text: String, depth: usize) -> String {
         .join("\n")
 }
 
-/// 点开的是已经到上限的 zip、cbz 或 7z 时停住，并写上 Vue 取包内预览时的那句原因。
+/// 点开的是已经到上限的 zip、cbz 或 7z 时停住，并写上取包内预览失败的原因。
 ///
 /// 返回真表示这次点击已经处理完，调用方不要再去取字节。不到上限、或不是这三种时返回假。
 pub(super) fn refuse_past_depth(state: &mut InspectState, path: &str) -> bool {
     if state.archive_nests.len() < MAX_NESTED_DEPTH || !nestable_file(path) {
         return false;
     }
-    // 和 Vue `prepareEntryPreview` 在嵌套目录没解开时交回的原因同一句，舞台原样显示。
+    // 嵌套目录没解开时交回的原因，舞台原样显示。
     // `selectEntry` 仍把这一行标成当前项，不因为展不开就把选中清掉。
     let message = format!("nested archive depth limit reached: {path}");
     eprintln!("Nana 压缩包嵌套已到第 {MAX_NESTED_DEPTH} 层，不再展开：{path}");
@@ -250,7 +250,7 @@ mod tests {
         assert_eq!(state.archive_nests.len(), 5, "打开普通文件不丢掉这一层");
     }
 
-    /// Vue `archivePreviewExtensions` 把 cbz 和 zip 放在一起，`archive_format_for_path` 把 cbz 当成 Zip。
+    /// 预览扩展名里 cbz 和 zip 放在一起，`archive_format_for_path` 把 cbz 当成 Zip。
     /// 目录单击只选中，再次进入只过滤已经列出的名字。cbr 在同一函数里是 Rar，仍不进入。
     #[test]
     fn archive_cbz_enters_current_layer_like_zip() {
@@ -490,7 +490,7 @@ mod tests {
         assert_eq!(text, "n");
     }
 
-    /// 点开的文件行是当前项，和 Vue `is-selected` 一样。目录不再亮。再点另一条，当前项跟着换。
+    /// 点开的文件行是当前项。目录不再亮。再点另一条，当前项跟着换。
     /// 不能内联的类型也标这一行。名单里没有的名字不改当前项。点目录后当前项回到目录。
     #[test]
     fn archive_opened_file_row_is_selected() {
@@ -587,7 +587,7 @@ mod tests {
         assert!(!row_selected(&picked, row_index(&picked, "clip.bin")));
     }
 
-    /// 点目录照 Vue `selectEntry` 再经 `renderInternalPreview`：目录没有扩展名，舞台写目录名和
+    /// 点目录先选中再渲染内部预览：目录没有扩展名，舞台写目录名和
     /// 「无法内联预览该文件类型」。已经打开的内部文件收起，名单留在左边。进入这一层后才回到空闲提示。
     #[test]
     fn archive_directory_click_puts_the_directory_on_the_stage() {

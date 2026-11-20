@@ -7,7 +7,7 @@
 //!   步骤和日志用带 key 的 `each`，状态变了的那一行才重建；进度条直接绑热信号；
 //! - 按钮的事件处理器只发意图消息，不捕获任何会过期的值。
 //!
-//! 版式照 Vue `AppShell.vue` 的 `.workspace-startup`：眉题、步骤标题、「第 N / M 步」、6px 进度条、
+//! 版式：眉题、步骤标题、「第 N / M 步」、6px 进度条、
 //! 步骤说明、四个步骤圆标、错误条、「加载日志」和失败后的「重试」。
 
 use std::sync::Arc;
@@ -26,7 +26,7 @@ use super::startup_view::{ROOT_LINE_HEIGHT, eyebrow, fill_section, line, margin,
 use super::workspace::{StartupLog, StartupStatus, StartupStepItem, StartupStepState};
 use super::{ShellMessage, ShellViewModel};
 
-/// 启动页内容最宽 680px（`.workspace-startup__panel`）。
+/// 启动页内容最宽 680px。
 const PANEL_WIDTH: f32 = 680.0;
 /// 加载日志框最高 240px，超出滚动。
 const LOG_PANEL_MAX_HEIGHT: f32 = 240.0;
@@ -115,8 +115,8 @@ impl StartupSignals {
     }
 }
 
-/// 启动页：Vue 主区内容层 `overflow: auto`，窗口矮时整页连同内边距一起滚动；
-/// `.workspace-startup` 的 `min-height: 100%` 让内容在高窗口里上下居中。
+/// 启动页：主区内容层可滚动，窗口矮时整页连同内边距一起滚动；
+/// 内容最小高度占满主区，在高窗口里上下居中。
 pub(super) fn view(signals: StartupSignals, hot: HotSignals) -> AnyView {
     let section = widget(fill_section())
         .children((panel(signals, hot),))

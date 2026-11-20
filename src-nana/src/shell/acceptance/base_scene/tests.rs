@@ -1,5 +1,5 @@
-//! 验收场景的工作区底子和 Vue 夹具 `base()` 对齐：侧栏计数、目录树、根目录条目和展示方式都从启动消息
-//! 算出来，和 `tmp/vue-mock/scenes/*.ts` 同名场景的数据一致。
+//! 验收场景的工作区底子：侧栏计数、目录树、根目录条目和展示方式都从启动消息
+//! 算出来，和共用夹具的数据一致。
 
 use crate::shell::files::DisplayMode;
 use crate::shell::{ShellPage, ShellViewModel, StartupStatus};
@@ -59,7 +59,7 @@ fn assert_base(name: &str, model: &mut ShellViewModel) {
         ["assets", "cover.png", "notes/page.pdf"],
         "{name} 的根目录条目不对"
     );
-    // Vue `settings-error` 场景的 `list_plugins` 一直失败，启动结束时也读不到插件。
+    // `settings-error` 场景的 `list_plugins` 一直失败，启动结束时也读不到插件。
     let plugins_expected = name != "SettingsError";
     assert_eq!(
         !model.admin.plugins.is_empty(),

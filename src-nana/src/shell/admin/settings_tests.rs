@@ -23,7 +23,7 @@ fn with_theme(theme: &str) -> ApplicationSettings {
     }
 }
 
-/// 设置页插件卡片的运行时芯片照 Vue `pluginRuntimeLabel`：`vue-module` 写「Vue 模块」，不写成「未知运行时」。
+/// 设置页插件卡片的运行时芯片：前端模块运行时写它自己的中文名，不写成「未知运行时」。
 #[test]
 fn vue_module_plugins_show_the_vue_runtime_chip() {
     let mut harness = ShellHarness::mount(ShellViewModel::for_page(ShellPage::Settings));
@@ -115,7 +115,7 @@ fn a_settings_read_from_before_a_change_does_not_overwrite_it() {
 }
 
 /// 插件「打开目录」：查到目录时还没打开，不先说已打开；打不开时原因写在插件面板上，不进状态区；
-/// 打开了才写「已打开…设置目录。」（Vue `openPluginDataDirectoryInWorkspace` 等 `openRepositoryPath`）。
+/// 打开了才写「已打开…设置目录。」。
 #[test]
 fn the_data_directory_notice_waits_for_the_open() {
     let mut model = ShellViewModel::default();

@@ -1,4 +1,4 @@
-//! 验收场景共用的插件和设置包夹具：照 `tmp/vue-mock/ipc.ts` 的 `realPlugins`、`get_cache_snapshot`、
+//! 验收场景共用的插件和设置包夹具：真实插件清单、`get_cache_snapshot`、
 //! `get_api_design_snapshot` 和 `get_external_api_connection_status` 应答。
 //!
 //! 产品启动结束时读一次设置包、插件列表换新后读一次播放器类型，底子（`shell/acceptance/base_scene.rs`）和
@@ -83,7 +83,7 @@ pub(super) fn bundle_loaded(plugins: Vec<PluginManifest>) -> AdminMessage {
     bundle_with(Ok(plugins))
 }
 
-/// 插件目录读取失败的设置包：其它三份照常应答，整批失败，这三份也不写入。
+/// 插件目录读取失败的设置包：其它三份照常应答，但整批算失败，这三份也不写入。
 pub(super) fn bundle_failed(error: &str) -> AdminMessage {
     bundle_with(Err(error.to_string()))
 }
@@ -97,7 +97,7 @@ fn bundle_with(plugins: Result<Vec<PluginManifest>, String>) -> AdminMessage {
     }
 }
 
-/// 照 `tmp/vue-mock/ipc.ts` 的 `realPlugins`：已启用、就绪、内置来源、依赖全部可用。
+/// 把清单改成已启用、就绪、内置来源、依赖全部可用。
 fn mock_install(manifest: &mut Map<String, Value>) {
     let version = manifest
         .get("version")

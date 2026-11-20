@@ -1,7 +1,7 @@
-//! 任务弹层的「仓库操作」行：对应 Vue `composables/workspace/tasks.ts` 的 `operationProgress`。
+//! 任务弹层的「仓库操作」行。
 //!
 //! 只有一个槽位，最后开始的操作占着它。开始一次操作拿到编号，之后的更新、完成和取消都带着编号；
-//! 编号已经不是槽位里的那一个（被后来的操作顶掉）时什么也不做，和 Vue `operationProgressId` 一样。
+//! 编号已经不是槽位里的那一个（被后来的操作顶掉）时什么也不做。
 //! 等待时每 [`CLIMB_INTERVAL_MS`] 往上爬一次：35 以下加 5、70 以下加 3、其余加 1，不超过
 //! [`CLIMB_CEILING`]；完成时停在 100%，过 [`FINISH_LINGER_MS`] 收起；取消立刻收起。
 //!
@@ -12,11 +12,11 @@
 
 use super::tree_sync::now_ms;
 
-/// Vue `setInterval(.., 220)`：等待中的进度隔多久往上爬一次。
+/// 等待中的进度隔多久往上爬一次。
 pub const CLIMB_INTERVAL_MS: u64 = 220;
-/// Vue `finishOperationProgress` 停在 100% 以后、收起之前的停留。
+/// 完成时停在 100% 以后、收起之前的停留。
 pub const FINISH_LINGER_MS: u64 = 180;
-/// Vue `startOperationProgress` 的默认 `ceiling`：等待中最多爬到这里。
+/// 等待中最多爬到这里。
 pub const CLIMB_CEILING: f64 = 88.0;
 
 /// 仓库操作行显示的内容。
@@ -30,7 +30,7 @@ pub struct OperationProgress {
     pub value: f64,
     /// 不确定进度：不显示百分比，进度条呼吸。
     pub indeterminate: bool,
-    /// 上一次变化的墙钟毫秒。任务弹层按它和运行中的任务一起排先后（Vue 每次重算都取 `Date.now()`）。
+    /// 上一次变化的墙钟毫秒。任务弹层按它和运行中的任务一起排先后。
     pub updated_at_ms: i64,
     /// 这次操作在后台跑的任务协议（例如加载资源库跑同步）。任务弹层里这些协议的后台任务就是这一行表示的
     /// 同一件事，不再单列（`admin_support::popover_rows`）。
@@ -41,7 +41,7 @@ pub struct OperationProgress {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct OperationId(u64);
 
-/// 开始一次操作：种类、阶段、起始百分比和是否不确定（Vue `startOperationProgress` 的参数）。
+/// 开始一次操作：种类、阶段、起始百分比和是否不确定。
 #[derive(Clone, Debug, PartialEq)]
 pub struct OperationStart {
     pub label: String,
@@ -63,7 +63,7 @@ impl OperationStart {
         }
     }
 
-    /// 标成不确定进度（Vue `{ indeterminate: true }`）。
+    /// 标成不确定进度。
     pub fn indeterminate(mut self) -> Self {
         self.indeterminate = true;
         self
@@ -76,7 +76,7 @@ impl OperationStart {
     }
 }
 
-/// 更新进行中的操作，只改给了的字段（Vue `updateOperationProgress` 的补丁）。
+/// 更新进行中的操作，只改给了的字段。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct OperationPatch {
     pub detail: Option<String>,
@@ -211,8 +211,7 @@ impl RepositoryOperation {
     /// 准备帧拨时钟：到点往上爬，完成停留到点收起。返回槽位显示的内容有没有变。
     ///
     /// 算法：每过一个 [`CLIMB_INTERVAL_MS`] 爬一级，增量看爬之前的值（35 以下 5、70 以下 3、其余 1），
-    /// 到 [`CLIMB_CEILING`] 停住；已经被更新到上限以上的值不往回压（Vue 的 `Math.min` 会压回 88，
-    /// 但它的更新和完成总在同一拍里，看不到这一步）。
+    /// 到 [`CLIMB_CEILING`] 停住；已经被更新到上限以上的值不往回压。
     pub fn tick(&mut self, step_ms: u64) -> bool {
         self.clock_ms = self.clock_ms.saturating_add(step_ms);
         let clock = self.clock_ms;

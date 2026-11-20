@@ -94,7 +94,7 @@ fn netease(logged_in: bool, login_expired: bool, others: Vec<RepositorySummary>)
     .model()
 }
 
-/// 右键单曲：选中它、打开菜单，再照 Vue 模拟 IPC 答上右键选中时读的素材详情。
+/// 右键单曲：选中它、打开菜单，再按夹具答上右键选中时读的素材详情。
 fn open_menu(model: &mut ShellViewModel) {
     model.reduce(ShellMessage::Files(FilesMessage::OpenEntryMenu {
         path: TRACK.into(),
@@ -114,7 +114,7 @@ fn open_menu(model: &mut ShellViewModel) {
     let _ = model.inspect.take_effects();
 }
 
-/// 登录过期：照 Vue `actionDisabled`，网易云的条目动作都禁用，后面一行写「来源认证或本地缓存不可用」。
+/// 登录过期：网易云的条目动作都禁用，后面一行写「来源认证或本地缓存不可用」。
 fn unavailable_menu() -> ShellViewModel {
     let mut model = netease(
         true,
@@ -189,7 +189,7 @@ fn open_online_preview(model: &mut ShellViewModel) -> Option<(String, u64)> {
 }
 
 /// 预览在线单曲，播放源还在准备（来源插件在下载）：预览框是准备卡，写文件名和「准备音频」，进度不定；
-/// 播放条还没被接管。和旧版一样，准备期间看不到中间阶段。
+/// 播放条还没被接管。准备期间看不到中间阶段。
 fn online_preview_preparing() -> ShellViewModel {
     let mut model = netease_base(vec![online_track()], true, false).model();
     open_online_preview(&mut model);

@@ -1,4 +1,4 @@
-//! 访问记录的测试：侧栏「最近使用」的计数照 Vue 当场更新，「清空记录」当场归零，「打开」记一次访问，
+//! 访问记录的测试：侧栏「最近使用」的计数当场更新，「清空记录」当场归零，「打开」记一次访问，
 //! 访问时间只留最近的 50 条。
 
 use crate::backend::services::repository::AssetSummary;
@@ -26,7 +26,7 @@ fn accessed(model: &mut ShellViewModel, path: &str, at: &str) {
     });
 }
 
-/// Vue `patchActiveSnapshotAssetAccess`：记下访问以后侧栏「最近使用」的计数当场变，不重读目录、不重读摘要；
+/// 记下访问以后侧栏「最近使用」的计数当场变，不重读目录、不重读摘要；
 /// 同一条再访问不重复计数。记录失败、别的资源库、摘要里没有的路径都不动。
 #[test]
 fn an_access_updates_the_recent_count_on_the_spot() {
@@ -66,7 +66,7 @@ fn an_access_updates_the_recent_count_on_the_spot() {
     assert_eq!(model.sidebar.counts.recent, 2);
 }
 
-/// 「清空记录」成功照 Vue `clearActiveSnapshotRecentAccess` 当场清掉素材的访问时间：计数归零，之后再访问从 1 数起。
+/// 「清空记录」成功后当场清掉素材的访问时间：计数归零，之后再访问从 1 数起。
 #[test]
 fn clearing_recent_history_resets_the_count_at_once() {
     let mut model = model();
@@ -182,7 +182,7 @@ fn clearing_recent_history_shows_busy_until_the_result() {
     assert!(harness.find("清空中...").is_none());
 }
 
-/// 「打开」照 Vue `openWorkspaceEntry` 记一次访问：系统程序照常打开，访问记录排给宿主，带仓库内的相对路径。
+/// 「打开」记一次访问：系统程序照常打开，访问记录排给宿主，带仓库内的相对路径。
 #[test]
 fn opening_an_entry_records_an_access() {
     let mut model = model();
@@ -265,7 +265,7 @@ fn an_access_keeps_only_the_latest_fifty() {
     assert!(!kept.contains(&"track-00.mp3"), "最早的访问被修剪");
 }
 
-/// 修剪的先后照 Vue：访问时间相同时修改时间早的先清；删掉的素材不记访问。
+/// 修剪的先后：访问时间相同时修改时间早的先清；删掉的素材不记访问。
 #[test]
 fn pruning_follows_vue_ordering_and_skips_deleted_assets() {
     let mut assets: Vec<AssetSummary> = (0..49)

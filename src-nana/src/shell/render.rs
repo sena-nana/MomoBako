@@ -11,7 +11,7 @@ use nana_ui::{RegionId, RegionRole, RegionState, WorkspaceLayout, WorkspaceModel
 const NARROW_WINDOW_PX: f32 = 390.0;
 /// Nana 工作区在两条轨道之间留的发丝间隙，画的是壳层底色，和侧栏同色。
 pub(super) const WORKBENCH_GAP_PX: f32 = nana_ui_core::HAIRLINE;
-/// Vue `.shell` 的 `--lilia-primary-inset`：主区内容左右 24、上下 20。
+/// 主区内容左右 24、上下 20。
 pub(super) const PRIMARY_INSET_X: f32 = 24.0;
 pub(super) const PRIMARY_INSET_Y: f32 = 20.0;
 
@@ -21,15 +21,15 @@ fn primary_min_px() -> f32 {
     (NARROW_WINDOW_PX - crate::theme_map::SIDEBAR_DEFAULT_PX).max(96.0)
 }
 
-/// Vue 标题栏高度。启动页的 `min-height: 100%` 要扣掉它和主区内边距。
+/// 标题栏高度。启动页的最小高度要扣掉它和主区内边距。
 pub(super) const TITLE_BAR_PX: f32 = 36.0;
 
 /// 骨架里的工作区：资源区和主区，资源区宽度按侧栏呈现宽度给。主区圆角，不画常驻浅色分割条。
 /// 区域内容由 `ShellView` 挂好后放进来，宽度之后由绑定跟着侧栏呈现宽度走。
 ///
-/// Vue 的主区紧贴侧栏（侧栏 276 时主区从 x=276 起）。Nana 两条轨道之间多一条发丝间隙，
+/// 主区要紧贴侧栏（侧栏 276 时主区从 x=276 起）。Nana 两条轨道之间多一条发丝间隙，
 /// 所以资源区少给一条间隙，侧栏右内边距也少一条（见 `sidebar_frame`），
-/// 侧栏看上去仍是 `width` 宽，内容盒和 Vue 一样。
+/// 侧栏看上去仍是 `width` 宽，内容盒不变。
 pub(super) fn workbench_workspace(width: f32) -> Workspace {
     let layout = WorkspaceLayout::new([
         RegionState::new(RegionId::Resources, RegionRole::Resources)

@@ -140,7 +140,7 @@ fn routine_updates_keep_every_sidebar_node() {
         }]),
         ShellMessage::Player(crate::shell::player::PlayerMessage::SetVolume(0.5)),
         ShellMessage::Inspect(crate::shell::InspectMessage::SetQuery("封面".into())),
-        // 侧栏点「全部」离开设置页，和 Vue 侧栏导航离开 `/settings` 一样。
+        // 侧栏点「全部」离开设置页。
         sidebar(SidebarMessage::SelectShortcut(
             crate::shell::ShortcutId::All,
         )),
@@ -434,7 +434,7 @@ fn quick_access_rows_follow_the_snapshot() {
     harness.assert_same_as_fresh_mount();
 }
 
-/// 播放集行的悬停提示照 Vue `title`：播放是「播放」，删除是「删除」。
+/// 播放集行的悬停提示：播放是「播放」，删除是「删除」。
 /// 读屏名仍是「播放播放集」「删除播放集」，点下去的动作不变。
 #[test]
 fn playlist_row_buttons_show_vue_play_and_delete_titles() {

@@ -1,9 +1,9 @@
 //! 任务弹层。首页的日志、拓展和动作面板是常驻路由，见 `route_admin.rs`。
 //!
-//! 任务弹层照 `TaskPopover.vue`：340 宽，贴在侧栏底部任务按钮上方；每个任务一块，
+//! 任务弹层：340 宽，贴在侧栏底部任务按钮上方；每个任务一块，
 //! 来源加进度条（标签、细节、百分比）。任务弹层常驻：任务按键增删行，进度、标签和细节只改
-//! 绑定的字段；进度条的填充宽度照 `.progress-bar__fill` 按 0.18s 过渡（动效时钟在 `motion.rs`，逐帧的
-//! 宽度经热信号写进来）；点弹层外面关闭（Vue 的外部按下）。
+//! 绑定的字段；进度条的填充宽度按 0.18s 过渡（动效时钟在 `motion.rs`，逐帧的
+//! 宽度经热信号写进来）；在弹层外面按下就关闭。
 
 use std::sync::Arc;
 
@@ -23,7 +23,7 @@ use super::AdminMessage;
 use super::icons;
 use super::style::{self, column, label, pad, row};
 
-/// Vue 定位弹层用的高度估计：`min(360, max(180, 96 + 任务数 × 70))`。
+/// 定位弹层用的高度估计：`min(360, max(180, 96 + 任务数 × 70))`。
 fn estimated_height(count: usize) -> f32 {
     (96.0 + count as f32 * 70.0).clamp(180.0, 360.0)
 }
@@ -68,7 +68,7 @@ impl TaskPopoverView {
     }
 }
 
-/// 弹层的行：任务编号做键（重复时加序号），百分比按 Vue `clampPercent` 夹到 0–100 再取整。
+/// 弹层的行：任务编号做键（重复时加序号），百分比夹到 0–100 再取整。
 fn task_row_views(model: &ShellViewModel) -> Vec<TaskRowView> {
     let tasks = model.task_rows();
     let keys = style::unique_keys(tasks.iter().map(|task| task.id.as_str()));
@@ -127,7 +127,7 @@ pub(crate) fn task_popover(model: &ShellViewModel) -> Option<AnyView> {
             widget(label("当前没有运行中的任务。", 12.0, 400, Role::Faint)).key("admin-task-empty"),
         ))
         .into_any();
-    // `.task-popover__list`：弹层最高 360，任务多时列表自己滚动。
+    // 弹层最高 360，任务多时列表自己滚动。
     let scroll = ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
         layout.flex_grow = Some(1.0);
         layout.flex_shrink = Some(1.0);
@@ -186,7 +186,7 @@ pub(crate) fn task_popover(model: &ShellViewModel) -> Option<AnyView> {
     )
 }
 
-/// 弹层外的透明点击层：点弹层外面关闭，和 Vue 的外部按下一致。
+/// 弹层外的透明点击层：在弹层外面按下就关闭。
 fn dismiss_layer() -> AnyView {
     let mut style = nana_ui::runtime::NodeStyle::default();
     {
@@ -325,9 +325,9 @@ fn task_item(
     .into_any()
 }
 
-/// `ProgressBar.vue`：6 高的药丸轨道，填充至少 18 宽；下面是标签、细节和百分比，间距 7。填充宽度照
-/// `transition: width 0.18s ease` 取动效时钟这一帧的值（`fills`；不经 `ShellView` 建树时没有，直接用目标宽度）。
-/// 不确定进度（`.progress-bar--indeterminate`）不写百分比，填充按 `progress-pulse` 呼吸（减少动态效果时不呼吸）。
+/// 进度条：6 高的药丸轨道，填充至少 18 宽；下面是标签、细节和百分比，间距 7。填充宽度按
+/// 0.18s ease 过渡，取动效时钟这一帧的值（`fills`；不经 `ShellView` 建树时没有，直接用目标宽度）。
+/// 不确定进度不写百分比，填充按 `progress-pulse` 呼吸（减少动态效果时不呼吸）。
 fn progress_bar(
     view: Signal<TaskPopoverView>,
     key: &str,

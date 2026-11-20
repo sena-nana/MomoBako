@@ -1,4 +1,4 @@
-//! 停用的图标按钮照 Vue `button:disabled { opacity: 0.45 }` 只淡一次。
+//! 停用的图标按钮按 0.45 不透明度只淡一次。
 //!
 //! NanaUI 的 `IconButton` 停用时只给按种类配色的按钮整枚淡到 50%（线性空间合成）；`colors_from_style` 的按钮
 //! 照自己写的 `style.interaction.disabled` 画，节点不透明度照写的来。壳层里会停用的图标按钮都走后一种：
@@ -87,7 +87,7 @@ fn assert_mixed_over_surface(harness: &ShellHarness, id: StableNodeId, label: &s
     );
 }
 
-/// 传输按钮是 `IconButton`，自绘按停用状态混好颜色；提示照 Vue 只有循环模式有。
+/// 传输按钮是 `IconButton`，自绘按停用状态混好颜色；提示只有循环模式有。
 #[test]
 fn disabled_player_buttons_are_dimmed_only_by_their_painter() {
     let harness = ShellHarness::mount(scene("live-files"));

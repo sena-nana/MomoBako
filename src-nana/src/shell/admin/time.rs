@@ -1,8 +1,8 @@
 //! 日志和插件执行记录的时间显示。
 //!
-//! Vue 用 `Intl.DateTimeFormat("zh-CN")` 按本机时区显示 `MM/DD HH:mm:ss`。这里把 RFC 3339 时间
-//! 解析成 UTC 秒，再用 C 运行库的 `localtime` 取本机时区偏移（含夏令时），格式和 Vue 一致。
-//! 解析不了的时间原样返回，和 Vue 对无效日期的处理相同。
+//! 按本机时区显示 `MM/DD HH:mm:ss`。这里把 RFC 3339 时间
+//! 解析成 UTC 秒，再用 C 运行库的 `localtime` 取本机时区偏移（含夏令时）。
+//! 解析不了的时间原样返回。
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

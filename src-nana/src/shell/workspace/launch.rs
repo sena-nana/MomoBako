@@ -1,6 +1,5 @@
 //! 首屏启动流程：读资源库列表、同步、读仓库摘要、读首屏目录，再等设置包和播放器类型。
 //!
-//! 对应 Vue `workspace/lifecycle.ts` 的 `ensureRepositoryWorkspace` / `loadInitialRepository` 和 `emitStartupLog`。
 //! 步骤条和加载日志的数据在 `shell/workspace/startup.rs`，换仓库和同一个仓库的刷新在 `shell/workspace/switch.rs`；这里是
 //! 把服务结果一步步推进成启动状态的那段状态机。换仓库借用其中的同步、读摘要和首屏目录三步。
 
@@ -32,7 +31,7 @@ impl WorkspaceState {
     }
 
     /// 开始一轮启动：记下「流程开始」和「开始读取资源库列表」，步骤条进入第 1 步。「流程开始」的活动仓库是
-    /// 上一轮留下的（[`Self::logged_active_repo_id`]），重试时和 Vue 一样带着失败那一轮已经换上的仓库。
+    /// 上一轮留下的（[`Self::logged_active_repo_id`]），重试时带着失败那一轮已经换上的仓库。
     fn begin_startup(&mut self) {
         let active = self.logged_active_repo_id();
         self.startup
@@ -49,7 +48,7 @@ impl WorkspaceState {
         );
     }
 
-    /// 加载日志里的活动仓库，照 Vue `activeRepoId` 的时机：首屏启动换上目标（读完摘要、选中缺失仓库、列表为空）
+    /// 加载日志里的活动仓库：首屏启动换上目标（读完摘要、选中缺失仓库、列表为空）
     /// 以前还是这一轮开始时的值，换仓库一开始就是目标。Nana 的 `active_repo_id` 在选中时就换成目标，日志不能直接用它。
     fn logged_active_repo_id(&self) -> Option<String> {
         if self.startup.active_applied || self.startup.mode == StartupMode::Switch {
@@ -59,8 +58,8 @@ impl WorkspaceState {
         }
     }
 
-    /// 启动失败：停在当前步骤，日志照 Vue 带上活动仓库（读完摘要以后才是这次的仓库）和正在加载的目标资源库。
-    /// 换仓库失败照 Vue 不写日志（`StartupState::log` 跳过），任务弹层这一行取消。
+    /// 启动失败：停在当前步骤，日志带上活动仓库（读完摘要以后才是这次的仓库）和正在加载的目标资源库。
+    /// 换仓库失败不写日志（`StartupState::log` 跳过），任务弹层这一行取消。
     fn fail_startup(&mut self, error: impl Into<String>) {
         let (active, target) = (self.logged_active_repo_id(), self.active_repo_id.clone());
         self.startup
@@ -176,7 +175,7 @@ impl WorkspaceState {
     }
 
     /// 启动（含换仓库）第 3 步的摘要到了：成功记下摘要计数、进入第 4 步、排下首屏目录的读取，记住这个仓库
-    /// （Vue 读完摘要才 `rememberLastActiveRepository`）；失败停在第 3 步。调用方先用 [`Self::awaits_snapshot`]
+    /// （读完摘要才记）；失败停在第 3 步。调用方先用 [`Self::awaits_snapshot`]
     /// 认过代次和仓库。
     pub fn note_index_finished(&mut self, result: Result<IndexCounts, String>) {
         if self.startup.status != StartupStatus::Loading || self.startup.current_step != 3 {
@@ -286,8 +285,8 @@ impl WorkspaceState {
         self.startup.finish_launch(repo_id.as_deref());
     }
 
-    /// 工作区的内容已经读好：启动结束了，或者首屏启动读完首屏目录、只在等设置包。Vue 这时已经换上了
-    /// `activeRepoId`，结构更新照常静默刷新，Nana 在等设置包的这段也一样，不丢掉外面的改动。
+    /// 工作区的内容已经读好：启动结束了，或者首屏启动读完首屏目录、只在等设置包。这时活动仓库已经换上，
+    /// 结构更新照常静默刷新，不丢掉外面的改动。
     pub fn content_loaded(&self) -> bool {
         self.startup.status == StartupStatus::Ready || self.startup.settings != SettingsWait::None
     }

@@ -1,8 +1,8 @@
-//! 按 zh-CN 排序，对应 Vue 的 `localeCompare`：筛选候选和播放器类型都按它排。
+//! 按 zh-CN 排序：筛选候选和播放器类型都按它排。
 //!
 //! WebView2 的 `localeCompare` 走 ICU 的 zh 排序：标点符号在前，数字其次，汉字按拼音，
 //! 然后才是拉丁字母（大小写不敏感、小写在前）。Windows 10 1903 起系统自带同一套 ICU
-//! （`icu.dll`），这里按需加载它的 `ucol_strcoll`，排出来和 Vue 一致。
+//! （`icu.dll`），这里按需加载它的 `ucol_strcoll`，排出来和它一致。
 //! 加载不到时退回到同样分区的近似规则：分区内汉字按码位，其余按小写码位。
 
 use std::cmp::Ordering;

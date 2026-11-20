@@ -1,4 +1,4 @@
-//! 文件夹树「刷新」的回归：照 Vue `refreshFileBrowserTree` 开始时清掉失败、进度走过扫描、写入、刷新三步、
+//! 文件夹树「刷新」的回归：开始时清掉失败、进度走过扫描、写入、刷新三步、
 //! 同步完重读摘要、硬链接候选和目录树再读当前目录，任何一段失败写进状态区；缺失仓库、回收站、虚拟视图、
 //! 换仓库和过期结果各走各的分支；侧栏状态区原地显示同步进度（失败和忙碌优先），刷新按钮转圈并禁用。
 
@@ -207,7 +207,7 @@ fn browses(model: &mut ShellViewModel) -> Vec<(String, bool)> {
         .collect()
 }
 
-/// Vue `createInitialSyncProgress` 的初值和 `setSyncProgress` 的百分比：一共 3 步，1/3、2/3、3/3 四舍五入。
+/// 同步进度的初值和百分比：一共 3 步，1/3、2/3、3/3 四舍五入。
 #[test]
 fn progress_percent_rounds_like_vue() {
     let mut progress = SyncProgress::default();
@@ -389,7 +389,7 @@ fn a_failed_sync_lands_in_the_status_area() {
     assert!(model.tree_sync.take_effects().is_empty(), "失败后不再重读");
 }
 
-/// 重读里有一份失败：照 `Promise.all`，成功的几份照样写进去，整轮按失败收尾，不读当前目录。
+/// 重读里有一份失败：成功的几份照样写进去，整轮按失败收尾，不读当前目录。
 #[test]
 fn a_failed_reload_keeps_what_arrived_and_stops_before_the_directory() {
     let mut model = scene("live-files-plain");
@@ -509,7 +509,7 @@ fn stale_results_and_switched_repositories_are_dropped() {
     assert_eq!(failure(&model), None);
 }
 
-/// 状态区的顺序照 Vue：失败 > 忙碌 > 同步进度。同步途中读素材详情时是忙碌行，定位失败时是错误条；
+/// 状态区的顺序：失败 > 忙碌 > 同步进度。同步途中读素材详情时是忙碌行，定位失败时是错误条；
 /// 详情读完、下一次定位开始清掉失败以后，回到同步进度，刷新本身不受打断。
 #[test]
 fn sync_progress_ranks_after_failures_and_busy() {

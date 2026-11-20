@@ -199,7 +199,7 @@ mod tests {
         );
     }
 
-    /// 没有资源库：空状态用 Vue `SearchPanel.vue` 的标题和说明，不写出仓库、命中或查询。
+    /// 没有资源库：空状态写没有资源库时的标题和说明，不写出仓库、命中或查询。
     #[test]
     fn search_no_library_uses_the_vue_empty_copy() {
         let model = scene("search-no-library");

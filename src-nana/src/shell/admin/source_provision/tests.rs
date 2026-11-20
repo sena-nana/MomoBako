@@ -1,6 +1,6 @@
 //! 来源登录与建仓流程的测试。
 //!
-//! 期望值来自 `SourceAuthenticationSettings.vue`：仓库标识、名称、路径从登录结果和
+//! 仓库标识、名称、路径从登录结果和
 //! `repositoryProvisioning` 推出，已有仓库更新配置再配缓存，新仓库跳过首次同步创建，
 //! 随后后台同步；敏感字段一律不进仓库配置。
 
@@ -201,7 +201,7 @@ fn poll(model: &mut ShellViewModel, result: Value) {
 
 /// 选择缓存目录的系统对话框标题带上插件显示名。
 ///
-/// Vue `chooseCachePath` 写的是 `选择${manifest.name}缓存目录`。名称空白或找不到插件时退回「选择缓存目录」。调用在途时不弹。
+/// 标题是「选择{插件名}缓存目录」。名称空白或找不到插件时退回「选择缓存目录」。调用在途时不弹。
 #[test]
 fn source_cache_dialog_uses_the_vue_plugin_name() {
     let mut named = model();
@@ -256,7 +256,7 @@ fn assert_cache_dialog_title(model: &mut ShellViewModel, expected: &str) {
     );
 }
 
-/// 登录完成：后台同步来源仓库，并切到它；切过去时照 Vue 后台读它的仓库动作。
+/// 登录完成：后台同步来源仓库，并切到它；切过去时后台读它的仓库动作。
 fn assert_synced_and_switched(model: &mut ShellViewModel) {
     let effects = model.admin.take_effects();
     assert!(
@@ -456,7 +456,7 @@ fn new_account_creates_the_repository_without_secrets_then_syncs() {
             .iter()
             .any(|item| item.repo_id == REPO && item.cache_required)
     );
-    // Vue `createNewRepository` 建完就 `selectRepository` 切过去：回到启动页同步新仓库，不先读列表。
+    // 建完就切过去：回到启动页同步新仓库，不先读列表。
     assert!(
         model.workspace.take_effects().iter().any(|effect| matches!(effect, WorkspaceEffect::SyncRepository { repo_id, .. } if repo_id == REPO)),
         "建完切到新仓库并同步"

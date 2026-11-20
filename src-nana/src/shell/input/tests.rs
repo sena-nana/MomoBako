@@ -1231,7 +1231,7 @@ fn relocate_folder_dialog_queues_pick_folder_and_submits_only_a_chosen_path() {
 #[test]
 fn attach_folder_dialog_submits_a_chosen_path_and_ignores_cancel() {
     let mut model = ShellViewModel::default();
-    // 和 Vue 一样先打开添加菜单，选「本地文件夹」后才弹系统文件夹对话框。
+    // 先打开添加菜单，选「本地文件夹」后才弹系统文件夹对话框。
     model.admin.plugins = vec![super::support::test_source_plugin(
         "momobako.local-filesystem",
         "本地文件夹",
@@ -1441,7 +1441,7 @@ fn download_folder_calls_plugin_only_after_a_directory_is_chosen() {
             "D:/downloads".into()
         )
     );
-    // Vue `runDownloadAction`：选好目录以后任务弹层出「下载单曲 · 正在下载 夜曲」36%，不确定进度。
+    // 选好目录以后任务弹层出「下载单曲 · 正在下载 夜曲」36%，不确定进度。
     let row = model.operation.shown().cloned().expect("下载的进度行");
     assert_eq!(
         (
@@ -1671,7 +1671,7 @@ fn live_import_picker_submits_only_a_chosen_path() {
     ));
 }
 
-/// 窗口失焦把已经拖远的内部拖动交给系统，和 Vue `handleWindowBlur` 一样。
+/// 窗口失焦把已经拖远的内部拖动交给系统。
 /// 拖得还不够远时会话留着。窗口还聚焦时不发这条消息。不开窗口。
 #[test]
 fn focus_loss_hands_a_long_drag_to_the_system() {

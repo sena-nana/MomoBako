@@ -159,9 +159,9 @@ fn native_actions_are_reachable_through_runtime_hit_testing() {
     }
     let document = acceptance_document_for(ShellPage::FileList).expect("acceptance document");
     let mut session = RuntimeAgentSession::new(document, 1200, 800).expect("agent session");
-    // Vue 文件夹加号的可见内容是图标，`aria-label` 和 `title` 都是「在当前目录新建文件夹」。
+    // 文件夹加号的可见内容是图标，`aria-label` 和 `title` 都是「在当前目录新建文件夹」。
     // 对话框标题才叫「新建文件夹」。命中测试点现在的无障碍名。展示方式下拉框读出当前值，
-    // 文件页和 Vue `base()` 一样是网格。
+    // 文件页默认是网格。
     for label in [
         "根目录",
         "在当前目录新建文件夹",
@@ -567,7 +567,7 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
         // 右键菜单开在 cover.png 上，带复制和重命名。
         "live-menu" => &["复制到…", "重命名"],
         "copy-dialog" => &["复制到文件夹", "目标目录"],
-        // 单击 cover.png 后打开重命名：标题、字段和按钮照 Vue，草稿仍是原来的文件名。
+        // 单击 cover.png 后打开重命名：标题、字段和按钮，草稿仍是原来的文件名。
         "rename-dialog" => &["重命名文件", "新名称", "取消", "保存"],
         // 从文件夹导入：对话框打开，路径留空，不提交，不编造成功。
         "import-folder-dialog" => &["从文件夹导入", "多个路径用分号分隔", "取消", "导入"],
@@ -608,7 +608,7 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
         "search-empty" => &["当前查询: 不存在的文件", "0 条结果", "没有匹配的文件"],
         // 有资源库，搜索派发出去时领域服务没起来：只画交回的失败原因，不写命中。
         "search-failed" => &["当前查询: 封面", "1 个仓库", "0 条结果", "领域服务未启动"],
-        // 没有资源库时的日志：历史答空，空文案照 Vue `WorkspaceLogsPanel.vue`，不写四条夹具日志。
+        // 没有资源库时的日志：历史答空，写空文案，不写四条夹具日志。
         "logs-no-library" => &[
             "系统日志",
             "还没有系统日志",
@@ -625,7 +625,7 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
             "插件工具",
             "无资源库",
         ],
-        // 没有资源库时的仓库动作：没有仓库就不读列表，空文案仍是 Vue 原文。
+        // 没有资源库时的仓库动作：没有仓库就不读列表，写空文案。
         "actions-no-library" => &[
             "仓库动作",
             "动作",
@@ -633,7 +633,7 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
             "当前仓库没有导入动作。",
             "无资源库",
         ],
-        // 没有资源库：空状态标题和说明照 Vue `SearchPanel.vue`，不写仓库名、命中或查询。
+        // 没有资源库：写空状态标题和说明，不写仓库名、命中或查询。
         "search-no-library" => &[
             "搜索结果",
             "全局搜索",
@@ -692,7 +692,7 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
             "在中间列表中选择目标查看详情。",
             "未选择播放内容",
         ],
-        // 夹具没有导入动作：切到动作面板再答空列表。页头和空状态照 Vue，不编动作名或运行结果。
+        // 夹具没有导入动作：切到动作面板再答空列表。只写页头和空状态，不编动作名或运行结果。
         "repository-actions" => &["仓库动作", "动作", "0 项", "当前仓库没有导入动作。"],
         // 进入夹具目录 assets：面包屑停在这一层，列表只有树里的子文件夹 covers。
         // 右侧是目录摘要，不是「选择一个文件」。播放条仍在文件浏览面板下面。
@@ -720,7 +720,7 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
             "0",
             "未选择播放内容",
         ],
-        // 夹具没有智能文件夹：打开后的结果页列表是空的，不写命中数。空文案是 Vue 只读虚拟视图的详情。
+        // 夹具没有智能文件夹：打开后的结果页列表是空的，不写命中数。空文案是只读虚拟视图的详情。
         "smart-folder" => &[
             "分类视图",
             "智能文件夹",

@@ -1,7 +1,7 @@
 //! zip、cbz 和 7z 的当前层，以及名单里单个文件的字节。
 //!
 //! 列表只留下已经读出的条目名，条数到 [`LIST_LIMIT`] 就停，不把条目内容读进内存。
-//! 已有字节数按 Vue `formatByteCount` 显示；目录仍写「目录」。没有大小字段不编数字。
+//! 已有字节数按 1024 进位写成 B、KB、MB、GB；目录仍写「目录」。没有大小字段不编数字。
 //! 单击目录只选中。连点进入下一层时按这些名字过滤，不重新打开压缩包。
 //! 点开一个已经列出的文件时，只取出那一条的真实字节：zip 按中央目录定位这一条；
 //! 7z 只在这一条位于自己压缩块开头时读取，固实块里靠后的文件要先解开前面的内容，这种不取。
@@ -67,8 +67,8 @@ pub(super) fn select(state: &mut InspectState, path: &str) {
         eprintln!("Nana 压缩包名单里没有这个目录：{path}");
         return;
     }
-    // Vue `selectEntry`：清掉已打开的文件和在途读取。目录没有扩展名，
-    // `renderInternalPreview` 落到二进制，舞台写目录名和「无法内联预览该文件类型」。
+    // 清掉已打开的文件和在途读取。目录没有扩展名，
+    // 按二进制处理，舞台写目录名和「无法内联预览该文件类型」。
     state.archive_selected = Some(path.clone());
     state.archive_request = None;
     state.archive_entry = None;
@@ -233,7 +233,7 @@ pub(super) fn request_file(state: &mut InspectState, path: &str) {
         return;
     }
     if !previewable(&relative) {
-        // Vue `selectEntry` 先把这一条标成当前项，再写文件名和「无法内联预览该文件类型」，不去取字节。
+        // 先把这一条标成当前项，再写文件名和「无法内联预览该文件类型」，不去取字节。
         state.archive_selected = Some(path);
         state.archive_request = None;
         state.archive_notice = Some(ArchiveFileNotice::Inline(
@@ -734,7 +734,7 @@ fn avi_name(extension: &str) -> bool {
     extension.eq_ignore_ascii_case("avi")
 }
 
-/// zip、cbz 和 7z 再列一层。Vue `archive_format_for_path` 把 cbz 当成 Zip，这里只列已经取出的字节。cbr 和 rar 仍停在名单上。
+/// zip、cbz 和 7z 再列一层。cbz 当成 Zip，这里只列已经取出的字节。cbr 和 rar 仍停在名单上。
 fn nestable(extension: &str) -> bool {
     matches!(
         extension.to_ascii_lowercase().as_str(),
@@ -1254,7 +1254,7 @@ fn directory_known(catalog: &ArchiveCatalog, path: &str) -> bool {
         .any(|name| (name.directory && name.path == path) || name.path.starts_with(&prefix))
 }
 
-/// 和 Vue `normalizeInternalPath` 一样去掉首尾斜杠。`.`、`..` 和盘符不接受。
+/// 去掉首尾斜杠。`.`、`..` 和盘符不接受。
 fn normalize_directory(path: &str) -> Option<String> {
     let raw = path.trim().replace('\\', "/");
     if raw.starts_with('/') || raw.split('/').next().is_some_and(|part| part.contains(':')) {

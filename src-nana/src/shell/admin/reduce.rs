@@ -1,6 +1,6 @@
 //! 设置、插件、日志、任务和来源登录的消息归约。
 //!
-//! 规则照 Vue 对应组件：插件操作的提示文案、字段规范化、日志筛选、任务弹层的开关、
+//! 包括插件操作的提示文案、字段规范化、日志筛选、任务弹层的开关、
 //! 主题和圆角的即时保存。只改状态并排副作用，真正的服务调用在 `admin_dispatch`。
 
 use crate::backend::services::repository::{
@@ -95,7 +95,7 @@ fn consume_legacy(model: &mut ShellViewModel, message: ShellMessage) -> Option<S
                 .fail(FailureSource::Logs, format!("无法读取系统日志：{error}"));
             None
         }
-        // Vue `clearSystemLogsInWorkspace`：清空中按钮禁用，结果回来以前日志页不变。
+        // 清空中按钮禁用，结果回来以前日志页不变。
         ShellMessage::ClearLogs => {
             if model.admin.logs_clearing {
                 eprintln!("Nana 系统日志正在清空，忽略重复点击");
@@ -436,7 +436,7 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
 }
 
 /// 插件列表换新：重算筛选栏的库类型快捷方式，再重读插件登记的播放器类型。
-/// Vue 每次拿到新列表都同步前端插件注册表（`syncPreviewPlugins`），播放器跟着换。
+/// 插件列表变了，登记的播放器也可能变，所以每次都重读。
 fn publish_plugins(model: &mut ShellViewModel, plugins: &[PluginManifest]) {
     model.inspect.shortcuts = super::super::inspect_shortcuts::shortcuts_from_plugins(plugins);
     model.admin.push_effect(AdminEffect::LoadPlaylistPlayers);
@@ -450,8 +450,8 @@ fn apply_config(model: &mut ShellViewModel, config: &PluginConfigSnapshot) {
     model.admin.sync_json_drafts(&config.plugin_id);
 }
 
-/// 打开设置页：读设置包（Vue `Settings.vue` 挂载时的 `loadSettingsData`）和应用设置。
-/// 带插件时照 Vue 路由的 `?plugin=` 展开它的设置，插件列表里还没有它时不展开。
+/// 打开设置页：读设置包和应用设置。
+/// 带插件时展开它的设置，插件列表里还没有它时不展开。
 pub(crate) fn open_settings_page(model: &mut ShellViewModel, plugin_id: Option<&str>) {
     model.page = ShellPage::Settings;
     model.admin.begin_settings_load();
@@ -591,7 +591,7 @@ fn reset_config(model: &mut ShellViewModel, plugin_id: &str, key: &str) {
     });
 }
 
-/// 单行字段回车，单行和 JSON 字段失焦（Vue 文本框的 `@change`、JSON 文本域的 `@blur`）：有没提交的草稿、
+/// 单行字段回车，单行和 JSON 字段失焦：有没提交的草稿、
 /// 而且和字段现在的值（配置快照，没有时是清单默认值）不同才提交，没改过的不保存。单行字段比显示的文字；
 /// JSON 字段比解析出来的值，只改了空白和缩进不算改过，解析不了的算改过、提交时报错。
 /// 插件管理在途时控件禁用、焦点也会离开，这时不重复提交，草稿留着。
@@ -691,8 +691,8 @@ fn replace_plugins(model: &mut ShellViewModel, result: Result<Vec<PluginManifest
     }
 }
 
-/// 查到了插件的设置目录：交给宿主打开，打开的结果回来（[`settle_directory_open`]）才写提示，和 Vue
-/// `openPluginDataDirectoryInWorkspace` 等 `openRepositoryPath` 完成一样。查不到时写错误。
+/// 查到了插件的设置目录：交给宿主打开，打开的结果回来（[`settle_directory_open`]）才写提示。
+/// 查不到时写错误。
 fn finish_directory(model: &mut ShellViewModel, name: &str, result: Result<String, String>) {
     model.admin.managing = false;
     match result {
@@ -758,7 +758,7 @@ fn apply_bundle(
     external: Result<crate::backend::services::runtime::ExternalApiConnectionStatus, String>,
 ) {
     model.admin.loading_settings = false;
-    // 首屏启动在等的设置包：成功时插件列表换新、接着读播放器类型，启动等它回来；失败照 Vue 吃掉错误，启动就此结束。
+    // 首屏启动在等的设置包：成功时插件列表换新、接着读播放器类型，启动等它回来；失败时吞掉错误，启动就此结束。
     let complete = plugins.is_ok() && hooks.is_ok() && api.is_ok() && external.is_ok();
     model.workspace.note_settings_loaded(complete);
     match (plugins, hooks, api, external) {
@@ -859,8 +859,8 @@ fn external_json(model: &ShellViewModel) -> String {
     )
 }
 
-/// 清空系统日志的结果。成功照 Vue 把手上的日志清空、不再重读（之后的新记录照常经宿主事件合并进来）；
-/// 失败时日志留着，原因写进状态区。Vue 这里的失败没有界面反馈，不照抄。
+/// 清空系统日志的结果。成功把手上的日志清空、不再重读（之后的新记录照常经宿主事件合并进来）；
+/// 失败时日志留着，原因写进状态区，让用户知道没清掉。
 fn note_logs_cleared(model: &mut ShellViewModel, result: Result<(), String>) {
     model.admin.logs_clearing = false;
     match result {
@@ -874,7 +874,7 @@ fn note_logs_cleared(model: &mut ShellViewModel, result: Result<(), String>) {
     }
 }
 
-/// 清理缓存、重新获取播放资源的结果。成功和 Vue 来源动作完成后的 `context.refreshRepo()` 一样重读资源库列表，再按
+/// 清理缓存、重新获取播放资源的结果。成功后和其它来源动作一样重读资源库列表，再按
 /// 当前仓库同步、重读摘要和目录；失败写进文件列。下载的收尾在 `shell/admin/source_download.rs`。
 fn finish_file_plugin(
     model: &mut ShellViewModel,
@@ -897,7 +897,7 @@ fn finish_file_plugin(
     }
 }
 
-/// 「创建播放列表」照 Vue `runPlaylistAction` 交给服务：没有当前仓库或来源歌单标识时只报错，不建。
+/// 「创建播放列表」交给服务：没有当前仓库或来源歌单标识时只报错，不建。
 fn create_source_playlist(
     model: &mut ShellViewModel,
     playlist: super::super::entry_actions::SourcePlaylist,
@@ -922,8 +922,8 @@ fn create_source_playlist(
     });
 }
 
-/// 建好以后和别的来源动作一样刷新资源库（Vue `context.refreshRepo()`），新播放集随摘要出现在侧栏。
-/// 失败写进文件列表的错误；Vue 在这里没有任何提示，失败只留在控制台。
+/// 建好以后和别的来源动作一样刷新资源库，新播放集随摘要出现在侧栏。
+/// 失败写进文件列表的错误，让用户看得到。
 fn finish_source_playlist(model: &mut ShellViewModel, result: Result<(), String>) {
     match result {
         Ok(()) => {
@@ -1050,7 +1050,7 @@ fn finish_action(model: &mut ShellViewModel, result: Result<RepositoryAction, St
             {
                 *current = action;
             }
-            // Vue `runActiveRepositoryAction` 的 `refreshWorkspaceAfterMutation`。
+            // 动作改了仓库：重读摘要和当前目录。
             model.reload_after_mutation(&repo_id);
         }
         Err(error) => {

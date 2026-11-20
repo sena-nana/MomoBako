@@ -224,7 +224,7 @@ fn a_layout_change_moves_the_frame_without_rebuilding() {
 }
 
 /// 设置页上选面板（底栏「拓展」「日志」、侧栏「动作」、标题栏搜索和筛选开关）都离开设置页，主区换成
-/// 选的面板（Vue `selectPanel`、`showSearchWorkspace` 在 `/settings` 时 `router.push("/")`）。
+/// 选的面板。
 #[test]
 fn choosing_a_panel_leaves_the_settings_page() {
     for (panel, route) in [
@@ -272,7 +272,7 @@ fn footer_and_title_bar_leave_the_mounted_settings_page() {
     assert!(harness.keyed("admin-settings").is_none(), "设置页还在");
 }
 
-/// 没有资源库时也能进「拓展」「日志」和「动作」（Vue `Home.vue` 的这几个面板不要求仓库），没有筛选栏；
+/// 没有资源库时也能进「拓展」「日志」和「动作」（这几个面板不要求仓库），没有筛选栏；
 /// 文件、回收站、智能文件夹和播放集面板照旧是空库页。
 #[test]
 fn admin_panels_open_without_a_repository() {

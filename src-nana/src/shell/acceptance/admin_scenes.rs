@@ -1,8 +1,7 @@
 //! 设置、插件、日志和仓库动作的对照场景：设置页、插件管理、来源登录、拓展工具页、日志、任务和动作面板。
 //!
-//! 场景名和 `tmp/vue-mock/scenes/admin.ts` 的 Vue 场景同名，数据和 Vue 夹具一致：工作区是 `base()`
-//! （`shell/acceptance/base_scene.rs`），插件清单读 `External/Plugins/*/manifest.json` 的真实内容，按 Vue 模拟 IPC 的
-//! 口径改成已启用、依赖就绪；缓存、API 设计、外部连接和日志照 `tmp/vue-mock/ipc.ts` 与 `fixtures.ts` 的应答。
+//! 工作区是共用底子（`shell/acceptance/base_scene.rs`），插件清单读 `External/Plugins/*/manifest.json` 的真实内容，
+//! 统一改成已启用、依赖就绪；缓存、API 设计、外部连接和日志用固定的夹具应答。
 //! 状态一律经过真实消息归约，不直接拼界面字段。
 
 use serde_json::{Value, json};
@@ -25,7 +24,7 @@ use super::super::{
 use super::base_scene::{Base, NOW, REPO_ID, REPO_NAME, REPO_PATH, settle, summary};
 use super::plugin_fixtures::{bundle_failed, bundle_loaded, bundled_plugins, players_of};
 use super::seed_base;
-/// 设置数据读取失败时 `list_plugins` 的报错，和 Vue 场景 `settings-error` 一致。
+/// 设置数据读取失败时 `list_plugins` 的报错，`settings-error` 场景用它。
 pub(super) const LOAD_ERROR: &str = "读取插件目录失败：拒绝访问。 (os error 5)";
 const LOCAL_FILESYSTEM: &str = "momobako.local-filesystem";
 const DOWNLOADER: &str = "momobako.service.downloader";
@@ -62,8 +61,8 @@ pub(super) fn seed_settings(model: &mut ShellViewModel) {
     load_bundle(model, bundled_plugins(|_| true));
 }
 
-/// `settings-error`：设置页数据读取失败。Vue 场景让 `list_plugins` 一直失败：启动结束那次和打开设置页
-/// 那次都读不到，`Promise.all` 整批失败，其它四份应答照常返回但不写入，所以手上一直没有插件。
+/// `settings-error`：设置页数据读取失败。场景让 `list_plugins` 一直失败：启动结束那次和打开设置页
+/// 那次都读不到，整批失败，其它四份应答照常返回但不写入，所以手上一直没有插件。
 pub(super) fn seed_settings_error(model: &mut ShellViewModel) {
     Base {
         plugins_error: Some(LOAD_ERROR),
@@ -75,7 +74,7 @@ pub(super) fn seed_settings_error(model: &mut ShellViewModel) {
     model.admin.take_effects();
 }
 
-/// `logs`：日志面板，四条记录和 Vue 夹具 `logRecord(1..4)` 一致。
+/// `logs`：日志面板，四条记录来自夹具 `log_record`。
 pub(super) fn seed_logs(model: &mut ShellViewModel) {
     seed_base(model);
     model.workspace.panel = WorkspacePanel::Logs;
@@ -126,7 +125,7 @@ pub(super) fn seed_plugin_settings(model: &mut ShellViewModel) {
 }
 
 /// `task-running` 和 `task-cancelling`：任务弹层打开，里面一个任务。
-/// Vue 弹层不分运行和取消，取消中只是细节文字不同、进度不定。
+/// 弹层不分运行和取消，取消中只是细节文字不同、进度不定。
 pub(super) fn seed_task(model: &mut ShellViewModel, cancelling: bool) {
     seed_base(model);
     let (task_id, status, label, phase, percent) = if cancelling {
@@ -166,7 +165,7 @@ pub(super) fn seed_task(model: &mut ShellViewModel, cancelling: bool) {
 }
 
 /// `logs-paused`：日志面板点了「暂停追踪」，日志列表不跟随末尾，停在顶部。
-/// Vue 的跟随实际不滚动，这个场景用来和 Vue 对照版式。
+/// 这个场景用来核对列表停在顶部时的版式。
 fn logs_paused_scene() -> ShellViewModel {
     let mut model = ShellViewModel::for_page(ShellPage::Logs);
     model.reduce(ShellMessage::Admin(AdminMessage::SetLogPaused(true)));
@@ -184,7 +183,7 @@ fn extensions_scene() -> ShellViewModel {
 
 /// `file-import`：拓展页里点开「文件导入」。夹具仓库是「默认资源库」，当前目录是根，目标目录写成「/」。
 ///
-/// 不打开文件夹或 ZIP 对话框，不写完成提示，也不编来源路径。按钮停在 Vue 的空闲文案。
+/// 不打开文件夹或 ZIP 对话框，不写完成提示，也不编来源路径。按钮停在空闲文案。
 fn file_import_scene() -> ShellViewModel {
     let mut model = extensions_scene();
     let page_id = super::super::admin::support::TOOL_FILE_MANAGER;
@@ -382,7 +381,7 @@ fn source_auth_methods_scene() -> ShellViewModel {
 
 /// `repository-actions`：切到仓库动作面板，再按夹具答空列表。
 ///
-/// 启动绑侧栏时 Vue 模拟 IPC 的 `list_repository_actions` 答空数组，底子里已经答过一次。切到动作面板会再读
+/// 启动绑侧栏时 `list_repository_actions` 按夹具答空数组，底子里已经答过一次。切到动作面板会再读
 /// （`queue_actions`）。夹具没有导入动作，这次仍答空列表：页头是「动作 / 仓库动作 / 0 项」，下面是
 /// 「当前仓库没有导入动作。」。不编动作名、步骤、插件或运行结果，也不把执行标成成功。侧栏「动作」入口
 /// 只在有动作时出现，这里不出现。
@@ -424,7 +423,7 @@ fn empty_library() -> ShellViewModel {
 
 /// `logs-no-library`：没有资源库时打开日志。切到面板会读历史，夹具没有记录，答空列表。
 ///
-/// 空文案照 Vue `WorkspaceLogsPanel.vue`：「还没有系统日志」和
+/// 空文案是「还没有系统日志」和
 /// 「宿主、插件和辅助进程产生的关键操作会在这里持续汇总。」。不编四条启动日志，也不停在「正在加载」。
 fn logs_no_library_scene() -> ShellViewModel {
     let mut model = empty_library();
@@ -447,7 +446,7 @@ fn logs_no_library_scene() -> ShellViewModel {
 
 /// `extensions-no-library`：没有资源库时打开拓展。空库启动已经读过真实插件清单，这里不再读，也不把插件清掉。
 ///
-/// 工具页按清单顺序停在 API Playground。快照没有端点时页面自己用 Vue 的三个兜底接口，场景不另写接口或调用结果。
+/// 工具页按清单顺序停在 API Playground。快照没有端点时页面自己用三个兜底接口，场景不另写接口或调用结果。
 fn extensions_no_library_scene() -> ShellViewModel {
     let mut model = empty_library();
     model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Extensions));
@@ -460,7 +459,7 @@ fn extensions_no_library_scene() -> ShellViewModel {
 
 /// `actions-no-library`：没有资源库时打开仓库动作。没有仓库就不读列表。
 ///
-/// 空文案仍是 Vue `RepositoryActionsPanel.vue` 的「当前仓库没有导入动作。」。不编动作名、步骤或运行结果。
+/// 空文案仍是「当前仓库没有导入动作。」。不编动作名、步骤或运行结果。
 fn actions_no_library_scene() -> ShellViewModel {
     let mut model = empty_library();
     model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Actions));
@@ -471,8 +470,8 @@ fn actions_no_library_scene() -> ShellViewModel {
     model
 }
 
-/// `foreign-tool`：插件声明了宿主没有的工具页，只画页头和说明。Vue 里第三方工具页由插件自己的组件绘制，
-/// 没有 Vue 对照图。
+/// `foreign-tool`：插件声明了宿主没有的工具页，只画页头和说明。第三方工具页本该由插件自己的组件绘制，
+/// 宿主画不出它的内容。
 fn foreign_tool_scene() -> ShellViewModel {
     let mut model = ShellViewModel::for_page(ShellPage::FileList);
     model.workspace.panel = WorkspacePanel::Extensions;
@@ -488,7 +487,7 @@ fn foreign_tool_scene() -> ShellViewModel {
     model
 }
 
-/// 一次写入设置页五份数据，和 Vue 模拟 IPC 的默认应答一致；插件列表换新后照产品重读播放器类型，
+/// 一次写入设置页五份数据，插件之外都用夹具的默认应答；插件列表换新后照产品重读播放器类型，
 /// 只剩这几个插件时播放器也只剩它们登记的。
 fn load_bundle(model: &mut ShellViewModel, plugins: Vec<PluginManifest>) {
     let players = players_of(&plugins);
@@ -511,7 +510,7 @@ fn open_plugin_settings(model: &mut ShellViewModel, plugin_id: &str) {
     })));
 }
 
-/// 当前仓库的完整摘要，和 Vue 夹具 `repository("默认资源库")` 一致。
+/// 当前仓库「默认资源库」的完整摘要。
 fn local_summary() -> RepositorySummary {
     summary(REPO_NAME, "ready")
 }
@@ -859,7 +858,7 @@ mod no_library_scene_tests {
         assert!(harness.find(label).is_none(), "不该出现「{label}」");
     }
 
-    /// 没有资源库的日志页：画出 Vue 的空标题和说明，不画出夹具里的四条日志，也不停在加载。
+    /// 没有资源库的日志页：画出空标题和说明，不画出夹具里的四条日志，也不停在加载。
     #[test]
     fn logs_no_library_draws_the_vue_empty_copy() {
         let mut model = logs_no_library_scene();
@@ -928,7 +927,7 @@ mod no_library_scene_tests {
         }
     }
 
-    /// 没有资源库的动作页：不读列表，空文案仍是 Vue 的「当前仓库没有导入动作。」。
+    /// 没有资源库的动作页：不读列表，空文案仍是「当前仓库没有导入动作。」。
     #[test]
     fn actions_no_library_draws_the_vue_empty_copy() {
         let mut model = actions_no_library_scene();
@@ -965,7 +964,7 @@ mod no_library_scene_tests {
     }
 }
 
-/// Vue 夹具 `logRecord`：时间是 07:5x:00Z，来源是 MomoBako 核心。
+/// 日志夹具：时间是 07:5x:00Z，来源是 MomoBako 核心。
 fn log_record(
     index: u32,
     level: &str,

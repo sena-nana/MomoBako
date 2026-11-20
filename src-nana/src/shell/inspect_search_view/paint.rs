@@ -1,8 +1,8 @@
 //! 搜索面板和筛选栏的自绘：颜色芯片前的色块、结果行的文件图标块。
 //!
 //! 色块要画元数据里的真实颜色，不能折成语义色，所以用 `PaintColor::Rgba`；
-//! 色块外圈和 Vue 一样是 70% 的 `--border-strong`。结果图标块是 Vue
-//! `.search-workbench__item-icon` 的 135° 渐变底加 lucide `FileImage` 线框。
+//! 色块外圈是 70% 的 `--border-strong`。结果图标块是
+//! 135° 渐变底加 lucide `FileImage` 线框。
 
 use std::hash::{Hash, Hasher};
 
@@ -16,7 +16,7 @@ use nana_ui_core::{
 
 use super::presenter::SwatchColor;
 
-/// 色块直径，对应 `.workspace-filter-chip__swatch` 的 9px。
+/// 色块直径 9px。
 pub(crate) const SWATCH_SIZE: f32 = 9.0;
 /// 色块外圈宽度，对应 `box-shadow: 0 0 0 1px`。
 const SWATCH_RING: f32 = 1.0;
@@ -58,8 +58,8 @@ impl Painter for SwatchChipPainter {
             ]),
             SwatchColor::Accent => PaintColor::Role(SemanticColorRole::Accent),
         };
-        // 全圆角矩形走和控件相同的圆角着色，平滑圆角设置下和 Vue 一样是超椭圆。
-        // 外圈按 70% 混进芯片底色，和 Vue 在 sRGB 里合成的 `color-mix` 一致。
+        // 全圆角矩形走和控件相同的圆角着色，平滑圆角设置下是超椭圆。
+        // 外圈按 70% 在 sRGB 里混进芯片底色。
         let ring_color = PaintColor::Mix(SemanticColorMix::new(
             SemanticColorRole::BorderStrong,
             SemanticColorRole::Background,

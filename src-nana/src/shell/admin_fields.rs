@@ -1,6 +1,6 @@
 //! 插件设置表单。
 //!
-//! 照 `PluginManagerPanel.vue` 的 `.plugin-manager__settings-fields`：每个字段一行三列网格，
+//! 每个字段一行三列网格，
 //! 左边粗体字段名和弱色说明，中间控件，右边「重置」。布尔字段是勾选框；选项字段是下拉框，
 //! 第一项是空值；JSON 字段是等宽文本域，失焦提交；其余是单行输入，回车或失焦提交。
 //!
@@ -216,7 +216,7 @@ fn control(
     let key = row.field_key.clone();
     match row.kind {
         FieldKind::Boolean => {
-            // `.plugin-manager__settings-field input[type=checkbox]` 是 18 见方。
+            // 勾选框 18 见方。
             let checkbox = style::native_checkbox(Checkbox::new("", row.checked), 18.0);
             widget(checkbox)
                 .prop::<bool, fields::checkbox::checked>(row_flag(item, |row| row.checked))
@@ -280,7 +280,7 @@ fn control(
                 layout.padding_bottom = Some(LengthSpec::Px(10.0));
             }
             area.style.text_vertical_alignment = nana_ui::runtime::TextVerticalAlignment::Top;
-            // 多行框按回车只换行，不发提交事件：照 Vue `@blur` 在焦点离开时提交。
+            // 多行框按回车只换行，不发提交事件，在焦点离开时提交。
             let (blur_id, blur_key) = (id.clone(), key.clone());
             widget(area)
                 .model(draft.signal())
@@ -314,7 +314,7 @@ fn control(
                     .label(row.label.clone())
                     .placeholder(row.placeholder.clone()),
             );
-            // 回车和失焦都提交（Vue 文本框的 `@change`），改完点到别处、收起设置都不丢。
+            // 回车和失焦都提交，改完点到别处、收起设置都不丢。
             let (submit_id, submit_key) = (id.clone(), key.clone());
             let (blur_id, blur_key) = (id.clone(), key.clone());
             widget(input)
@@ -358,7 +358,7 @@ fn select_options(options: &[(String, String)]) -> Vec<SelectOption> {
         .collect()
 }
 
-/// Vue `Boolean(value)`：空串、0、false、null 都是假。
+/// 按真值判断：空串、0、false、null 都是假。
 fn truthy(value: &Value) -> bool {
     match value {
         Value::Bool(flag) => *flag,

@@ -1,12 +1,12 @@
 //! 换仓库和同一个仓库的刷新。
 //!
-//! 对应 Vue `navigation.ts` 的 `selectRepository` 和 `lifecycle.ts` 的 `loadRepositories`：
+//! 两条路径：
 //! - **换到别的仓库**：回到启动页（[`StartupMode::Switch`]），走「扫描资源库文件 → 读取仓库摘要 →
 //!   读取首屏目录」，失败停在启动页给「重试」；目标缺失时直接结束，主区是缺失页。任务弹层是
 //!   「加载资源库 · 读取资源库快照」，扫描时 28%，读完摘要 46%，首屏读完以后完成。上一个仓库的内容由
 //!   壳层在活动仓库变了的那次归约里清掉（`workspace_flow.rs`）。
-//! - **同一个仓库**：先同步，再读摘要、重读当前目录（读失败退回根目录）。从「刷新」进来（Vue
-//!   `loadRepositories`）时先重读资源库列表，任务弹层是「加载资源库 · 读取已注册资源库」，列表到了走到
+//! - **同一个仓库**：先同步，再读摘要、重读当前目录（读失败退回根目录）。从「刷新」进来
+//!   时先重读资源库列表，任务弹层是「加载资源库 · 读取已注册资源库」，列表到了走到
 //!   「加载资源库摘要」38%，之后由重读目录接手。整轮期间状态区写「正在同步仓库状态」，失败写进状态区。
 //!
 //! 换仓库的入口：切换列表、附加或新建资源库成功、删除当前仓库以后选下一个、搜索命中在别的仓库，
@@ -41,20 +41,20 @@ pub struct RefreshRun {
     /// 这一轮的列表、同步和摘要请求带的代次。
     pub generation: u64,
     pub stage: RefreshStage,
-    /// 读完列表以后要选的仓库（附加、来源登录以后切过去的那个）。没有时照 Vue 选当前仓库，
+    /// 读完列表以后要选的仓库（附加、来源登录以后切过去的那个）。没有时选当前仓库，
     /// 当前仓库不在列表里时选第一项。
     pub target: Option<String>,
-    /// 要重读的目录：Vue 在 `selectRepository` 开始时记下的 `previousDirectoryPath`，壳层随后填上。
+    /// 要重读的目录：刷新开始时的当前目录，壳层随后填上。
     pub directory: Option<String>,
     /// 读当前目录失败，已经退回根目录读过一次。
     pub fell_back: bool,
-    /// 这一轮是来源下载的收尾（Vue `context.refreshRepo()`），不是用户开始的新操作：状态区里下载刚记下的失败
+    /// 这一轮是来源下载的收尾，不是用户开始的新操作：状态区里下载刚记下的失败
     /// 不因为这一轮读列表、同步和重读目录被清掉（`status.rs` 的 `Activity`）。
     pub keeps_status: bool,
 }
 
 impl WorkspaceState {
-    /// 刷新资源库（Vue `loadRepositories`）：重读资源库列表再选仓库，`target` 是读完以后要切过去的仓库。
+    /// 刷新资源库：重读资源库列表再选仓库，`target` 是读完以后要切过去的仓库。
     /// 启动还没完成时只重读列表，结果接着走启动。
     pub fn refresh_repositories(&mut self, target: Option<String>) {
         self.list_generation = self.list_generation.saturating_add(1);
@@ -90,7 +90,7 @@ impl WorkspaceState {
         }
     }
 
-    /// 启动以后读回的资源库列表（Vue `loadRepositories` 拿到列表）：换上列表，空列表回到空库；否则选目标
+    /// 启动以后读回的资源库列表：换上列表，空列表回到空库；否则选目标
     /// 仓库、当前仓库或第一项。选中别的仓库就是换仓库，选中同一个仓库接着同步。
     pub(super) fn apply_ready_list(&mut self, items: Vec<WorkspaceRepository>) {
         self.repositories = items;
@@ -117,7 +117,7 @@ impl WorkspaceState {
         self.select_repository(&next);
     }
 
-    /// 选一个资源库（Vue `selectRepository`）：换到别的仓库回到启动页走三步；同一个仓库先同步再重读。
+    /// 选一个资源库：换到别的仓库回到启动页走三步；同一个仓库先同步再重读。
     /// 启动或换仓库还在走时，让进行中的结果作废，从同步重新开始。返回有没有选上。
     pub fn select_repository(&mut self, repo_id: &str) -> bool {
         let Some(repository) = self
@@ -143,8 +143,8 @@ impl WorkspaceState {
         true
     }
 
-    /// 启动或换仓库途中又选了仓库：旧的同步和摘要结果作废，从这个仓库的同步重新走。和 Vue `selectRepository`
-    /// 换仓库一样立即换上活动仓库。
+    /// 启动或换仓库途中又选了仓库：旧的同步和摘要结果作废，从这个仓库的同步重新走。
+    /// 活动仓库立即换上。
     fn restart_loading(&mut self, repository: WorkspaceRepository) {
         self.list_generation = self.list_generation.saturating_add(1);
         self.assign_active(Some(repository.repo_id.clone()));
@@ -160,7 +160,7 @@ impl WorkspaceState {
         self.begin_sync(repository.repo_id);
     }
 
-    /// 换到别的仓库（Vue `selectRepository` 的 `isSwitchingRepository`）。
+    /// 换到别的仓库。
     fn begin_switch(&mut self, repository: WorkspaceRepository) {
         self.list_generation = self.list_generation.saturating_add(1);
         self.refresh = None;
@@ -172,8 +172,8 @@ impl WorkspaceState {
             self.panel,
             WorkspacePanel::Trash | WorkspacePanel::SmartFolder | WorkspacePanel::Playlist
         ) {
-            // 回收站、智能文件夹和播放集属于上一个仓库。Vue 换仓库不改面板，回收站面板会接着显示新仓库的
-            // 根目录（不是回收站），这里回到文件面板。
+            // 回收站、智能文件夹和播放集属于上一个仓库，换仓库后回到文件面板，
+            // 免得回收站面板显示新仓库的根目录。
             self.panel = WorkspacePanel::Files;
         }
         self.snapshot_loading = true;
@@ -194,7 +194,7 @@ impl WorkspaceState {
         self.begin_sync(repository.repo_id);
     }
 
-    /// 同一个仓库（Vue `selectRepository` 不换仓库）：缺失时回到缺失页；否则先同步，再读摘要、重读当前目录。
+    /// 同一个仓库：缺失时回到缺失页；否则先同步，再读摘要、重读当前目录。
     fn select_same(&mut self, repository: WorkspaceRepository) {
         let target_listing = self
             .refresh
@@ -288,7 +288,7 @@ impl WorkspaceState {
         Some(run.directory.clone().unwrap_or_default())
     }
 
-    /// 壳层记下刷新开始时的当前目录（Vue `previousDirectoryPath`）。已经记下的不改。
+    /// 壳层记下刷新开始时的当前目录。已经记下的不改。
     pub(crate) fn note_refresh_directory(&mut self, directory: &str) {
         if let Some(run) = self
             .refresh
@@ -318,7 +318,7 @@ impl WorkspaceState {
     }
 
     /// 同仓库刷新收尾（成功或失败）：放下忙碌，任务弹层的这一行走到 100% 再收起。行已经被读目录接手时
-    /// 完成不碰它（Vue `finishOperationProgress` 对过期编号什么也不做）。
+    /// 完成不碰它（过期编号的完成什么也不做）。
     pub(crate) fn finish_refresh(&mut self) {
         self.refresh = None;
         self.list_loading = false;
@@ -327,7 +327,7 @@ impl WorkspaceState {
     }
 
     /// 启动或换仓库的加载走完了（空列表、目标缺失时在选定以后，可用的仓库在读完首屏目录以后）：换仓库到这里结束，
-    /// 任务弹层的「加载资源库」完成；首屏启动照 Vue 先在第 4 步等设置包和播放器类型（`StartupState::await_settings`），
+    /// 任务弹层的「加载资源库」完成；首屏启动先在第 4 步等设置包和播放器类型（`StartupState::await_settings`），
     /// 都回来再结束。
     pub(super) fn finish_loading_run(&mut self) {
         self.snapshot_loading = false;
@@ -340,7 +340,7 @@ impl WorkspaceState {
         self.operation.finish();
     }
 
-    /// 把附加、新建或重定向返回的仓库摘要放进列表（Vue `upsertRepositorySummary`，按名称排序）。
+    /// 把附加、新建或重定向返回的仓库摘要放进列表，按名称排序。
     pub fn upsert_repository(&mut self, summary: &RepositorySummary) {
         let repository = WorkspaceRepository::from_summary(summary);
         self.repositories
@@ -350,7 +350,7 @@ impl WorkspaceState {
             .sort_by(|left, right| compare_zh(&left.name, &right.name));
     }
 
-    /// 删除当前资源库以后选下一个（Vue `selectNextRepositoryAfterRemoval`）：列表空了回到空库，
+    /// 删除当前资源库以后选下一个：列表空了回到空库，
     /// 否则换到第一项。
     pub(super) fn remove_repository(&mut self, repo_id: &str) {
         self.repositories
@@ -368,7 +368,7 @@ impl WorkspaceState {
         self.begin_switch(next);
     }
 
-    /// 重定向的结果（Vue `relocateMissingRepository`）：成功时任务弹层走到「更新资源库状态」64%，换上返回的
+    /// 重定向的结果：成功时任务弹层走到「更新资源库状态」64%，换上返回的
     /// 仓库摘要，再按同一个仓库同步、读摘要、读目录；失败写在缺失页上。
     pub fn note_relocate_finished(&mut self, result: Result<RepositorySummary, String>) {
         self.relocating = false;

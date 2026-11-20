@@ -72,7 +72,7 @@ impl MotionFrame {
     }
 }
 
-/// 任务弹层各行进度条这一刻的填充百分比，按行键（`.progress-bar__fill` 的宽度过渡，见
+/// 任务弹层各行进度条这一刻的填充百分比，按行键（宽度过渡见
 /// `MotionState::set_task_fills`）。弹层关着时为空。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct TaskFills(Vec<(String, f32)>);

@@ -1,6 +1,6 @@
 //! 插件管理面板里的一张插件卡片和它展开的设置区。
 //!
-//! 卡片照 `.extensions-workbench__card`：名称和状态胶囊、说明、插件 id 和版本、禁用或降级原因、
+//! 卡片内容：名称和状态胶囊、说明、插件 id 和版本、禁用或降级原因、
 //! 分类到能力的芯片、依赖 / 权限 / Hook / 执行记录四段、底部的设置 / 启用 / 删除，展开设置时下面
 //! 多一块设置区（设置标题和说明、「打开目录」、下载服务或 Office 转换状态、来源账号区、字段表单）。
 //!
@@ -36,7 +36,7 @@ pub(crate) type CardItem = Item<
     PluginCardView,
 >;
 
-/// `.extensions-workbench__card`：主背景、xl 圆角、1px 透明边加 16 内边距，竖排间距 10。
+/// 插件卡片：主背景、xl 圆角、1px 透明边加 16 内边距，竖排间距 10。
 pub(super) fn plugin_card(card: CardItem, signals: PluginPanelSignals) -> AnyView {
     let plugin_id = card.get_untracked().plugin_id;
     let pid = style::key_part(&plugin_id);
@@ -128,7 +128,7 @@ fn status_pill(card: CardItem, pid: &str) -> AnyView {
         .into_any()
 }
 
-/// `.plugin-manager__notice`：内边距 8/10、md 圆角、12 号行高 1.5；禁用原因用危险色柔和底。
+/// 卡片里的提示：内边距 8/10、md 圆角、12 号行高 1.5；禁用原因用危险色柔和底。
 fn plugin_notice(text: &str, danger: bool) -> AnyView {
     let body = pad(column(0.0), 8.0, 10.0, 8.0, 10.0);
     let (body, color) = if danger {
@@ -149,7 +149,7 @@ fn plugin_notice(text: &str, danger: bool) -> AnyView {
         .into_any()
 }
 
-/// `.settings-list__chips`：分类、类型、来源、运行时、依赖和能力，上边距 8、间距 8。
+/// 芯片行：分类、类型、来源、运行时、依赖和能力，上边距 8、间距 8。
 fn chips_row(values: &[String], pid: &str) -> AnyView {
     let items = values
         .iter()
@@ -227,7 +227,7 @@ fn sections(card: CardItem, pid: &str) -> Vec<AnyView> {
     vec![dependencies, permissions, hooks, executions]
 }
 
-/// `.plugin-manager__dependency`：最小高 24、内边距 4/8、md 圆角、`bg-subtle`、12 号。
+/// 依赖项：最小高 24、内边距 4/8、md 圆角、`bg-subtle`、12 号。
 fn dependency_chip(text: String, tone: ChipTone) -> AnyView {
     let body = pad(row(0.0), 4.0, 8.0, 4.0, 8.0).with_layout(|layout| {
         layout.min_height = Some(LengthSpec::Px(24.0));
@@ -263,7 +263,7 @@ fn section(title: &str, items: Vec<AnyView>) -> AnyView {
     section_with_body(title, list)
 }
 
-/// `.plugin-manager__section`：`grid-template-columns: 56px minmax(0, 1fr)`，间距 8，顶对齐。
+/// 卡片里的一段：`grid-template-columns: 56px minmax(0, 1fr)`，间距 8，顶对齐。
 /// 网格先定列宽、再按列宽量行高，折行的芯片按内容列的宽度排。
 fn section_with_body(title: &str, body: AnyView) -> AnyView {
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
@@ -405,7 +405,7 @@ fn card_actions(card: CardItem, signals: PluginPanelSignals, plugin_id: &str) ->
     .into_any()
 }
 
-/// `.plugin-manager__settings`：上边线、上内边距 12，竖排间距 12。头部是设置标题、说明和
+/// 设置区：上边线、上内边距 12，竖排间距 12。头部是设置标题、说明和
 /// 「打开目录」；下面是下载服务或 Office 转换状态、来源账号区和字段表单。只在这张卡片的设置展开时建。
 fn settings_section(plugin_id: &str, signals: PluginPanelSignals) -> AnyView {
     let pid = style::key_part(plugin_id);

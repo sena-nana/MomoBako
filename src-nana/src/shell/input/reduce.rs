@@ -303,7 +303,7 @@ fn begin_drag(
     };
     model.input.dragged_paths = drag_paths.clone();
     model.input.internal_active = true;
-    // 和 Vue 一样：拖动已经起步，松手时这一行上的点击丢掉。
+    // 拖动已经起步，松手时这一行上的点击丢掉。
     super::super::files_view::suppress_row_click(path);
     model.input.session = Some(InternalSession {
         start_x: x,
@@ -720,8 +720,8 @@ fn box_select(model: &mut ShellViewModel, paths: &[String], append: bool) {
         .set_drag_selection(paths.to_vec(), primary.clone(), primary);
 }
 
-/// 照 Vue `openWorkspaceEntry`：记一次访问，再交给系统程序打开。两件事并行：访问记录在任务里写，回来再改
-/// 「最近使用」；记录失败只记日志，不挡住打开（Vue 记录失败时不打开，见 `nana-vue-parity.md`）。
+/// 记一次访问，再交给系统程序打开。两件事并行：访问记录在任务里写，回来再改
+/// 「最近使用」；记录失败只记日志，不挡住打开：访问记录是附带的账。
 fn open_entry(model: &mut ShellViewModel, has_repo: bool, absolute_path: &str, path: &str) {
     if !has_repo || absolute_path.trim().is_empty() {
         if has_repo && !path.trim().is_empty() && absolute_path.trim().is_empty() {

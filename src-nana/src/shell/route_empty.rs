@@ -4,7 +4,7 @@
 //! 视图只建一次。拖着文件夹经过时面板换底色和描边、附加失败的错误条，都按字段绑定。
 //! 拖放处理器在事件到达时现读信号里的拖放条件，不抄建视图那一刻的值。
 //!
-//! 版式照 `EmptyRepositoryState.vue`：标题、拖入说明和附加失败的错误。
+//! 版式：标题、拖入说明和附加失败的错误。
 
 use std::sync::Arc;
 
@@ -133,7 +133,7 @@ fn panel(view: Signal<EmptyView>) -> AnyView {
         .into_any()
 }
 
-/// 居中的一段字，行高写成像素。对应 `.empty-state-page` 的 `text-align: center`。
+/// 居中的一段字，行高写成像素。
 fn centered_text(
     value: impl Into<String>,
     size: f32,

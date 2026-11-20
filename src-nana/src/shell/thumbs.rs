@@ -1,18 +1,18 @@
 //! 文件缩略图的宽高比和解码，以及预览图片的解码。
 //!
-//! Vue 在图片加载后用原始宽高比，并夹到 0.55–2.4；各展示方式的卡片尺寸在 `shell/files_view/cards.rs`。
-//! 解码按 EXIF 方向摆正（照片和 Vue 的 `<img>` 一样不横躺、不倒置）。预览里的 SVG 交给 NanaUI 带着的 resvg
+//! 图片加载后用原始宽高比，并夹到 0.55–2.4；各展示方式的卡片尺寸在 `shell/files_view/cards.rs`。
+//! 解码按 EXIF 方向摆正（照片不横躺、不倒置）。预览里的 SVG 交给 NanaUI 带着的 resvg
 //! 光栅（`nana-svg-raster`）；预览图任一边超过宿主纹理上限时按比例缩小，不拒绝长条漫画和全景图。
 
 use std::io::Cursor;
 
 use image::{DynamicImage, GenericImageView, ImageDecoder, ImageReader};
 
-/// 与 `usePreviewUi` 的 `Math.min(Math.max(aspect, 0.55), 2.4)` 相同。
+/// 宽高比夹到 0.55–2.4。
 pub const ASPECT_MIN: f32 = 0.55;
 pub const ASPECT_MAX: f32 = 2.4;
 
-/// 宽高未知或无效时按正方形。否则夹到 Vue 的范围。
+/// 宽高未知或无效时按正方形。否则夹到 0.55–2.4。
 pub fn content_aspect(width: u32, height: u32) -> f32 {
     if width == 0 || height == 0 {
         return 1.0;

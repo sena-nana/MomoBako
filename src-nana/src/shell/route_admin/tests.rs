@@ -274,7 +274,7 @@ fn at_end(harness: &ShellHarness) -> bool {
 }
 
 /// 宽敞的窗口（1200×800）表现不变：主体的滚动范围只算到列表自己的盒子，日志再多主体也不滚；
-/// 面板正好撑满主体，列表在筛选下面占满剩下的高度（比 Vue 的 360 还高）、自己滚，追踪时停在末尾。
+/// 面板正好撑满主体，列表在筛选下面占满剩下的高度（比 360 还高）、自己滚，追踪时停在末尾。
 #[test]
 fn a_roomy_window_scrolls_only_the_log_list() {
     let harness = crowded_logs_at(1200.0, 800.0, 12);
@@ -312,7 +312,7 @@ fn a_roomy_window_scrolls_only_the_log_list() {
 }
 
 /// 常见的矮窗口（960×600、960×480）：列表在筛选下面收矮到主体放得下，主体不滚；追踪时列表停在末尾，
-/// 最新一条的消息落在列表和主体的可视区里，不用滚页面就看得到。有意偏离 Vue 的最小高 360。
+/// 最新一条的消息落在列表和主体的可视区里，不用滚页面就看得到。列表有意不守 360 的最小高。
 #[test]
 fn short_windows_keep_the_latest_log_in_view_without_scrolling_the_page() {
     for height in [600.0, 480.0] {
@@ -895,7 +895,7 @@ fn corner_radii(messages: &[ShellMessage]) -> Vec<f64> {
         .collect()
 }
 
-/// 拖圆角滑杆还没松手就要写入。Vue `Settings.vue` 的圆角 range 听 `@input`。松手不再把同一格写第二次。
+/// 拖圆角滑杆还没松手就要写入。松手不再把同一格写第二次。
 #[test]
 fn dragging_the_corner_radius_slider_sets_radius_before_release() {
     let mut harness = ShellHarness::mount(ShellViewModel::for_page(ShellPage::Settings));

@@ -1,4 +1,4 @@
-//! 上次打开的资源库，对照 Vue `readLastActiveRepositoryId` / `rememberLastActiveRepository`：从冷启动的读列表
+//! 上次打开的资源库：从冷启动的读列表
 //! 和切换列表这些真实入口走，送回服务结果，看选中了哪个仓库、加载日志写了什么、排没排写文件，以及写下去的文件
 //! 下一次冷启动读不读得回来。
 
@@ -85,7 +85,7 @@ fn log_detail(model: &ShellViewModel, message: &str) -> String {
     log.and_then(|log| log.detail.clone()).unwrap_or_default()
 }
 
-/// 记着 repo-b，列表第一项是 repo-a：照 Vue 打开 repo-b，加载日志的「流程开始」和「已选定资源库」都写出上次打开的
+/// 记着 repo-b，列表第一项是 repo-a：打开 repo-b，加载日志的「流程开始」和「已选定资源库」都写出上次打开的
 /// 仓库。还是同一个仓库，读完摘要不重写文件。
 #[test]
 fn a_cold_start_opens_the_remembered_repository() {
@@ -209,7 +209,7 @@ fn switching_writes_the_new_repository_after_its_summary() {
     let _ = fs::remove_dir_all(dir);
 }
 
-/// 换到缺失的仓库：不同步，立即记住它（Vue `selectRepository` 的缺失分支）。
+/// 换到缺失的仓库：不同步，立即记住它。
 #[test]
 fn switching_to_a_missing_repository_remembers_it_at_once() {
     let dir = temp_dir("missing");
@@ -231,7 +231,7 @@ fn switching_to_a_missing_repository_remembers_it_at_once() {
     let _ = fs::remove_dir_all(dir);
 }
 
-/// 列表空了：照 Vue `resetWorkspaceSelection({ clearRememberedRepository: true })` 清掉，写下的文件不带这个键。
+/// 列表空了：清掉记住的仓库，写下的文件不带这个键。
 #[test]
 fn an_empty_list_forgets_the_remembered_repository() {
     let dir = temp_dir("empty");

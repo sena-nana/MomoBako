@@ -1,7 +1,7 @@
 //! 预览页自绘：插件预览框顶部的 accent-soft 光晕、音频舞台卡片的浅光和落影、唱片和中间的封面。
 //!
-//! 唱片纹路是 Vue 写死的 #151515 / #202020 / #181818，和主题无关，这里照用；其它颜色都取主题角色。
-//! 正圆后面有 `.media-preview__audio-record` 的落影。有封面图时按 `object-fit: cover` 画进中间 58% 的圆里；没有图时仍是封面圆。
+//! 唱片纹路是写死的 #151515 / #202020 / #181818，和主题无关；其它颜色都取主题角色。
+//! 正圆后面有落影。有封面图时按 `object-fit: cover` 画进中间 58% 的圆里；没有图时仍是封面圆。
 //! 卡片上的浅光和 `0 18px 40px` 落影在 [`AudioCardFace`]，不改唱片那条 `0 22px 60px`。
 //! 音视频准备卡的 `0 12px 32px` 落影在 [`LoadingCardShadow`]，色条扫动在 [`PreviewSweep`]。
 
@@ -89,7 +89,7 @@ impl Painter for PageViewerBackdrop {
     }
 }
 
-/// 音频舞台卡片 `.media-preview--audio` 的径向浅光和落影。
+/// 音频舞台卡片的径向浅光和落影。
 ///
 /// 浅光在卡片底色之上、唱片和歌词之下：
 /// `radial-gradient(circle at 28% 32%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 28%)`。
@@ -294,7 +294,7 @@ impl Painter for VinylRecord {
     }
 }
 
-/// 正圆后面的落影。对应 `.media-preview__audio-record` 的
+/// 正圆后面的落影：
 /// `box-shadow: 0 22px 60px color-mix(in srgb, var(--bg) 78%, transparent)`。
 /// 跟画出的圆走，不跟外框：格子不是正方形时仍是圆，不铺成方块。
 fn disc_shadow(cx: &mut PaintContext<'_>, center: [f32; 2], radius: f32) {
@@ -372,13 +372,13 @@ fn fill_circle(cx: &mut PaintContext<'_>, center: [f32; 2], radius: f32, color: 
     cx.fill_path(&path, color);
 }
 
-/// 准备卡落影的垂直偏移，对应 `.media-playlist-runtime__loading` 的 `box-shadow: 0 12px 32px`。
+/// 准备卡落影的垂直偏移，`box-shadow: 0 12px 32px`。
 const LOADING_SHADOW_Y: f32 = 12.0;
 /// 准备卡落影的模糊半径。
 const LOADING_SHADOW_BLUR: f32 = 32.0;
 /// `color-mix(in srgb, var(--bg) 70%, transparent)` 里背景色的比例。
 const LOADING_SHADOW_MIX: f32 = 0.7;
-/// 不确定进度色条的宽度，相对轨道。`.media-preview__download-progress--indeterminate span` 的 `width: 42%`。
+/// 不确定进度色条的宽度，相对轨道，42%。
 const SWEEP_FILL: f32 = 0.42;
 /// `translateX(-120%)`，百分比相对色条自己。
 const SWEEP_FROM: f32 = -120.0;
@@ -401,7 +401,7 @@ pub(super) fn loading_sweep_scope<R>(signal: Signal<f32>, build: impl FnOnce() -
     build()
 }
 
-/// 音视频准备卡 `.media-playlist-runtime__loading` 的落影。
+/// 音视频准备卡的落影。
 ///
 /// `box-shadow: 0 12px 32px color-mix(in srgb, var(--bg) 70%, transparent)`，跟着卡片的 md 圆角。
 /// 底色和 border-soft 细边仍走外壳自己的外观。
@@ -537,7 +537,7 @@ pub(super) fn loading_progress() -> AnyView {
     .into_any()
 }
 
-/// 图片读取胶囊里的进度轨。宽 132，对应 `.media-preview__download-progress` 在状态胶囊里的固定宽度。
+/// 图片读取胶囊里的进度轨。宽 132，在状态胶囊里固定宽度。
 /// 色条和准备卡同一条扫动：宽 42%，`translateX` 从 -120% 到 250%。没有时钟时停在起点并记日志。
 pub(super) fn status_progress() -> AnyView {
     let signal = LOADING_SWEEP.with(Cell::get);

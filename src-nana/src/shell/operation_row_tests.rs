@@ -1,5 +1,4 @@
-//! 文件变更在任务弹层里的仓库操作行，对齐 Vue `operationProgress` 和 `TaskPopover.vue` 的
-//! `workspace-operation`：从文件页的操作开始，看任务弹层的行和侧栏「任务」的计数。
+//! 文件变更在任务弹层里的仓库操作行：从文件页的操作开始，看任务弹层的行和侧栏「任务」的计数。
 //! 删除和回收站变更成功以后，侧栏「回收站」计数跟着静默重读的仓库摘要走。
 
 use std::collections::BTreeMap;
@@ -118,7 +117,7 @@ fn copying_shows_the_operation_until_the_directory_is_reloaded() {
     assert_eq!(model.task_rows().len(), idle);
 }
 
-/// 等待中的进度照 Vue 每 220 ms 往上爬：复制从 32% 起，下一拍 35%，再一拍过了 35 改加 3。
+/// 等待中的进度每 220 ms 往上爬：复制从 32% 起，下一拍 35%，再一拍过了 35 改加 3。
 #[test]
 fn waiting_operations_climb_like_vue() {
     let mut model = files_page();
@@ -132,8 +131,8 @@ fn waiting_operations_climb_like_vue() {
     assert_eq!(operation_row(&model).map(|row| row.2), Some(40.0));
 }
 
-/// 侧栏的回收站快捷方式和快捷访问是 Vue 的非静默读取，任务弹层出「读取回收站」「读取目录」，读完走到
-/// 「整理目录条目」再完成；点文件夹是静默读取（Vue `openFolder` 带 `silent`），不出这一行。
+/// 侧栏的回收站快捷方式和快捷访问是非静默读取，任务弹层出「读取回收站」「读取目录」，读完走到
+/// 「整理目录条目」再完成；点文件夹是静默读取，不出这一行。
 #[test]
 fn sidebar_reads_report_like_vue() {
     use super::sidebar::{ShortcutId, SidebarMessage};
@@ -172,7 +171,7 @@ fn sidebar_reads_report_like_vue() {
     assert!(operation_row(&model).is_none(), "点文件夹是静默读取");
 }
 
-/// 多选删除（和移动）在 Vue 里成功以后非静默地重读目录：进度行换成「读取目录」，读回来走到「整理目录条目」再完成。
+/// 多选删除（和移动）成功以后非静默地重读目录：进度行换成「读取目录」，读回来走到「整理目录条目」再完成。
 #[test]
 fn multi_deletes_hand_the_row_to_the_directory_read() {
     let mut model = files_page();
@@ -202,7 +201,7 @@ fn multi_deletes_hand_the_row_to_the_directory_read() {
     );
 }
 
-/// 和 Vue 一样只有多选删除出进度行，单条删除不出；变更失败时收起。
+/// 只有多选删除出进度行，单条删除不出；变更失败时收起。
 #[test]
 fn only_multi_delete_shows_the_operation_and_failures_clear_it() {
     let mut model = files_page();
@@ -259,7 +258,7 @@ fn hardlink_page() -> (ShellViewModel, String) {
     (model, repo_id)
 }
 
-/// 确认硬链接照 Vue `refreshWorkspace(repoId, { directory, hardlinkCandidates, repositorySnapshot })`：确认本身不出
+/// 确认硬链接一并刷新目录、候选和仓库摘要：确认本身不出
 /// 进度行；成功以后重读候选、静默重读仓库摘要、非静默地重读当前目录，任务弹层是「读取目录」，目录读回来收起。
 /// 只有这一条候选时确认框关掉。
 #[test]
@@ -315,7 +314,7 @@ fn confirming_a_hardlink_reloads_candidates_summary_and_directory() {
     );
 }
 
-/// 两条候选，确认第一条成功：照 Vue `isMutatingFiles` 包着整轮刷新，重读的候选回来以前确认框一直处理中（按钮禁用、
+/// 两条候选，确认第一条成功：整轮刷新都算在变更里，重读的候选回来以前确认框一直处理中（按钮禁用、
 /// 点「加入关联」「跳过」和 Escape 都不动），回来以后按新的列表显示下一条。确认以前发出的读取晚到，不会把确认掉的
 /// 那一条写回来。
 #[test]
@@ -420,7 +419,7 @@ fn the_dialog_waits_for_the_reread_and_ignores_reads_from_before_the_confirmatio
     );
 }
 
-/// 确认失败照 Vue 静默重读候选，确认框和这一条留着，错误写在文件列，不重读目录和摘要；重读回来以前确认框处理中，
+/// 确认失败时静默重读候选，确认框和这一条留着，错误写在文件列，不重读目录和摘要；重读回来以前确认框处理中，
 /// 回来以后按新的列表走（候选已经失效、列表空了就收起）。确认回来时已经换了仓库就什么也不读。
 #[test]
 fn a_failed_or_stale_hardlink_confirmation_does_not_reload_the_workspace() {
@@ -512,7 +511,7 @@ fn a_reread_without_candidates_closes_the_dialog() {
     assert!(!model.files.hardlink_busy());
 }
 
-/// 删除成功照 Vue `refreshAfterFileMutation` 静默重读仓库摘要，侧栏「回收站」换成摘要里的
+/// 删除成功后静默重读仓库摘要，侧栏「回收站」换成摘要里的
 /// `trashCount`，摘要没回来以前不自己加一。失败不读。清空回收站还静默重读仓库列表。
 #[test]
 fn trash_count_follows_the_snapshot_after_delete_and_empty() {
@@ -610,7 +609,7 @@ fn trash_count_follows_the_snapshot_after_delete_and_empty() {
     );
 }
 
-/// 多选还原照 Vue `restoreTrashEntries`：成功后丢掉变更快照，清空选择，非静默重读回收站。
+/// 多选还原：成功后丢掉变更快照，清空选择，非静默重读回收站。
 /// 任务弹层从「还原文件」换成「读取回收站」，文件列换成「正在读取目录」。
 /// 失败不重读、选择留着。单条还原仍采用快照，不出「读取回收站」。
 #[test]
@@ -750,7 +749,7 @@ fn multi_restore_reloads_the_trash_and_clears_the_selection() {
     assert!(single.files.selected.is_empty(), "还原掉的条目不留在选择里");
 }
 
-/// 目录快照带着文件夹树时，侧栏目录换成这份树和每个目录的文件数（Vue `applyFileBrowserSnapshot`）。
+/// 目录快照带着文件夹树时，侧栏目录换成这份树和每个目录的文件数。
 /// 没有树时侧栏不动。分类视图路径对不上、过期的目录快照、多选还原丢掉的快照都不写。
 #[test]
 fn snapshot_tree_replaces_the_sidebar_folders() {

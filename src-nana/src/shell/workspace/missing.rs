@@ -1,6 +1,5 @@
 //! 缺失仓库页的动作和删除资源库对话框。
 //!
-//! 对应 Vue `MissingRepositoryState.vue`、`useMissingRepositoryActions.ts` 和 `RepositoryDeleteDialog.vue`：
 //! 刷新、选新路径并重定向、打开来源设置，以及删除资源库的三种方式（只删记录、删 .momo 数据、删整个文件夹）
 //! 能不能选、说明文案和删除结果。重定向的结果在 `shell/workspace/switch.rs`。
 

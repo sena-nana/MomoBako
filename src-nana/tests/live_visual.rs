@@ -73,7 +73,7 @@ fn live_workspace_title_bar_layout_and_clicks_hold() {
     assert_smart_folder_dialog();
 }
 
-/// 指针停在能滚的设置页上：照 Vue 的 overlay 滚动条淡入 4px 的 `--border-strong` 滑块，画在内容上面；
+/// 指针停在能滚的设置页上：浮层滚动条淡入 4px 的 `--border-strong` 滑块，画在内容上面；
 /// 真像素里滑块中心就是滑块的颜色。截图留在 `target/nana-live-visual/settings-scrollbar-dark-960.png`。
 #[test]
 fn hovered_settings_page_paints_the_overlay_thumb() {
@@ -309,7 +309,7 @@ fn assert_clicks() {
         "最大化没有排队宿主命令：{commands:?}"
     );
 
-    // 默认关闭行为和旧版一致：没有未保存的修改时直接关窗，不弹确认。
+    // 默认关闭行为：没有未保存的修改时直接关窗，不弹确认。
     click_label(&mut session, "关闭");
     let commands = pump(&mut session, &mut model);
     assert!(
@@ -375,7 +375,7 @@ fn assert_smart_folder_dialog() {
     for label in ["新建智能文件夹", "名称", "父级", "匹配方式", "取消", "创建"] {
         assert!(has_label(&nodes, label), "新建智能文件夹缺少 {label}");
     }
-    // 下拉框由字段名命名，值是当前选项，和 Vue `<label>` 包着 `<select>` 一致。
+    // 下拉框由字段名命名，值是当前选项。
     for (label, value) in [("父级", "顶层智能文件夹"), ("匹配方式", "全部匹配")] {
         let combo = nodes
             .iter()
@@ -634,7 +634,7 @@ fn assert_file_layout(
     );
 }
 
-/// 展示方式和 Vue 一样是一个下拉，读出的是当前值。
+/// 展示方式是一个下拉，读出的是当前值。
 fn display_mode_select(nodes: &[AccessibilityDumpNode]) -> &AccessibilityDumpNode {
     assert!(has_label(nodes, "展示方式"), "缺少展示方式标签");
     nodes
@@ -649,7 +649,7 @@ fn display_mode_select(nodes: &[AccessibilityDumpNode]) -> &AccessibilityDumpNod
         .expect("缺少展示方式下拉")
 }
 
-/// 底部四个入口和 Vue 一样挤在侧栏里，不能被撑出侧栏画到文件列下面。
+/// 底部四个入口挤在侧栏里，不能被撑出侧栏画到文件列下面。
 fn assert_footer_inside_sidebar(nodes: &[AccessibilityDumpNode]) {
     let sidebar = required(nodes, "resources");
     for label in FOOTER {

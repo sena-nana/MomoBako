@@ -1,4 +1,4 @@
-//! 对话框正文里的字段：标签加输入框、多行输入、下拉框和两列栅格，照 Vue `.dialog-field`。
+//! 对话框正文里的字段：标签加输入框、多行输入、下拉框和两列栅格。
 //!
 //! 标签 12px/600 次要色，下面是控件，间距 6；输入框、多行输入和下拉框最小高 32、左右内边距 8、
 //! `--radius-sm` 圆角、14px 字。输入框和多行输入用 `.model(草稿信号)` 受控，草稿由浮层会话按
@@ -20,7 +20,7 @@ use crate::shell::ShellMessage;
 /// 下拉框的选项：值和显示文字。
 pub(crate) type Choices = Vec<(String, String)>;
 
-/// `.dialog-field` 的竖排：标签在上，控件在下，间距 6，占满宽度。
+/// 字段的竖排：标签在上，控件在下，间距 6，占满宽度。
 fn field_column() -> Stack {
     Stack::column(6.0)
         .width(LengthSpec::Fill)
@@ -117,8 +117,8 @@ pub(crate) fn text_area_field(
         .into_any()
 }
 
-/// 下拉框字段。下拉框没有自己的名称，用 `.labelled_by` 以字段名命名，和 Vue `<label>` 包着
-/// `<select>` 一样；`value` 和 `choices` 都可以读信号，打开期间变了只改这两个字段。
+/// 下拉框字段。下拉框没有自己的名称，用 `.labelled_by` 以字段名命名；
+/// `value` 和 `choices` 都可以读信号，打开期间变了只改这两个字段。
 pub(crate) fn select_field(
     label: &'static str,
     key: &'static str,

@@ -1,6 +1,6 @@
 //! 搜索面板和筛选栏共用的小部件：文字、计数胶囊、筛选芯片、输入胶囊和工具按钮。
 //!
-//! 尺寸照 Vue 的 `workspace-filter-*`、`asset-stat` 和 `workspace-hints__chip` 的设计值：
+//! 尺寸：
 //! 芯片、输入胶囊和计数胶囊 26px，结果芯片 28px，筛选栏按钮 28px。
 //! 颜色只用语义角色；色块的真实颜色由 `search_paint` 自绘。
 
@@ -18,7 +18,7 @@ use super::paint::SwatchChipPainter;
 use super::presenter::SwatchColor;
 use crate::theme_map::DISABLED_OPACITY;
 
-/// Vue 根字号的行高倍数 1.55。
+/// 行高倍数 1.55。
 pub(crate) const LINE_RATIO: f32 = 1.55;
 /// 筛选芯片、输入胶囊、计数胶囊和分组标签的高度。
 pub(crate) const CONTROL_HEIGHT: f32 = 26.0;
@@ -28,10 +28,10 @@ pub(crate) const BAR_BUTTON_HEIGHT: f32 = 28.0;
 const CHIP_PADDING: f32 = 9.0;
 /// 色块和芯片文字之间的间距。
 const CHIP_GAP: f32 = 6.0;
-/// 输入框宽度，对应 `.workspace-filter-input` 的 `minmax(86px, 120px)` 上限。
+/// 输入框宽度，`minmax(86px, 120px)` 的上限。
 pub(crate) const INPUT_WIDTH: f32 = 120.0;
 
-/// 按 Vue 字号、字重和行高排一段文字。
+/// 按给定字号、字重和行高排一段文字。
 pub(crate) fn label(
     content: impl Into<String>,
     size: f32,
@@ -85,7 +85,7 @@ pub(crate) fn bound(node: Text, value: impl IntoProp<String>) -> El<Text> {
     widget(node).prop::<String, fields::text::value>(value)
 }
 
-/// Vue `.asset-stat`：26px 高的计数胶囊，主表面底、12px 次要文字。文字可以绑定，
+/// 26px 高的计数胶囊，主表面底、12px 次要文字。文字可以绑定，
 /// 返回元素，调用方还能再绑显隐。
 pub(crate) fn stat(
     content: impl IntoProp<String>,
@@ -110,7 +110,7 @@ pub(crate) fn stat(
     .key(key)
 }
 
-/// Vue `.workspace-filter-chip`：26px 胶囊，1px 边框。未选是主表面底、次要字；
+/// 筛选芯片：26px 胶囊，1px 边框。未选是主表面底、次要字；
 /// 选中和悬停是强调色描边、柔和强调底、强调色字。颜色芯片在左内边距里画色块。
 pub(crate) fn chip(content: &str, active: bool, swatch: Option<SwatchColor>) -> Button {
     let button = Button::new(content);
@@ -200,8 +200,8 @@ impl FieldWrite<Button, bool> for ChipActive {
     }
 }
 
-/// Vue `.workspace-filter-bar__btn`：28px 高、左右 9px 的透明按钮，14px 中等字重正文色。
-/// 悬停是 `--bg-hover`。禁用时文字按 45% 混进筛选栏底色：Vue 的 `opacity` 在 sRGB 里合成，
+/// 筛选栏按钮：28px 高、左右 9px 的透明按钮，14px 中等字重正文色。
+/// 悬停是 `--bg-hover`。禁用时文字按 45% 混进筛选栏底色：不透明度要按 sRGB 合成，
 /// 直接给半透明文字会被渲染器按线性空间合成得更亮，所以先混成不透明色。
 pub(crate) fn bar_button(content: &str, disabled: bool) -> Button {
     let button = Button::new(content).disabled(disabled);
@@ -229,7 +229,7 @@ pub(crate) fn bar_button(content: &str, disabled: bool) -> Button {
     button.style(style)
 }
 
-/// 关闭筛选栏：和工具按钮同高，14px 叉号（Vue lucide `X`，两条对角线），正文色。
+/// 关闭筛选栏：和工具按钮同高，14px 叉号（两条对角线），正文色。
 pub(crate) fn close_button(name: &str) -> IconButton {
     let button = IconButton::new(X, name)
         .size(nana_ui_core::ControlSize::Large)
@@ -267,7 +267,7 @@ fn ghost_paint(style: &mut NodeStyle) {
     style.interaction.disabled = SemanticPaint::default();
 }
 
-/// Vue `.workspace-filter-input`：26px 胶囊，1px 边框、主表面底，里面放输入框和可选按钮。
+/// 输入胶囊：26px 高，1px 边框、主表面底，里面放输入框和可选按钮。
 pub(crate) fn input_pill(fill: bool) -> Stack {
     let pill = Stack::row(0.0)
         .align(AlignSpec::Stretch)
@@ -399,7 +399,7 @@ pub(crate) fn pill_button(content: &str, disabled: bool) -> Button {
     button.style(style)
 }
 
-/// Vue `.workspace-hints__chip`：28px 胶囊、1px 边框、12px 次要字，只读。
+/// 提示芯片：28px 胶囊、1px 边框、12px 次要字，只读。
 pub(crate) fn hint_chip(content: &str, key: String) -> AnyView {
     widget(
         Stack::row(0.0)

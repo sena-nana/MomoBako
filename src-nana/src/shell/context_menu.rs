@@ -1,19 +1,18 @@
-//! 右键菜单的共用视图：文件条目和侧栏文件夹行的右键菜单都从这里建，对应 Vue `ContextMenuHost.vue`
-//! （两处在 Vue 里也是同一个 `v-context-menu` 宿主）。
+//! 右键菜单的共用视图：文件条目和侧栏文件夹行的右键菜单都从这里建。
 //!
-//! 外观照 `.ctx-menu`：抬升底、`--border-strong` 描边、`Md` 圆角、内边距 4、行间距 1，
+//! 外观：抬升底、`--border-strong` 描边、`Md` 圆角、内边距 4、行间距 1，
 //! 行高 28、13px/500、13px 图标；分组带 ›，子菜单贴在这一行右边 4px。
-//! 子菜单照 `.ctx-menu__slot:hover` / `:focus-within`：指针或键盘焦点进到分组那一行（含子菜单）
+//! 子菜单：指针或键盘焦点进到分组那一行（含子菜单）
 //! 就展开，都离开就收起，没有延迟；点分组本身不收起（按下时焦点落在分组上）。禁用的分组不展开。
 //! 菜单按指针落点放置，靠右或靠下放不下时夹回窗口内 4px。
 //! 菜单和每个子菜单各是一个方向键焦点组：上下键在本层的项之间走、首尾相接，Tab 从分组走进子菜单；
-//! 带子菜单的分组照 Vue 报成菜单按钮（`aria-haspopup="menu"`）。菜单键和 Shift+F10 打开的菜单，
+//! 带子菜单的分组报成菜单按钮（`aria-haspopup="menu"`）。菜单键和 Shift+F10 打开的菜单，
 //! 焦点落在首项（`menu_focus.rs`），Enter 执行，Escape 由全局 Escape 关掉。
 //! 要点两次的项第一次只把这一行变成待确认，文案换成确认句，菜单按这句变宽，靠右时夹回窗口内。点菜单外关闭。
-//! 在菜单上再按右键或菜单键也关闭：菜单自己没有提供者（Vue `installContextMenu` 的 `contextmenu`）。
+//! 在菜单上再按右键或菜单键也关闭：菜单自己不提供右键菜单。
 //! 方向键在会弹出的分组上也会变成同一种按键，那是走进子菜单，不关。
-//! 任意滚动区的偏移变了也关闭（Vue `installContextMenu` 在捕获阶段听 `scroll`），
-//! 窗口失焦也关闭（同一处的 `blur`），窗口逻辑尺寸变了也关闭（同一处的 `resize`）。
+//! 任意滚动区的偏移变了也关闭，
+//! 窗口失焦也关闭，窗口逻辑尺寸变了也关闭。
 //! 文件菜单和文件夹菜单一起收。尺寸没变不关，菜单项仍能点。
 //! 菜单关掉或换了一份锚点，再滚才算下一次。
 //! 不能用的项禁用，后面可以跟一行弱色小字写原因（不是菜单项，不能点、不能聚焦）。
@@ -54,14 +53,14 @@ pub(crate) struct MenuScrollSnapshot {
     offsets: BTreeMap<String, (i32, i32)>,
 }
 
-/// `.ctx-menu` 的最小宽度、内边距、行高和行间距。
+/// 菜单的最小宽度、内边距、行高和行间距。
 const MENU_MIN_WIDTH: f32 = 180.0;
 const MENU_PADDING: f32 = 4.0;
 const ITEM_HEIGHT: f32 = 28.0;
 const ITEM_GAP: f32 = 1.0;
 /// 菜单离窗口边至少 4px（`SB_MENU_EDGE_PADDING`）。
 const EDGE: f32 = 4.0;
-/// 子菜单离这一行右缘的距离（`.ctx-menu__submenu { left: calc(100% + 4px) }`）。
+/// 子菜单离这一行右缘的距离，4px。
 const SUBMENU_GAP: f32 = 4.0;
 
 /// 点菜单项时发的消息，存成数据：能比较（按调试文本），条目变了就知道。`ShellMessage` 不能克隆，
@@ -219,7 +218,7 @@ pub(crate) struct MenuChrome {
 
 /// 右键菜单开着时，任一滚动区的偏移相对这份菜单记下的位置变了，就关掉文件菜单和文件夹菜单。
 ///
-/// 和 Vue `installContextMenu` 一样：听的是滚动，不是点在菜单上。第一次见到这份菜单只记下偏移；
+/// 听的是滚动，不是点在菜单上。第一次见到这份菜单只记下偏移；
 /// 菜单关掉或锚点换了就重新记，避免菜单关着时滚过的距离在重新打开时被当成这次的滚动。
 /// 滚动区还没排出来、或者偏移不是有限数时跳过，不当成已经滚动。
 pub(crate) fn dismiss_context_menus_on_scroll(
@@ -252,7 +251,7 @@ pub(crate) fn dismiss_context_menus_on_scroll(
 
 /// 窗口失焦时要发的消息。
 ///
-/// Vue `installContextMenu` 在 `blur` 时关掉右键菜单；`useWorkspaceDragDrop` 的 `handleWindowBlur`
+/// 失焦时关掉右键菜单，
 /// 在内部拖动已经离开够远时交给系统拖放（`WindowBlur`）。焦点还在窗口里时什么都不发。
 /// 点菜单项走的是点击，不经过这里。没有拖动会话时不发 `WindowBlur`，那条归约什么都不做。
 pub(crate) fn focus_loss_messages(
@@ -271,7 +270,7 @@ pub(crate) fn focus_loss_messages(
 
 /// 窗口逻辑尺寸变了时要发的消息。
 ///
-/// Vue `installContextMenu` 在 `resize` 时关掉右键菜单。第一次见到有限尺寸只记下像素，
+/// 窗口缩放时关掉右键菜单。第一次见到有限尺寸只记下像素，
 /// 不当成缩放；之后宽或高差了至少 1px 才收起文件菜单和文件夹菜单。同一像素（含不到 1px 的抖动）
 /// 和无效尺寸不关，菜单留着，点菜单项仍走点击。不发 `WindowBlur`：内部拖动交给系统只在失焦时发生。
 pub(crate) fn window_resize_messages(
@@ -449,7 +448,7 @@ impl FieldWrite<Stack, (f32, f32, f32, f32)> for MenuPlacement {
     }
 }
 
-/// 铺满窗口的透明底，点在菜单外就关闭，和 Vue 的全局 pointerdown 一样。
+/// 铺满窗口的透明底，在菜单外按下就关闭。
 fn backdrop(chrome: MenuChrome) -> AnyView {
     let mut style = NodeStyle::default();
     let layout = Arc::make_mut(&mut style.layout);
@@ -467,7 +466,7 @@ fn backdrop(chrome: MenuChrome) -> AnyView {
         .into_any()
 }
 
-/// 一行和它的子菜单（`.ctx-menu__slot`）。可用的分组挂上指针和焦点的进出：子树里包括子菜单，
+/// 一行和它的子菜单。可用的分组挂上指针和焦点的进出：子树里包括子菜单，
 /// 在分组和子菜单之间移动不算离开。展开哪个分组只切换子菜单的显隐。
 fn slot(view: Signal<MenuView>, entry: MenuEntry, chrome: MenuChrome) -> AnyView {
     let frame = Stack::column(0.0)
@@ -502,11 +501,11 @@ fn slot(view: Signal<MenuView>, entry: MenuEntry, chrome: MenuChrome) -> AnyView
         .into_any()
 }
 
-/// 子菜单（`.ctx-menu__submenu`）：从这一行右缘起，先是 4px 透明接缝，再是菜单面板。
+/// 子菜单：从这一行右缘起，先是 4px 透明接缝，再是菜单面板。
 ///
 /// 整块接住指针：接缝盖住父菜单右侧的内边距和描边，面板的内边距和行距落在它上面。指针从分组移进
-/// 子菜单、在子菜单里移动，都还在这一行的子树里，子菜单不闪关。Vue 的子菜单离这一行也是 4px，
-/// 但中间是父菜单的内边距，不属于 `.ctx-menu__slot`，指针慢慢移过去时 `:hover` 先断一下。
+/// 子菜单、在子菜单里移动，都还在这一行的子树里，子菜单不闪关。要是接缝留给父菜单的内边距，
+/// 指针慢慢移过去时悬停会先断一下。
 fn submenu(view: Signal<MenuView>, entry: &MenuEntry, chrome: MenuChrome) -> AnyView {
     let id = entry.id.clone();
     let rows = entry
@@ -546,7 +545,7 @@ enum Click {
     Act(Option<MenuAction>),
 }
 
-/// `.ctx-menu__item`：图标、文字、分组的 ›。危险项是错误色，待确认时浅红底、600 字重。
+/// 菜单项：图标、文字、分组的 ›。危险项是错误色，待确认时浅红底、600 字重。
 fn item(entry: &MenuEntry, chrome: MenuChrome) -> AnyView {
     let pending = entry.pending;
     let foreground = if entry.danger || pending {
@@ -610,7 +609,7 @@ fn item(entry: &MenuEntry, chrome: MenuChrome) -> AnyView {
     )
     .content(content)
     .key(format!("{}-menu-{}", chrome.prefix, entry.id));
-    // 分组没有自己的动作（Vue `selectContextMenuItem` 遇到 `children` 直接返回），子菜单由所在的那一行管。
+    // 分组没有自己的动作，子菜单由所在的那一行管。
     if !entry.disabled && entry.children.is_empty() {
         let click = match chrome.arm {
             Some(arm) if entry.confirm_label.is_some() && !pending => {
@@ -660,7 +659,7 @@ fn note(entry: &MenuEntry, chrome: MenuChrome) -> AnyView {
         .into_any()
 }
 
-/// 这一行现在写出来的文字。待确认时换成确认句，和 Vue `displayLabel` 一样。
+/// 这一行现在写出来的文字。待确认时换成确认句。
 fn shown_label(entry: &MenuEntry) -> String {
     if !entry.pending {
         return entry.label.clone();
