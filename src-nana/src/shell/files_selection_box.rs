@@ -74,7 +74,7 @@ impl SelectionBox {
     }
 }
 
-/// 按当前手势刷新选框。不是框选、还没拖过 3px，或没有列表区域时藏起来。
+/// 按当前手势刷新选框。不是框选、按下点还没结算，或没有列表区域时藏起来。
 pub(crate) fn track(model: &mut ShellViewModel, list: Option<LayoutBox>) {
     let Some(gesture) = model.input.live_gesture.clone() else {
         model.input.selection_box = SelectionBox::hidden();
