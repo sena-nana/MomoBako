@@ -11,7 +11,7 @@ use nana_ui::runtime::{
     Gradient, LayoutBox, LengthSpec, PaintContext, Painter, RadiusTier, SemanticColorRole, Stack,
     Text, TextHorizontalAlignment,
 };
-use nana_ui_core::{Icon, ThemeAppearance};
+use nana_ui_core::{Icon, TextWeight, ThemeAppearance};
 
 /// 正文行高 1.55。
 const LINE_BODY: f32 = 1.55;
@@ -20,7 +20,7 @@ const LINE_BODY: f32 = 1.55;
 pub(crate) fn text(
     label: impl Into<String>,
     size: f32,
-    weight: u16,
+    weight: TextWeight,
     role: SemanticColorRole,
     line_height: f32,
 ) -> Text {
@@ -31,17 +31,35 @@ pub(crate) fn text(
 
 /// 正文：14px、400、主文本色，行高 21.7。
 pub(crate) fn body(label: impl Into<String>) -> Text {
-    text(label, 14.0, 400, SemanticColorRole::Text, 14.0 * LINE_BODY)
+    text(
+        label,
+        14.0,
+        TextWeight::Regular,
+        SemanticColorRole::Text,
+        14.0 * LINE_BODY,
+    )
 }
 
 /// 次级说明：12px、400、弱化色，行高 18.6。
 pub(crate) fn small_muted(label: impl Into<String>) -> Text {
-    text(label, 12.0, 400, SemanticColorRole::Muted, 12.0 * LINE_BODY)
+    text(
+        label,
+        12.0,
+        TextWeight::Regular,
+        SemanticColorRole::Muted,
+        12.0 * LINE_BODY,
+    )
 }
 
 /// 元数据行的标签：11px、700、最弱色，字距 0.4。
 pub(crate) fn row_label(label: impl Into<String>) -> Text {
-    let mut node = text(label, 11.0, 700, SemanticColorRole::Faint, 11.0 * LINE_BODY);
+    let mut node = text(
+        label,
+        11.0,
+        TextWeight::Bold,
+        SemanticColorRole::Faint,
+        11.0 * LINE_BODY,
+    );
     std::sync::Arc::make_mut(&mut node.style.layout)
         .text_ext
         .letter_spacing = Some(0.4);
@@ -50,7 +68,13 @@ pub(crate) fn row_label(label: impl Into<String>) -> Text {
 
 /// 眉题：11px、600、最弱色，字距 0.4。
 pub(crate) fn eyebrow(label: impl Into<String>) -> Text {
-    let mut node = text(label, 11.0, 600, SemanticColorRole::Faint, 11.0 * LINE_BODY);
+    let mut node = text(
+        label,
+        11.0,
+        TextWeight::Semibold,
+        SemanticColorRole::Faint,
+        11.0 * LINE_BODY,
+    );
     std::sync::Arc::make_mut(&mut node.style.layout)
         .text_ext
         .letter_spacing = Some(0.4);
@@ -62,7 +86,7 @@ pub(crate) fn heading(label: impl Into<String>) -> Text {
     wrapping(text(
         label,
         18.0,
-        700,
+        TextWeight::Bold,
         SemanticColorRole::Text,
         18.0 * LINE_BODY,
     ))
@@ -73,7 +97,7 @@ pub(crate) fn subline(label: impl Into<String>) -> Text {
     wrapping(text(
         label,
         14.0,
-        400,
+        TextWeight::Regular,
         SemanticColorRole::Muted,
         14.0 * LINE_BODY,
     ))
@@ -149,7 +173,6 @@ pub(crate) fn fixed(stack: Stack, width: f32, height: f32) -> Stack {
 pub(crate) struct ButtonLook {
     pub height: f32,
     pub padding_x: f32,
-    pub weight: u16,
     pub foreground: SemanticColorRole,
     pub background: Option<SemanticColorRole>,
     pub hover: Option<SemanticColorRole>,
@@ -159,11 +182,10 @@ pub(crate) struct ButtonLook {
 }
 
 impl ButtonLook {
-    /// 工具栏按钮：高 34，左右 10，字号取按钮的正文档、字重 500，常态透明，悬停 `--bg-hover`。
+    /// 工具栏按钮：高 34，左右 10，字号、字重取按钮的正文档和中等档，常态透明，悬停 `--bg-hover`。
     pub(crate) const TOOLBAR: Self = Self {
         height: 34.0,
         padding_x: 10.0,
-        weight: 500,
         foreground: SemanticColorRole::Text,
         background: None,
         hover: Some(SemanticColorRole::Hover),
@@ -212,7 +234,6 @@ pub(crate) fn styled_button(
     layout.padding_right = Some(LengthSpec::Px(look.padding_x));
     layout.padding_top = Some(LengthSpec::Px(0.0));
     layout.padding_bottom = Some(LengthSpec::Px(0.0));
-    layout.font_weight = Some(look.weight);
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
     button.style(style)

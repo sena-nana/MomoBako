@@ -10,7 +10,7 @@ use nana_ui::runtime::{
     ScrollAxes, ScrollOffset, ScrollView, ScrollViewportChanged, SemanticColorRole, StableNodeId,
     Stack, TextHorizontalAlignment,
 };
-use nana_ui_core::ScrollEdgeFade;
+use nana_ui_core::{ScrollEdgeFade, TextWeight};
 use serde_json::Value;
 
 use super::super::ShellMessage;
@@ -280,7 +280,7 @@ pub(super) fn audio_stage(
     let mut heading = text(
         &caption.title,
         title_size,
-        700,
+        TextWeight::Bold,
         SemanticColorRole::Text,
         title_size * 1.24,
     )
@@ -288,8 +288,14 @@ pub(super) fn audio_stage(
     // 标题盒子跟唱片直径走。文案仍是 title / 艺人 / 专辑那套，这里只卡宽度。
     title_width::pin_width(std::sync::Arc::make_mut(&mut heading.style.layout), stacked);
     heading.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
-    let mut secondary =
-        text(&caption.subtitle, 12.0, 400, SemanticColorRole::Muted, 18.6).truncating();
+    let mut secondary = text(
+        &caption.subtitle,
+        12.0,
+        TextWeight::Regular,
+        SemanticColorRole::Muted,
+        18.6,
+    )
+    .truncating();
     secondary.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
     let mut chips = vec![pills::pill("音频", false, "inspect-audio-kind")];
     if !caption.album.is_empty() {
@@ -396,9 +402,15 @@ fn lyric_body(
         } else {
             ("暂无歌词", "inspect-audio-lyrics-empty")
         };
-        return widget(text(label, 14.0, 400, SemanticColorRole::Muted, 21.7))
-            .key(key)
-            .into_any();
+        return widget(text(
+            label,
+            14.0,
+            TextWeight::Regular,
+            SemanticColorRole::Muted,
+            21.7,
+        ))
+        .key(key)
+        .into_any();
     }
     let inset = signal(LYRIC_INSET_INITIAL);
     let fade = signal(ScrollEdgeFade::default());
@@ -660,7 +672,7 @@ fn lyric_line(
     line: &super::super::inspect_lyrics::LyricLine,
     active: Option<usize>,
 ) -> AnyView {
-    let (weight, mix) = lyric_tone(index, line.time_ms.is_none(), active);
+    let mix = lyric_tone(index, line.time_ms.is_none(), active);
     let key = if active == Some(index) {
         "inspect-audio-lyric-active".to_string()
     } else {
@@ -670,7 +682,7 @@ fn lyric_line(
         let mut line = text(
             &line.text,
             lyric_box::FONT,
-            weight,
+            TextWeight::Regular,
             SemanticColorRole::Text,
             lyric_box::LEADING,
         );
@@ -678,7 +690,7 @@ fn lyric_line(
         lyric_box::apply(std::sync::Arc::make_mut(&mut line.style.layout));
         return widget(line).key(key).into_any();
     };
-    widget(lyric_button(&line.text, weight, mix))
+    widget(lyric_button(&line.text, mix))
         .key(key)
         .on_cx(move |_, _: &Activate, cx| {
             cx.dispatch_program_all(ShellMessage::Player(PlayerMessage::Seek(time_ms)));
@@ -687,7 +699,7 @@ fn lyric_line(
 }
 
 /// 有时间的歌词行：居中、按淡法混字色，悬停和键盘焦点再亮一档。不铺按钮底，避免画成芯片。
-fn lyric_button(label: &str, weight: u16, mix: Option<f32>) -> Button {
+fn lyric_button(label: &str, mix: Option<f32>) -> Button {
     let mut button = Button::new(label);
     button.style.foreground = Some(SemanticColorRole::Text);
     button.style.background = None;
@@ -701,7 +713,6 @@ fn lyric_button(label: &str, weight: u16, mix: Option<f32>) -> Button {
     button.style.interaction.hovered.background = None;
     button.style.interaction.pressed.background = None;
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
-    layout.font_weight = Some(weight);
     lyric_box::apply(layout);
     if mix.is_none() {
         lyric_lift::lift_active_line(&mut button);
@@ -730,13 +741,13 @@ fn lyric_mix(ratio: Option<f32>) -> Option<nana_ui_core::SemanticColorMix> {
 }
 
 /// 当前行不淡。已经唱过的略实。还没唱到的、以及排在后面的没有时间的行，用更淡的那一档。
-fn lyric_tone(index: usize, untimed: bool, active: Option<usize>) -> (u16, Option<f32>) {
+fn lyric_tone(index: usize, untimed: bool, active: Option<usize>) -> Option<f32> {
     if active == Some(index) {
-        (700, None)
+        None
     } else if !untimed && active.is_some_and(|current| index < current) {
-        (400, Some(LYRIC_PASSED_MIX))
+        Some(LYRIC_PASSED_MIX)
     } else {
-        (400, Some(LYRIC_AHEAD_MIX))
+        Some(LYRIC_AHEAD_MIX)
     }
 }
 
@@ -792,10 +803,28 @@ pub(super) fn loading_card(name: &str, video: bool) -> AnyView {
             }),
     )
     .children((
-        widget(text(&name, 13.0, 700, SemanticColorRole::Text, 20.15).truncating())
-            .key("inspect-media-loading-name"),
-        widget(text(detail, 12.0, 400, SemanticColorRole::Muted, 18.6).truncating())
-            .key("inspect-media-loading-detail"),
+        widget(
+            text(
+                &name,
+                13.0,
+                TextWeight::Bold,
+                SemanticColorRole::Text,
+                20.15,
+            )
+            .truncating(),
+        )
+        .key("inspect-media-loading-name"),
+        widget(
+            text(
+                detail,
+                12.0,
+                TextWeight::Regular,
+                SemanticColorRole::Muted,
+                18.6,
+            )
+            .truncating(),
+        )
+        .key("inspect-media-loading-detail"),
         super::preview_paint::loading_progress(),
     ))
     .key("inspect-media-loading")

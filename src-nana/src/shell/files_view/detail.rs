@@ -28,6 +28,7 @@ use super::super::inspect_metadata_view::{self, MetadataSignals};
 use super::bind::{StyleField, fact_row, fill_container};
 use super::cards::{PreviewLook, preview_box};
 use super::style;
+use nana_ui_core::TextWeight;
 
 /// 详情里现在显示哪一种卡片。和滚动区的键一起决定要不要换一整块。
 #[derive(Clone, Debug, PartialEq)]
@@ -605,7 +606,7 @@ fn lead_row(
         widget(style::wrapping(style::text(
             untrack(&value),
             13.0,
-            500,
+            TextWeight::Medium,
             SemanticColorRole::Text,
             19.5,
         )))

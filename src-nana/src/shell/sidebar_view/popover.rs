@@ -33,6 +33,7 @@ use super::super::view_part_sidebar::project::HeadView;
 use super::super::{ShellMessage, ShellViewModel, SidebarMessage};
 use super::parts::{self, ActiveTone, PopoverOpen};
 use super::sidebar_message;
+use nana_ui_core::TextWeight;
 
 /// 侧栏和仓库头的左右内边距合起来：切换列表比侧栏窄这么多，和仓库头同宽。
 const SWITCHER_INSET: f32 = 2.0 * (8.0 + 2.0);
@@ -86,10 +87,10 @@ pub(crate) fn repository_switcher(
     let name = head.with_untracked(|head| head.name.clone());
     let width = popover.with_untracked(|view| view.width);
     let mut style = parts::row_style(28.0, 8.0, 8.0, 6.0, ActiveTone::Accent, false);
-    Arc::make_mut(&mut style.layout).font_weight = Some(600);
+    crate::theme_map::control_weight(Arc::make_mut(&mut style.layout), TextWeight::Semibold);
     let trigger = widget(Stack::fill_row(6.0).align(AlignSpec::Center))
         .children((
-            widget(parts::fill_text(name.clone(), 13.0, 600))
+            widget(parts::fill_text(name.clone(), 13.0, TextWeight::Semibold))
                 .prop::<String, fields::text::value>(move || head.with(|head| head.name.clone())),
             widget(parts::inherit_icon(SELECTOR, 13.0)),
         ))
@@ -306,8 +307,13 @@ fn repository_row(row: RepositoryRow) -> AnyView {
                 .role(SemanticColorRole::Accent),
         )
     }));
-    let mut name =
-        parts::label_text(row.name.clone(), 13.0, 600, Some(SemanticColorRole::Text)).truncating();
+    let mut name = parts::label_text(
+        row.name.clone(),
+        13.0,
+        TextWeight::Semibold,
+        Some(SemanticColorRole::Text),
+    )
+    .truncating();
     {
         let layout = Arc::make_mut(&mut name.style.layout);
         layout.flex_shrink = Some(1.0);
@@ -440,7 +446,11 @@ fn menu_item(
     if let Some(icon) = icon {
         parts_row.push(widget(parts::inherit_icon(icon, 14.0)).into_any());
     }
-    parts_row.push(parts::fill_label(label.to_string(), 13.0, 500));
+    parts_row.push(parts::fill_label(
+        label.to_string(),
+        13.0,
+        TextWeight::Medium,
+    ));
     widget(ListItem::new(label.to_string()).style(style))
         .content(widget(Stack::fill_row(10.0).align(AlignSpec::Center)).children(parts_row))
         .key(format!("{key}-{label}"))
@@ -516,7 +526,7 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
         widget(parts::label_text(
             String::new(),
             13.0,
-            700,
+            TextWeight::Bold,
             Some(SemanticColorRole::Text),
         ))
         .prop::<String, fields::text::value>(move || view.with(|view| view.title.clone())),
@@ -551,7 +561,7 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
     let mut note = parts::label_text(
         "当前仅完成后端配置入口与服务端抽象。远端适配器尚未实现，请先用于配置演进与契约联调。",
         12.0,
-        400,
+        TextWeight::Regular,
         Some(SemanticColorRole::Warning),
     )
     .line_height(17.0);

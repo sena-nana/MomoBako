@@ -345,7 +345,7 @@ fn header(head: Signal<PageHead>) -> AnyView {
     .children((
         widget(eyebrow).key("playlist-page-eyebrow"),
         widget(spaced(
-            crate::theme_map::typed_text(Text::new(initial.name), 20.0, 700)
+            crate::theme_map::typed_text(Text::new(initial.name), 20.0, TextWeight::Bold)
                 .color(SemanticColorRole::Text)
                 .line_height(34.1),
             4.0,
@@ -526,7 +526,7 @@ fn drag_handle(id: &str, item: EntryItem, head: Signal<PageHead>) -> AnyView {
 }
 
 /// 58px 方块：bg-subtle 底、`--radius-xl`、溢出裁切。有本地封面时按 cover 铺满、不写扩展名；
-/// 没有时居中写 11px 粗体弱色扩展名。单击打开预览，封面换了原地换，不重建这一行。
+/// 没有时居中写 11px 弱色扩展名，字重取按钮的中等档。单击打开预览，封面换了原地换，不重建这一行。
 ///
 /// 400 毫秒内再点同一块，和整行双击一样再从这一条播放。计时键是 `cover:{编号}`，
 /// 和文件名、拖动柄、路径的双击分开：先点文件名再点方块不算连点。不能播或没有播放插件时第二下只打开预览，并记日志。
@@ -595,7 +595,6 @@ fn preview_button(mark: &str, cover: &str) -> Button {
     }
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
-    layout.font_weight = Some(700);
     layout.padding_left = Some(LengthSpec::Px(0.0));
     layout.padding_right = Some(LengthSpec::Px(0.0));
     layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
@@ -699,7 +698,6 @@ fn toolbar_button(
     layout.min_height = Some(LengthSpec::Px(34.0));
     layout.padding_left = Some(LengthSpec::Px(10.0));
     layout.padding_right = Some(LengthSpec::Px(10.0));
-    layout.font_weight = Some(500);
     layout.width = Some(LengthSpec::Shrink);
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);

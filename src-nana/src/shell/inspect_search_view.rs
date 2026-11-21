@@ -19,7 +19,7 @@ use nana_ui::runtime::{
     Activate, AlignSpec, EmptyState, JustifySpec, LengthSpec, List, ListItem, RadiusTier,
     SemanticColorRole, Spinner, Stack,
 };
-use nana_ui_core::StatusTone;
+use nana_ui_core::{StatusTone, TextWeight};
 
 use super::ShellMessage;
 use super::inspect::InspectMessage;
@@ -89,13 +89,18 @@ fn header(head: Signal<SearchHead>) -> AnyView {
         })
         .key("search-workbench-scope"),
         widget(widgets::margin_top(
-            widgets::label("搜索结果", 24.0, 700, SemanticColorRole::Text),
+            widgets::label("搜索结果", 24.0, TextWeight::Bold, SemanticColorRole::Text),
             4.0,
         ))
         .key("search-workbench-title"),
         widgets::bound(
             widgets::margin_top(
-                widgets::wrapping_label(String::new(), 14.0, 400, SemanticColorRole::Muted),
+                widgets::wrapping_label(
+                    String::new(),
+                    14.0,
+                    TextWeight::Regular,
+                    SemanticColorRole::Muted,
+                ),
                 8.0,
             ),
             move || head.with(|head| head.summary.clone()),
@@ -148,7 +153,7 @@ fn searching_state(status: Signal<SearchStatus>) -> AnyView {
         widget(widgets::label(
             "正在执行全局搜索",
             14.0,
-            400,
+            TextWeight::Regular,
             SemanticColorRole::Muted,
         ))
         .key("search-workbench-searching-text"),
@@ -247,7 +252,7 @@ fn result_row(item: HitItem) -> AnyView {
         layout.padding_bottom = Some(LengthSpec::Px(15.0));
         layout.white_space_nowrap = false;
         layout.text_overflow_ellipsis = false;
-        layout.font_weight = Some(500);
+        crate::theme_map::control_weight(layout, TextWeight::Medium);
     }
     let tile = widget(
         Stack::row(0.0)
@@ -272,12 +277,22 @@ fn result_row(item: HitItem) -> AnyView {
     )
     .children((
         widgets::bound(
-            widgets::wrapping_label(String::new(), 14.0, 700, SemanticColorRole::Text),
+            widgets::wrapping_label(
+                String::new(),
+                14.0,
+                TextWeight::Bold,
+                SemanticColorRole::Text,
+            ),
             hit_text(item, |row| &row.filename),
         )
         .key(format!("search-hit-name-{key}")),
         widgets::bound(
-            widgets::wrapping_label(String::new(), 14.0, 500, SemanticColorRole::Muted),
+            widgets::wrapping_label(
+                String::new(),
+                14.0,
+                TextWeight::Medium,
+                SemanticColorRole::Muted,
+            ),
             hit_text(item, |row| &row.detail),
         )
         .key(format!("search-hit-path-{key}")),

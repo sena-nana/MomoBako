@@ -36,7 +36,7 @@ use nana_ui::runtime::{
     FocusWithinChanged, LengthSpec, OverlayHost, PointerHoverChanged, PositionSpec, RadiusTier,
     SecondaryPress, SemanticColorRole, Stack,
 };
-use nana_ui_core::Icon;
+use nana_ui_core::{Icon, TextWeight};
 
 use super::admin::AdminMessage;
 use super::files::{BranchSource, FilesMessage};
@@ -738,7 +738,7 @@ fn note(entry: &MenuEntry, key: String) -> AnyView {
             style::text(
                 entry.label.clone(),
                 12.0,
-                400,
+                TextWeight::Regular,
                 SemanticColorRole::Faint,
                 18.0,
             )

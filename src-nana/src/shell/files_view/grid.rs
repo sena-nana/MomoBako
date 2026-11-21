@@ -21,7 +21,7 @@ use nana_ui::runtime::{
     ScrollView, SemanticColorRole, SizeChanged, Spinner, Stack, TextHorizontalAlignment, UiWorld,
     UserScroll,
 };
-use nana_ui_core::{Icon, StatusTone};
+use nana_ui_core::{Icon, StatusTone, TextWeight};
 
 use super::super::field_bind::ButtonIcon;
 use super::super::files::{FileContext, FilesMessage};
@@ -253,7 +253,7 @@ fn state_box(label: String, error: bool, spinner: bool) -> AnyView {
             widget(style::text(
                 label,
                 14.0,
-                400,
+                TextWeight::Regular,
                 SemanticColorRole::Muted,
                 21.7,
             ))
@@ -458,7 +458,6 @@ fn load_more(sections: Signal<Sections>) -> AnyView {
     let look = style::ButtonLook {
         height: 21.7,
         padding_x: 0.0,
-        weight: 400,
         hover: None,
         gap: 4.0,
         ..style::ButtonLook::TOOLBAR

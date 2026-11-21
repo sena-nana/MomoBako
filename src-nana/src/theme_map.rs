@@ -156,26 +156,13 @@ const TYPE_STEPS: [(f32, NanaTypeRole); 8] = [
     (type_scale::DISPLAY, NanaTypeRole::Display),
 ];
 
-/// 主题的四档字重。
-const WEIGHT_STEPS: [(u16, TextWeight); 4] = [
-    (400, TextWeight::Regular),
-    (500, TextWeight::Medium),
-    (600, TextWeight::Semibold),
-    (700, TextWeight::Bold),
-];
-
-/// 写一段字的字号和字重。字号落在主题字阶上时用 Nana 的字号角色，字重正好是 400 / 500 / 600 / 700
-/// 时用字重台阶，都跟着装上的主题走；落在台阶之间的照写数值。
-/// 行盒先按数值字号定，主题换字阶时行盒不跟着跳；调用方另写行高时以调用方为准。
-pub fn typed_text(node: Text, size: f32, weight: u16) -> Text {
-    let node = node.font_size(size);
-    let node = match TYPE_STEPS.iter().find(|(px, _)| *px == size) {
+/// 写一段字的字号和字重。字号落在主题字阶上时用 Nana 的字号角色，跟着装上的主题走，落在台阶之间的照写数值；
+/// 字重只取主题的四档。行盒先按数值字号定，主题换字阶时行盒不跟着跳；调用方另写行高时以调用方为准。
+pub fn typed_text(node: Text, size: f32, weight: TextWeight) -> Text {
+    let node = node.font_size(size).weight(weight);
+    match TYPE_STEPS.iter().find(|(px, _)| *px == size) {
         Some((_, role)) => node.role(*role),
         None => node,
-    };
-    match WEIGHT_STEPS.iter().find(|(value, _)| *value == weight) {
-        Some((_, step)) => node.weight(*step),
-        None => node.font_weight(weight),
     }
 }
 
@@ -185,6 +172,14 @@ pub fn typed_text(node: Text, size: f32, weight: u16) -> Text {
 pub fn control_font(layout: &mut LayoutStyle, role: NanaTypeRole) {
     layout.font_size = Some(TypographyTokens::DEFAULT.size(role));
     layout.theme.font_size = Some(ThemeToken::Type(role).into());
+}
+
+/// 写控件样式的字重档：默认主题下的数值进 `font_weight`，主题字重令牌进 `theme.font_weight`。
+/// 解析时主题令牌盖过数值字重和字重台阶，所以按钮、勾选框这类自带字重令牌的控件只改数值不生效，要连令牌一起换；
+/// 装上的主题换字重时控件跟着变。
+pub fn control_weight(layout: &mut LayoutStyle, weight: TextWeight) {
+    layout.font_weight = Some(TypographyTokens::DEFAULT.weight(weight));
+    layout.theme.font_weight = Some(ThemeToken::Weight(weight).into());
 }
 
 /// 禁用控件的整体不透明度 0.45，右键菜单项和滑杆也是这个值。
@@ -265,10 +260,10 @@ pub fn clear_matches_background(theme: &str, clear: [f32; 4]) -> bool {
 mod tests {
     use super::*;
 
-    /// 字阶上的字号和四档字重跟主题走；不在档上的字号、字重照写的数值。行盒都按数值字号定。
+    /// 字阶上的字号和字重档跟主题走；不在档上的字号照写数值。行盒都按数值字号定。
     #[test]
     fn typed_text_follows_the_theme_steps_it_lands_on() {
-        let meta = typed_text(Text::new("元信息"), 12.0, 500);
+        let meta = typed_text(Text::new("元信息"), 12.0, TextWeight::Medium);
         assert_eq!(meta.style.type_role, Some(NanaTypeRole::Meta));
         assert_eq!(meta.style.type_weight, Some(TextWeight::Medium));
         assert_eq!(meta.style.layout.font_size, Some(12.0));
@@ -278,11 +273,11 @@ mod tests {
             numeric.style.layout.line_height
         );
 
-        let odd = typed_text(Text::new("正文"), 24.0, 450);
+        let odd = typed_text(Text::new("正文"), 24.0, TextWeight::Regular);
         assert_eq!(odd.style.type_role, None, "24px 不在字阶上");
-        assert_eq!(odd.style.type_weight, None);
+        assert_eq!(odd.style.type_weight, Some(TextWeight::Regular));
         assert_eq!(odd.style.layout.font_size, Some(24.0));
-        assert_eq!(odd.style.layout.font_weight, Some(450));
+        assert_eq!(odd.style.layout.font_weight, None);
 
         for (size, role) in [
             (11.0, NanaTypeRole::Hint),
@@ -294,7 +289,9 @@ mod tests {
             (20.0, NanaTypeRole::Display),
         ] {
             assert_eq!(
-                typed_text(Text::new(""), size, 700).style.type_role,
+                typed_text(Text::new(""), size, TextWeight::Bold)
+                    .style
+                    .type_role,
                 Some(role)
             );
         }
@@ -310,6 +307,19 @@ mod tests {
         assert_eq!(
             layout.theme.font_size,
             Some(ThemeToken::Type(NanaTypeRole::Section).into())
+        );
+    }
+
+    /// 控件字重档同时写数值和主题令牌，数值是默认主题下这一档的字重。
+    #[test]
+    fn control_weight_writes_the_step_and_its_theme_token() {
+        let mut layout = LayoutStyle::default();
+        layout.font_weight = Some(650);
+        control_weight(&mut layout, TextWeight::Semibold);
+        assert_eq!(layout.font_weight, Some(type_scale::SEMIBOLD));
+        assert_eq!(
+            layout.theme.font_weight,
+            Some(ThemeToken::Weight(TextWeight::Semibold).into())
         );
     }
 

@@ -18,7 +18,7 @@ use nana_ui::runtime::{
     SelectChanged, SemanticColorRole, SettingsCard, Stack, TextChanged, TextInput, TextSubmitted,
 };
 use nana_ui::{ButtonKind, ControlSize};
-use nana_ui_core::Icon;
+use nana_ui_core::{Icon, TextWeight};
 
 use super::super::ShellMessage;
 use super::super::field_bind::GlyphIcon;
@@ -70,7 +70,7 @@ pub(super) fn tags_row(signals: MetadataSignals) -> AnyView {
                 widget(style::text(
                     "标签组",
                     14.0,
-                    500,
+                    TextWeight::Medium,
                     SemanticColorRole::Text,
                     21.7,
                 ))
@@ -79,7 +79,7 @@ pub(super) fn tags_row(signals: MetadataSignals) -> AnyView {
                     widget(style::text(
                         untrack(meta),
                         12.0,
-                        500,
+                        TextWeight::Medium,
                         SemanticColorRole::Muted,
                         18.6,
                     ))
@@ -267,9 +267,18 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
                     .role(SemanticColorRole::Muted),
             )
             .key("inspect-tag-menu-icon"),
-            widget(style::text("添加标签", 14.0, 500, SemanticColorRole::Text, 21.7).nowrap(true))
-                .visible(empty)
-                .key("inspect-tag-menu-text"),
+            widget(
+                style::text(
+                    "添加标签",
+                    14.0,
+                    TextWeight::Medium,
+                    SemanticColorRole::Text,
+                    21.7,
+                )
+                .nowrap(true),
+            )
+            .visible(empty)
+            .key("inspect-tag-menu-text"),
         ))
         .key("inspect-tag-menu-trigger");
     let popover = Popover::new()
@@ -341,7 +350,7 @@ fn tag_group(group: TagGroupOption, locked: impl Fn() -> bool + Send + Clone + '
         widget(style::text(
             group.name.clone(),
             11.0,
-            600,
+            TextWeight::Semibold,
             SemanticColorRole::Muted,
             11.0 * 1.55,
         ))

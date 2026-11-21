@@ -13,13 +13,14 @@ use nana_ui::runtime::view::{
     AnyView, El, FieldWrite, IntoProp, IntoView, Signal, fields, stylesheet, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, IconButton, IconGlyph, InteractionStyle, LengthSpec, NodeStyle,
-    Popover, PopoverAlignment, PopoverPlacement, PopoverToggled, RadiusTier, SemanticColorRole,
+    Activate, AlignSpec, IconButton, IconGlyph, InteractionStyle, LengthSpec, NodeStyle, Popover,
+    PopoverAlignment, PopoverPlacement, PopoverToggled, RadiusTier, SemanticColorRole,
     SemanticPaint, SidebarRow, SidebarRowIcon, SidebarRowState, Stack, Text, ViewContext,
 };
 use nana_ui::{ControlSize, Icon};
 
 use crate::theme_map::{DISABLED_OPACITY, disabled_paint};
+use nana_ui_core::TextWeight;
 
 /// 分组标题高度。
 const GROUP_HEADER_HEIGHT: f32 = 24.0;
@@ -65,7 +66,7 @@ pub(crate) fn row_style(
         layout.padding_left = Some(LengthSpec::Px(pad_left));
         layout.padding_right = Some(LengthSpec::Px(pad_right));
         crate::theme_map::control_font(layout, nana_ui_core::TypeRole::Body);
-        layout.font_weight = Some(500);
+        crate::theme_map::control_weight(layout, TextWeight::Medium);
         layout.white_space_nowrap = true;
         layout.text_overflow_ellipsis = true;
         layout.flex_grow = Some(0.0);
@@ -111,13 +112,6 @@ pub(crate) fn row_style(
     style
 }
 
-/// 主操作按钮：`--accent-soft` 底、`--accent-on-soft` 字、600 字重（DESIGN.md 5.1 的 `.primary`）。
-pub(crate) fn primary_button(label: impl Into<String>) -> Button {
-    let mut button = Button::new(label).kind(nana_ui::ButtonKind::Primary);
-    Arc::make_mut(&mut button.style.layout).font_weight = Some(600);
-    button
-}
-
 /// 不带固定颜色的图标：跟着行的前景色走。
 pub(crate) fn inherit_icon(icon: Icon, size: f32) -> IconGlyph {
     IconGlyph::new(icon).size(size).style(NodeStyle::default())
@@ -127,7 +121,7 @@ pub(crate) fn inherit_icon(icon: Icon, size: f32) -> IconGlyph {
 pub(crate) fn label_text(
     value: impl Into<String>,
     size: f32,
-    weight: u16,
+    weight: TextWeight,
     color: Option<SemanticColorRole>,
 ) -> Text {
     let mut node = crate::theme_map::typed_text(Text::new(value), size, weight);
@@ -138,12 +132,12 @@ pub(crate) fn label_text(
 }
 
 /// 占满剩余宽度、超出时省略的单行文字。
-pub(crate) fn fill_label(value: impl Into<String>, size: f32, weight: u16) -> AnyView {
+pub(crate) fn fill_label(value: impl Into<String>, size: f32, weight: TextWeight) -> AnyView {
     widget(fill_text(value, size, weight)).into_any()
 }
 
 /// [`fill_label`] 的文字节点本身，常驻视图拿它再绑定文字。
-pub(crate) fn fill_text(value: impl Into<String>, size: f32, weight: u16) -> Text {
+pub(crate) fn fill_text(value: impl Into<String>, size: f32, weight: TextWeight) -> Text {
     let mut node = label_text(value, size, weight, None).truncating();
     let layout = Arc::make_mut(&mut node.style.layout);
     layout.flex_grow = Some(1.0);
@@ -196,7 +190,7 @@ pub(crate) fn nav_row(
             widget(label_text(
                 count.to_string(),
                 12.0,
-                600,
+                TextWeight::Semibold,
                 Some(SemanticColorRole::Muted),
             ))
             .prop::<String, fields::text::value>(move || {
@@ -249,7 +243,12 @@ pub(crate) fn group_header(title: AnyView, tools: Vec<AnyView>, key: &'static st
 
 /// 分组标题文字：11px、700、`--text-faint`、字距 0.4px。
 pub(crate) fn group_title(value: &str) -> Text {
-    let mut node = label_text(value, 11.0, 700, Some(SemanticColorRole::Faint));
+    let mut node = label_text(
+        value,
+        11.0,
+        TextWeight::Bold,
+        Some(SemanticColorRole::Faint),
+    );
     Arc::make_mut(&mut node.style.layout)
         .text_ext
         .letter_spacing = Some(0.4);
@@ -402,7 +401,13 @@ pub(crate) fn bound_hint(
 
 /// 空状态说明的文字：12px 弱色、行高 18px，可在任意位置折行。
 fn hint_text(copy: &str) -> Text {
-    let mut node = label_text(copy, 12.0, 400, Some(SemanticColorRole::Faint)).line_height(18.0);
+    let mut node = label_text(
+        copy,
+        12.0,
+        TextWeight::Regular,
+        Some(SemanticColorRole::Faint),
+    )
+    .line_height(18.0);
     let layout = Arc::make_mut(&mut node.style.layout);
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));

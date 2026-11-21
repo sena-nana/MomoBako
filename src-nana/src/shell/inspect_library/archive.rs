@@ -171,11 +171,11 @@ pub(super) fn archive_stage_view(stage: ArchiveStage) -> AnyView {
     } else {
         SemanticColorRole::Text
     };
-    let mut title = typed_text(Text::new(stage.title), 13.0, 600)
+    let mut title = typed_text(Text::new(stage.title), 13.0, TextWeight::Semibold)
         .color(title_role)
         .line_height(20.15);
     title.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
-    let mut detail = typed_text(Text::new(stage.detail), 12.0, 400)
+    let mut detail = typed_text(Text::new(stage.detail), 12.0, TextWeight::Regular)
         .color(SemanticColorRole::Muted)
         .line_height(18.6);
     detail.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
@@ -332,7 +332,7 @@ pub(super) fn archive_kind_key(row_key: &str) -> String {
 
 /// 名单行首的小字。目录固定写「DIR」；文件走 [`file_kind_label`]。
 pub(super) fn archive_kind_mark(label: &str, key: &str) -> AnyView {
-    let mark = crate::theme_map::typed_text(Text::new(label.to_string()), 11.0, 700)
+    let mark = crate::theme_map::typed_text(Text::new(label.to_string()), 11.0, TextWeight::Bold)
         .color(SemanticColorRole::Muted);
     widget(
         Stack::row(0.0)

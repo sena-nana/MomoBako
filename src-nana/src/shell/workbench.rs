@@ -4,6 +4,7 @@
 
 use nana_ui::runtime::view::{AnyView, IntoView, widget};
 use nana_ui::runtime::{LengthSpec, SemanticColorRole, Stack, Text, TextHorizontalAlignment};
+use nana_ui_core::TextWeight;
 
 /// 页面纵向排布。页边距由主区外框统一给（上下 20、左右 24），这里不再加。
 pub(crate) fn page(body: Vec<AnyView>) -> AnyView {
@@ -17,7 +18,7 @@ pub(crate) fn meta(label: impl Into<String>) -> Text {
     aligned(
         label,
         12.0,
-        400,
+        TextWeight::Regular,
         SemanticColorRole::Muted,
         TextHorizontalAlignment::Start,
     )
@@ -36,7 +37,7 @@ pub(crate) fn with_bottom_divider(column: Stack) -> Stack {
 fn aligned(
     label: impl Into<String>,
     size: f32,
-    weight: u16,
+    weight: TextWeight,
     color: SemanticColorRole,
     align: TextHorizontalAlignment,
 ) -> Text {

@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use nana_ui::runtime::view::{AnyView, IntoView, widget};
 use nana_ui::runtime::{AlignSpec, JustifySpec, LengthSpec, SemanticColorRole, Stack, Text};
+use nana_ui_core::TextWeight;
 
 use super::render::{PRIMARY_INSET_Y, TITLE_BAR_PX};
 use super::sidebar_view::parts::label_text;
@@ -35,7 +36,7 @@ pub(crate) fn fill_section() -> Stack {
 pub(super) fn line(
     value: impl Into<String>,
     size: f32,
-    weight: u16,
+    weight: TextWeight,
     color: SemanticColorRole,
     line_height: f32,
 ) -> Text {
@@ -46,7 +47,7 @@ pub(super) fn line(
 pub(super) fn wrapping(
     value: impl Into<String>,
     size: f32,
-    weight: u16,
+    weight: TextWeight,
     color: SemanticColorRole,
     line_height: f32,
 ) -> Text {
@@ -63,7 +64,7 @@ pub(super) fn eyebrow(value: &str, key: &'static str) -> AnyView {
     let mut node = line(
         value,
         11.0,
-        600,
+        TextWeight::Semibold,
         SemanticColorRole::Faint,
         11.0 * ROOT_LINE_HEIGHT,
     );

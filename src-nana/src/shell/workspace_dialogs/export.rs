@@ -17,7 +17,7 @@ use nana_ui::runtime::{
     ToggleChanged,
 };
 use nana_ui::{ButtonKind, DialogSize};
-use nana_ui_core::Icon;
+use nana_ui_core::{Icon, TextWeight};
 
 use crate::shell::files::FilesMessage;
 use crate::shell::files_view::style;
@@ -242,9 +242,18 @@ fn repository_box(view: Signal<ExportView>) -> AnyView {
             .radius(RadiusTier::Sm),
     )
     .children((
-        widget(style::text(String::new(), 14.0, 700, SemanticColorRole::Text, 21.7).truncating())
-            .key("export-repo-name")
-            .prop::<String, fields::text::value>(move || view.with(|view| view.repo_name.clone())),
+        widget(
+            style::text(
+                String::new(),
+                14.0,
+                TextWeight::Bold,
+                SemanticColorRole::Text,
+                21.7,
+            )
+            .truncating(),
+        )
+        .key("export-repo-name")
+        .prop::<String, fields::text::value>(move || view.with(|view| view.repo_name.clone())),
         widget(style::small_muted(String::new()).truncating())
             .key("export-repo-path")
             .prop::<String, fields::text::value>(move || view.with(|view| view.repo_path.clone())),

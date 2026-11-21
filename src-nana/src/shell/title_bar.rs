@@ -23,6 +23,7 @@ use super::hot::{FilterLook, TitleSignals};
 use super::sidebar_view::parts;
 use super::workspace::WorkspacePanel;
 use super::{InspectMessage, ShellMessage};
+use nana_ui_core::TextWeight;
 
 /// 搜索框宽度：搜索组 392px，扣掉筛选开关 28px、间距 4px。
 const SEARCH_WIDTH: f32 = 360.0;
@@ -197,7 +198,13 @@ fn filter_toggle(signals: TitleSignals) -> AnyView {
     )
     .visible(move || count.get() > 0)
     .children((widget(
-        parts::label_text("0", 10.0, 700, Some(SemanticColorRole::Background)).line_height(14.0),
+        parts::label_text(
+            "0",
+            10.0,
+            TextWeight::Bold,
+            Some(SemanticColorRole::Background),
+        )
+        .line_height(14.0),
     )
     .prop::<String, fields::text::value>(move || count.get().to_string()),))
     .key("filter-count");

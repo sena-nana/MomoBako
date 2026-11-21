@@ -27,6 +27,7 @@ use super::shell_tint::SoftFill;
 use super::startup_view::{ROOT_LINE_HEIGHT, eyebrow, fill_section, line, margin, wrapping};
 use super::workspace::{StartupLog, StartupStatus, StartupStepItem, StartupStepState};
 use super::{ShellMessage, ShellViewModel};
+use nana_ui_core::TextWeight;
 
 /// 启动页内容最宽 680px。
 const PANEL_WIDTH: f32 = 680.0;
@@ -134,7 +135,7 @@ fn panel(signals: StartupSignals, hot: HotSignals) -> AnyView {
     let title = widget(line(
         initial.title.clone(),
         20.0,
-        700,
+        TextWeight::Bold,
         SemanticColorRole::Text,
         25.0,
     ))
@@ -143,7 +144,7 @@ fn panel(signals: StartupSignals, hot: HotSignals) -> AnyView {
     let meta = widget(line(
         initial.meta.clone(),
         13.0,
-        400,
+        TextWeight::Regular,
         SemanticColorRole::Muted,
         13.0 * ROOT_LINE_HEIGHT,
     ))
@@ -154,7 +155,7 @@ fn panel(signals: StartupSignals, hot: HotSignals) -> AnyView {
         .children((widget(wrapping(
             initial.detail.clone(),
             13.0,
-            400,
+            TextWeight::Regular,
             SemanticColorRole::Text,
             19.5,
         ))
@@ -221,7 +222,13 @@ fn step_row(item: StartupStepItem) -> AnyView {
         StartupStepState::Error => (SemanticColorRole::Danger, SemanticColorRole::Muted),
         StartupStepState::Pending => (SemanticColorRole::Muted, SemanticColorRole::Muted),
     };
-    let mut number = line(item.number.to_string(), 12.0, 400, foreground, 12.0);
+    let mut number = line(
+        item.number.to_string(),
+        12.0,
+        TextWeight::Regular,
+        foreground,
+        12.0,
+    );
     number.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
     let badge = Stack::row(0.0)
         .width(LengthSpec::Px(24.0))
@@ -258,12 +265,18 @@ fn step_row(item: StartupStepItem) -> AnyView {
             .shrink(1.0),
     )
     .children((
-        widget(wrapping(item.label, 13.0, 600, label_color, 17.55))
-            .key(format!("startup-label-{}", item.number)),
+        widget(wrapping(
+            item.label,
+            13.0,
+            TextWeight::Semibold,
+            label_color,
+            17.55,
+        ))
+        .key(format!("startup-label-{}", item.number)),
         widget(wrapping(
             item.detail,
             12.0,
-            400,
+            TextWeight::Regular,
             SemanticColorRole::Muted,
             17.4,
         ))
@@ -297,7 +310,7 @@ fn log_panel(logs: Signal<Vec<LogRow>>) -> AnyView {
     let summary = widget(line(
         format!("{count} 条最近记录"),
         12.0,
-        400,
+        TextWeight::Regular,
         SemanticColorRole::Muted,
         12.0 * ROOT_LINE_HEIGHT,
     ))
@@ -309,7 +322,7 @@ fn log_panel(logs: Signal<Vec<LogRow>>) -> AnyView {
         line(
             "加载日志",
             13.0,
-            700,
+            TextWeight::Bold,
             SemanticColorRole::Text,
             13.0 * ROOT_LINE_HEIGHT,
         ),
@@ -357,9 +370,27 @@ fn log_row(row: LogRow) -> AnyView {
         "error" => SemanticColorRole::Danger,
         _ => SemanticColorRole::Text,
     };
-    let mut lines = vec![widget(wrapping(record.message, 12.0, 600, color, 17.4)).into_any()];
+    let mut lines = vec![
+        widget(wrapping(
+            record.message,
+            12.0,
+            TextWeight::Semibold,
+            color,
+            17.4,
+        ))
+        .into_any(),
+    ];
     if let Some(detail) = record.detail {
-        lines.push(widget(wrapping(detail, 11.0, 400, SemanticColorRole::Muted, 15.95)).into_any());
+        lines.push(
+            widget(wrapping(
+                detail,
+                11.0,
+                TextWeight::Regular,
+                SemanticColorRole::Muted,
+                15.95,
+            ))
+            .into_any(),
+        );
     }
     let body = widget(
         Stack::column(2.0)
@@ -370,7 +401,13 @@ fn log_row(row: LogRow) -> AnyView {
     .children(lines)
     .into_any();
     let columns = log_columns(
-        line(record.time, 12.0, 400, SemanticColorRole::Muted, 17.4),
+        line(
+            record.time,
+            12.0,
+            TextWeight::Regular,
+            SemanticColorRole::Muted,
+            17.4,
+        ),
         body,
     );
     widget(Stack::column(0.0).width(LengthSpec::Fill))

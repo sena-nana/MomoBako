@@ -18,9 +18,9 @@ use nana_ui::runtime::{
 };
 
 use super::shell_tint::SoftFill;
-use super::sidebar_view::parts::primary_button;
 use super::startup_view::{ROOT_LINE_HEIGHT, eyebrow, fill_section, line, margin, wrapping};
 use super::{ShellMessage, ShellViewModel};
+use nana_ui_core::TextWeight;
 
 /// 缺失仓库页内容最宽 560px。
 const MISSING_PANEL_WIDTH: f32 = 560.0;
@@ -153,7 +153,7 @@ fn panel(signals: MissingSignals) -> AnyView {
     let name = widget(line(
         initial.name.clone(),
         22.0,
-        650,
+        TextWeight::Bold,
         SemanticColorRole::Text,
         22.0 * ROOT_LINE_HEIGHT,
     ))
@@ -162,7 +162,7 @@ fn panel(signals: MissingSignals) -> AnyView {
     let mut summary = wrapping(
         initial.summary(),
         13.0,
-        400,
+        TextWeight::Regular,
         SemanticColorRole::Muted,
         13.0 * 1.6,
     );
@@ -197,7 +197,7 @@ fn path_box(view: Signal<MissingView>) -> AnyView {
     let mut node = wrapping(
         view.with_untracked(|view| view.path.clone()),
         12.0,
-        400,
+        TextWeight::Regular,
         SemanticColorRole::Text,
         18.0,
     );
@@ -236,11 +236,14 @@ fn editor(signals: MissingSignals) -> AnyView {
         .on_cx(|_, event: &TextChanged, cx| {
             cx.dispatch_program_all(ShellMessage::MissingPathChanged(event.value.to_string()));
         });
-    let submit =
-        widget(primary_button("确认重定向").disabled(view.with_untracked(|view| view.busy)))
-            .prop::<bool, fields::button::disabled>(move || view.with(|view| view.busy))
-            .key("missing-submit-path")
-            .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::MissingSubmitPath));
+    let submit = widget(
+        Button::new("确认重定向")
+            .kind(ButtonKind::Primary)
+            .disabled(view.with_untracked(|view| view.busy)),
+    )
+    .prop::<bool, fields::button::disabled>(move || view.with(|view| view.busy))
+    .key("missing-submit-path")
+    .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::MissingSubmitPath));
     let editor = widget(Stack::column(8.0).width(LengthSpec::Fill))
         .children((input, widget(Stack::row(0.0)).children((submit,))));
     widget(margin(12.0, 0.0))
@@ -255,20 +258,24 @@ fn actions(view: Signal<MissingView>) -> AnyView {
     let busy = move || view.with(|view| view.busy);
     widget(Stack::row(8.0).align(AlignSpec::Center).wrap(true))
         .children((
-            widget(primary_button(initial.primary).disabled(initial.busy))
-                .prop::<String, fields::button::label>(move || {
-                    view.with(|view| view.primary.to_string())
-                })
-                .prop::<bool, fields::button::disabled>(busy)
-                .key("missing-primary")
-                .on_cx(move |_, _: &Activate, cx| {
-                    let message = if view.with_untracked(|view| view.cache_issue) {
-                        ShellMessage::MissingOpenSourceSettings
-                    } else {
-                        ShellMessage::MissingChoosePath
-                    };
-                    cx.dispatch_program_all(message);
-                }),
+            widget(
+                Button::new(initial.primary)
+                    .kind(ButtonKind::Primary)
+                    .disabled(initial.busy),
+            )
+            .prop::<String, fields::button::label>(move || {
+                view.with(|view| view.primary.to_string())
+            })
+            .prop::<bool, fields::button::disabled>(busy)
+            .key("missing-primary")
+            .on_cx(move |_, _: &Activate, cx| {
+                let message = if view.with_untracked(|view| view.cache_issue) {
+                    ShellMessage::MissingOpenSourceSettings
+                } else {
+                    ShellMessage::MissingChoosePath
+                };
+                cx.dispatch_program_all(message);
+            }),
             widget(
                 Button::new("刷新")
                     .kind(ButtonKind::Ghost)

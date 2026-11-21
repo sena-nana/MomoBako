@@ -13,7 +13,7 @@ use nana_ui::runtime::{
     SemanticColorRole, SemanticPaint, Stack, Text, TextHorizontalAlignment, TextInput,
 };
 use nana_ui_core::{
-    ControlPadding, LineHeightSpec, RadiusTier, SemanticColorMix, ThemeExpr, ThemeToken,
+    ControlPadding, LineHeightSpec, RadiusTier, SemanticColorMix, TextWeight, ThemeExpr, ThemeToken,
 };
 
 use super::paint::SwatchChipPainter;
@@ -35,7 +35,7 @@ pub(crate) const INPUT_WIDTH: f32 = 120.0;
 pub(crate) fn label(
     content: impl Into<String>,
     size: f32,
-    weight: u16,
+    weight: TextWeight,
     role: SemanticColorRole,
 ) -> Text {
     let mut node =
@@ -50,7 +50,7 @@ pub(crate) fn label(
 pub(crate) fn wrapping_label(
     content: impl Into<String>,
     size: f32,
-    weight: u16,
+    weight: TextWeight,
     role: SemanticColorRole,
 ) -> Text {
     let mut node = label(content, size, weight, role);
@@ -71,7 +71,12 @@ pub(crate) fn margin_top(mut node: Text, px: f32) -> Text {
 
 /// 眉题：11px、600 字重、弱色，字距 0.4px。
 pub(crate) fn eyebrow(content: impl Into<String>) -> Text {
-    let mut node = label(content, 11.0, 600, SemanticColorRole::Faint);
+    let mut node = label(
+        content,
+        11.0,
+        TextWeight::Semibold,
+        SemanticColorRole::Faint,
+    );
     Arc::make_mut(&mut node.style.layout)
         .text_ext
         .letter_spacing = Some(0.4);
@@ -101,7 +106,12 @@ pub(crate) fn stat(
             .shrink(0.0),
     )
     .children((bound(
-        label(String::new(), 12.0, 500, SemanticColorRole::Muted),
+        label(
+            String::new(),
+            12.0,
+            TextWeight::Medium,
+            SemanticColorRole::Muted,
+        ),
         content,
     )
     .key(format!("{key}-text")),))
@@ -133,7 +143,6 @@ pub(crate) fn bar_button(content: &str, disabled: bool) -> Button {
         fixed_height(layout, BAR_BUTTON_HEIGHT);
         layout.padding_left = Some(LengthSpec::Px(9.0));
         layout.padding_right = Some(LengthSpec::Px(9.0));
-        layout.font_weight = Some(500);
         layout.line_height = Some(LineHeightSpec::Relative(LINE_RATIO));
     }
     clear_control_metrics(&mut style);
@@ -230,7 +239,7 @@ pub(crate) fn pill_input(
         layout.padding_top = Some(LengthSpec::Px(0.0));
         layout.padding_bottom = Some(LengthSpec::Px(0.0));
         layout.border_width = Some(0.0);
-        layout.font_weight = Some(400);
+        crate::theme_map::control_weight(layout, TextWeight::Regular);
         layout.line_height = Some(LineHeightSpec::Relative(LINE_RATIO));
         match width {
             Some(width) => {
@@ -273,7 +282,6 @@ pub(crate) fn pill_button(content: &str, disabled: bool) -> Button {
         layout.padding_left = Some(LengthSpec::Px(9.0));
         layout.padding_right = Some(LengthSpec::Px(9.0));
         layout.border_width = Some(0.0);
-        layout.font_weight = Some(500);
         layout.line_height = Some(LineHeightSpec::Relative(LINE_RATIO));
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(0.0);

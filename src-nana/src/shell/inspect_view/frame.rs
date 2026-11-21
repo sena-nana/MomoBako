@@ -17,6 +17,7 @@ use nana_ui::runtime::{
     ScrollView, SemanticColorRole, Stack, Text, Toolbar,
 };
 use nana_ui::{ButtonKind, Icon};
+use nana_ui_core::TextWeight;
 
 use super::super::files_view::bind::{StyleField, fill_container};
 use super::super::inspect_asmr::{self, AsmrPanels};
@@ -365,8 +366,17 @@ fn title_lines(head: Signal<HeadView>) -> (AnyView, AnyView, AnyView, AnyView) {
         .visible(move || !value().is_empty())
         .children((
             widget(eyebrow_bold(label)),
-            widget(text(&untrack(value), 13.0, 500, SemanticColorRole::Text, 19.5).wrap_anywhere())
-                .prop::<String, fields::text::value>(value),
+            widget(
+                text(
+                    &untrack(value),
+                    13.0,
+                    TextWeight::Medium,
+                    SemanticColorRole::Text,
+                    19.5,
+                )
+                .wrap_anywhere(),
+            )
+            .prop::<String, fields::text::value>(value),
         ))
         .key(key)
         .into_any()
@@ -393,14 +403,28 @@ fn title_lines(head: Signal<HeadView>) -> (AnyView, AnyView, AnyView, AnyView) {
             .key("inspect-preview-eyebrow")
             .into_any(),
         widget(spaced(
-            text(&current.name, 20.0, 700, SemanticColorRole::Text, 31.0).wrap_anywhere(),
+            text(
+                &current.name,
+                20.0,
+                TextWeight::Bold,
+                SemanticColorRole::Text,
+                31.0,
+            )
+            .wrap_anywhere(),
             4.0,
         ))
         .prop::<String, fields::text::value>(move || head.with(|view| view.name.clone()))
         .key("inspect-preview-name")
         .into_any(),
         widget(spaced(
-            text(&current.path, 14.0, 400, SemanticColorRole::Muted, 21.7).wrap_anywhere(),
+            text(
+                &current.path,
+                14.0,
+                TextWeight::Regular,
+                SemanticColorRole::Muted,
+                21.7,
+            )
+            .wrap_anywhere(),
             4.0,
         ))
         .prop::<String, HiddenWhenEmpty<fields::text::value>>(move || {
@@ -688,7 +712,6 @@ fn action_button(label: &str, icon: Icon, icon_size: f32, height: f32) -> Button
     layout.min_height = Some(LengthSpec::Px(height));
     layout.padding_left = Some(LengthSpec::Px(10.0));
     layout.padding_right = Some(LengthSpec::Px(10.0));
-    layout.font_weight = Some(500);
     layout.width = Some(LengthSpec::Shrink);
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
@@ -712,7 +735,13 @@ fn action(
 
 /// 11px 半粗、弱色、字距 0.4 的眉题。
 pub(super) fn eyebrow(label: &str) -> Text {
-    let mut node = text(label, 11.0, 600, SemanticColorRole::Faint, 17.05);
+    let mut node = text(
+        label,
+        11.0,
+        TextWeight::Semibold,
+        SemanticColorRole::Faint,
+        17.05,
+    );
     std::sync::Arc::make_mut(&mut node.style.layout)
         .text_ext
         .letter_spacing = Some(0.4);
@@ -727,7 +756,7 @@ pub(super) fn eyebrow_bold(label: &str) -> Text {
 pub(super) fn text(
     label: &str,
     size: f32,
-    weight: u16,
+    weight: TextWeight,
     role: SemanticColorRole,
     line_height: f32,
 ) -> Text {

@@ -41,6 +41,7 @@ pub(crate) use menu::EntryMenuView;
 pub(crate) use menu::open_and_reveal_targets;
 
 use bind::StyleField;
+use nana_ui_core::TextWeight;
 
 /// 详情卡片宽。
 const DETAIL_WIDTH: f32 = 300.0;
@@ -296,7 +297,7 @@ fn drop_hint(look: Signal<ColumnLook>) -> AnyView {
         .children((widget(style::text(
             "拖放到此处添加",
             14.0,
-            700,
+            TextWeight::Bold,
             SemanticColorRole::Accent,
             21.7,
         ))

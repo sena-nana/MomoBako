@@ -18,7 +18,7 @@ use nana_ui::runtime::{
 };
 use nana_ui_core::{
     ButtonKind, GridTrack, RadiusTier, SemanticColorMix, SemanticColorRole as Role, TextWeight,
-    ThemeToken, TypeRole,
+    TypeRole,
 };
 
 use super::super::super::hot::ModelField;
@@ -593,7 +593,7 @@ fn request_column(signals: PlaygroundSignals) -> AnyView {
     {
         let layout = Arc::make_mut(&mut checkbox.style.layout);
         crate::theme_map::control_font(layout, TypeRole::Meta);
-        layout.theme.font_weight = Some(ThemeToken::Weight(TextWeight::Bold).into());
+        crate::theme_map::control_weight(layout, TextWeight::Bold);
     }
     let auth = widget(checkbox)
         .visible(is_http)

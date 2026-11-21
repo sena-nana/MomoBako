@@ -23,7 +23,7 @@ use nana_ui::runtime::{
     PointerDragPhase, PointerDragged, RadiusTier, SecondaryPress, SemanticColorRole, SemanticPaint,
     Stack, Text, Thumbnail,
 };
-use nana_ui_core::{Icon, LengthAtom, SemanticColorMix};
+use nana_ui_core::{Icon, LengthAtom, SemanticColorMix, TextWeight};
 
 use super::super::ShellMessage;
 use super::super::files::{DisplayMode, FileRow, FilesMessage, hardlink_label};
@@ -695,7 +695,14 @@ fn list_content(cell: &CardCell, item: CardItem, current: &CardView) -> AnyView 
 
 /// 资源库摘要：12px 强调色，一行放不下用省略号截断。
 fn library_text(text: String) -> Text {
-    style::text(text, 12.0, 400, SemanticColorRole::Accent, 12.0 * 1.55).truncating()
+    style::text(
+        text,
+        12.0,
+        TextWeight::Regular,
+        SemanticColorRole::Accent,
+        12.0 * 1.55,
+    )
+    .truncating()
 }
 
 /// 列表右侧的一段：一行放不下时每段可以缩到 0，用省略号截断，不伸出元信息列。
@@ -709,7 +716,13 @@ fn meta_text(text: String, key: &str) -> nana_ui::runtime::view::El<Text> {
 
 /// 卡片标题：14px/700，去掉扩展名，最多两行，网格里居中并至少占两行高。
 fn title(label: String, list: bool) -> Text {
-    let mut node = style::text(label, 14.0, 700, SemanticColorRole::Text, 14.0 * 1.35);
+    let mut node = style::text(
+        label,
+        14.0,
+        TextWeight::Bold,
+        SemanticColorRole::Text,
+        14.0 * 1.35,
+    );
     {
         let layout = Arc::make_mut(&mut node.style.layout);
         layout.text_ext.line_clamp = Some(2);

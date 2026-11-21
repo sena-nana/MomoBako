@@ -7,7 +7,7 @@
 
 use nana_ui::runtime::view::{AnyView, IntoView, widget};
 use nana_ui::runtime::{LengthSpec, SemanticColorRole, Stack};
-use nana_ui_core::SemanticColorMix;
+use nana_ui_core::{SemanticColorMix, TextWeight};
 
 use super::super::frame::text;
 
@@ -42,7 +42,13 @@ pub(super) fn pill(label: &str, chip: bool, key: &'static str) -> AnyView {
         .shrink(0.0);
     // 这一版 NanaUI 的 `Stack` 没有 `surface_mix`，混合底写在节点样式上。
     let style = frame.node_style().surface_mix(fill);
-    let mut label_text = text(label, 12.0, 600, SemanticColorRole::Muted, 18.6);
+    let mut label_text = text(
+        label,
+        12.0,
+        TextWeight::Semibold,
+        SemanticColorRole::Muted,
+        18.6,
+    );
     if chip {
         label_text = label_text.truncating();
     }

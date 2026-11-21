@@ -51,6 +51,7 @@ pub use popover::repository_popover;
 pub use tree::folder_menu;
 pub(crate) use tree::folder_row_key;
 
+use nana_ui_core::TextWeight;
 use parts::{
     FooterLook, NavLook, PlayBase, bound_hint, footer_button, footer_popover, group_header,
     group_title, nav_row, tree_action, tree_action_titled,
@@ -192,8 +193,13 @@ fn progress_line(status: Signal<StatusLine>) -> AnyView {
         })
     };
     let (label, percent) = progress_of();
-    let mut text =
-        parts::label_text(label, 12.0, 400, Some(SemanticColorRole::Muted)).line_height(18.0);
+    let mut text = parts::label_text(
+        label,
+        12.0,
+        TextWeight::Regular,
+        Some(SemanticColorRole::Muted),
+    )
+    .line_height(18.0);
     {
         let layout = Arc::make_mut(&mut text.style.layout);
         layout.flex_grow = Some(1.0);
@@ -213,7 +219,7 @@ fn progress_line(status: Signal<StatusLine>) -> AnyView {
             parts::label_text(
                 format!("{percent}%"),
                 12.0,
-                400,
+                TextWeight::Regular,
                 Some(SemanticColorRole::Faint),
             )
             .line_height(18.0),
@@ -444,7 +450,7 @@ fn playlist_title(state: Signal<PlaylistGroup>) -> AnyView {
     let mut count_text = parts::label_text(
         initial.count.to_string(),
         11.0,
-        700,
+        TextWeight::Bold,
         Some(SemanticColorRole::Muted),
     );
     Arc::make_mut(&mut count_text.style.layout)
@@ -482,11 +488,21 @@ fn playlist_title(state: Signal<PlaylistGroup>) -> AnyView {
 fn playlist_row(item: PlaylistItem) -> AnyView {
     let row = item.get_untracked();
     let id = row.playlist_id;
-    let mut name =
-        parts::label_text(row.name.clone(), 13.0, 600, Some(SemanticColorRole::Text)).truncating();
+    let mut name = parts::label_text(
+        row.name.clone(),
+        13.0,
+        TextWeight::Semibold,
+        Some(SemanticColorRole::Text),
+    )
+    .truncating();
     Arc::make_mut(&mut name.style.layout).width = Some(LengthSpec::Fill);
-    let mut meta =
-        parts::label_text(row.meta, 11.0, 400, Some(SemanticColorRole::Muted)).truncating();
+    let mut meta = parts::label_text(
+        row.meta,
+        11.0,
+        TextWeight::Regular,
+        Some(SemanticColorRole::Muted),
+    )
+    .truncating();
     Arc::make_mut(&mut meta.style.layout).width = Some(LengthSpec::Fill);
     let mut main_style = parts::row_style(42.0, 8.0, 8.0, 0.0, parts::ActiveTone::Accent, false);
     {
@@ -694,7 +710,7 @@ fn task_badge(footer: Signal<FooterView>) -> AnyView {
         parts::label_text(
             count.to_string(),
             9.0,
-            700,
+            TextWeight::Bold,
             Some(SemanticColorRole::AccentText),
         )
         .line_height(12.0),

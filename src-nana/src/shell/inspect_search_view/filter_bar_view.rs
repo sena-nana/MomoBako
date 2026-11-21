@@ -18,7 +18,9 @@ use nana_ui::runtime::{
     Activate, AlignSpec, JustifySpec, LengthSpec, RadiusTier, Select, SelectChanged, SelectOption,
     SemanticColorRole, Stack, TextChanged, TextSubmitted, Toolbar,
 };
-use nana_ui_core::{DisplaySpec, GridLine, GridRepeatAuto, GridTrack, GridTrackListUnsupported};
+use nana_ui_core::{
+    DisplaySpec, GridLine, GridRepeatAuto, GridTrack, GridTrackListUnsupported, TextWeight,
+};
 
 use super::super::ShellMessage;
 use super::super::admin::style::key_part;
@@ -206,7 +208,12 @@ fn head(signals: FilterBarSignals) -> AnyView {
     .children((
         widget(widgets::eyebrow("当前资源库筛选")).key("workspace-filter-eyebrow"),
         widgets::bound(
-            widgets::label(String::new(), 13.0, 700, SemanticColorRole::Text),
+            widgets::label(
+                String::new(),
+                13.0,
+                TextWeight::Bold,
+                SemanticColorRole::Text,
+            ),
             move || head.with(|head| head.repository.clone()),
         )
         .key("workspace-filter-repository"),
@@ -249,10 +256,13 @@ fn group(
             .grow(0.0)
             .shrink(0.0),
     )
-    .children((
-        widget(widgets::label(title, 12.0, 700, SemanticColorRole::Muted))
-            .key(format!("workspace-filter-{key}-title")),
+    .children((widget(widgets::label(
+        title,
+        12.0,
+        TextWeight::Bold,
+        SemanticColorRole::Muted,
     ))
+    .key(format!("workspace-filter-{key}-title")),))
     .key(format!("workspace-filter-{key}-caption"))
     .into_any();
     let style = Stack::bar(8.0).align(AlignSpec::Start).node_style();
@@ -593,7 +603,7 @@ fn sort_direction_select(direction: Signal<SortDirection>) -> AnyView {
         layout.padding_left = Some(LengthSpec::Px(8.0));
         layout.padding_right = Some(LengthSpec::Px(8.0));
         layout.border_width = Some(0.0);
-        layout.font_weight = Some(400);
+        crate::theme_map::control_weight(layout, TextWeight::Regular);
         layout.flex_grow = Some(1.0);
     }
     widget(widgets::input_pill(true))

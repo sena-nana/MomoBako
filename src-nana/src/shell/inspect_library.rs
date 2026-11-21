@@ -385,7 +385,7 @@ fn stacked_value(
         layout.padding_top = Some(LengthSpec::Px(12.0));
         column = column.style(style);
     }
-    let mut name = typed_text(Text::new(label), 11.0, 700)
+    let mut name = typed_text(Text::new(label), 11.0, TextWeight::Bold)
         .color(SemanticColorRole::Faint)
         .line_height(17.05);
     std::sync::Arc::make_mut(&mut name.style.layout)

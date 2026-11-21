@@ -12,6 +12,7 @@ use super::super::ShellMessage;
 use super::super::inspect::InspectMessage;
 use super::body::Pixels;
 use super::frame::text;
+use nana_ui_core::TextWeight;
 
 /// 用页位图画白纸。高度跟宽高比走，超出时滚动区滚动，不裁掉页底。编码失败时是一张空白的纸位。
 pub(super) fn page_bitmap(raster: &Pixels) -> AnyView {
@@ -107,7 +108,7 @@ pub(super) fn page_nav(index: usize, total: usize) -> AnyView {
             widget(text(
                 &format!("{} / {total}", index + 1),
                 14.0,
-                400,
+                TextWeight::Regular,
                 SemanticColorRole::Text,
                 21.7,
             ))
@@ -133,7 +134,6 @@ fn page_button(label: &str, disabled: bool) -> Button {
     layout.min_height = Some(LengthSpec::Px(32.0));
     layout.padding_left = Some(LengthSpec::Px(10.0));
     layout.padding_right = Some(LengthSpec::Px(10.0));
-    layout.font_weight = Some(500);
     layout.width = Some(LengthSpec::Shrink);
     button
 }

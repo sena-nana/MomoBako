@@ -29,6 +29,7 @@ use super::super::{ShellMessage, ShellViewModel};
 use super::bind::DraftField;
 use super::file_message;
 use super::style::{self, ButtonLook};
+use nana_ui_core::TextWeight;
 
 /// 左列的文字：眉题和分类视图的说明（空时不占位）。
 #[derive(Clone, Debug, PartialEq)]
@@ -241,7 +242,7 @@ fn location(signals: HeaderSignals) -> AnyView {
         widget(style::text(
             initial.subline.clone(),
             14.0,
-            400,
+            TextWeight::Regular,
             SemanticColorRole::Muted,
             21.7,
         ))
@@ -478,8 +479,17 @@ fn display_mode_field(mode: Signal<DisplayMode>) -> AnyView {
         });
     widget(frame)
         .children((
-            widget(style::text("展示方式", 12.0, 400, SemanticColorRole::Muted, 18.6).nowrap(true))
-                .key("file-display-label"),
+            widget(
+                style::text(
+                    "展示方式",
+                    12.0,
+                    TextWeight::Regular,
+                    SemanticColorRole::Muted,
+                    18.6,
+                )
+                .nowrap(true),
+            )
+            .key("file-display-label"),
             widget(clip).key("file-display-clip").children((select,)),
         ))
         .key("file-display-field")
@@ -617,7 +627,7 @@ fn import_trigger() -> AnyView {
                 style::text(
                     "导入",
                     14.0,
-                    ButtonLook::TOOLBAR.weight,
+                    TextWeight::Medium,
                     SemanticColorRole::Text,
                     21.7,
                 )

@@ -27,6 +27,7 @@ use super::files::{EnsuredThumbnail, FileContext, FileRow, FilesMessage};
 use super::inspect::support::display_value;
 use super::inspect_library::{asmr_enabled, matches_asmr};
 use super::{ShellMessage, ShellViewModel};
+use nana_ui_core::TextWeight;
 
 mod candidates;
 mod cover;
@@ -498,7 +499,7 @@ fn queue_head(label: &str, count: &str, key: &str) -> AnyView {
         .children((
             widget(super::workbench::meta(label)),
             widget(
-                crate::theme_map::typed_text(Text::new(count.to_string()), 12.0, 700)
+                crate::theme_map::typed_text(Text::new(count.to_string()), 12.0, TextWeight::Bold)
                     .color(SemanticColorRole::Text),
             ),
         ))

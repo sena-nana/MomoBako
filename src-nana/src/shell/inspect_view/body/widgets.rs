@@ -1,6 +1,7 @@
 //! 预览工具栏、图片与视频、文档与模型视图、覆盖层、状态层与字节数格式化等小部件。
 
 use super::*;
+use nana_ui_core::TextWeight;
 
 /// 插件顶栏：42px 起，8/12 内边距，底边 border-soft，标签可折行。
 pub(super) fn toolbar(chips: Vec<AnyView>, key: &'static str) -> AnyView {
@@ -128,10 +129,14 @@ pub(super) fn document_view(
     } else {
         rows.push(
             widget(Stack::fill_column(0.0).padding(18.0))
-                .children((
-                    widget(text(body, 13.0, 400, SemanticColorRole::Text, 20.15))
-                        .key("inspect-native"),
+                .children((widget(text(
+                    body,
+                    13.0,
+                    TextWeight::Regular,
+                    SemanticColorRole::Text,
+                    20.15,
                 ))
+                .key("inspect-native"),))
                 .key("inspect-native-text")
                 .into_any(),
         );
@@ -166,7 +171,7 @@ pub(super) fn model_view(
             .children((widget(text(
                 content,
                 13.0,
-                400,
+                TextWeight::Regular,
                 SemanticColorRole::Muted,
                 20.15,
             )),))
@@ -336,13 +341,25 @@ pub(super) fn failed_mask(
 }
 
 pub(super) fn overlay_heading(title: &str) -> Text {
-    let mut heading = text(title, 14.0, 700, SemanticColorRole::Danger, 21.7);
+    let mut heading = text(
+        title,
+        14.0,
+        TextWeight::Bold,
+        SemanticColorRole::Danger,
+        21.7,
+    );
     heading.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
     heading
 }
 
 pub(super) fn overlay_reason(message: &str) -> Text {
-    let mut reason = text(message, 14.0, 400, SemanticColorRole::Muted, 21.7);
+    let mut reason = text(
+        message,
+        14.0,
+        TextWeight::Regular,
+        SemanticColorRole::Muted,
+        21.7,
+    );
     reason.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
     {
         let layout = std::sync::Arc::make_mut(&mut reason.style.layout);
@@ -361,8 +378,20 @@ pub(super) fn centered_status(title: &str, detail: &str) -> AnyView {
             .justify(JustifySpec::Center),
     )
     .children((
-        widget(text(title, 14.0, 600, SemanticColorRole::Text, 21.7)),
-        widget(text(detail, 14.0, 400, SemanticColorRole::Muted, 21.7)),
+        widget(text(
+            title,
+            14.0,
+            TextWeight::Semibold,
+            SemanticColorRole::Text,
+            21.7,
+        )),
+        widget(text(
+            detail,
+            14.0,
+            TextWeight::Regular,
+            SemanticColorRole::Muted,
+            21.7,
+        )),
     ))
     .key("inspect-status-center")
     .into_any()
@@ -394,8 +423,25 @@ pub(super) fn status_layer(pill: AnyView, toolbar: Option<AnyView>) -> AnyView {
 /// 状态胶囊：底是 bg-elev 的 84%，border-soft 细边。图片读取多一条 132×6 的扫动进度。
 pub(super) fn status_pill(title: &str, detail: &str, progress: bool) -> AnyView {
     let mut children = vec![
-        widget(text(title, 12.0, 600, SemanticColorRole::Text, 18.6)).into_any(),
-        widget(text(detail, 12.0, 400, SemanticColorRole::Muted, 18.6).truncating()).into_any(),
+        widget(text(
+            title,
+            12.0,
+            TextWeight::Semibold,
+            SemanticColorRole::Text,
+            18.6,
+        ))
+        .into_any(),
+        widget(
+            text(
+                detail,
+                12.0,
+                TextWeight::Regular,
+                SemanticColorRole::Muted,
+                18.6,
+            )
+            .truncating(),
+        )
+        .into_any(),
     ];
     if progress {
         children.push(super::super::preview_paint::status_progress());

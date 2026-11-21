@@ -11,10 +11,9 @@ use nana_ui::runtime::{
     AlignSpec, Button, IconGlyph, InteractionStyle, JustifySpec, LengthSpec, NodeStyle,
     SemanticPaint, Stack, Text, TextHorizontalAlignment, TextInput,
 };
-use nana_ui::theme::type_scale;
 use nana_ui_core::{
     ButtonKind, Icon, LineHeightSpec, OverflowWrapSpec, RadiusTier, SemanticColorRole as Role,
-    TextWeight, ThemeToken, TypeRole,
+    TextWeight, TypeRole,
 };
 
 /// 正文行高倍数。
@@ -177,8 +176,7 @@ pub(crate) fn action(
     layout.theme.line_height = None;
     crate::theme_map::control_font(layout, TypeRole::Section);
     if kind == ButtonKind::Primary {
-        layout.font_weight = Some(type_scale::SEMIBOLD);
-        layout.theme.font_weight = Some(ThemeToken::Weight(TextWeight::Semibold).into());
+        crate::theme_map::control_weight(layout, TextWeight::Semibold);
     }
     if disabled {
         layout.opacity = Some(crate::theme_map::DISABLED_OPACITY);

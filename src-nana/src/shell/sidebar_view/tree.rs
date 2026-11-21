@@ -27,7 +27,7 @@ use nana_ui::runtime::{
     Activate, AlignSpec, IconButton, LengthSpec, ListItem, NodeStyle, SecondaryPress,
     SemanticColorRole, SemanticPaint, Stack,
 };
-use nana_ui_core::SemanticColorMix;
+use nana_ui_core::{SemanticColorMix, TextWeight};
 
 use super::super::field_bind::StyleField;
 use super::super::input::{HostDragPhase, InputMessage};
@@ -147,13 +147,17 @@ fn folder_row(item: FolderItem) -> AnyView {
         widget(Stack::fill_row(6.0).align(AlignSpec::Center)).children((
             widget(parts::inherit_icon(folder_icon(row.branch), 14.0))
                 .prop::<Icon, GlyphIcon>(move || folder_icon(item.branch().get())),
-            widget(parts::fill_text(row.label.clone(), 13.0, 500))
-                .prop::<String, fields::text::value>(item.label()),
+            widget(parts::fill_text(
+                row.label.clone(),
+                13.0,
+                TextWeight::Medium,
+            ))
+            .prop::<String, fields::text::value>(item.label()),
         )),
         widget(parts::label_text(
             row.count.to_string(),
             11.0,
-            500,
+            TextWeight::Medium,
             Some(SemanticColorRole::Faint),
         ))
         .prop::<String, fields::text::value>(move || item.count().get().to_string()),
@@ -441,7 +445,7 @@ fn smart_row(item: SmartItem, state: Signal<SmartGroup>) -> AnyView {
         widget(Stack::fill_row(6.0).align(AlignSpec::Center)).children((
             widget(parts::inherit_icon(folder_icon(row.branch), 14.0))
                 .prop::<Icon, GlyphIcon>(move || folder_icon(item.branch().get())),
-            widget(parts::fill_text(row.name.clone(), 13.0, 500))
+            widget(parts::fill_text(row.name.clone(), 13.0, TextWeight::Medium))
                 .prop::<String, fields::text::value>(item.name()),
         )),
         actions,

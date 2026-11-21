@@ -74,7 +74,6 @@ const BUTTON_HELPERS: &[&str] = &[
     "styled_button",
     "glyph_button",
     "hit_area",
-    "primary_button",
     "bar_button",
     "pill_button",
     "close_button",

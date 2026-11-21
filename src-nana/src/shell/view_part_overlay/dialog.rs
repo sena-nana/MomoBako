@@ -27,7 +27,7 @@ use nana_ui::runtime::{
     PositionSpec, RadiusTier, SemanticColorRole, Stack, StatusTone, Text,
 };
 use nana_ui::{ButtonKind, ControlSize, Icon};
-use nana_ui_core::{DialogClosePolicy, DialogSize};
+use nana_ui_core::{DialogClosePolicy, DialogSize, TextWeight};
 
 use super::session::{OverlaySession, register};
 use crate::shell::ShellMessage;
@@ -324,7 +324,7 @@ pub(crate) fn footer(leading: Option<AnyView>, buttons: Vec<AnyView>) -> AnyView
         .into_any()
 }
 
-/// 底栏按钮：高 32、左右 10、按钮正文档字号；主操作低饱和蓝 600 字重，危险操作低饱和红，普通操作透明
+/// 底栏按钮：高 32、左右 10、按钮正文档字号和中等字重；主操作低饱和蓝，危险操作低饱和红，普通操作透明
 /// （DESIGN.md 5.1）。点击发 `message`；禁用时框架不派发点击。
 pub(crate) fn action(
     label: impl IntoProp<String>,
@@ -373,11 +373,6 @@ fn button_view(
         layout.min_height = Some(LengthSpec::Px(32.0));
         layout.padding_left = Some(LengthSpec::Px(10.0));
         layout.padding_right = Some(LengthSpec::Px(10.0));
-        layout.font_weight = Some(if kind == ButtonKind::Primary {
-            600
-        } else {
-            500
-        });
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(0.0);
     }
@@ -422,9 +417,10 @@ pub(crate) fn busy_note(visible: impl IntoProp<bool>, key: &'static str) -> AnyV
 
 /// 占满宽度、任意处折行的一段字。
 pub(crate) fn wrapping_text(size: f32, line_height: f32, color: SemanticColorRole) -> Text {
-    let mut node = crate::theme_map::typed_text(Text::new(String::new()), size, 400)
-        .color(color)
-        .line_height(line_height);
+    let mut node =
+        crate::theme_map::typed_text(Text::new(String::new()), size, TextWeight::Regular)
+            .color(color)
+            .line_height(line_height);
     let layout = Arc::make_mut(&mut node.style.layout);
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));

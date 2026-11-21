@@ -24,6 +24,7 @@ use super::super::workspace::{DeleteMode, WorkspaceDialog};
 use super::super::{ShellMessage, ShellViewModel, SidebarMessage};
 use super::parts;
 use super::sidebar_message;
+use nana_ui_core::TextWeight;
 
 mod smart;
 pub use smart::smart_folder_dialog;
@@ -251,7 +252,7 @@ fn option_card(
         widget(parts::label_text(
             title,
             14.0,
-            600,
+            TextWeight::Semibold,
             Some(SemanticColorRole::Text),
         )),
         detail_text,
