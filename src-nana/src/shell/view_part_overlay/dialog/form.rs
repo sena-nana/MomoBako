@@ -53,7 +53,6 @@ pub(crate) fn text_field(
         layout.min_height = Some(LengthSpec::Px(32.0));
         layout.padding_left = Some(LengthSpec::Px(8.0));
         layout.padding_right = Some(LengthSpec::Px(8.0));
-        layout.font_size = Some(14.0);
     }
     let mut control = widget(input)
         .model(draft)
@@ -91,7 +90,6 @@ pub(crate) fn text_area_field(
         layout.min_width = Some(LengthSpec::Px(0.0));
         layout.padding_left = Some(LengthSpec::Px(8.0));
         layout.padding_right = Some(LengthSpec::Px(8.0));
-        layout.font_size = Some(14.0);
     }
     let control = widget(area)
         .model(draft)
@@ -124,7 +122,6 @@ pub(crate) fn select_field(
         layout.min_width = Some(LengthSpec::Px(0.0));
         layout.height = Some(LengthSpec::Px(32.0));
         layout.min_height = Some(LengthSpec::Px(32.0));
-        layout.font_size = Some(14.0);
     }
     let control = widget(select)
         .key(key)

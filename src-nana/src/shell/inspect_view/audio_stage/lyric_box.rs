@@ -5,7 +5,9 @@
 //! 行与行的间距是 4px。
 //! 单行盒子只用来估算还没排出来的滚动；排出来以后按布局盒居中，折行的行可以更高。
 
-use nana_ui_core::{LayoutStyle, LengthSpec, LineHeightSpec, OverflowWrapSpec, WhiteSpaceSpec};
+use nana_ui_core::{
+    LayoutStyle, LengthSpec, LineHeightSpec, OverflowWrapSpec, TypeRole, WhiteSpaceSpec,
+};
 
 /// 歌词行的字号。
 pub(super) const FONT: f32 = 16.0;
@@ -23,14 +25,17 @@ pub(super) const GAP: f32 = 4.0;
 /// 不写死高度，第二行才撑得开。长句在任意位置断开，和 `overflow-wrap: anywhere` 一样，
 /// 不再 `nowrap` 加省略号。
 pub(super) fn apply(layout: &mut LayoutStyle) {
-    layout.font_size = Some(FONT);
+    crate::theme_map::control_font(layout, TypeRole::Heading);
     layout.line_height = Some(LineHeightSpec::Absolute(LEADING));
+    // 按钮自带行高和边框令牌，解析时盖过上面的行高和下面的 0 边框，所以一并清掉。
+    layout.theme.line_height = None;
     layout.padding_top = Some(LengthSpec::Px(PAD_Y));
     layout.padding_bottom = Some(LengthSpec::Px(PAD_Y));
     layout.padding_left = Some(LengthSpec::Px(0.0));
     layout.padding_right = Some(LengthSpec::Px(0.0));
     // 歌词行不要边框。按钮默认的 1px 边会把单行盒子撑高 2px。
     layout.border_width = Some(0.0);
+    layout.theme.border_width = None;
     layout.min_height = Some(LengthSpec::Px(LINE));
     layout.height = None;
     layout.max_height = None;
@@ -99,6 +104,7 @@ mod tests {
         for label in ["短句", chinese.as_str(), latin.as_str()] {
             let style = style_of(&harness, label);
             assert_eq!(style.layout.font_size, Some(FONT), "{label} 的字号");
+            assert_eq!(used_font(&harness, label), FONT, "{label} 画出来的字号");
             assert!(
                 matches!(style.layout.line_height, Some(LineHeightSpec::Absolute(value)) if (value - LEADING).abs() < 0.01),
                 "{label} 的行高应是 {LEADING}"
@@ -177,6 +183,26 @@ mod tests {
             .node_style(id)
             .unwrap_or_else(|| panic!("{key} 没有样式"))
             .clone()
+    }
+
+    /// 节点画字用的字号：按钮自己画的字看画出来的，纯文字看解析后的。
+    fn used_font(harness: &ShellHarness, key: &str) -> f32 {
+        let id = harness.node(key);
+        let world = harness.document().context().world();
+        world
+            .widget_paint(id)
+            .and_then(|paint| {
+                paint.ops.iter().find_map(|op| match &op.op {
+                    nana_ui::runtime::WidgetPaintOp::Text(text) => Some(text.font_size),
+                    _ => None,
+                })
+            })
+            .or_else(|| {
+                world
+                    .computed_style(id)
+                    .map(|style| style.inherited.font_size)
+            })
+            .unwrap_or_else(|| panic!("{key} 没有字号"))
     }
 
     fn style_of(harness: &ShellHarness, key: &str) -> nana_ui::runtime::NodeStyle {

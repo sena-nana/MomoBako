@@ -281,7 +281,6 @@ fn select_field(
         layout.width = Some(LengthSpec::Shrink);
         layout.min_width = Some(LengthSpec::Px(122.0));
         layout.height = Some(LengthSpec::Px(32.0));
-        layout.font_size = Some(14.0);
         layout.padding_left = Some(LengthSpec::Px(0.0));
     }
     let frame = style::field_frame().with_layout(|layout| {

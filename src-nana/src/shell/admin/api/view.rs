@@ -387,7 +387,7 @@ fn field(title: &str, caption: NodeRef, control: AnyView) -> AnyView {
         .into_any()
 }
 
-/// 原生下拉框的外观：`bg-subtle` 底、`border-strong` 边线，高 32，14 号字。
+/// 原生下拉框的外观：`bg-subtle` 底、`border-strong` 边线，高 32，字号是下拉框尺寸档的正文档。
 fn native_select(select: Select) -> Select {
     let mut select = select;
     select.style.interaction.base.background_mix = Some(SemanticColorMix::alpha(Role::Subtle, 1.0));
@@ -397,7 +397,6 @@ fn native_select(select: Select) -> Select {
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
     layout.height = Some(LengthSpec::Px(32.0));
-    layout.font_size = Some(14.0);
     select
 }
 
@@ -593,7 +592,7 @@ fn request_column(signals: PlaygroundSignals) -> AnyView {
     checkbox.style.foreground = Some(Role::Muted);
     {
         let layout = Arc::make_mut(&mut checkbox.style.layout);
-        layout.theme.font_size = Some(ThemeToken::Type(TypeRole::Meta).into());
+        crate::theme_map::control_font(layout, TypeRole::Meta);
         layout.theme.font_weight = Some(ThemeToken::Weight(TextWeight::Bold).into());
     }
     let auth = widget(checkbox)
@@ -666,7 +665,7 @@ fn request_column(signals: PlaygroundSignals) -> AnyView {
         .into_any()
 }
 
-/// 等宽文本域：12/1.5、内边距 10、sm 圆角、`border-strong` 边线、`bg-subtle`。字色另外绑定。
+/// 等宽文本域：正文档字号、1.5 倍行高、内边距 10、sm 圆角、`border-strong` 边线、`bg-subtle`。字色另外绑定。
 fn code_area_style(min_height: f32) -> nana_ui::runtime::NodeStyle {
     let mut node = style::native_field_style(min_height);
     node.text_vertical_alignment = nana_ui::runtime::TextVerticalAlignment::Top;
@@ -676,7 +675,6 @@ fn code_area_style(min_height: f32) -> nana_ui::runtime::NodeStyle {
     layout.flex_grow = Some(1.0);
     layout.white_space_nowrap = false;
     layout.text_ext.font_family = Some(style::MONO_FAMILY.into());
-    layout.font_size = Some(12.0);
     layout.line_height = Some(nana_ui_core::LineHeightSpec::Relative(1.5));
     layout.padding_top = Some(LengthSpec::Px(10.0));
     layout.padding_bottom = Some(LengthSpec::Px(10.0));

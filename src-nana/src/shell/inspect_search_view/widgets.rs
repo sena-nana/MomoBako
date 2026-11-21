@@ -122,7 +122,7 @@ pub(crate) fn chip(content: &str, swatch: Option<SwatchColor>) -> Chip {
     chip
 }
 
-/// 筛选栏按钮：28px 高、左右 9px 的透明按钮，14px 中等字重正文色。
+/// 筛选栏按钮：28px 高、左右 9px 的透明按钮，按钮正文档字号、中等字重、正文色。
 /// 悬停是 `--bg-hover`。禁用时文字按 45% 混进筛选栏底色：不透明度要按 sRGB 合成，
 /// 直接给半透明文字会被渲染器按线性空间合成得更亮，所以先混成不透明色。
 pub(crate) fn bar_button(content: &str, disabled: bool) -> Button {
@@ -133,7 +133,6 @@ pub(crate) fn bar_button(content: &str, disabled: bool) -> Button {
         fixed_height(layout, BAR_BUTTON_HEIGHT);
         layout.padding_left = Some(LengthSpec::Px(9.0));
         layout.padding_right = Some(LengthSpec::Px(9.0));
-        layout.font_size = Some(14.0);
         layout.font_weight = Some(500);
         layout.line_height = Some(LineHeightSpec::Relative(LINE_RATIO));
     }
@@ -211,7 +210,7 @@ pub(crate) fn input_pill(fill: bool) -> Stack {
     }
 }
 
-/// 胶囊里的输入框：透明、无边框，左右 8px，12px 正文。宽度为 `None` 时填满胶囊。
+/// 胶囊里的输入框：透明、无边框，左右 8px，输入框正文档字号。宽度为 `None` 时填满胶囊。
 pub(crate) fn pill_input(
     value: &str,
     placeholder: &str,
@@ -231,7 +230,6 @@ pub(crate) fn pill_input(
         layout.padding_top = Some(LengthSpec::Px(0.0));
         layout.padding_bottom = Some(LengthSpec::Px(0.0));
         layout.border_width = Some(0.0);
-        layout.font_size = Some(12.0);
         layout.font_weight = Some(400);
         layout.line_height = Some(LineHeightSpec::Relative(LINE_RATIO));
         match width {
@@ -264,7 +262,7 @@ pub(crate) fn pill_divider() -> Divider {
     Divider::vertical()
 }
 
-/// 胶囊右侧的「添加」：`--bg-subtle` 底，12px 次要字，右端跟着胶囊的全圆角。
+/// 胶囊右侧的「添加」：`--bg-subtle` 底，按钮正文档字号的次要色字，右端跟着胶囊的全圆角。
 /// 可用时悬停是柔和强调底、强调色字；输入为空时底和字都按 45% 混进胶囊底色。
 pub(crate) fn pill_button(content: &str, disabled: bool) -> Button {
     let button = Button::new(content).disabled(disabled);
@@ -275,7 +273,6 @@ pub(crate) fn pill_button(content: &str, disabled: bool) -> Button {
         layout.padding_left = Some(LengthSpec::Px(9.0));
         layout.padding_right = Some(LengthSpec::Px(9.0));
         layout.border_width = Some(0.0);
-        layout.font_size = Some(12.0);
         layout.font_weight = Some(500);
         layout.line_height = Some(LineHeightSpec::Relative(LINE_RATIO));
         layout.flex_grow = Some(0.0);

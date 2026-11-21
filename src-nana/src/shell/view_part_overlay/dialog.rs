@@ -324,7 +324,7 @@ pub(crate) fn footer(leading: Option<AnyView>, buttons: Vec<AnyView>) -> AnyView
         .into_any()
 }
 
-/// 底栏按钮：高 32、左右 10、14px；主操作低饱和蓝 600 字重，危险操作低饱和红，普通操作透明
+/// 底栏按钮：高 32、左右 10、按钮正文档字号；主操作低饱和蓝 600 字重，危险操作低饱和红，普通操作透明
 /// （DESIGN.md 5.1）。点击发 `message`；禁用时框架不派发点击。
 pub(crate) fn action(
     label: impl IntoProp<String>,
@@ -373,7 +373,6 @@ fn button_view(
         layout.min_height = Some(LengthSpec::Px(32.0));
         layout.padding_left = Some(LengthSpec::Px(10.0));
         layout.padding_right = Some(LengthSpec::Px(10.0));
-        layout.font_size = Some(14.0);
         layout.font_weight = Some(if kind == ButtonKind::Primary {
             600
         } else {

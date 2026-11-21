@@ -247,7 +247,6 @@ fn result_row(item: HitItem) -> AnyView {
         layout.padding_bottom = Some(LengthSpec::Px(15.0));
         layout.white_space_nowrap = false;
         layout.text_overflow_ellipsis = false;
-        layout.font_size = Some(14.0);
         layout.font_weight = Some(500);
     }
     let tile = widget(

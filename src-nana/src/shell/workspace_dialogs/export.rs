@@ -329,10 +329,9 @@ impl FieldWrite<PathField, bool> for PathDisabled {
     }
 }
 
-/// 「加密压缩包」勾选：15px 方框和 13px/500 文字。
+/// 「加密压缩包」勾选：15px 方框，文字是勾选框自带的正文档。
 fn encrypt_toggle(view: Signal<ExportView>) -> AnyView {
-    let mut checkbox = Checkbox::new("加密压缩包", view.with_untracked(|view| view.encrypt));
-    Arc::make_mut(&mut checkbox.style.layout).font_size = Some(13.0);
+    let checkbox = Checkbox::new("加密压缩包", view.with_untracked(|view| view.encrypt));
     widget(checkbox)
         .key("export-encrypt")
         .prop::<bool, fields::checkbox::checked>(move || view.with(|view| view.encrypt))

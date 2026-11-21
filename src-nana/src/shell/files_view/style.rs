@@ -149,7 +149,6 @@ pub(crate) fn fixed(stack: Stack, width: f32, height: f32) -> Stack {
 pub(crate) struct ButtonLook {
     pub height: f32,
     pub padding_x: f32,
-    pub font_size: f32,
     pub weight: u16,
     pub foreground: SemanticColorRole,
     pub background: Option<SemanticColorRole>,
@@ -160,11 +159,10 @@ pub(crate) struct ButtonLook {
 }
 
 impl ButtonLook {
-    /// 工具栏按钮：高 34，左右 10，14px/500，常态透明，悬停 `--bg-hover`。
+    /// 工具栏按钮：高 34，左右 10，字号取按钮的正文档、字重 500，常态透明，悬停 `--bg-hover`。
     pub(crate) const TOOLBAR: Self = Self {
         height: 34.0,
         padding_x: 10.0,
-        font_size: 14.0,
         weight: 500,
         foreground: SemanticColorRole::Text,
         background: None,
@@ -214,11 +212,7 @@ pub(crate) fn styled_button(
     layout.padding_right = Some(LengthSpec::Px(look.padding_x));
     layout.padding_top = Some(LengthSpec::Px(0.0));
     layout.padding_bottom = Some(LengthSpec::Px(0.0));
-    layout.font_size = Some(look.font_size);
     layout.font_weight = Some(look.weight);
-    layout.line_height = Some(nana_ui_core::LineHeightSpec::Absolute(
-        look.font_size * LINE_BODY,
-    ));
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
     button.style(style)

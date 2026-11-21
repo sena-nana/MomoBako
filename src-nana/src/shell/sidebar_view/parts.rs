@@ -64,7 +64,7 @@ pub(crate) fn row_style(
         layout.min_height = Some(LengthSpec::Px(height));
         layout.padding_left = Some(LengthSpec::Px(pad_left));
         layout.padding_right = Some(LengthSpec::Px(pad_right));
-        layout.font_size = Some(13.0);
+        crate::theme_map::control_font(layout, nana_ui_core::TypeRole::Body);
         layout.font_weight = Some(500);
         layout.white_space_nowrap = true;
         layout.text_overflow_ellipsis = true;

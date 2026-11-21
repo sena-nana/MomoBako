@@ -393,7 +393,7 @@ fn stacked_value(
         .letter_spacing = Some(0.4);
     let mut text = Text::new(untrack(&value))
         .color(SemanticColorRole::Text)
-        .font_size(14.0)
+        .role(nana_ui_core::TypeRole::Section)
         .line_height(21.7);
     {
         let layout = std::sync::Arc::make_mut(&mut text.style.layout);

@@ -170,13 +170,12 @@ pub(crate) fn action(
     layout.padding_top = Some(LengthSpec::Px(0.0));
     layout.padding_bottom = Some(LengthSpec::Px(0.0));
     layout.border_width = None;
-    layout.font_size = Some(type_scale::SECTION);
     layout.line_height = Some(LineHeightSpec::Relative(LINE));
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
     layout.theme.border_width = None;
     layout.theme.line_height = None;
-    layout.theme.font_size = Some(ThemeToken::Type(TypeRole::Section).into());
+    crate::theme_map::control_font(layout, TypeRole::Section);
     if kind == ButtonKind::Primary {
         layout.font_weight = Some(type_scale::SEMIBOLD);
         layout.theme.font_weight = Some(ThemeToken::Weight(TextWeight::Semibold).into());
@@ -377,7 +376,7 @@ pub(crate) fn field_frame() -> Stack {
         })
 }
 
-/// 嵌在 [`field_frame`] 里的输入框：透明、无边、无内边距，高 32，14 号字。
+/// 嵌在 [`field_frame`] 里的输入框：透明、无边、无内边距，高 32，正文档字号。
 pub(crate) fn bare_input(input: TextInput) -> TextInput {
     let mut style = NodeStyle {
         foreground: Some(Role::Text),
@@ -391,7 +390,7 @@ pub(crate) fn bare_input(input: TextInput) -> TextInput {
         layout.height = Some(LengthSpec::Px(32.0));
         layout.flex_grow = Some(1.0);
         layout.flex_shrink = Some(1.0);
-        layout.font_size = Some(14.0);
+        crate::theme_map::control_font(layout, TypeRole::Body);
         layout.line_height = Some(LineHeightSpec::Relative(LINE));
         layout.white_space_nowrap = true;
         layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
@@ -435,7 +434,7 @@ pub(crate) fn native_field_style(height: f32) -> NodeStyle {
         layout.padding_right = Some(LengthSpec::Px(10.0));
         layout.padding_top = Some(LengthSpec::Px(6.0));
         layout.padding_bottom = Some(LengthSpec::Px(6.0));
-        layout.font_size = Some(14.0);
+        crate::theme_map::control_font(layout, TypeRole::Body);
         layout.line_height = Some(LineHeightSpec::Relative(LINE));
         layout.white_space_nowrap = true;
         layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;

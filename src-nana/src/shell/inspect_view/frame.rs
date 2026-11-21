@@ -688,7 +688,6 @@ fn action_button(label: &str, icon: Icon, icon_size: f32, height: f32) -> Button
     layout.min_height = Some(LengthSpec::Px(height));
     layout.padding_left = Some(LengthSpec::Px(10.0));
     layout.padding_right = Some(LengthSpec::Px(10.0));
-    layout.font_size = Some(14.0);
     layout.font_weight = Some(500);
     layout.width = Some(LengthSpec::Shrink);
     layout.flex_grow = Some(0.0);

@@ -744,4 +744,6 @@ pub(crate) fn prepare_registered(
 }
 
 #[cfg(test)]
+mod font_tests;
+#[cfg(test)]
 mod tests;

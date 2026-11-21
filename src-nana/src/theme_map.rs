@@ -7,7 +7,10 @@
 
 use nana_ui::runtime::{SemanticColorRole, SemanticPaint, Text};
 use nana_ui::theme::{SemanticPalette, ThemeAppearance, ThemeMetrics, UI_METRICS, type_scale};
-use nana_ui_core::{SemanticColorMix, TextWeight, TypeRole as NanaTypeRole};
+use nana_ui_core::{
+    LayoutStyle, SemanticColorMix, TextWeight, ThemeToken, TypeRole as NanaTypeRole,
+    TypographyTokens,
+};
 
 /// 一条 CSS 变量到 Nana 调色板字段的对应。
 pub struct ColorRole {
@@ -176,6 +179,14 @@ pub fn typed_text(node: Text, size: f32, weight: u16) -> Text {
     }
 }
 
+/// 写控件样式的字号档：默认主题下的像素值进 `font_size`，主题字号令牌进 `theme.font_size`。
+/// 解析时主题令牌盖过数值字号，所以按钮、输入框这类自带字号令牌的控件只改数值不生效，要连令牌一起换；
+/// 装上的主题换字阶时控件跟着变。行高不动，由调用方另定。
+pub fn control_font(layout: &mut LayoutStyle, role: NanaTypeRole) {
+    layout.font_size = Some(TypographyTokens::DEFAULT.size(role));
+    layout.theme.font_size = Some(ThemeToken::Type(role).into());
+}
+
 /// 禁用控件的整体不透明度 0.45，右键菜单项和滑杆也是这个值。
 /// 有的控件直接写节点透明度，有的在 sRGB 里和所在底色混成不透明色（渲染器按线性空间合成会更亮），
 /// 都用这一个值。遮罩的 0.45（`appearance.rs` 的 `SCRIM_CSS_ALPHA`）是另一个意思，不用它。
@@ -287,6 +298,19 @@ mod tests {
                 Some(role)
             );
         }
+    }
+
+    /// 控件字号档同时写数值和主题令牌，数值是默认主题下这一档的像素。
+    #[test]
+    fn control_font_writes_the_step_and_its_theme_token() {
+        let mut layout = LayoutStyle::default();
+        layout.font_size = Some(22.0);
+        control_font(&mut layout, NanaTypeRole::Section);
+        assert_eq!(layout.font_size, Some(type_scale::SECTION));
+        assert_eq!(
+            layout.theme.font_size,
+            Some(ThemeToken::Type(NanaTypeRole::Section).into())
+        );
     }
 
     #[test]

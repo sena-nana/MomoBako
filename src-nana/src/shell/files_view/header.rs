@@ -447,7 +447,6 @@ fn display_mode_field(mode: Signal<DisplayMode>) -> AnyView {
         layout.min_width = Some(LengthSpec::Px(0.0));
         layout.margin_left = Some(LengthSpec::Px(-1.0));
         layout.margin_top = Some(LengthSpec::Px(-1.0));
-        layout.font_size = Some(14.0);
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(0.0);
     }
@@ -516,7 +515,6 @@ fn create_name_field(signals: HeaderSignals) -> AnyView {
     layout.flex_shrink = Some(1.0);
     layout.padding_left = Some(LengthSpec::Px(0.0));
     layout.padding_right = Some(LengthSpec::Px(0.0));
-    layout.font_size = Some(14.0);
     layout.border_width = Some(0.0);
     let frame = field_box(0.0, 34.0)
         .width(LengthSpec::Px(222.0))
@@ -618,7 +616,7 @@ fn import_trigger() -> AnyView {
             widget(
                 style::text(
                     "导入",
-                    ButtonLook::TOOLBAR.font_size,
+                    14.0,
                     ButtonLook::TOOLBAR.weight,
                     SemanticColorRole::Text,
                     21.7,

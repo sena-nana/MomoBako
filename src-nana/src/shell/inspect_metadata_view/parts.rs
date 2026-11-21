@@ -176,7 +176,6 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
         layout.min_height = Some(LengthSpec::Px(34.0));
-        layout.font_size = Some(14.0);
     }
     let label = move || tags.with(|view| view.add_label.clone());
     let create_locked = locked.clone();

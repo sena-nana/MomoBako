@@ -332,10 +332,8 @@ pub(super) fn archive_kind_key(row_key: &str) -> String {
 
 /// 名单行首的小字。目录固定写「DIR」；文件走 [`file_kind_label`]。
 pub(super) fn archive_kind_mark(label: &str, key: &str) -> AnyView {
-    let mark = Text::new(label.to_string())
-        .color(SemanticColorRole::Muted)
-        .font_size(10.0)
-        .weight(TextWeight::Bold);
+    let mark = crate::theme_map::typed_text(Text::new(label.to_string()), 11.0, 700)
+        .color(SemanticColorRole::Muted);
     widget(
         Stack::row(0.0)
             .align(AlignSpec::Center)

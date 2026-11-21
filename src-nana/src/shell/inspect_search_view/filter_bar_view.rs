@@ -593,7 +593,6 @@ fn sort_direction_select(direction: Signal<SortDirection>) -> AnyView {
         layout.padding_left = Some(LengthSpec::Px(8.0));
         layout.padding_right = Some(LengthSpec::Px(8.0));
         layout.border_width = Some(0.0);
-        layout.font_size = Some(12.0);
         layout.font_weight = Some(400);
         layout.flex_grow = Some(1.0);
     }

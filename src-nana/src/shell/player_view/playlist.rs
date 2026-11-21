@@ -345,10 +345,8 @@ fn header(head: Signal<PageHead>) -> AnyView {
     .children((
         widget(eyebrow).key("playlist-page-eyebrow"),
         widget(spaced(
-            Text::new(initial.name)
+            crate::theme_map::typed_text(Text::new(initial.name), 20.0, 700)
                 .color(SemanticColorRole::Text)
-                .font_size(22.0)
-                .weight(TextWeight::Bold)
                 .line_height(34.1),
             4.0,
         ))
@@ -597,7 +595,6 @@ fn preview_button(mark: &str, cover: &str) -> Button {
     }
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
-    layout.font_size = Some(11.0);
     layout.font_weight = Some(700);
     layout.padding_left = Some(LengthSpec::Px(0.0));
     layout.padding_right = Some(LengthSpec::Px(0.0));
@@ -702,7 +699,6 @@ fn toolbar_button(
     layout.min_height = Some(LengthSpec::Px(34.0));
     layout.padding_left = Some(LengthSpec::Px(10.0));
     layout.padding_right = Some(LengthSpec::Px(10.0));
-    layout.font_size = Some(14.0);
     layout.font_weight = Some(500);
     layout.width = Some(LengthSpec::Shrink);
     layout.flex_grow = Some(0.0);

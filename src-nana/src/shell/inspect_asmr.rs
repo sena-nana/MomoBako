@@ -454,7 +454,7 @@ fn playlist_actions(audio: bool, empty: bool) -> AnyView {
     .into_any()
 }
 
-/// 队列操作钮：至少 28px 高，左右 8、上下 4，12px 字，幽灵按钮样式。
+/// 队列操作钮：至少 28px 高，左右 8、上下 4，按钮自带的正文档字号，幽灵按钮样式。
 fn queue_action(label: &str, disabled: bool) -> Button {
     let button = Button::new(label)
         .kind(ButtonKind::Ghost)
@@ -470,7 +470,6 @@ fn queue_action(label: &str, disabled: bool) -> Button {
     layout.padding_right = Some(LengthSpec::Px(8.0));
     layout.padding_top = Some(LengthSpec::Px(4.0));
     layout.padding_bottom = Some(LengthSpec::Px(4.0));
-    layout.font_size = Some(12.0);
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
     layout.width = Some(LengthSpec::Shrink);

@@ -458,7 +458,6 @@ fn load_more(sections: Signal<Sections>) -> AnyView {
     let look = style::ButtonLook {
         height: 21.7,
         padding_x: 0.0,
-        font_size: 14.0,
         weight: 400,
         hover: None,
         gap: 4.0,

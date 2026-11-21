@@ -382,7 +382,6 @@ fn inline_field(
     layout.height = Some(LengthSpec::Px(32.0));
     layout.padding_left = Some(LengthSpec::Px(10.0));
     layout.padding_right = Some(LengthSpec::Px(10.0));
-    layout.font_size = Some(14.0);
     layout.border_width = Some(0.0);
     let frame = Stack::row(8.0)
         .align(AlignSpec::Center)

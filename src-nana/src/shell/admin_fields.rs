@@ -200,7 +200,6 @@ fn control(item: FieldItem, row: &FieldRowView, fkey: &str) -> AnyView {
                 layout.width = Some(LengthSpec::Fill);
                 layout.min_width = Some(LengthSpec::Px(0.0));
                 layout.height = Some(LengthSpec::Px(32.0));
-                layout.font_size = Some(14.0);
             }
             widget(select)
                 .prop::<Vec<SelectOption>, fields::select::options>(move || {
@@ -233,7 +232,6 @@ fn control(item: FieldItem, row: &FieldRowView, fkey: &str) -> AnyView {
                 layout.min_height = Some(LengthSpec::Px(92.0));
                 layout.white_space_nowrap = false;
                 layout.text_ext.font_family = Some(style::MONO_FAMILY.into());
-                layout.font_size = Some(13.0);
                 layout.padding_top = Some(LengthSpec::Px(10.0));
                 layout.padding_bottom = Some(LengthSpec::Px(10.0));
             }
