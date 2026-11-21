@@ -1,6 +1,6 @@
 //! 文件页工作区：文件卡片、播放条和详情卡片。
 //!
-//! 左列竖排文件卡片和播放条（间距 18），
+//! 左列竖排文件卡片和播放条（间距 `PageTight`），
 //! 右列是 300px 宽的详情卡片。双击或「预览」打开预览页时，整块换成预览页，播放条在预览页底部。
 //! 外边距由壳层主区统一给，这里只负责两列本身；面板固定高度，列表和详情各自滚动。
 //!
@@ -40,13 +40,16 @@ pub(crate) use menu::EntryMenuView;
 #[cfg(test)]
 pub(crate) use menu::open_and_reveal_targets;
 
+use crate::theme_map::tiers;
 use bind::StyleField;
-use nana_ui_core::TextWeight;
+use nana_ui_core::{SpacingStep, TextWeight};
 
 /// 详情卡片宽。
 const DETAIL_WIDTH: f32 = 300.0;
-/// 两列之间、文件卡片和播放条之间都是 18。
-const DETAIL_GAP: f32 = 18.0;
+/// 两列之间、文件卡片和播放条之间的间距档。
+const DETAIL_GAP_STEP: SpacingStep = SpacingStep::PageTight;
+/// 两列之间的间距（默认主题），估算列表宽度用。
+const DETAIL_GAP: f32 = tiers::space_px(DETAIL_GAP_STEP);
 /// 窗口窄于 900 时详情排到文件卡片下面。
 const STACKED_VIEWPORT_PX: f32 = 900.0;
 
@@ -197,7 +200,8 @@ fn workbench(
     let look = signals.look;
     let shown = signals.player;
     let main = widget(
-        Stack::fill_column(DETAIL_GAP)
+        Stack::fill_column(0.0)
+            .gap_theme(DETAIL_GAP_STEP)
             .min_width(LengthSpec::Px(0.0))
             .min_height(LengthSpec::Px(0.0))
             .with_layout(|layout| layout.flex_basis = Some(LengthSpec::Px(0.0))),
@@ -228,9 +232,11 @@ fn workbench(
 
 fn workbench_style(stacked: bool) -> NodeStyle {
     let frame = if stacked {
-        Stack::fill_column(DETAIL_GAP)
+        Stack::fill_column(0.0).gap_theme(DETAIL_GAP_STEP)
     } else {
-        Stack::fill_row(DETAIL_GAP).align(AlignSpec::Stretch)
+        Stack::fill_row(0.0)
+            .gap_theme(DETAIL_GAP_STEP)
+            .align(AlignSpec::Stretch)
     };
     frame
         .min_width(LengthSpec::Px(0.0))
@@ -238,7 +244,8 @@ fn workbench_style(stacked: bool) -> NodeStyle {
         .node_style()
 }
 
-/// 文件卡片：抬升底色、`--radius-2xl` 的大卡片。外部文件拖进来时描强调色边。
+/// 文件卡片：抬升底色、`--radius-2xl` 的大卡片。外部文件拖进来时描强调色发丝边，
+/// 平时四边先留一根发丝边宽的内边距。
 ///
 /// 卡片自己不裁内容：裁的话导入菜单也会被裁掉，窗口矮时下面几项点不到。
 /// 列表的滚动区自己裁内容，留在卡片里的内容都在圆角以内，导入菜单可以伸出卡片。
@@ -260,33 +267,32 @@ fn card_style(look: ColumnLook) -> NodeStyle {
     let mut card = Stack::fill_column(0.0)
         .min_width(LengthSpec::Px(0.0))
         .min_height(LengthSpec::Px(0.0))
-        .padding(1.0)
+        .with_layout(style::hairline_padding)
         .surface(SemanticColorRole::Surface)
         .radius(RadiusTier::Xxl)
         .with_layout(|layout| layout.position = PositionSpec::Relative);
     if look.dragging {
-        card = card.border(SemanticColorRole::Accent, 1.0);
+        card = style::hairline(card, SemanticColorRole::Accent);
     }
     card.node_style()
 }
 
-/// 拖入提示：四周内缩 12 的虚线框，中间写「拖放到此处添加」。拖入时才显示。
+/// 拖入提示：四周内缩 `Xl` 的虚线框，中间写「拖放到此处添加」。拖入时才显示。
 fn drop_hint(look: Signal<ColumnLook>) -> AnyView {
-    let frame = Stack::column(0.0)
-        .align(AlignSpec::Center)
-        .justify(nana_ui::runtime::JustifySpec::Center)
-        .border(SemanticColorRole::Accent, 1.0)
-        .radius(RadiusTier::Xl)
-        .with_layout(|layout| {
-            layout.position = PositionSpec::Absolute;
-            layout.offset_top = Some(LengthSpec::Px(12.0));
-            layout.offset_left = Some(LengthSpec::Px(12.0));
-            layout.offset_right = Some(LengthSpec::Px(12.0));
-            layout.offset_bottom = Some(LengthSpec::Px(12.0));
-            layout.z_index = Some(2);
-            layout.border_style = Some(nana_ui_core::BorderStyle::Dashed);
-            layout.pointer_events = Some(nana_ui_core::PointerEventsSpec::None);
-        });
+    let frame = style::hairline(
+        Stack::column(0.0)
+            .align(AlignSpec::Center)
+            .justify(nana_ui::runtime::JustifySpec::Center),
+        SemanticColorRole::Accent,
+    )
+    .radius(RadiusTier::Xl)
+    .with_layout(|layout| {
+        layout.position = PositionSpec::Absolute;
+        style::inset(layout, SpacingStep::Xl);
+        layout.z_index = Some(2);
+        layout.border_style = Some(nana_ui_core::BorderStyle::Dashed);
+        layout.pointer_events = Some(nana_ui_core::PointerEventsSpec::None);
+    });
     let mut style = frame.node_style();
     style.interaction.base.background_mix = Some(nana_ui_core::SemanticColorMix::alpha(
         SemanticColorRole::Surface,

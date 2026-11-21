@@ -1,7 +1,7 @@
 //! 文件列表的虚拟行：只构建视口和预取范围内的卡片。
 //!
 //! 一组条目先排成「行」再交给 `each_virtual`：列表模式一张卡片一行；网格和自适应按列表
-//! 宽度把卡片装进一行（行内、行间都隔 14）；瀑布流先按 CSS 多列的规则分好列，每列各自虚拟化。
+//! 宽度把卡片装进一行（行内、行间都隔 `Xxl`）；瀑布流先按 CSS 多列的规则分好列，每列各自虚拟化。
 //! 所有虚拟列表都跟着同一个列表滚动区滚动（`within`），行高按内容量（`measured`）。
 //! 每一行下面都带组内间距，行高就等于估算值（卡片设计尺寸 + 间距），量过以后位置也不跳；
 //! 最后一行多出来的间距由外层的负下边距抵掉。
@@ -16,22 +16,29 @@ use nana_ui::runtime::view::{
     AnyView, Computed, IntoView, NodeRef, Signal, computed, dynamic, each_virtual, widget,
 };
 use nana_ui::runtime::{AlignSpec, LengthSpec, Stack};
+use nana_ui_core::SpacingStep;
 
 use super::super::files::DisplayMode;
 use super::cards::{self, CardBox, CardCell, CardFace, Cards};
+use super::style;
+use crate::theme_map::tiers::{self, Edge};
 
-/// 组内卡片的行列间距。
-pub(super) const GAP: f32 = 14.0;
-/// 列表模式卡片之间的间距。
-const LIST_GAP: f32 = 8.0;
+/// 组内卡片的行列间距档。
+pub(super) const GAP_STEP: SpacingStep = SpacingStep::Xxl;
+/// 组内卡片的行列间距（默认主题），排行和估算用。
+pub(super) const GAP: f32 = tiers::space_px(GAP_STEP);
+/// 列表模式卡片之间的间距档。
+const LIST_GAP_STEP: SpacingStep = SpacingStep::Md;
+/// 列表模式卡片之间的间距（默认主题）。
+const LIST_GAP: f32 = tiers::space_px(LIST_GAP_STEP);
 /// 瀑布流的列宽。
 pub(super) const MASONRY_COLUMN: f32 = 164.0;
 /// 视口上下各多建 240px 的行，滚动时不露白，也不把视口以外太多的卡片建出来。
 const OVERSCAN: f32 = 240.0;
-/// 列表卡片：1px 边、上下 8 内边距、56 缩略图，至少 72 高（`min-height: 72px`）。
-const LIST_CARD_HEIGHT: f32 = 74.0;
-/// 自适应卡片：1px 边、上下 8 内边距、120 缩略图、8 间距、两行标题区 38。
-const ADAPTIVE_CARD_HEIGHT: f32 = 184.0;
+/// 列表卡片：上下各一根发丝边，至少 72 高（`min-height: 72px`）。
+const LIST_CARD_HEIGHT: f32 = cards::LIST_MIN_HEIGHT + tiers::hairline_px() * 2.0;
+/// 自适应卡片：边框、上下内边距、120 缩略图、间距、两行标题区。
+const ADAPTIVE_CARD_HEIGHT: f32 = cards::tile_height(cards::ADAPTIVE_PREVIEW, 0);
 
 /// 行里一格的身份：条目键、外框尺寸（按位）和标题下的小字行数。小字行数变了卡片高度跟着变，
 /// 按内容量高的虚拟行要整行重建、重新量。
@@ -250,8 +257,8 @@ fn shaped(
 ) -> AnyView {
     match shape.mode {
         DisplayMode::Masonry => masonry_view(shape, lines, cards, scroll, key),
-        DisplayMode::List => virtual_lines(lines, shape.mode, LIST_GAP, cards, scroll, key),
-        mode => virtual_lines(lines, mode, GAP, cards, scroll, key),
+        DisplayMode::List => virtual_lines(lines, shape.mode, LIST_GAP_STEP, cards, scroll, key),
+        mode => virtual_lines(lines, mode, GAP_STEP, cards, scroll, key),
     }
 }
 
@@ -270,7 +277,7 @@ fn estimate(lines: Signal<GroupLines>, index: usize, fallback: f32) -> f32 {
 fn virtual_lines(
     lines: Signal<GroupLines>,
     mode: DisplayMode,
-    gap: f32,
+    gap: SpacingStep,
     cards: Cards,
     scroll: NodeRef,
     key: &'static str,
@@ -291,7 +298,12 @@ fn virtual_lines(
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0))
             .with_layout(move |layout| {
-                layout.margin_bottom = Some(LengthSpec::Px(-gap));
+                // 抵掉最后一行下面的间距：负的一档，主题换刻度时跟着变。
+                layout.margin_bottom = Some(LengthSpec::Px(-tiers::space_px(gap)));
+                layout.theme.margin_bottom = Some(nana_ui_core::ThemeExpr {
+                    constant: 0.0,
+                    terms: vec![(nana_ui_core::ThemeToken::Space(gap), -1.0)],
+                });
             }),
     )
     .children((list,))
@@ -300,11 +312,11 @@ fn virtual_lines(
 }
 
 /// 一行卡片，下面留 `gap`。列表模式竖排（只有一张），其余横排靠左、顶端对齐。
-fn line_view(line: &CardLine, mode: DisplayMode, gap: f32, cards: Cards) -> AnyView {
+fn line_view(line: &CardLine, mode: DisplayMode, gap: SpacingStep, cards: Cards) -> AnyView {
     let frame = if mode.is_list() {
         Stack::column(0.0)
     } else {
-        Stack::row(GAP).align(AlignSpec::Start)
+        style::row(GAP_STEP).align(AlignSpec::Start)
     };
     let views = line
         .cells
@@ -316,7 +328,7 @@ fn line_view(line: &CardLine, mode: DisplayMode, gap: f32, cards: Cards) -> AnyV
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0))
             .with_layout(move |layout| {
-                layout.padding_bottom = Some(LengthSpec::Px(gap));
+                tiers::padding(layout, &[Edge::Bottom], gap);
             }),
     )
     .children(views)
@@ -356,7 +368,7 @@ fn masonry_view(
         })
         .collect::<Vec<_>>();
     widget(
-        Stack::row(GAP)
+        style::row(GAP_STEP)
             .align(AlignSpec::Start)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
@@ -365,7 +377,7 @@ fn masonry_view(
     .into_any()
 }
 
-/// 瀑布流的一格：卡片撑满列宽，下面留 14。
+/// 瀑布流的一格：卡片撑满列宽，下面留 `Xxl`。
 fn masonry_cell(line: &CardLine, cards: Cards) -> AnyView {
     let views = line
         .cells
@@ -375,7 +387,7 @@ fn masonry_cell(line: &CardLine, cards: Cards) -> AnyView {
     widget(
         Stack::column(0.0)
             .width(LengthSpec::Fill)
-            .with_layout(|layout| layout.margin_bottom = Some(LengthSpec::Px(GAP))),
+            .with_layout(|layout| tiers::margin(layout, &[Edge::Bottom], GAP_STEP)),
     )
     .children(views)
     .into_any()
@@ -465,8 +477,8 @@ pub(crate) fn row_slots(
     if !directories.is_empty() {
         y = place_group(&directory_shape, &directory_lines, 0.0, width, &mut slots);
         if !files.is_empty() {
-            // 段间距 14、分隔线上下各 2 再加 1px 线，再一段间距。
-            y += GAP + 5.0 + GAP;
+            // 段间距、分隔线上下各 `Xxs` 再加一根发丝线，再一段间距。
+            y += GAP + tiers::space_px(SpacingStep::Xxs) * 2.0 + tiers::hairline_px() + GAP;
         }
     }
     if !files.is_empty() {
@@ -563,8 +575,7 @@ fn slot_height(cell: &cards::CardCell, mode: DisplayMode) -> f32 {
     if cell.geometry.height > 0.0 {
         return cell.geometry.height;
     }
-    let extra = cell.lines as f32 * (4.0 + 12.0 * 1.55);
-    2.0 + 8.0 + cell.geometry.preview_height + 8.0 + 38.0 + extra + 8.0
+    cards::tile_height(cell.geometry.preview_height, cell.lines)
 }
 
 /// 在 `limit` 高度内顺序装填，装得下就返回各列结束下标。

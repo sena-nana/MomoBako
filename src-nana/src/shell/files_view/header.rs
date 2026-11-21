@@ -28,8 +28,9 @@ use super::super::workspace::{LibraryCategory, WorkspacePanel};
 use super::super::{ShellMessage, ShellViewModel};
 use super::bind::DraftField;
 use super::file_message;
-use super::style::{self, ButtonLook};
-use nana_ui_core::TextWeight;
+use super::style::{self, ButtonLook, Height};
+use crate::theme_map::tiers::{self, Edge};
+use nana_ui_core::{ControlSize, SpacingStep, TextWeight};
 
 /// 左列的文字：眉题和分类视图的说明（空时不占位）。
 #[derive(Clone, Debug, PartialEq)]
@@ -203,16 +204,19 @@ fn tools(model: &ShellViewModel, ctx: &FileContext) -> Tools {
     }
 }
 
-/// 头部：左列位置、右侧工具条，下边一条发丝线。
+/// 头部：左列位置、右侧工具条，下边一条发丝线。上、左、右留 `PageTight`，下留 `Xxl`。
 pub(super) fn header(signals: HeaderSignals) -> AnyView {
-    let row = Stack::bar(12.0)
+    let row = Stack::bar(0.0)
+        .gap_theme(SpacingStep::Xl)
         .align(AlignSpec::Start)
         .justify(JustifySpec::SpaceBetween)
         .with_layout(|layout| {
-            layout.padding_top = Some(LengthSpec::Px(18.0));
-            layout.padding_left = Some(LengthSpec::Px(20.0));
-            layout.padding_right = Some(LengthSpec::Px(20.0));
-            layout.padding_bottom = Some(LengthSpec::Px(14.0));
+            tiers::padding(
+                layout,
+                &[Edge::Top, Edge::Left, Edge::Right],
+                SpacingStep::PageTight,
+            );
+            tiers::padding(layout, &[Edge::Bottom], SpacingStep::Xxl);
         });
     widget(style::bottom_rule(row))
         .children((location(signals), toolbar(signals)))
@@ -225,11 +229,11 @@ fn location(signals: HeaderSignals) -> AnyView {
     let text = signals.text;
     let initial = text.get_untracked();
     let breadcrumbs = each(signals.crumbs, Crumb::clone, crumb)
-        .horizontal(8.0)
-        .css(css! { flex-wrap: wrap; })
+        .horizontal(tiers::space_px(SpacingStep::Md))
+        .css(css! { flex-wrap: wrap; gap: theme(space-md); })
         .key("file-breadcrumbs");
     widget(
-        Stack::column(8.0)
+        style::column(SpacingStep::Md)
             .width(LengthSpec::Shrink)
             .grow(0.0)
             .shrink(0.0),
@@ -255,10 +259,10 @@ fn location(signals: HeaderSignals) -> AnyView {
     .into_any()
 }
 
-/// 面包屑项：高 28、左右 10、白底、弱化色 14px/500，单行不折。
+/// 面包屑项：小号控件高、左右取控件内边距档、白底、弱化色 14px/500，单行不折。
 fn crumb(crumb: Crumb) -> AnyView {
     let look = ButtonLook {
-        height: 28.0,
+        height: Height::Control(ControlSize::Small),
         background: Some(SemanticColorRole::Background),
         hover: Some(SemanticColorRole::Hover),
         foreground: SemanticColorRole::Muted,
@@ -314,7 +318,7 @@ fn category_label(category: LibraryCategory) -> Option<&'static str> {
     }
 }
 
-/// 工具条：在剩余宽度里换行，每一行右对齐，行列间距都是 10。只在某种面板出现的工具藏着时不占位。
+/// 工具条：在剩余宽度里换行，每一行右对齐，行列间距都是 `Lg`。只在某种面板出现的工具藏着时不占位。
 fn toolbar(signals: HeaderSignals) -> AnyView {
     let tools = signals.tools;
     let shown = move |pick: fn(&Tools) -> bool| move || tools.with(pick);
@@ -379,7 +383,7 @@ fn toolbar(signals: HeaderSignals) -> AnyView {
     );
     // NanaUI 的工具栏：读屏把这一排念成一组。父级卡片已经有底，不画工具栏自己的表面，
     // 排法照原来的折行行。行里有下拉框和输入框，方向键留给它们，不做方向键焦点组。
-    let row = Stack::row(10.0)
+    let row = style::row(SpacingStep::Lg)
         .wrap(true)
         .justify(JustifySpec::End)
         .align(AlignSpec::Center)
@@ -388,7 +392,7 @@ fn toolbar(signals: HeaderSignals) -> AnyView {
         .min_width(LengthSpec::Px(0.0))
         .with_layout(|layout| {
             layout.flex_basis = Some(LengthSpec::Px(0.0));
-            layout.row_gap = Some(LengthSpec::Px(10.0));
+            tiers::row_gap(layout, SpacingStep::Lg);
         });
     widget(
         Toolbar::new()
@@ -423,7 +427,7 @@ fn tool_button(
 
 /// 展示方式选择框：描边框里左边写「展示方式」，右边是当前值和下拉箭头，框宽 156、高 34。
 ///
-/// Nana `Select` 总会画自己的底和边。这里让它四边各伸出 1px，放进一个裁剪层：边线被裁掉，
+/// Nana `Select` 总会画自己的底和边。这里让它四边各伸出一根发丝边，放进一个裁剪层：边线被裁掉，
 /// 底色和外框同为 `--bg`，看上去就是框中直接放下拉的样子；角色和键盘行为仍是下拉框。
 fn display_mode_field(mode: Signal<DisplayMode>) -> AnyView {
     let options = [
@@ -440,33 +444,37 @@ fn display_mode_field(mode: Signal<DisplayMode>) -> AnyView {
         .options(options)
         .placeholder("展示方式");
     select.style.foreground = Some(SemanticColorRole::Text);
+    let hairline = tiers::hairline_px();
     {
         let layout = Arc::make_mut(&mut select.style.layout);
-        layout.height = Some(LengthSpec::Px(34.0));
-        layout.min_height = Some(LengthSpec::Px(34.0));
-        layout.width = Some(LengthSpec::percent_offset(100.0, 2.0));
+        layout.height = Some(LengthSpec::Px(style::TOOLBAR_HEIGHT));
+        layout.min_height = Some(LengthSpec::Px(style::TOOLBAR_HEIGHT));
+        layout.width = Some(LengthSpec::percent_offset(100.0, hairline * 2.0));
         layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.margin_left = Some(LengthSpec::Px(-1.0));
-        layout.margin_top = Some(LengthSpec::Px(-1.0));
+        layout.margin_left = Some(LengthSpec::Px(-hairline));
+        layout.margin_top = Some(LengthSpec::Px(-hairline));
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(0.0);
     }
     let clip = Stack::row(0.0)
-        .height(LengthSpec::Px(32.0))
+        .height(LengthSpec::Px(style::TOOLBAR_HEIGHT - hairline * 2.0))
         .min_width(LengthSpec::Px(0.0))
         .grow(1.0)
         .shrink(1.0)
         .with_layout(|layout| {
             layout.flex_basis = Some(LengthSpec::Px(0.0));
-            // 选择框文字有 10px 内边距；往左让 1px 后，值正好落在标签后 8px 处。
-            layout.margin_left = Some(LengthSpec::Px(-1.0));
+            // 选择框文字有 `Lg` 内边距；往左让一根发丝边后，值正好落在标签后 `Md` 处。
+            layout.margin_left = Some(LengthSpec::Px(-hairline));
             layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
             layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
         });
-    let frame = field_box(156.0, 34.0)
-        .width(LengthSpec::Px(156.0))
+    let frame = field_box(DISPLAY_FIELD_WIDTH)
+        .width(LengthSpec::Px(DISPLAY_FIELD_WIDTH))
         .gap(0.0)
-        .with_layout(|layout| layout.padding_right = Some(LengthSpec::Px(0.0)));
+        .with_layout(|layout| {
+            layout.padding_right = Some(LengthSpec::Px(0.0));
+            layout.theme.padding_right = None;
+        });
     let select = widget(select)
         .prop::<Option<Arc<str>>, fields::select::value>(move || {
             Some(Arc::from(mode.with(|mode| mode.storage_value())))
@@ -517,8 +525,9 @@ fn create_name_field(signals: HeaderSignals) -> AnyView {
     input.style.interaction.disabled.background = None;
     input.style.interaction.disabled.border = None;
     let layout = Arc::make_mut(&mut input.style.layout);
-    layout.height = Some(LengthSpec::Px(32.0));
-    layout.min_height = Some(LengthSpec::Px(32.0));
+    let height = style::TOOLBAR_HEIGHT - tiers::hairline_px() * 2.0;
+    layout.height = Some(LengthSpec::Px(height));
+    layout.min_height = Some(LengthSpec::Px(height));
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
     layout.flex_grow = Some(1.0);
@@ -526,15 +535,16 @@ fn create_name_field(signals: HeaderSignals) -> AnyView {
     layout.padding_left = Some(LengthSpec::Px(0.0));
     layout.padding_right = Some(LengthSpec::Px(0.0));
     layout.border_width = Some(0.0);
-    let frame = field_box(0.0, 34.0)
-        .width(LengthSpec::Px(222.0))
+    layout.theme.border_width = None;
+    let frame = field_box(0.0)
+        .width(LengthSpec::Px(CREATE_FIELD_WIDTH))
         .shrink(1.0);
     widget(frame)
         .visible(move || tools.with(|tools| tools.create.is_some()))
         .children((
             widget(
                 nana_ui::runtime::IconGlyph::new(PLUS)
-                    .size(14.0)
+                    .size(style::TOOLBAR_ICON)
                     .role(SemanticColorRole::Muted),
             )
             .key("file-create-icon"),
@@ -551,19 +561,31 @@ fn create_name_field(signals: HeaderSignals) -> AnyView {
         .into_any()
 }
 
-/// 工具条里的描边框：白底、`--border` 描边、`Lg` 圆角、左右 10、子项间距 8。
-fn field_box(min_width: f32, height: f32) -> Stack {
-    Stack::row(8.0)
-        .align(AlignSpec::Center)
-        .padding_xy(10.0, 0.0)
-        .height(LengthSpec::Px(height))
-        .min_height(LengthSpec::Px(height))
-        .min_width(LengthSpec::Px(min_width))
-        .grow(0.0)
-        .shrink(0.0)
-        .surface(SemanticColorRole::Background)
-        .border(SemanticColorRole::Border, 1.0)
-        .radius(RadiusTier::Lg)
+/// 展示方式框的宽度。
+const DISPLAY_FIELD_WIDTH: f32 = 156.0;
+/// 新建文件名框的宽度：输入区 220 加两根发丝边。
+const CREATE_FIELD_WIDTH: f32 = 222.0;
+
+/// 工具条里的描边框：白底、`--border` 发丝边、`Lg` 圆角、左右 `Lg`、子项间距 `Md`，和工具栏按钮一样高。
+fn field_box(min_width: f32) -> Stack {
+    let height = style::TOOLBAR_HEIGHT;
+    style::hairline(
+        style::row(SpacingStep::Md)
+            .align(AlignSpec::Center)
+            .with_layout(|layout| {
+                tiers::padding(layout, &Edge::X, SpacingStep::Lg);
+                layout.padding_top = Some(LengthSpec::Px(0.0));
+                layout.padding_bottom = Some(LengthSpec::Px(0.0));
+            })
+            .height(LengthSpec::Px(height))
+            .min_height(LengthSpec::Px(height))
+            .min_width(LengthSpec::Px(min_width))
+            .grow(0.0)
+            .shrink(0.0)
+            .surface(SemanticColorRole::Background),
+        SemanticColorRole::Border,
+    )
+    .radius(RadiusTier::Lg)
 }
 
 /// 「导入」和它的菜单：NanaUI `ActionMenu`。菜单挂在触发器下方、右边对齐，开合、点外面和 Escape 收起、
@@ -616,7 +638,7 @@ fn import_anchor(tools: Signal<Tools>) -> AnyView {
 
 /// 「导入」触发器上画的内容：文件夹图标加文字，和工具条上别的按钮同一个样子。
 fn import_trigger() -> AnyView {
-    widget(Stack::row(ButtonLook::TOOLBAR.gap).align(AlignSpec::Center))
+    widget(style::row(ButtonLook::TOOLBAR.gap).align(AlignSpec::Center))
         .children((
             widget(
                 nana_ui::runtime::IconGlyph::new(FOLDER_OPEN)
@@ -638,7 +660,7 @@ fn import_trigger() -> AnyView {
         .into_any()
 }
 
-/// 触发器的尺寸和圆角照工具条按钮：高 34、左右 10、`Sm` 圆角，悬停 `--bg-hover`。
+/// 触发器的尺寸和圆角照工具条按钮：高 34、左右取控件内边距档、`Sm` 圆角，悬停 `--bg-hover`。
 fn import_trigger_style() -> NodeStyle {
     style::styled_button("导入", Some(FOLDER_OPEN), ButtonLook::TOOLBAR).style
 }

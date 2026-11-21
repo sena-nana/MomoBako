@@ -157,7 +157,7 @@ pub(crate) fn overlay(list: AnyView, selection: Signal<SelectionBox>) -> AnyView
         .into_any()
 }
 
-/// 框选矩形：1px 强调色 82% 混白的描边，18% 强调色的底，圆角 lg，在卡片之上。
+/// 框选矩形：一根发丝边宽的强调色 82% 混白描边，18% 强调色的底，圆角 lg，在卡片之上。
 fn rectangle(selection: Signal<SelectionBox>) -> AnyView {
     let initial = selection.get_untracked();
     let mut frame = Stack::column(0.0)
@@ -166,7 +166,7 @@ fn rectangle(selection: Signal<SelectionBox>) -> AnyView {
             layout.position = PositionSpec::Absolute;
             layout.z_index = Some(3);
             layout.pointer_events = Some(PointerEventsSpec::None);
-            layout.border_width = Some(1.0);
+            crate::theme_map::tiers::border(layout, 1);
             write_box(layout, initial);
         });
     let mut style = frame.node_style();

@@ -1,6 +1,6 @@
 //! 文件列表里的一张条目卡片。
 //!
-//! 四种展示方式共用：白底、`Lg` 圆角、1px 边（常态透明），选中时底色混入 10% 强调色、
+//! 四种展示方式共用：白底、`Lg` 圆角、一根发丝边（常态透明），选中时底色混入 10% 强调色、
 //! 边线混入 34% 强调色；外部或内部拖到文件夹上时是放置态。网格固定 148×190，
 //! 自适应和瀑布流按缩略图宽高比算宽高，列表是缩略图、标题路径和右对齐元信息三栏。
 //! 卡片自己接 NanaUI 的 `PointerDragged`：拖动采样带着条目路径交给输入归约；卡片登记在拖动节点表里，
@@ -23,7 +23,7 @@ use nana_ui::runtime::{
     PointerDragPhase, PointerDragged, RadiusTier, SecondaryPress, SemanticColorRole, SemanticPaint,
     Stack, Text, Thumbnail,
 };
-use nana_ui_core::{Icon, LengthAtom, SemanticColorMix, TextWeight};
+use nana_ui_core::{Icon, LengthAtom, SemanticColorMix, SpacingStep, TextWeight};
 
 use super::super::ShellMessage;
 use super::super::files::{DisplayMode, FileRow, FilesMessage, hardlink_label};
@@ -32,6 +32,37 @@ use super::super::pointer_gesture::{ENTRY_DRAG_PX, EntryKind, EntryNode, registe
 use super::bind::StyleField;
 use super::file_message;
 use super::style::{self, PreviewPainter, Tone};
+use crate::theme_map::tiers;
+
+/// 卡片内边距的档（列表卡片左右另取 `Lg`）。
+const CARD_PAD_STEP: SpacingStep = SpacingStep::Md;
+/// 卡片内边距（默认主题），估算卡片高度用。
+const CARD_PAD: f32 = tiers::space_px(CARD_PAD_STEP);
+/// 卡片边框（默认主题），估算卡片高度用。
+const CARD_BORDER: f32 = tiers::hairline_px();
+/// 缩略图和标题区之间的间距档。
+const TILE_GAP_STEP: SpacingStep = SpacingStep::Md;
+/// 标题区里各行之间的间距档。
+const LINE_GAP_STEP: SpacingStep = SpacingStep::Xs;
+/// 卡片标题的行高倍数。
+const TITLE_LEADING: f32 = 1.35;
+/// 网格类卡片的标题区至少两行高：14px、1.35 倍行高的两行，取整到 38。
+const TITLE_MIN_HEIGHT: f32 = 38.0;
+/// 列表卡片的最小高度（`min-height: 72px`）。
+pub(super) const LIST_MIN_HEIGHT: f32 = 72.0;
+/// 列表三栏之间的间距档。
+const LIST_COLUMN_GAP_STEP: SpacingStep = SpacingStep::Xl;
+
+/// 网格类卡片的高度：上下边框、上下内边距、缩略图、间距、标题区，再加标题下每一行小字（行距加行高）。
+pub(super) const fn tile_height(preview_height: f32, lines: usize) -> f32 {
+    let line = tiers::space_px(LINE_GAP_STEP) + 12.0 * style::LINE_BODY;
+    CARD_BORDER * 2.0
+        + CARD_PAD * 2.0
+        + preview_height
+        + tiers::space_px(TILE_GAP_STEP)
+        + TITLE_MIN_HEIGHT
+        + lines as f32 * line
+}
 
 /// 一张卡片的外框尺寸：宽（0 表示撑满所在列）和高（0 表示随内容）。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -263,29 +294,35 @@ pub(super) fn aspect(width: u32, height: u32) -> f32 {
     super::super::thumbs::content_aspect(width, height)
 }
 
-/// 自适应：宽 `clamp(118, 120·比例 + 16, 300)`，缩略图高 120、宽 120·比例，居中。
+/// 自适应卡片的缩略图高。
+pub(super) const ADAPTIVE_PREVIEW: f32 = 120.0;
+
+/// 自适应：宽 `clamp(118, 120·比例 + 两侧内边距, 300)`，缩略图高 120、宽 120·比例，居中。
 pub(super) fn adaptive_box(ratio: f32) -> CardBox {
-    let preview_width = 120.0 * ratio;
-    let width = (preview_width + 16.0).clamp(118.0, 300.0);
+    let preview_width = ADAPTIVE_PREVIEW * ratio;
+    let width = (preview_width + CARD_PAD * 2.0).clamp(118.0, 300.0);
     CardBox {
         width,
         height: 0.0,
-        preview_width: preview_width.min(width - 2.0),
-        preview_height: 120.0,
+        preview_width: preview_width.min(width - CARD_BORDER * 2.0),
+        preview_height: ADAPTIVE_PREVIEW,
     }
 }
 
-/// 网格：卡片 148×190，缩略图撑满内容宽、高 112。
+/// 网格卡片的宽度。
+const GRID_WIDTH: f32 = 148.0;
+
+/// 网格：卡片 148×190，缩略图撑满内容宽（卡宽减两侧边框和内边距）、高 112。
 pub(super) const GRID_BOX: CardBox = CardBox {
-    width: 148.0,
+    width: GRID_WIDTH,
     height: 190.0,
-    preview_width: 130.0,
+    preview_width: GRID_WIDTH - (CARD_BORDER + CARD_PAD) * 2.0,
     preview_height: 112.0,
 };
 
 /// 瀑布流：卡片撑满列宽，缩略图撑满内容宽、高按宽高比。
 pub(super) fn masonry_box(ratio: f32, column_width: f32) -> CardBox {
-    let content = (column_width - 18.0).max(1.0);
+    let content = (column_width - (CARD_BORDER + CARD_PAD) * 2.0).max(1.0);
     CardBox {
         width: column_width,
         height: 0.0,
@@ -297,8 +334,7 @@ pub(super) fn masonry_box(ratio: f32, column_width: f32) -> CardBox {
 /// 瀑布流卡片的估算高度：边框、上下内边距、缩略图、间距和标题区。用来把条目分到各列。
 pub(super) fn masonry_height(face: &CardFace, column_width: f32) -> f32 {
     let preview = masonry_box(face.aspect(), column_width).preview_height;
-    let extra = face.body_lines() as f32 * (4.0 + 12.0 * 1.55);
-    2.0 + 8.0 + preview + 8.0 + 38.0 + extra + 8.0
+    tile_height(preview, face.body_lines())
 }
 
 /// 列表：撑满一行，至少 72 高。
@@ -487,20 +523,17 @@ fn card_style(mode: DisplayMode, geometry: CardBox, drop_target: bool) -> NodeSt
     }
     let layout = Arc::make_mut(&mut style.layout);
     layout.direction = Some(nana_ui_core::FlexDirection::Column);
-    layout.border_width = Some(1.0);
+    tiers::border(layout, 1);
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
     layout.align_items = AlignSpec::Stretch;
-    let (padding_x, padding_y) = if list { (10.0, 8.0) } else { (8.0, 8.0) };
-    layout.padding_left = Some(LengthSpec::Px(padding_x));
-    layout.padding_right = Some(LengthSpec::Px(padding_x));
-    layout.padding_top = Some(LengthSpec::Px(padding_y));
-    layout.padding_bottom = Some(LengthSpec::Px(padding_y));
+    let padding_x = if list { SpacingStep::Lg } else { CARD_PAD_STEP };
+    tiers::padding_xy(layout, padding_x, CARD_PAD_STEP);
     if geometry.height > 0.0 {
         layout.height = Some(LengthSpec::Px(geometry.height));
     }
     if list {
-        layout.min_height = Some(LengthSpec::Px(72.0));
+        layout.min_height = Some(LengthSpec::Px(LIST_MIN_HEIGHT));
     }
     style
 }
@@ -541,7 +574,7 @@ fn tile_content(cell: &CardCell, mode: DisplayMode, item: CardItem, current: &Ca
         );
     }
     let body = widget(
-        Stack::column(4.0)
+        style::column(LINE_GAP_STEP)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0))
             .justify(JustifySpec::Center),
@@ -549,7 +582,7 @@ fn tile_content(cell: &CardCell, mode: DisplayMode, item: CardItem, current: &Ca
     .children(lines)
     .into_any();
     // 网格卡片定高 190，内容比它矮，竖直居中。
-    let mut column = Stack::column(8.0)
+    let mut column = style::column(TILE_GAP_STEP)
         .align(AlignSpec::Center)
         .width(LengthSpec::Fill)
         .min_width(LengthSpec::Px(0.0));
@@ -582,7 +615,7 @@ fn list_content(cell: &CardCell, item: CardItem, current: &CardView) -> AnyView 
     let face = &current.face;
     let geometry = cell.geometry;
     let body = widget(
-        Stack::column(4.0)
+        style::column(LINE_GAP_STEP)
             .grow(1.5)
             .shrink(1.0)
             .min_width(LengthSpec::Px(0.0))
@@ -649,8 +682,9 @@ fn list_content(cell: &CardCell, item: CardItem, current: &CardView) -> AnyView 
             })
             .into_any(),
     );
+    let column_gap = tiers::space_px(LIST_COLUMN_GAP_STEP);
     let meta = widget(
-        Stack::row(12.0)
+        style::row(LIST_COLUMN_GAP_STEP)
             .wrap(true)
             .justify(JustifySpec::End)
             .align(AlignSpec::Center)
@@ -660,13 +694,13 @@ fn list_content(cell: &CardCell, item: CardItem, current: &CardView) -> AnyView 
                 LengthAtom::Px(LIST_META_MIN),
                 LengthAtom::CalcPercent {
                     percent: 100.0,
-                    offset_px: -(geometry.preview_width + 12.0 * 2.0 + LIST_TITLE_MIN),
+                    offset_px: -(geometry.preview_width + column_gap * 2.0 + LIST_TITLE_MIN),
                 },
             ))
             .width(LengthSpec::Px(0.0))
             .with_layout(|layout| {
                 layout.flex_basis = Some(LengthSpec::Px(0.0));
-                layout.row_gap = Some(LengthSpec::Px(6.0));
+                tiers::row_gap(layout, SpacingStep::Sm);
             }),
     )
     .children(meta)
@@ -684,7 +718,7 @@ fn list_content(cell: &CardCell, item: CardItem, current: &CardView) -> AnyView 
         &cell.key,
     );
     widget(
-        Stack::row(12.0)
+        style::row(LIST_COLUMN_GAP_STEP)
             .align(AlignSpec::Start)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
@@ -700,7 +734,7 @@ fn library_text(text: String) -> Text {
         12.0,
         TextWeight::Regular,
         SemanticColorRole::Accent,
-        12.0 * 1.55,
+        12.0 * style::LINE_BODY,
     )
     .truncating()
 }
@@ -721,7 +755,7 @@ fn title(label: String, list: bool) -> Text {
         14.0,
         TextWeight::Bold,
         SemanticColorRole::Text,
-        14.0 * 1.35,
+        14.0 * TITLE_LEADING,
     );
     {
         let layout = Arc::make_mut(&mut node.style.layout);
@@ -731,7 +765,7 @@ fn title(label: String, list: bool) -> Text {
         layout.min_width = Some(LengthSpec::Px(0.0));
         layout.text_ext.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
         if !list {
-            layout.min_height = Some(LengthSpec::Px(38.0));
+            layout.min_height = Some(LengthSpec::Px(TITLE_MIN_HEIGHT));
         }
     }
     if list { node } else { style::centered(node) }

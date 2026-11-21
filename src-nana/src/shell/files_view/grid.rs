@@ -1,6 +1,7 @@
 //! 文件卡片的列表区，以及读取、处理、出错三种状态框。
 //!
-//! 列表纵向滚动，内边距 16 / 20 / 20。文件夹一组、分隔线、文件一组，各段保持自身高度、段间距 14，
+//! 列表纵向滚动，内边距上 `Xxxl`、左右下 `PageTight`。文件夹一组、分隔线、文件一组，各段保持自身高度、
+//! 段间距 `Xxl`，
 //! 内容比列表高时由列表滚动。两组卡片都走虚拟列表（见 `shell/files_view/virtual_rows.rs`），只建视口附近的行。
 //! 内容矮时段不被拉伸，内容高时段也不被压扁，卡片不会盖到分隔线上。
 //!
@@ -21,7 +22,7 @@ use nana_ui::runtime::{
     ScrollView, SemanticColorRole, SizeChanged, Spinner, Stack, TextHorizontalAlignment, UiWorld,
     UserScroll,
 };
-use nana_ui_core::{Icon, StatusTone, TextWeight};
+use nana_ui_core::{Icon, SpacingStep, StatusTone, TextWeight};
 
 use super::super::field_bind::ButtonIcon;
 use super::super::files::{FileContext, FilesMessage};
@@ -32,10 +33,13 @@ use super::bind::fill_container;
 use super::board::{BoardSignals, GroupPresence};
 use super::file_message;
 use super::style;
-use super::virtual_rows::{self, GAP};
+use super::virtual_rows::{self, GAP_STEP};
+use crate::theme_map::tiers::{self, Edge};
 
-/// 列表区左右内边距。
-pub(super) const LIST_PADDING_X: f32 = 20.0;
+/// 列表区左右内边距的档。
+const LIST_PADDING_STEP: SpacingStep = SpacingStep::PageTight;
+/// 列表区左右内边距（默认主题）。
+pub(super) const LIST_PADDING_X: f32 = tiers::space_px(LIST_PADDING_STEP);
 /// 续读的提前量：哨兵进入视口下沿再往外这么远就续读。
 const LOAD_MORE_MARGIN: f32 = 320.0;
 
@@ -220,7 +224,7 @@ pub(super) fn body(signals: ListSignals, hot: HotSignals) -> AnyView {
     .into_any()
 }
 
-/// 状态框：圆角小框，白底描边。左右各留 20 的边距撑满列表宽，不随文字收窄。
+/// 状态框：圆角小框，白底发丝边。左右各留列表内边距那么宽的边距撑满列表宽，不随文字收窄。
 /// 出错时换成危险色调的 NanaUI 提示条，边距不变。
 fn state_box(label: String, error: bool, spinner: bool) -> AnyView {
     if error {
@@ -229,18 +233,18 @@ fn state_box(label: String, error: bool, spinner: bool) -> AnyView {
             .key("file-error")
             .into_any();
     }
-    let mut frame = state_margin(
-        Stack::row(8.0)
-            .align(AlignSpec::Center)
-            .width(LengthSpec::Fill)
-            .padding_xy(12.0, 10.0)
-            .radius(RadiusTier::Xl),
-    );
-    let mut node_style = frame.node_style();
-    node_style.background = Some(SemanticColorRole::Background);
-    node_style.border = Some(SemanticColorRole::Border);
-    Arc::make_mut(&mut node_style.layout).border_width = Some(1.0);
-    frame = frame.style(node_style);
+    let frame = state_margin(style::hairline(
+        style::pad(
+            style::row(SpacingStep::Md)
+                .align(AlignSpec::Center)
+                .width(LengthSpec::Fill),
+            SpacingStep::Xl,
+            SpacingStep::Lg,
+        )
+        .radius(RadiusTier::Xl)
+        .surface(SemanticColorRole::Background),
+        SemanticColorRole::Border,
+    ));
     // 读取中、处理中的转圈是 NanaUI 的 `Spinner`，旋转由框架的动画时间线驱动。文字照旧写在右边，
     // 转圈自己的标签只作无障碍名字。
     let icon = spinner.then(|| {
@@ -263,12 +267,11 @@ fn state_box(label: String, error: bool, spinner: bool) -> AnyView {
         .into_any()
 }
 
-/// 状态框上方留 16，左右各留列表的内边距。
+/// 状态框上方留 `Xxxl`，左右各留列表的内边距。
 fn state_margin(frame: Stack) -> Stack {
     frame.with_layout(|layout| {
-        layout.margin_top = Some(LengthSpec::Px(16.0));
-        layout.margin_left = Some(LengthSpec::Px(LIST_PADDING_X));
-        layout.margin_right = Some(LengthSpec::Px(LIST_PADDING_X));
+        tiers::margin(layout, &[Edge::Top], SpacingStep::Xxxl);
+        tiers::margin(layout, &Edge::X, LIST_PADDING_STEP);
     })
 }
 
@@ -293,16 +296,18 @@ fn list(scroll_key: &str, signals: ListSignals, hot: HotSignals) -> AnyView {
         "file-virtual-files",
     );
     let content = widget(
-        Stack::column(GAP)
+        style::column(GAP_STEP)
             .width(LengthSpec::Fill)
             .height(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0))
             .grow(1.0)
             .with_layout(|layout| {
-                layout.padding_top = Some(LengthSpec::Px(16.0));
-                layout.padding_left = Some(LengthSpec::Px(LIST_PADDING_X));
-                layout.padding_right = Some(LengthSpec::Px(LIST_PADDING_X));
-                layout.padding_bottom = Some(LengthSpec::Px(20.0));
+                tiers::padding(layout, &[Edge::Top], SpacingStep::Xxxl);
+                tiers::padding(
+                    layout,
+                    &[Edge::Left, Edge::Right, Edge::Bottom],
+                    LIST_PADDING_STEP,
+                );
             }),
     )
     .children((
@@ -409,7 +414,7 @@ fn sentinel_entered(metrics: ScrollMetrics, offset_y: f32) -> bool {
         && metrics.content_height <= metrics.viewport_height + 1.0
 }
 
-/// 一段：保持自身高度，段间距 14。没有内容时藏着，不占位也不多一个间距。
+/// 一段：保持自身高度，段间距 `Xxl`。没有内容时藏着，不占位也不多一个间距。
 fn section(
     content: AnyView,
     key: &'static str,
@@ -425,13 +430,12 @@ fn section(
         .into_any()
 }
 
-/// 文件夹组和文件组之间的分隔线：NanaUI 的 `Divider`，`--border-strong` 色，上下各 2px。
+/// 文件夹组和文件组之间的分隔线：NanaUI 的 `Divider`，`--border-strong` 色，上下各 `Xxs`。
 fn divider() -> AnyView {
     let mut line = Divider::horizontal();
     line.style.background = Some(SemanticColorRole::BorderStrong);
     let layout = Arc::make_mut(&mut line.style.layout);
-    layout.margin_top = Some(LengthSpec::Px(2.0));
-    layout.margin_bottom = Some(LengthSpec::Px(2.0));
+    tiers::margin(layout, &Edge::Y, SpacingStep::Xxs);
     widget(line).key("file-list-divider").into_any()
 }
 
@@ -456,10 +460,10 @@ fn load_more(sections: Signal<Sections>) -> AnyView {
         })
     });
     let look = style::ButtonLook {
-        height: 21.7,
-        padding_x: 0.0,
+        height: style::Height::Px(14.0 * style::LINE_BODY),
+        padding_x: style::Inset::None,
         hover: None,
-        gap: 4.0,
+        gap: SpacingStep::Xs,
         ..style::ButtonLook::TOOLBAR
     };
     let mut button = style::styled_button(
