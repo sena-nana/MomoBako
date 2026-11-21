@@ -15,9 +15,9 @@ use nana_ui::{
 const NARROW_WINDOW_PX: f32 = 390.0;
 /// Nana 工作区在两条轨道之间留的发丝间隙，画的是壳层底色，和侧栏同色。
 pub(super) const WORKBENCH_GAP_PX: f32 = nana_ui_core::HAIRLINE;
-/// 主区内容左右 24、上下 20。
-pub(super) const PRIMARY_INSET_X: f32 = 24.0;
-pub(super) const PRIMARY_INSET_Y: f32 = 20.0;
+/// 主区内容左右取页面档（默认 24）、上下取紧凑页面档（默认 20）。
+pub(super) const PRIMARY_INSET_X: nana_ui_core::SpacingStep = nana_ui_core::SpacingStep::Page;
+pub(super) const PRIMARY_INSET_Y: nana_ui_core::SpacingStep = nana_ui_core::SpacingStep::PageTight;
 
 /// 主区最小宽。390 里还要放下默认侧栏和间隙，不能再用 320。
 /// 宽窗里主区按 fill 铺开，这个下限不会把 1200 的版式压窄。

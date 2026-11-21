@@ -5,11 +5,13 @@
 //! 具体数值由 `SemanticPalette` 持有；本模块只锁住颜色角色、字号、侧栏宽度和圆角刻度的对应，另给离屏
 //! 清屏色比对用的背景色。
 
-use nana_ui::runtime::{SemanticColorRole, SemanticPaint, Text};
+use nana_ui::runtime::{SemanticColorRole, SemanticPaint, Stack, Text};
 use nana_ui::theme::{SemanticPalette, ThemeAppearance, ThemeMetrics, UI_METRICS, type_scale};
+use std::sync::Arc;
+
 use nana_ui_core::{
-    LayoutStyle, SemanticColorMix, TextWeight, ThemeToken, TypeRole as NanaTypeRole,
-    TypographyTokens,
+    BorderWidth, ControlSize, LayoutStyle, LineRole, SemanticColorMix, StateLayer, TextWeight,
+    ThemeExpr, ThemeToken, TypeRole as NanaTypeRole, TypographyTokens,
 };
 
 /// 一条 CSS 变量到 Nana 调色板字段的对应。
@@ -157,12 +159,71 @@ const TYPE_STEPS: [(f32, NanaTypeRole); 8] = [
 ];
 
 /// 写一段字的字号和字重。字号落在主题字阶上时用 Nana 的字号角色，跟着装上的主题走，落在台阶之间的照写数值；
-/// 字重只取主题的四档。行盒先按数值字号定，主题换字阶时行盒不跟着跳；调用方另写行高时以调用方为准。
+/// 字重只取主题的四档。行盒取主题的行盒档：字号到正文档为止是 Line（默认 16），再大是 Tall（默认 18），
+/// 和 NanaUI 按字号配的行盒同值，主题换行盒档时跟着变。调用方另写行高时用 [`text_line_height`]。
 pub fn typed_text(node: Text, size: f32, weight: TextWeight) -> Text {
-    let node = node.font_size(size).weight(weight);
+    let mut node = node.font_size(size).weight(weight);
+    let line = match ControlSize::nearest_text(size) {
+        ControlSize::Small | ControlSize::Medium => LineRole::Line,
+        ControlSize::Large => LineRole::Tall,
+    };
+    tiers::line(Arc::make_mut(&mut node.style.layout), line);
     match TYPE_STEPS.iter().find(|(px, _)| *px == size) {
         Some((_, role)) => node.role(*role),
         None => node,
+    }
+}
+
+/// 字号 `size` 的字写行高 `line_px`，挂主题档位：等于行盒档（Line 16、Tall 18）时取行盒档，
+/// 否则取字号档的倍数（字号不在字阶上时取最近的一档），默认主题下的数值不变，主题换字阶时行高跟着字号按比例变。
+pub fn line_height_px(layout: &mut LayoutStyle, size: f32, line_px: f32) {
+    for role in [LineRole::Line, LineRole::Tall] {
+        if TypographyTokens::DEFAULT.line_height(role) == line_px {
+            tiers::line(layout, role);
+            return;
+        }
+    }
+    let (step_px, role) = TYPE_STEPS
+        .iter()
+        .copied()
+        .min_by(|(a, _), (b, _)| (a - size).abs().total_cmp(&(b - size).abs()))
+        .expect("字阶非空");
+    tiers::line_ratio(layout, role, line_px / step_px);
+}
+
+/// 给一段字写行高，见 [`line_height_px`]。字号按节点上写的（没写时按正文档）。
+pub fn text_line_height(mut node: Text, line_px: f32) -> Text {
+    let layout = Arc::make_mut(&mut node.style.layout);
+    let size = layout.font_size.unwrap_or(type_scale::BODY);
+    line_height_px(layout, size, line_px);
+    node
+}
+
+/// 只给盒子的一条边写边框宽度，取发丝边的整数倍，同时写数值和主题令牌（`tiers::border` 是四条边一起）。
+pub fn border_side(layout: &mut LayoutStyle, edge: tiers::Edge, hairlines: u8) {
+    let count = f32::from(hairlines);
+    let px = Some(tiers::hairline_px() * count);
+    let expr = Some(ThemeExpr {
+        constant: 0.0,
+        terms: vec![(ThemeToken::Border(BorderWidth::Hairline), count)],
+    });
+    match edge {
+        tiers::Edge::Top => {
+            layout.border_sides.top_width = px;
+            layout.theme.border_top_width = expr;
+        }
+        tiers::Edge::Right => {
+            layout.border_sides.right_width = px;
+            layout.theme.border_right_width = expr;
+        }
+        tiers::Edge::Bottom => {
+            layout.border_sides.bottom_width = px;
+            layout.theme.border_bottom_width = expr;
+        }
+        tiers::Edge::Left => {
+            layout.border_sides.left_width = px;
+            layout.theme.border_left_width = expr;
+        }
     }
 }
 
@@ -182,12 +243,25 @@ pub fn control_weight(layout: &mut LayoutStyle, weight: TextWeight) {
     layout.theme.font_weight = Some(ThemeToken::Weight(weight).into());
 }
 
-/// 禁用控件的整体不透明度 0.45，右键菜单项和滑杆也是这个值。
+/// 容器描边：`role` 色、`hairlines` 根发丝边宽，宽度同时写数值和主题令牌。
+pub fn bordered(stack: Stack, role: SemanticColorRole, hairlines: u8) -> Stack {
+    stack
+        .border(role, tiers::hairline_px() * f32::from(hairlines))
+        .with_layout(|layout| tiers::border(layout, hairlines))
+}
+
+/// 禁用控件的整体不透明度：主题状态层的 `Disabled` 档（默认 0.5），右键菜单项和滑杆也是这个值。
 /// 有的控件直接写节点透明度，有的在 sRGB 里和所在底色混成不透明色（渲染器按线性空间合成会更亮），
 /// 都用这一个值。遮罩的 0.45（`appearance.rs` 的 `SCRIM_CSS_ALPHA`）是另一个意思，不用它。
-pub const DISABLED_OPACITY: f32 = 0.45;
+///
+/// 状态层分深浅两套，禁用这一档两套相同，所以这里不分外观；哪天两套分开了，下面的断言编译不过，
+/// 要改成按外观取（`tiers::opacity(StateLayer::Disabled, dark)`）。
+pub const DISABLED_OPACITY: f32 = tiers::opacity(StateLayer::Disabled, true);
+const _: () = assert!(
+    tiers::opacity(StateLayer::Disabled, true) == tiers::opacity(StateLayer::Disabled, false)
+);
 
-/// 停用控件的字色：0.45 整体不透明度盖在不透明底色 `base` 上的结果。
+/// 停用控件的字色：禁用不透明度（[`DISABLED_OPACITY`]）整体盖在不透明底色 `base` 上的结果。
 ///
 /// `SemanticColorMix::new` 在 sRGB 通道里按比例混（带预乘透明度，两种颜色都不透明时就是逐通道线性插值），
 /// 和浏览器合成 `opacity` 的结果一致，混出来的是不透明色；直接写节点不透明度会被渲染器按线性空间合成，
@@ -320,6 +394,55 @@ mod tests {
         assert_eq!(
             layout.theme.font_weight,
             Some(ThemeToken::Weight(TextWeight::Semibold).into())
+        );
+    }
+
+    /// 写像素行高时挂主题档位：等于行盒档取行盒档，否则取字号档的倍数，默认主题下数值不变。
+    #[test]
+    fn pixel_line_heights_land_on_theme_tokens() {
+        let mut layout = LayoutStyle::default();
+        line_height_px(&mut layout, 12.0, 18.0);
+        assert_eq!(
+            layout.theme.line_height,
+            Some(ThemeToken::Line(LineRole::Tall).into())
+        );
+        line_height_px(&mut layout, 13.0, 19.5);
+        assert_eq!(
+            layout.line_height,
+            Some(nana_ui_core::LineHeightSpec::Absolute(19.5))
+        );
+        assert_eq!(
+            layout.theme.line_height,
+            Some(ThemeExpr {
+                constant: 0.0,
+                terms: vec![(ThemeToken::Type(NanaTypeRole::Body), 1.5)],
+            })
+        );
+        // 不在字阶上的字号按最近的一档折比例。
+        line_height_px(&mut layout, 9.0, 12.0);
+        assert!(layout.theme.line_height.is_some());
+        let node = typed_text(Text::new("角标"), 13.0, TextWeight::Medium);
+        assert_eq!(
+            node.style.layout.theme.line_height,
+            Some(ThemeToken::Line(LineRole::Line).into()),
+            "字的行盒跟着主题的行盒档"
+        );
+    }
+
+    /// 单边边框和容器描边都写发丝边的整数倍，同时挂主题令牌；禁用不透明度取主题状态层。
+    #[test]
+    fn borders_and_disabled_opacity_follow_theme_tokens() {
+        let mut layout = LayoutStyle::default();
+        border_side(&mut layout, tiers::Edge::Bottom, 1);
+        assert_eq!(layout.border_sides.bottom_width, Some(tiers::hairline_px()));
+        assert!(layout.theme.border_bottom_width.is_some());
+        let stack = bordered(Stack::column(0.0), SemanticColorRole::Border, 2);
+        let style = stack.node_style();
+        assert_eq!(style.layout.border_width, Some(2.0 * tiers::hairline_px()));
+        assert!(style.layout.theme.border_width.is_some());
+        assert_eq!(
+            DISABLED_OPACITY,
+            nana_ui_core::OpacityTokens::DARK.resolve(StateLayer::Disabled)
         );
     }
 

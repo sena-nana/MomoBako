@@ -20,6 +20,7 @@ use nana_ui::icons_tabler::{
     CARET_DOWN, CARET_RIGHT, FOLDER, FOLDER_OPEN, FOLDER_PLUS, PENCIL, PLUS, TRASH,
 };
 use nana_ui::runtime::FileDropEvent;
+use nana_ui::runtime::view::css;
 use nana_ui::runtime::view::node_ref;
 use nana_ui::runtime::view::{AnyView, IntoView, signal, widget};
 use nana_ui::runtime::view::{Item, Signal, Store, StoreList, StorePath, fields};
@@ -27,7 +28,9 @@ use nana_ui::runtime::{
     Activate, AlignSpec, IconButton, LengthSpec, ListItem, NodeStyle, SecondaryPress,
     SemanticColorRole, SemanticPaint, Stack,
 };
-use nana_ui_core::{SemanticColorMix, TextWeight};
+use nana_ui_core::{SemanticColorMix, SpacingRole, SpacingStep, TextWeight};
+
+use crate::theme_map::tiers::{self, Edge};
 
 use super::super::field_bind::StyleField;
 use super::super::input::{HostDragPhase, InputMessage};
@@ -46,13 +49,13 @@ use super::super::{ShellMessage, ShellViewModel, SidebarMessage};
 use super::parts::{self, ActiveTone, bound_hint, group_header, group_title, tree_action};
 use super::{group, refresh_icon, sidebar_message};
 
-/// 每层缩进，对应 `--folder-tree-indent`。
-const TREE_INDENT: f32 = 20.0;
+/// 每层缩进，对应 `--folder-tree-indent`：`PageTight` 档（默认 20px）。
+const TREE_INDENT: SpacingStep = SpacingStep::PageTight;
 /// 折叠三角的宽度，对应 `--folder-tree-toggle-width`。
 const TOGGLE_WIDTH: f32 = 10.0;
 const ROW_HEIGHT: f32 = 24.0;
-/// 导引线起点：三角宽 10、行内边距 4，再加 6.5，对应 `--folder-tree-guide-offset`。
-const GUIDE_OFFSET: f32 = TOGGLE_WIDTH + 4.0 + 6.5;
+/// 导引线起点：三角宽 10、行卡片左内边距（`Xs` 档），再加 6.5，对应 `--folder-tree-guide-offset`。
+const GUIDE_OFFSET: f32 = TOGGLE_WIDTH + tiers::space_px(SpacingStep::Xs) + 6.5;
 /// 文件夹三角展开和收起时的无障碍名。
 const FOLDER_CARET: (&str, &str) = ("收起文件夹", "展开文件夹");
 /// 智能文件夹三角展开和收起时的无障碍名。
@@ -105,7 +108,7 @@ pub(super) fn folder_group(
     .children((rows
         .keyed(folder_key)
         .each(folder_row)
-        .gap(3.0)
+        .css(css! { gap: theme(space-xxs); })
         .key("folder-tree"),))
     .key("folder-drop");
     let hint = bound_hint(move || state.with(|state| state.hint), "folder-hint");
@@ -143,8 +146,8 @@ fn folder_row(item: FolderItem) -> AnyView {
             move || sidebar_message(SidebarMessage::ToggleFolder(toggle_path.clone())),
         )
     });
-    let content = widget(Stack::fill_row(8.0).align(AlignSpec::Center)).children((
-        widget(Stack::fill_row(6.0).align(AlignSpec::Center)).children((
+    let content = widget(row_line(SpacingStep::Md)).children((
+        widget(row_line(SpacingStep::Sm)).children((
             widget(parts::inherit_icon(folder_icon(row.branch), 14.0))
                 .prop::<Icon, GlyphIcon>(move || folder_icon(item.branch().get())),
             widget(parts::fill_text(
@@ -222,16 +225,23 @@ fn owned_paths(paths: &[std::path::PathBuf]) -> Vec<String> {
         .collect()
 }
 
-/// 树行卡片：24px、左 4 右 6 内边距；悬停 `--bg-hover`，当前 `--bg-active`。
-/// 放下目标：强调色 14% 混进当前底，边是 55% 强调色。
+/// 树行卡片：24px、左 `Xs` 右 `Sm` 内边距（默认 4、6）；悬停 `--bg-hover`，当前 `--bg-active`。
+/// 放下目标：强调色 14% 混进当前底，一根发丝边，边是 55% 强调色。
 fn card_style(drop_target: bool) -> NodeStyle {
-    let mut style = parts::row_style(ROW_HEIGHT, 4.0, 6.0, 8.0, ActiveTone::Neutral, false);
+    let mut style = parts::row_style(
+        ROW_HEIGHT,
+        Some(SpacingStep::Xs),
+        Some(SpacingStep::Sm),
+        Some(SpacingStep::Md),
+        ActiveTone::Neutral,
+        false,
+    );
     let layout = Arc::make_mut(&mut style.layout);
     layout.flex_grow = Some(1.0);
     layout.flex_shrink = Some(1.0);
     layout.width = Some(LengthSpec::Px(0.0));
     if drop_target {
-        layout.border_width = Some(1.0);
+        tiers::border(layout, 1);
         let paint = SemanticPaint {
             background_mix: Some(SemanticColorMix::new(
                 SemanticColorRole::Accent,
@@ -250,6 +260,11 @@ fn card_style(drop_target: bool) -> NodeStyle {
         style.interaction.selected_pressed = paint;
     }
     style
+}
+
+/// 行内横排：占满、竖直居中，子项间距取 `gap` 档。
+fn row_line(gap: SpacingStep) -> Stack {
+    Stack::fill_row(0.0).gap_step(gap).align(AlignSpec::Center)
 }
 
 /// 一行：缩进导引线、折叠三角（没有子级时留空位）和卡片。
@@ -275,9 +290,12 @@ fn tree_row(depth: u16, has_children: bool, toggle: Option<AnyView>, card: AnyVi
             .height(LengthSpec::Px(ROW_HEIGHT))
             .with_layout(|layout| {
                 layout.position = nana_ui_core::PositionSpec::Relative;
-                layout.padding_left = Some(LengthSpec::Px(
-                    f32::from(depth.saturating_sub(1)) * TREE_INDENT,
-                ));
+                let levels = f32::from(depth.saturating_sub(1));
+                if levels > 0.0 {
+                    layout.padding_left =
+                        Some(LengthSpec::Px(levels * tiers::space_px(TREE_INDENT)));
+                    layout.theme.padding_left = Some(tiers::space_expr(TREE_INDENT).scaled(levels));
+                }
             }),
     )
     .children(children)
@@ -286,10 +304,10 @@ fn tree_row(depth: u16, has_children: bool, toggle: Option<AnyView>, card: AnyVi
 
 /// 这一行要画的竖线横坐标。
 ///
-/// 每层缩进处画一条 1px 的 `--border`：第 i 条在 `20.5 + i * 20`。
+/// 每层缩进处画一条发丝宽的 `--border`：第 i 条在 `20.5 + i * 20`。
 /// 有子级时三角背后用侧栏底色盖住当前这一层（最后一条），祖先层的线留着；
 /// 没有子级时三角不显示，盖板一起藏掉，当前层的线也露出来。
-/// 线高就是这一行的 24px，不伸进 3px 行距，和 `::before` 只盖住本行一样。
+/// 线高就是这一行的 24px，不伸进行距，和 `::before` 只盖住本行一样。
 fn guide_xs(depth: u16, has_children: bool) -> Vec<f32> {
     let levels = usize::from(depth.saturating_sub(1));
     let shown = if has_children {
@@ -298,17 +316,17 @@ fn guide_xs(depth: u16, has_children: bool) -> Vec<f32> {
         levels
     };
     (0..shown)
-        .map(|index| GUIDE_OFFSET + index as f32 * TREE_INDENT)
+        .map(|index| GUIDE_OFFSET + index as f32 * tiers::space_px(TREE_INDENT))
         .collect()
 }
 
-/// 一条 1px 的缩进导引线，不接点击。
+/// 一条发丝宽的缩进导引线，不接点击。
 fn guide_line(x: f32) -> AnyView {
     widget(
         Stack::row(0.0)
-            .width(LengthSpec::Px(1.0))
+            .width(LengthSpec::Px(tiers::hairline_px()))
             .height(LengthSpec::Px(ROW_HEIGHT))
-            .min_width(LengthSpec::Px(1.0))
+            .min_width(LengthSpec::Px(tiers::hairline_px()))
             .min_height(LengthSpec::Px(ROW_HEIGHT))
             .grow(0.0)
             .shrink(0.0)
@@ -379,7 +397,7 @@ pub(super) fn smart_group(state: Signal<SmartGroup>, rows: Store<Vec<SmartRow>>)
     let tree = rows
         .keyed(smart_key)
         .each(move |item| smart_row(item, state))
-        .gap(3.0)
+        .css(css! { gap: theme(space-xxs); })
         .key("smart-tree")
         .visible(move || state.with(|state| state.hint.is_none()));
     group(
@@ -408,7 +426,13 @@ fn smart_row(item: SmartItem, state: Signal<SmartGroup>) -> AnyView {
     });
     let busy = move || state.with(|state| state.busy);
     let (open_id, child_id, edit_id, delete_id) = (id.clone(), id.clone(), id.clone(), id.clone());
-    let actions = widget(Stack::row(2.0).align(AlignSpec::Center).shrink(0.0)).children((
+    let actions = widget(
+        Stack::row(0.0)
+            .gap_step(SpacingRole::IconTools)
+            .align(AlignSpec::Center)
+            .shrink(0.0),
+    )
+    .children((
         tree_action(
             FOLDER_PLUS,
             "新建子智能文件夹",
@@ -441,8 +465,8 @@ fn smart_row(item: SmartItem, state: Signal<SmartGroup>) -> AnyView {
             )));
         }),
     ));
-    let content = widget(Stack::fill_row(8.0).align(AlignSpec::Center)).children((
-        widget(Stack::fill_row(6.0).align(AlignSpec::Center)).children((
+    let content = widget(row_line(SpacingStep::Md)).children((
+        widget(row_line(SpacingStep::Sm)).children((
             widget(parts::inherit_icon(folder_icon(row.branch), 14.0))
                 .prop::<Icon, GlyphIcon>(move || folder_icon(item.branch().get())),
             widget(parts::fill_text(row.name.clone(), 13.0, TextWeight::Medium))
@@ -451,7 +475,11 @@ fn smart_row(item: SmartItem, state: Signal<SmartGroup>) -> AnyView {
         actions,
     ));
     let mut style = card_style(false);
-    Arc::make_mut(&mut style.layout).padding_right = Some(LengthSpec::Px(1.0));
+    tiers::padding(
+        Arc::make_mut(&mut style.layout),
+        &[Edge::Right],
+        SpacingStep::Xxs,
+    );
     let card = widget(ListItem::new(row.name).selected(row.active).style(style))
         .prop::<String, fields::list_item::label>(item.name())
         .prop::<bool, fields::list_item::selected>(item.active())

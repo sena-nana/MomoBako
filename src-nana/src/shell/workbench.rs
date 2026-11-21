@@ -6,11 +6,16 @@ use nana_ui::runtime::view::{AnyView, IntoView, widget};
 use nana_ui::runtime::{LengthSpec, SemanticColorRole, Stack, Text, TextHorizontalAlignment};
 use nana_ui_core::TextWeight;
 
-/// 页面纵向排布。页边距由主区外框统一给（上下 20、左右 24），这里不再加。
+/// 页面纵向排布，块与块之间是窗口一栏里分组的间距（`SpacingRole::GroupInPane`，默认 16）。
+/// 页边距由主区外框统一给，这里不再加。
 pub(crate) fn page(body: Vec<AnyView>) -> AnyView {
-    widget(Stack::fill_column(16.0).min_height(LengthSpec::Px(0.0)))
-        .children(body)
-        .into_any()
+    widget(
+        Stack::fill_column(0.0)
+            .gap_step(nana_ui_core::SpacingRole::GroupInPane)
+            .min_height(LengthSpec::Px(0.0)),
+    )
+    .children(body)
+    .into_any()
 }
 
 /// 次级说明。路径、时间和过程信息用它，不放进标题。
@@ -28,9 +33,11 @@ pub(crate) fn meta(label: impl Into<String>) -> Text {
 pub(crate) fn with_bottom_divider(column: Stack) -> Stack {
     let mut style = column.node_style();
     style.border = Some(SemanticColorRole::BorderSoft);
-    std::sync::Arc::make_mut(&mut style.layout)
-        .border_sides
-        .bottom_width = Some(1.0);
+    crate::theme_map::border_side(
+        std::sync::Arc::make_mut(&mut style.layout),
+        crate::theme_map::tiers::Edge::Bottom,
+        1,
+    );
     column.style(style)
 }
 

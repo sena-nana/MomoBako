@@ -1,4 +1,4 @@
-//! 停用的图标按钮按 0.45 不透明度只淡一次。
+//! 停用的图标按钮按主题禁用档的不透明度只淡一次。
 //!
 //! NanaUI 的 `IconButton` 停用时只给按种类配色的按钮整枚淡到 50%（线性空间合成）；`colors_from_style` 的按钮
 //! 照自己写的 `style.interaction.disabled` 画，节点不透明度照写的来。壳层里会停用的图标按钮都走后一种：
@@ -49,7 +49,7 @@ fn disabled_mix(harness: &ShellHarness, id: StableNodeId) -> Option<SemanticColo
         .and_then(|style| style.interaction.disabled.foreground_mix)
 }
 
-/// 弱色叉号或图标盖在 `--bg-elev` 上按 0.45 混。
+/// 弱色叉号或图标盖在 `--bg-elev` 上按主题禁用档的不透明度混。
 fn faint_over_surface() -> Option<SemanticColorMix> {
     Some(SemanticColorMix::new(
         SemanticColorRole::Faint,
@@ -83,7 +83,7 @@ fn assert_mixed_over_surface(harness: &ShellHarness, id: StableNodeId, label: &s
     assert_eq!(
         disabled_mix(harness, id),
         faint_over_surface(),
-        "「{label}」的停用色按 0.45 和底色在 sRGB 里混"
+        "「{label}」的停用色按主题禁用档和底色在 sRGB 里混"
     );
 }
 
@@ -237,7 +237,7 @@ fn playlist_row(id: &str, name: &str) -> SidebarPlaylist {
     }
 }
 
-/// 某一播放集行里停用的「播放」：节点不再整体淡化，停用色按 0.45 和这一行的底混。
+/// 某一播放集行里停用的「播放」：节点不再整体淡化，停用色按主题禁用档和这一行的底混。
 fn assert_play_mix(
     harness: &ShellHarness,
     row: StableNodeId,
@@ -266,6 +266,6 @@ fn assert_play_mix(
             base,
             DISABLED_OPACITY
         )),
-        "{label}的停用色应按 0.45 和所在底色混"
+        "{label}的停用色应按主题禁用档和所在底色混"
     );
 }

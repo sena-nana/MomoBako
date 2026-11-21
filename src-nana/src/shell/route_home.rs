@@ -11,13 +11,13 @@ use nana_ui::runtime::{LengthSpec, ScrollAxes, ScrollView, Stack};
 
 use super::render::{PRIMARY_INSET_X, PRIMARY_INSET_Y};
 
-/// 首页外框：占满主区、自身不滚动，内边距左右 24、上下 20；有筛选栏时它在主体上方。
+/// 首页外框：占满主区、自身不滚动，内边距左右页面档、上下紧凑页面档（默认 24、20）；有筛选栏时它在主体上方。
 /// 缺失仓库和空库区域不显示筛选栏，传 `None`。
 pub(super) fn home_page(filter: Option<AnyView>, body: AnyView) -> AnyView {
     widget(
         Stack::fill_column(0.0)
             .min_height(LengthSpec::Px(0.0))
-            .padding_xy(PRIMARY_INSET_X, PRIMARY_INSET_Y),
+            .padding_step(PRIMARY_INSET_X, PRIMARY_INSET_Y),
     )
     .children((filter, body))
     .key("workspace-page")
@@ -33,7 +33,7 @@ pub(super) fn home_scroll(key: &'static str, panel: AnyView) -> AnyView {
 /// 主区内容层的 `overflow: auto`：内边距在滚动内容里，随内容一起滚动。
 /// `key` 标出显示的内容，滚动容器常驻，偏移自然留着。
 pub(super) fn scroll_route(content: AnyView, key: &'static str) -> AnyView {
-    let padded = widget(Stack::column(0.0).padding_xy(PRIMARY_INSET_X, PRIMARY_INSET_Y))
+    let padded = widget(Stack::column(0.0).padding_step(PRIMARY_INSET_X, PRIMARY_INSET_Y))
         .children((content,))
         .into_any();
     widget(scroll_view())

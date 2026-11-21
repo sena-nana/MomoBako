@@ -14,6 +14,7 @@
 //! NanaUI 的危险口气，标题前有图标的放进标题图标槽；遮罩、分隔线、内边距、距顶 12vh、卡片圆角
 //! 和开合动效由主题配方决定（`appearance.rs`）。
 
+use nana_ui_core::SpacingStep;
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{ALERT_CIRCLE, X};
@@ -27,7 +28,7 @@ use nana_ui::runtime::{
     PositionSpec, RadiusTier, SemanticColorRole, Stack, StatusTone, Text,
 };
 use nana_ui::{ButtonKind, ControlSize, Icon};
-use nana_ui_core::{DialogClosePolicy, DialogSize, TextWeight};
+use nana_ui_core::{ControlHeight, ControlPadding, DialogClosePolicy, DialogSize, TextWeight};
 
 use super::session::{OverlaySession, register};
 use crate::shell::ShellMessage;
@@ -296,7 +297,7 @@ impl OverlaySession for Presence {
 /// 点它由框架变成关闭请求，按钮自己不发消息；处理中显示为禁用。
 ///
 /// 颜色照写的来（`colors_from_style`）：按种类配色会把叉号换成 `--text-muted`，停用时还会整枚按线性空间
-/// 淡到 50%。悬停、按下和焦点沿用 `IconButton` 自带的样子；停用按 0.45 不透明度和卡片底色
+/// 淡到 50%。悬停、按下和焦点沿用 `IconButton` 自带的样子；停用按主题的禁用不透明度和卡片底色
 /// （`--bg-elev`）在 sRGB 里混。
 fn close_affordance(busy: BusyFn) -> AnyView {
     let mut button = IconButton::new(X, "关闭")
@@ -312,20 +313,25 @@ fn close_affordance(busy: BusyFn) -> AnyView {
         .into_any()
 }
 
-/// 底栏：左边可放一段说明（处理中），按钮靠右、间距 8。
+/// 底栏：左边可放一段说明（处理中），按钮靠右、间距 `Md` 档（默认 8）。
 pub(crate) fn footer(leading: Option<AnyView>, buttons: Vec<AnyView>) -> AnyView {
     let mut children = Vec::with_capacity(buttons.len() + 2);
     children.extend(leading);
     children.push(widget(Stack::spacer()).into_any());
     children.extend(buttons);
-    widget(Stack::bar(8.0).align(AlignSpec::Center))
-        .children(children)
-        .key("dialog-actions")
-        .into_any()
+    widget(
+        Stack::bar(0.0)
+            .gap_step(SpacingStep::Md)
+            .align(AlignSpec::Center),
+    )
+    .children(children)
+    .key("dialog-actions")
+    .into_any()
 }
 
-/// 底栏按钮：高 32、左右 10、按钮正文档字号和中等字重；主操作低饱和蓝，危险操作低饱和红，普通操作透明
-/// （DESIGN.md 5.1）。点击发 `message`；禁用时框架不派发点击。
+/// 底栏按钮：中号控件高、标准控件内边距（默认高 32、左右 10）、按钮正文档字号；主操作低饱和蓝、半粗字重，
+/// 危险操作低饱和红，普通操作透明，后两种是按钮自带的中等字重（DESIGN.md 5.1）。点击发 `message`；
+/// 禁用时框架不派发点击。
 pub(crate) fn action(
     label: impl IntoProp<String>,
     kind: ButtonKind,
@@ -365,16 +371,15 @@ fn button_view(
     key: &'static str,
 ) -> El<Button> {
     let mut button = Button::new("").kind(kind);
-    button.style.control_height = None;
-    button.style.control_padding_x = None;
+    button.style.control_height = Some(ControlHeight::Exact(ControlSize::Medium));
+    button.style.control_padding_x = Some(ControlPadding::Standard);
     {
         let layout = Arc::make_mut(&mut button.style.layout);
-        layout.height = Some(LengthSpec::Px(32.0));
-        layout.min_height = Some(LengthSpec::Px(32.0));
-        layout.padding_left = Some(LengthSpec::Px(10.0));
-        layout.padding_right = Some(LengthSpec::Px(10.0));
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(0.0);
+        if kind == ButtonKind::Primary {
+            crate::theme_map::control_weight(layout, TextWeight::Semibold);
+        }
     }
     widget(button)
         .key(key)
@@ -382,7 +387,7 @@ fn button_view(
         .prop::<bool, fields::button::disabled>(disabled)
 }
 
-/// 正文里的一段说明：13px、行高 1.5、占满宽度、任意处折行。
+/// 正文里的一段说明：13px、行高为正文档的 1.5 倍、占满宽度、任意处折行。
 /// `muted` 时用次要文字色。
 pub(crate) fn paragraph(copy: impl IntoProp<String>, muted: bool, key: &'static str) -> AnyView {
     let color = if muted {
@@ -415,12 +420,13 @@ pub(crate) fn busy_note(visible: impl IntoProp<bool>, key: &'static str) -> AnyV
         .into_any()
 }
 
-/// 占满宽度、任意处折行的一段字。
+/// 占满宽度、任意处折行的一段字。行高按像素给，挂成主题档位（见 `theme_map::text_line_height`）。
 pub(crate) fn wrapping_text(size: f32, line_height: f32, color: SemanticColorRole) -> Text {
-    let mut node =
+    let mut node = crate::theme_map::text_line_height(
         crate::theme_map::typed_text(Text::new(String::new()), size, TextWeight::Regular)
-            .color(color)
-            .line_height(line_height);
+            .color(color),
+        line_height,
+    );
     let layout = Arc::make_mut(&mut node.style.layout);
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
@@ -428,7 +434,7 @@ pub(crate) fn wrapping_text(size: f32, line_height: f32, color: SemanticColorRol
     node
 }
 
-/// 行和卡片（`ListItem`）的禁用：连同 0.45 的整体透明度一起换。
+/// 行和卡片（`ListItem`）的禁用：连同主题禁用档的整体透明度一起换。
 /// 禁用的行框架不派发点击。对话框的选项卡片和弹层的菜单行共用。
 pub(crate) struct DimmedDisabled;
 

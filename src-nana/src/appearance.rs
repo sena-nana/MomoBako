@@ -17,11 +17,14 @@ use nana_ui::theme::{
     ScrollbarRecipe, ScrollbarTransition, ScrollbarVisibility, SemanticColor, ThemeAppearance,
     ThemeDefinition, ThemeId, ThemeMetrics, builtin_theme_arc, linear_scrim_alpha,
 };
-use nana_ui_core::SemanticColorMix;
+use nana_ui_core::{
+    EasingRole, MotionRole, SemanticColorMix, SpacingStep, TypeRole, TypographyTokens,
+};
 use nana_ui_platform::SystemAppearance;
 
 use crate::shell::ShellViewModel;
 use crate::theme_map;
+use crate::theme_map::tiers;
 
 /// 设置落到画面上的外观。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -111,8 +114,8 @@ fn scrollbar_recipe() -> ScrollbarRecipe {
         track_hot: None,
         track_resident: None,
         motion: ScrollbarMotion {
-            fade_in: ScrollbarTransition::new(SCROLLBAR_FADE_MS, CSS_EASE),
-            fade_out: ScrollbarTransition::new(SCROLLBAR_FADE_MS, CSS_EASE),
+            fade_in: ScrollbarTransition::new(SCROLLBAR_FADE_MS, STANDARD_EASE),
+            fade_out: ScrollbarTransition::new(SCROLLBAR_FADE_MS, STANDARD_EASE),
             hide_delay_ms: SCROLLBAR_FADE_MS,
             ..ScrollbarMotion::DEFAULT
         },
@@ -124,33 +127,33 @@ fn scrollbar_recipe() -> ScrollbarRecipe {
 const DIALOG_TOP_VH: f32 = 12.0;
 /// `.modal-card { max-height: 72vh }`。
 const DIALOG_MAX_HEIGHT_VH: f32 = 72.0;
-/// 标题行的最小高度：正文 14px、行高 1.55 的行盒。NanaUI 的标题按常规行高排，比它矮。
-const DIALOG_HEADER_LINE: f32 = 21.7;
+/// 标题行的最小高度：工作正文档（默认 14px）、行高 1.55 的行盒。NanaUI 的标题按常规行高排，比它矮。
+const DIALOG_HEADER_LINE: f32 = TypographyTokens::DEFAULT.size(TypeRole::Section) * 1.55;
 /// 标题前图标的格子：头部图标都是 14px。
 const DIALOG_ICON_SIZE: f32 = 14.0;
 /// 标题右侧关闭位的格子：`.repository-export-dialog__close` 24 见方。
 const DIALOG_CLOSE_SIZE: f32 = 24.0;
-/// `.dialog-card__header` 和 `.dialog-card__actions` 的 `gap`。
-const DIALOG_GAP: f32 = 8.0;
+/// `.dialog-card__header` 和 `.dialog-card__actions` 的 `gap`：`Md` 档（默认 8）。
+const DIALOG_GAP: f32 = tiers::space_px(SpacingStep::Md);
 /// `.modal-overlay { background: rgba(0, 0, 0, .45) }` 的不透明度，装进主题前换算到线性光。
 const SCRIM_CSS_ALPHA: f32 = 0.45;
 /// `.modal-overlay { backdrop-filter: blur(2px) }`：高斯标准差。
 const SCRIM_BLUR: f32 = 2.0;
-/// `.modal-enter-active { transition: opacity .16s ease }`，卡片淡入同长。
-const DIALOG_FADE_MS: u16 = 160;
-/// `.modal-card { transition: transform .18s cubic-bezier(.2, .8, .2, 1) }`。
-const DIALOG_MOVE_MS: u16 = 180;
+/// 遮罩和卡片淡入：主题动效的浮层透明度档（`MotionRole::MenuOpacity`，默认 160ms）。
+const DIALOG_FADE_MS: u16 = tiers::motion_ms(MotionRole::MenuOpacity);
+/// 卡片移回原位：浮层弹出档（`MotionRole::MenuPop`，默认 180ms），曲线是强调档。
+const DIALOG_MOVE_MS: u16 = tiers::motion_ms(MotionRole::MenuPop);
 /// `.modal-enter-from .modal-card { transform: translateY(-8px) scale(.98) }` 的位移。
 const DIALOG_ENTER_OFFSET: f32 = -8.0;
 /// 同上，起点的缩放。
 const DIALOG_ENTER_SCALE: f32 = 0.98;
-/// CSS 的 `ease`。
-const CSS_EASE: Easing = Easing::CubicBezier([0.25, 0.1, 0.25, 1.0]);
+/// 淡入淡出的曲线：主题的标准缓动档。
+const STANDARD_EASE: Easing = tiers::easing(EasingRole::Standard);
 
 /// 对话框卡片的配方：
-/// 距顶 12vh、最高 72vh、`--radius-xl`；标题行和正文内边距 12/14、底栏 10/14，标题行下和
-/// 底栏上各一条 `--border-soft` 发丝线；标题行 `align-items: center; gap: 8px`；开场遮罩淡入
-/// 160ms，卡片从上方 8px、0.98 倍处移回，退场倒放。
+/// 距顶 12vh、最高 72vh、`--radius-xl`；标题行和正文内边距上下 `Xl`、左右 `Xxl`（默认 12/14），底栏上下 `Lg`
+/// （默认 10），标题行下和底栏上各一条 `--border-soft` 发丝线；标题行 `align-items: center`、间距 `Md`；
+/// 开场遮罩按浮层透明度档淡入，卡片从上方 8px、0.98 倍处按弹出档移回，退场倒放。
 fn dialog_recipe() -> DialogRecipe {
     DialogRecipe {
         top: LengthSpec::Viewport {
@@ -166,20 +169,26 @@ fn dialog_recipe() -> DialogRecipe {
         header_gap: DIALOG_GAP,
         header_min_height: DIALOG_HEADER_LINE,
         radius: RadiusTier::Xl,
-        header: DialogInsets::symmetric(12.0, 14.0),
-        body: DialogInsets::symmetric(12.0, 14.0),
+        header: DialogInsets::symmetric(
+            tiers::space_px(SpacingStep::Xl),
+            tiers::space_px(SpacingStep::Xxl),
+        ),
+        body: DialogInsets::symmetric(
+            tiers::space_px(SpacingStep::Xl),
+            tiers::space_px(SpacingStep::Xxl),
+        ),
         body_bottom_alone: None,
-        footer: DialogInsets::symmetric(10.0, 14.0),
+        footer: DialogInsets::symmetric(
+            tiers::space_px(SpacingStep::Lg),
+            tiers::space_px(SpacingStep::Xxl),
+        ),
         action_gap: DIALOG_GAP,
         header_divider: Some(SemanticColorRole::BorderSoft),
         footer_divider: Some(SemanticColorRole::BorderSoft),
         motion: DialogMotion {
-            scrim: DialogTransition::new(DIALOG_FADE_MS, CSS_EASE),
-            card_fade: DialogTransition::new(DIALOG_FADE_MS, CSS_EASE),
-            card_move: DialogTransition::new(
-                DIALOG_MOVE_MS,
-                Easing::CubicBezier([0.2, 0.8, 0.2, 1.0]),
-            ),
+            scrim: DialogTransition::new(DIALOG_FADE_MS, STANDARD_EASE),
+            card_fade: DialogTransition::new(DIALOG_FADE_MS, STANDARD_EASE),
+            card_move: DialogTransition::new(DIALOG_MOVE_MS, tiers::easing(EasingRole::Emphasized)),
             enter_offset_y: DIALOG_ENTER_OFFSET,
             enter_scale: DIALOG_ENTER_SCALE,
         },
@@ -374,7 +383,7 @@ mod tests {
                     dialog.close_size,
                     dialog.header_min_height
                 ),
-                (14.0, 24.0, 21.7)
+                (14.0, 24.0, 14.0 * 1.55)
             );
             assert_eq!(dialog.header_divider, Some(SemanticColorRole::BorderSoft));
             assert_eq!(dialog.footer_divider, Some(SemanticColorRole::BorderSoft));
@@ -387,10 +396,7 @@ mod tests {
                 ),
                 (160, 160, 180)
             );
-            assert_eq!(
-                motion.scrim.easing,
-                Easing::CubicBezier([0.25, 0.1, 0.25, 1.0])
-            );
+            assert_eq!(motion.scrim.easing, Easing::EaseOutCubic);
             assert_eq!(
                 motion.card_move.easing,
                 Easing::CubicBezier([0.2, 0.8, 0.2, 1.0])
@@ -539,10 +545,7 @@ mod tests {
                 ),
                 (480, 480, 480)
             );
-            assert_eq!(
-                motion.fade_out.easing,
-                Easing::CubicBezier([0.25, 0.1, 0.25, 1.0])
-            );
+            assert_eq!(motion.fade_out.easing, Easing::EaseOutCubic);
             assert!(theme.metrics().same_layout(&ThemeMetrics {
                 scrollbar: SCROLLBAR_METRICS,
                 ..theme.metrics()

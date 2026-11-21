@@ -33,12 +33,16 @@ use super::super::view_part_sidebar::project::HeadView;
 use super::super::{ShellMessage, ShellViewModel, SidebarMessage};
 use super::parts::{self, ActiveTone, PopoverOpen};
 use super::sidebar_message;
-use nana_ui_core::TextWeight;
+use crate::theme_map::tiers::{self, Edge};
+use nana_ui::runtime::view::css;
+use nana_ui_core::{SpacingStep, TextWeight};
 
-/// 侧栏和仓库头的左右内边距合起来：切换列表比侧栏窄这么多，和仓库头同宽。
-const SWITCHER_INSET: f32 = 2.0 * (8.0 + 2.0);
-/// 面板顶边在仓库头下方的间距。
-const ANCHOR_GAP: f32 = 6.0;
+/// 侧栏和仓库头的左右内边距合起来（侧栏 `Md`、仓库头 `Xxs`，两边各一份）：切换列表比侧栏窄这么多，
+/// 和仓库头同宽。
+const SWITCHER_INSET: f32 =
+    2.0 * (tiers::space_px(SpacingStep::Md) + tiers::space_px(SpacingStep::Xxs));
+/// 面板顶边在仓库头下方的间距：`Sm` 档（默认 6px）。
+const ANCHOR_GAP: f32 = tiers::space_px(SpacingStep::Sm);
 const ADD_MENU_WIDTH: f32 = 180.0;
 const FORM_WIDTH: f32 = 320.0;
 
@@ -86,15 +90,26 @@ pub(crate) fn repository_switcher(
 ) -> AnyView {
     let name = head.with_untracked(|head| head.name.clone());
     let width = popover.with_untracked(|view| view.width);
-    let mut style = parts::row_style(28.0, 8.0, 8.0, 6.0, ActiveTone::Accent, false);
+    let mut style = parts::row_style(
+        28.0,
+        Some(SpacingStep::Md),
+        Some(SpacingStep::Md),
+        Some(SpacingStep::Sm),
+        ActiveTone::Accent,
+        false,
+    );
     crate::theme_map::control_weight(Arc::make_mut(&mut style.layout), TextWeight::Semibold);
-    let trigger = widget(Stack::fill_row(6.0).align(AlignSpec::Center))
-        .children((
-            widget(parts::fill_text(name.clone(), 13.0, TextWeight::Semibold))
-                .prop::<String, fields::text::value>(move || head.with(|head| head.name.clone())),
-            widget(parts::inherit_icon(SELECTOR, 13.0)),
-        ))
-        .key("repository-switcher-trigger");
+    let trigger = widget(
+        Stack::fill_row(0.0)
+            .gap_step(SpacingStep::Sm)
+            .align(AlignSpec::Center),
+    )
+    .children((
+        widget(parts::fill_text(name.clone(), 13.0, TextWeight::Semibold))
+            .prop::<String, fields::text::value>(move || head.with(|head| head.name.clone())),
+        widget(parts::inherit_icon(SELECTOR, 13.0)),
+    ))
+    .key("repository-switcher-trigger");
     let anchor = Popover::new()
         .trigger(switcher_label(&name))
         .bare_trigger(true)
@@ -180,18 +195,23 @@ pub fn repository_popover(model: &ShellViewModel) -> Option<AnyView> {
     }
 }
 
-/// 一页：竖排、撑满面板宽，`padding` 是这一页自己的内边距。`menu` 为真时（切换列表、添加菜单）
-/// 里面的项是一个方向键焦点组，上下键在项之间走。
+/// 一页：竖排、撑满面板宽，`padding` 是这一页自己的内边距，`gap` 是块与块之间的间距，都取主题间距档。
+/// `menu` 为真时（切换列表、添加菜单）里面的项是一个方向键焦点组，上下键在项之间走。
 fn page(
-    padding: f32,
-    gap: f32,
+    padding: SpacingStep,
+    gap: SpacingStep,
     children: Vec<AnyView>,
     label_key: &'static str,
     menu: bool,
 ) -> AnyView {
-    let page = widget(Stack::column(gap).padding(padding).width(LengthSpec::Fill))
-        .children(children)
-        .key(label_key);
+    let page = widget(
+        Stack::column(0.0)
+            .gap_step(gap)
+            .padding_step(padding, padding)
+            .width(LengthSpec::Fill),
+    )
+    .children(children)
+    .key(label_key);
     if menu {
         page.roving_focus(MENU_KEYS).into_any()
     } else {
@@ -256,32 +276,35 @@ fn switcher(model: &ShellViewModel) -> AnyView {
     Projected::register(view, SwitcherView::project);
     let rows = computed(move || view.with(|view| view.rows.clone()));
     let list = widget(Stack::column(0.0))
-        .children((each(rows, Clone::clone, repository_row).gap(2.0),))
+        .children((each(rows, Clone::clone, repository_row).css(css! { gap: theme(space-xxs); }),))
         .key("repository-switch-list")
         .into_any();
-    let actions = widget(top_divider(Stack::column(2.0), 6.0))
-        .children((
-            menu_item(
-                Some(PLUS),
-                "添加资源库",
-                "repository-add",
-                false,
-                move || view.with(|view| view.submitting),
-                || sidebar_message(SidebarMessage::ShowRepositoryAddMenu),
-            ),
-            menu_item(
-                Some(TRASH),
-                "删除当前资源库",
-                "repository-delete",
-                true,
-                move || view.with(|view| view.submitting || !view.can_delete),
-                || sidebar_message(SidebarMessage::DeleteRepositoryFromSwitcher),
-            ),
-        ))
-        .into_any();
+    let actions = widget(top_divider(
+        Stack::column(0.0).gap_step(SpacingStep::Xxs),
+        SpacingStep::Sm,
+    ))
+    .children((
+        menu_item(
+            Some(PLUS),
+            "添加资源库",
+            "repository-add",
+            false,
+            move || view.with(|view| view.submitting),
+            || sidebar_message(SidebarMessage::ShowRepositoryAddMenu),
+        ),
+        menu_item(
+            Some(TRASH),
+            "删除当前资源库",
+            "repository-delete",
+            true,
+            move || view.with(|view| view.submitting || !view.can_delete),
+            || sidebar_message(SidebarMessage::DeleteRepositoryFromSwitcher),
+        ),
+    ))
+    .into_any();
     page(
-        6.0,
-        6.0,
+        SpacingStep::Sm,
+        SpacingStep::Sm,
         vec![
             list,
             actions,
@@ -320,11 +343,28 @@ fn repository_row(row: RepositoryRow) -> AnyView {
         layout.min_width = Some(LengthSpec::Px(0.0));
     }
     let missing = row.missing.then(missing_badge);
-    let content = widget(Stack::fill_row(8.0).align(AlignSpec::Center)).children((
+    let content = widget(
+        Stack::fill_row(0.0)
+            .gap_step(SpacingStep::Md)
+            .align(AlignSpec::Center),
+    )
+    .children((
         check,
-        widget(Stack::fill_row(6.0).align(AlignSpec::Center)).children((widget(name), missing)),
+        widget(
+            Stack::fill_row(0.0)
+                .gap_step(SpacingStep::Sm)
+                .align(AlignSpec::Center),
+        )
+        .children((widget(name), missing)),
     ));
-    let mut style = parts::row_style(30.0, 8.0, 8.0, 8.0, ActiveTone::Accent, row.disabled);
+    let mut style = parts::row_style(
+        30.0,
+        Some(SpacingStep::Md),
+        Some(SpacingStep::Md),
+        Some(SpacingStep::Md),
+        ActiveTone::Accent,
+        row.disabled,
+    );
     style.interaction.selected.foreground = Some(SemanticColorRole::Text);
     style.interaction.selected_hovered = style.interaction.selected;
     style.interaction.selected_pressed = style.interaction.selected;
@@ -405,7 +445,7 @@ fn add_menu(model: &ShellViewModel) -> AnyView {
             move || sidebar_message(SidebarMessage::SelectRepositoryBackend(plugin_id.clone())),
         )
     })
-    .gap(1.0);
+    .css(css! { gap: theme(space-xxs); });
     let empty = widget(Stack::column(0.0))
         .visible(move || view.with(|view| view.options.is_empty()))
         .children((parts::empty_hint(
@@ -413,8 +453,8 @@ fn add_menu(model: &ShellViewModel) -> AnyView {
             "repository-backend-empty",
         ),));
     page(
-        4.0,
-        1.0,
+        SpacingStep::Xs,
+        SpacingStep::Xxs,
         vec![
             widget(Stack::column(0.0)).children((rows,)).into_any(),
             empty.into_any(),
@@ -425,8 +465,8 @@ fn add_menu(model: &ShellViewModel) -> AnyView {
     )
 }
 
-/// 菜单项：28px、左右 10px、13px 字、图标和文字间 10px。危险项红字，悬停浅红底。
-/// 禁用时整行 0.45 透明度，框架不派发点击。
+/// 菜单项：28px、左右 `Lg` 档（默认 10px）、13px 字、图标和文字间 `Lg` 档。危险项红字，悬停浅红底。
+/// 禁用时整行按主题的禁用不透明度淡化，框架不派发点击。
 fn menu_item(
     icon: Option<Icon>,
     label: &str,
@@ -435,7 +475,14 @@ fn menu_item(
     disabled: impl IntoProp<bool>,
     message: impl Fn() -> ShellMessage + Send + Sync + 'static,
 ) -> AnyView {
-    let mut style = parts::row_style(28.0, 10.0, 10.0, 10.0, ActiveTone::Accent, false);
+    let mut style = parts::row_style(
+        28.0,
+        Some(SpacingStep::Lg),
+        Some(SpacingStep::Lg),
+        Some(SpacingStep::Lg),
+        ActiveTone::Accent,
+        false,
+    );
     if danger {
         style.foreground = Some(SemanticColorRole::Danger);
         style.interaction.hovered.foreground = Some(SemanticColorRole::Danger);
@@ -452,7 +499,14 @@ fn menu_item(
         TextWeight::Medium,
     ));
     widget(ListItem::new(label.to_string()).style(style))
-        .content(widget(Stack::fill_row(10.0).align(AlignSpec::Center)).children(parts_row))
+        .content(
+            widget(
+                Stack::fill_row(0.0)
+                    .gap_step(SpacingStep::Lg)
+                    .align(AlignSpec::Center),
+            )
+            .children(parts_row),
+        )
         .key(format!("{key}-{label}"))
         .prop::<bool, DimmedDisabled>(disabled)
         .on_cx(move |_, _: &Activate, cx| cx.dispatch_program_all(message()))
@@ -514,11 +568,12 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
         .size(ControlSize::Small)
         .with_tooltip("关闭");
     close.style = parts::icon_button_style(22.0, RadiusTier::Sm, SemanticColorRole::Faint, None);
-    // 提交中停用：按 0.45 和弹层底色（`--bg-elev`）在 sRGB 里混。
+    // 提交中停用：按主题的禁用不透明度和弹层底色（`--bg-elev`）在 sRGB 里混。
     close.style.interaction.disabled =
         crate::theme_map::disabled_paint(SemanticColorRole::Faint, SemanticColorRole::Surface);
     let header = widget(
-        Stack::bar(8.0)
+        Stack::bar(0.0)
+            .gap_step(SpacingStep::Md)
             .align(AlignSpec::Center)
             .min_height(LengthSpec::Px(24.0)),
     )
@@ -558,13 +613,15 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
             None,
         )
     };
-    let mut note = parts::label_text(
-        "当前仅完成后端配置入口与服务端抽象。远端适配器尚未实现，请先用于配置演进与契约联调。",
-        12.0,
-        TextWeight::Regular,
-        Some(SemanticColorRole::Warning),
-    )
-    .line_height(17.0);
+    let mut note = crate::theme_map::text_line_height(
+        parts::label_text(
+            "当前仅完成后端配置入口与服务端抽象。远端适配器尚未实现，请先用于配置演进与契约联调。",
+            12.0,
+            TextWeight::Regular,
+            Some(SemanticColorRole::Warning),
+        ),
+        17.0,
+    );
     Arc::make_mut(&mut note.style.layout).width = Some(LengthSpec::Fill);
     let body: Vec<AnyView> = vec![
         widget(wrapping_text(12.0, 17.0, SemanticColorRole::Muted))
@@ -612,7 +669,7 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
         ),
         widget(
             Stack::column(0.0)
-                .padding_xy(10.0, 8.0)
+                .padding_step(SpacingStep::Lg, SpacingStep::Md)
                 .radius(RadiusTier::Sm)
                 .surface(SemanticColorRole::WarningSoft),
         )
@@ -621,10 +678,11 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
         popover_error(move || view.with(|view| view.error.clone())),
     ];
     let actions = widget(
-        Stack::bar(8.0)
+        Stack::bar(0.0)
+            .gap_step(SpacingStep::Md)
             .align(AlignSpec::Center)
             .with_layout(|layout| {
-                layout.padding_top = Some(LengthSpec::Px(2.0));
+                tiers::padding(layout, &[Edge::Top], SpacingStep::Xxs);
             }),
     )
     .children((
@@ -652,11 +710,13 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
         ),
     ));
     page(
-        10.0,
-        10.0,
+        SpacingStep::Lg,
+        SpacingStep::Lg,
         vec![
             header.into_any(),
-            widget(Stack::column(10.0)).children(body).into_any(),
+            widget(Stack::column(0.0).gap_step(SpacingStep::Lg))
+                .children(body)
+                .into_any(),
             actions.into_any(),
         ],
         "repository-backend-form",
@@ -674,11 +734,11 @@ fn popover_error(error: impl Fn() -> String + Send + 'static) -> AnyView {
         .into_any()
 }
 
-/// 顶边一条 `--border-soft` 分隔线，线下留 `gap` 内边距。
-fn top_divider(column: Stack, gap: f32) -> Stack {
+/// 顶边一条 `--border-soft` 发丝分隔线，线下留 `gap` 档内边距。
+fn top_divider(column: Stack, gap: SpacingStep) -> Stack {
     let column = column.with_layout(|layout| {
-        layout.padding_top = Some(LengthSpec::Px(gap));
-        layout.border_sides.top_width = Some(1.0);
+        tiers::padding(layout, &[Edge::Top], gap);
+        crate::theme_map::border_side(layout, Edge::Top, 1);
     });
     let mut style = column.node_style();
     style.border = Some(SemanticColorRole::BorderSoft);

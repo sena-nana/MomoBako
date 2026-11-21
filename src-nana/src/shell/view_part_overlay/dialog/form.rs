@@ -1,7 +1,8 @@
 //! 对话框正文里的字段：标签加输入框、多行输入、下拉框和两列栅格。
 //!
 //! 每个字段是 NanaUI 的 `FormField`：小号字段的标签是次要色小字，控件在标签下面。
-//! 输入框、多行输入和下拉框最小高 32、左右内边距 8、`--radius-sm` 圆角、14px 字。
+//! 输入框和下拉框取中号控件高（默认 32），左右内边距是控件自带的档（输入框、多行输入是字段档，默认 10），
+//! `--radius-sm` 圆角、14px 字。
 //! 输入框和多行输入用 `.model(草稿信号)` 受控，草稿由浮层会话按
 //! `ModelField` 的规矩回写，按键不会被排在后台消息后面的旧草稿冲掉；改动和回车只发消息。
 
@@ -13,6 +14,7 @@ use nana_ui::runtime::{
     AlignSpec, FormField, LengthSpec, RadiusTier, Select, SelectChanged, SelectOption, Stack,
     TextArea, TextChanged, TextInput, TextSubmitted,
 };
+use nana_ui_core::{ControlHeight, SpacingStep};
 
 use super::MessageFn;
 use crate::shell::ShellMessage;
@@ -44,15 +46,11 @@ pub(crate) fn text_field(
         .label(label)
         .secure(secure);
     input.style.radius = Some(RadiusTier::Sm);
-    input.style.control_height = None;
+    input.style.control_height = Some(ControlHeight::Exact(ControlSize::Medium));
     {
         let layout = Arc::make_mut(&mut input.style.layout);
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.height = Some(LengthSpec::Px(32.0));
-        layout.min_height = Some(LengthSpec::Px(32.0));
-        layout.padding_left = Some(LengthSpec::Px(8.0));
-        layout.padding_right = Some(LengthSpec::Px(8.0));
     }
     let mut control = widget(input)
         .model(draft)
@@ -88,8 +86,6 @@ pub(crate) fn text_area_field(
         let layout = Arc::make_mut(&mut area.style.layout);
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.padding_left = Some(LengthSpec::Px(8.0));
-        layout.padding_right = Some(LengthSpec::Px(8.0));
     }
     let control = widget(area)
         .model(draft)
@@ -115,13 +111,11 @@ pub(crate) fn select_field(
         .options(options(choices()))
         .label(label);
     select.style.radius = Some(RadiusTier::Sm);
-    select.style.control_height = None;
+    select.style.control_height = Some(ControlHeight::Exact(ControlSize::Medium));
     {
         let layout = Arc::make_mut(&mut select.style.layout);
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.height = Some(LengthSpec::Px(32.0));
-        layout.min_height = Some(LengthSpec::Px(32.0));
     }
     let control = widget(select)
         .key(key)
@@ -141,9 +135,9 @@ fn options(choices: Choices) -> Vec<SelectOption> {
         .collect()
 }
 
-/// 两列等宽的栅格（`grid-template-columns: repeat(2, minmax(0, 1fr))`），行列间距都是 `gap`。
+/// 两列等宽的栅格（`grid-template-columns: repeat(2, minmax(0, 1fr))`），行列间距都是 `gap` 档。
 /// 单数个格子时最后一行右边空着。
-pub(crate) fn two_columns(key: &'static str, gap: f32, cells: Vec<AnyView>) -> AnyView {
+pub(crate) fn two_columns(key: &'static str, gap: SpacingStep, cells: Vec<AnyView>) -> AnyView {
     let column = |cell: Option<AnyView>| -> AnyView {
         widget(
             Stack::column(0.0)
@@ -162,12 +156,12 @@ pub(crate) fn two_columns(key: &'static str, gap: f32, cells: Vec<AnyView>) -> A
     while let Some(first) = cells.next() {
         let second = cells.next();
         rows.push(
-            widget(Stack::bar(gap).align(AlignSpec::Start))
+            widget(Stack::bar(0.0).gap_step(gap).align(AlignSpec::Start))
                 .children((column(Some(first)), column(second)))
                 .into_any(),
         );
     }
-    widget(Stack::column(gap).width(LengthSpec::Fill))
+    widget(Stack::column(0.0).gap_step(gap).width(LengthSpec::Fill))
         .key(key)
         .children(rows)
         .into_any()

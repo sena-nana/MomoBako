@@ -374,12 +374,16 @@ fn empty_list_point(window: &ApplicationWindow) -> (f32, f32) {
         .unwrap_or_else(|| panic!("列表里没有空白点：{list:?}"))
 }
 
-/// 悬停任一底部入口，整排从半透明淡入到不透明：样式表的 `footer-entry` 平时 0.44、`lit` 时 1，
-/// 中间按 `transition: opacity 0.35s ease` 由 NanaUI 推进，从这一刻的透明度起步。
+/// 悬停任一底部入口，整排从半透明淡入到不透明：平时是主题禁用档的透明度、亮起时 1，
+/// 中间按主题动效的侧栏收起档由 NanaUI 推进，从这一刻的透明度起步。
 #[test]
 fn hovering_a_footer_button_lights_up_the_whole_footer() {
+    use crate::shell::sidebar_view::parts::FOOTER_DIM;
+    use crate::theme_map::tiers;
     use nana_ui::runtime::{AnimatableProperty, MotionValue};
+    use nana_ui_core::MotionRole;
     use std::time::Duration;
+    let fade = tiers::motion(MotionRole::SidebarCollapse);
     let mut model = files_model();
     let mut window = mounted(&model);
     let mut input = bind(&mut window);
@@ -399,7 +403,7 @@ fn hovering_a_footer_button_lights_up_the_whole_footer() {
     };
     let start = window.document.context().animation_now();
     assert!(!model.input.footer_hover);
-    assert_eq!(opacity(&window, start), 0.44, "底部入口平时半透明");
+    assert_eq!(opacity(&window, start), FOOTER_DIM, "底部入口平时半透明");
     let settings = labeled_center(&window, "设置");
     pointer(
         &mut model,
@@ -425,14 +429,10 @@ fn hovering_a_footer_button_lights_up_the_whole_footer() {
         "悬停底部入口时整排的终点是不透明"
     );
     let now = window.document.context().animation_now();
-    assert_eq!(opacity(&window, now), 0.44, "从这一刻的透明度起步");
-    let halfway = opacity(&window, now + Duration::from_millis(175));
-    assert!(halfway > 0.44 && halfway < 1.0, "淡入中：{halfway}");
-    assert_eq!(
-        opacity(&window, now + Duration::from_millis(350)),
-        1.0,
-        "0.35s 以后不透明"
-    );
+    assert_eq!(opacity(&window, now), FOOTER_DIM, "从这一刻的透明度起步");
+    let halfway = opacity(&window, now + fade / 2);
+    assert!(halfway > FOOTER_DIM && halfway < 1.0, "淡入中：{halfway}");
+    assert_eq!(opacity(&window, now + fade), 1.0, "淡入走完以后不透明");
 }
 
 #[test]
