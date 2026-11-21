@@ -15,12 +15,12 @@ use std::collections::BTreeMap;
 use std::time::Instant;
 
 use nana_ui::ButtonKind;
-use nana_ui::runtime::view::{AnyView, IntoView, Signal, fields, text, untrack, widget};
+use nana_ui::runtime::view::{AnyView, IntoView, Signal, fields, tag_frame, text, untrack, widget};
 use nana_ui::runtime::{
     Activate, AlignSpec, Button, EmptyState, JustifySpec, LabeledValue, LengthSpec, List, ListItem,
-    ListItemRole, RadiusTier, SemanticColorRole, SettingsCard, Stack, Text,
-    TextHorizontalAlignment,
+    ListItemRole, SemanticColorRole, SettingsCard, Stack, Text, TextHorizontalAlignment,
 };
+use nana_ui_core::{TextWeight, TypeRole};
 use serde_json::Value;
 
 use crate::backend::services::repository::PluginManifest;
@@ -29,6 +29,7 @@ use super::inspect::{ArchiveFileNotice, FileFacts, InspectState};
 use super::{InspectMessage, ShellMessage, ShellViewModel};
 
 use super::files::hardlink_label;
+use super::files_view::style::typed;
 
 mod archive;
 
@@ -224,17 +225,17 @@ pub(super) fn document_bar_parts(
     })
 }
 
-/// 顶栏：一排描边小标签，第一枚是种类，正文色半粗。
+/// 顶栏：一排只显示的标签，第一枚是种类，正文色半粗。
 pub(super) fn document_toolbar_view(bar: &DocumentBar) -> AnyView {
     let mut chips = Vec::new();
     if !bar.kind.is_empty() {
-        chips.push(toolbar_chip(&bar.kind, "inspect-doc-kind", true));
+        chips.push(label_tag(&bar.kind, true, "inspect-doc-kind"));
     }
     if !bar.extension.is_empty() {
-        chips.push(toolbar_chip(&bar.extension, "inspect-doc-ext", false));
+        chips.push(label_tag(&bar.extension, false, "inspect-doc-ext"));
     }
     if let Some(pages) = &bar.pages {
-        chips.push(toolbar_chip(pages, "inspect-doc-pages", false));
+        chips.push(label_tag(pages, false, "inspect-doc-pages"));
     }
     let row = super::workbench::with_bottom_divider(
         Stack::row(8.0)
@@ -262,29 +263,33 @@ fn document_extension(model: &ShellViewModel) -> String {
         .unwrap_or_default()
 }
 
-fn toolbar_chip(label: &str, key: &str, emphasis: bool) -> AnyView {
-    let color = if emphasis {
-        SemanticColorRole::Text
+/// 只显示的标签：NanaUI 的 `tag_frame`（浅底、柔和细边、元信息字号），不能点。
+/// `emphasis` 的一枚写种类，用正文色半粗；其余是弱色中等字重。预览顶栏和搜索命中都用它。
+pub(crate) fn label_tag(label: &str, emphasis: bool, key: impl Into<String>) -> AnyView {
+    label_tag_in(tag_frame(), label, emphasis, key)
+}
+
+/// 同 [`label_tag`]，框由调用方在 `tag_frame` 上改过，例如浮在画面上要换成不透明的底。
+pub(crate) fn label_tag_in(
+    frame: Stack,
+    label: &str,
+    emphasis: bool,
+    key: impl Into<String>,
+) -> AnyView {
+    let (color, weight) = if emphasis {
+        (SemanticColorRole::Text, TextWeight::Semibold)
     } else {
-        SemanticColorRole::Muted
+        (SemanticColorRole::Muted, TextWeight::Medium)
     };
-    let weight = if emphasis { 600 } else { 400 };
-    widget(
-        Stack::row(0.0)
-            .align(AlignSpec::Center)
-            .padding_xy(8.0, 4.0)
-            .surface(SemanticColorRole::Surface)
-            .border(SemanticColorRole::Border, 1.0)
-            .radius(RadiusTier::Md),
-    )
-    .children((widget(
-        Text::new(label.to_string())
-            .color(color)
-            .font_size(12.0)
-            .font_weight(weight),
-    ),))
-    .key(key.to_string())
-    .into_any()
+    widget(frame)
+        .children((widget(
+            Text::new(label.to_string())
+                .role(TypeRole::Meta)
+                .weight(weight)
+                .color(color),
+        ),))
+        .key(key.into())
+        .into_any()
 }
 
 /// 预览右侧事实卡的四行：类型、大小、硬链接（空时不占位）和修改时间。
@@ -380,10 +385,8 @@ fn stacked_value(
         layout.padding_top = Some(LengthSpec::Px(12.0));
         column = column.style(style);
     }
-    let mut name = Text::new(label)
+    let mut name = typed(Text::new(label), 11.0, 700)
         .color(SemanticColorRole::Faint)
-        .font_size(11.0)
-        .font_weight(700)
         .line_height(17.05);
     std::sync::Arc::make_mut(&mut name.style.layout)
         .text_ext

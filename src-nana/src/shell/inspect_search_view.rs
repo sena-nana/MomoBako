@@ -10,14 +10,16 @@
 
 use std::sync::Arc;
 
+use nana_ui::icons_tabler::ALERT_CIRCLE;
 use nana_ui::runtime::view::{
-    AnyView, IntoView, Item, Signal, Store, StoreList, StorePath, computed, css, each, fields,
-    untrack, widget,
+    AnyView, IntoView, Item, Signal, Store, StoreList, StorePath, callout, computed, css, each,
+    fields, untrack, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, EmptyState, JustifySpec, LengthSpec, ListItem, RadiusTier,
+    Activate, AlignSpec, EmptyState, JustifySpec, LengthSpec, List, ListItem, RadiusTier,
     SemanticColorRole, Spinner, Stack,
 };
+use nana_ui_core::StatusTone;
 
 use super::ShellMessage;
 use super::inspect::InspectMessage;
@@ -43,13 +45,16 @@ type HitItem = Item<Store<Vec<HitRow>>, String, HitRow>;
 /// 面板不撑满整页：撑满整页的大虚线框违背 DESIGN.md「避免装饰面板」的克制原则，这里保留实际的内容高度。
 pub(crate) fn resident_search_panel(signals: SearchPanelSignals) -> AnyView {
     let status = signals.status;
-    let results = signals
-        .hits
-        .keyed(HitRow::key)
-        .each(result_row)
-        .gap(10.0)
+    // 结果行直接是 NanaUI `List` 的子节点，读屏按「搜索结果」列表念。
+    let results = signals.hits.keyed(HitRow::key).each(result_row).container(
+        widget(
+            List::new()
+                .label("搜索结果")
+                .style(Stack::column(10.0).node_style()),
+        )
         .visible(move || status.with(|status| status.listed))
-        .key("search-workbench-results");
+        .key("search-workbench-results"),
+    );
     widget(
         Stack::column(16.0)
             .padding(23.0)
@@ -152,31 +157,36 @@ fn searching_state(status: Signal<SearchStatus>) -> AnyView {
     .into_any()
 }
 
-/// 搜索失败。面板里用危险色写出真实错误，不让失败看起来像「没有结果」。
+/// 搜索失败。面板里用危险色调的 NanaUI 提示条写出真实错误，不让失败看起来像「没有结果」。
+/// 没有错误时文字为空，整条不占位。
 fn error_state(status: Signal<SearchStatus>) -> AnyView {
-    widget(state_box().border(SemanticColorRole::Danger, 1.0))
+    widget(state_margin(Stack::column(0.0).width(LengthSpec::Fill)))
         .visible(move || status.with(|status| !status.error.is_empty()))
-        .children((widgets::bound(
-            widgets::wrapping_label(String::new(), 14.0, 400, SemanticColorRole::Danger),
-            move || status.with(|status| status.error.clone()),
-        )
-        .key("search-workbench-error-text"),))
+        .children((callout(ALERT_CIRCLE, StatusTone::Danger, move || {
+            status.with(|status| status.error.clone())
+        }),))
         .key("search-workbench-error")
         .into_any()
 }
 
+/// 状态块上方留 16，左右各留 20。
+fn state_margin(frame: Stack) -> Stack {
+    frame.min_width(LengthSpec::Px(0.0)).with_layout(|layout| {
+        layout.margin_top = Some(LengthSpec::Px(16.0));
+        layout.margin_left = Some(LengthSpec::Px(20.0));
+        layout.margin_right = Some(LengthSpec::Px(20.0));
+    })
+}
+
+/// 搜索中提示框：圆角小框，横排转圈和文字。
 fn state_box() -> Stack {
-    Stack::row(8.0)
-        .align(AlignSpec::Center)
-        .padding_xy(12.0, 10.0)
-        .radius(RadiusTier::Xl)
-        .width(LengthSpec::Fill)
-        .min_width(LengthSpec::Px(0.0))
-        .with_layout(|layout| {
-            layout.margin_top = Some(LengthSpec::Px(16.0));
-            layout.margin_left = Some(LengthSpec::Px(20.0));
-            layout.margin_right = Some(LengthSpec::Px(20.0));
-        })
+    state_margin(
+        Stack::row(8.0)
+            .align(AlignSpec::Center)
+            .padding_xy(12.0, 10.0)
+            .radius(RadiusTier::Xl)
+            .width(LengthSpec::Fill),
+    )
 }
 
 /// 空状态：NanaUI 的 `EmptyState`，标题和说明按字段绑定（没有资源库 / 等待搜索条件 / 跑完没有命中）。
@@ -278,8 +288,9 @@ fn result_row(item: HitItem) -> AnyView {
     let chips = computed(move || item.try_with(|row| row.chips.clone()).unwrap_or_default());
     let chip_key = key.clone();
     let tags = each(chips, HitChip::clone, move |chip: HitChip| {
-        widgets::hint_chip(
+        super::inspect_library::label_tag(
             &chip.text,
+            false,
             format!("search-hit-chip-{chip_key}-{}", chip.index),
         )
     })

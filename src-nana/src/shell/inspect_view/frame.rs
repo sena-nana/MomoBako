@@ -13,8 +13,8 @@ use nana_ui::runtime::view::{
     AnyView, IntoView, NodeRef, Signal, dynamic, signal, untrack, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, LengthSpec, NodeStyle, RadiusTier, ScrollAxes, ScrollView,
-    SemanticColorRole, Stack, Text,
+    Activate, AlignSpec, Button, LengthSpec, NodeStyle, RadiusTier, RovingFocusGroup, ScrollAxes,
+    ScrollView, SemanticColorRole, Stack, Text, Toolbar,
 };
 use nana_ui::{ButtonKind, Icon};
 
@@ -25,6 +25,7 @@ use super::super::inspect_metadata_view::{self, MetadataSignals};
 use super::super::player_view::icons;
 use super::super::{ShellMessage, ShellViewModel};
 use super::body::{self, PreviewSnapshot};
+use crate::theme_map::disabled_paint;
 
 mod facts;
 
@@ -300,12 +301,18 @@ fn header(head: Signal<HeadView>) -> AnyView {
             super::super::input::InputMessage::RevealEntry { absolute_path },
         ));
     });
+    // 「打开」「定位」是一条不画表面的 NanaUI 工具栏，左右方向键在两个按钮之间走。
+    let actions_row = Stack::row(8.0)
+        .align(AlignSpec::Center)
+        .grow(0.0)
+        .shrink(0.0);
     let actions = widget(
-        Stack::row(8.0)
-            .align(AlignSpec::Center)
-            .grow(0.0)
-            .shrink(0.0),
+        Toolbar::new()
+            .chrome(false)
+            .label("预览操作")
+            .style(actions_row.node_style()),
     )
+    .roving_focus(RovingFocusGroup::horizontal())
     .key("inspect-preview-actions")
     .children((open, reveal));
     let titles = widget(
@@ -666,22 +673,16 @@ fn stats(
         .into_any()
 }
 
-/// 页头按钮：透明底、正文色，图标在字前，悬停铺 bg-hover。禁用时字和图标在面板底色上淡化。
-fn action_button(label: &str, icon: Icon, icon_size: f32, height: f32, disabled: bool) -> Button {
+/// 页头按钮：透明底、正文色，图标在字前，悬停铺 bg-hover。
+/// 停用色写在 `interaction.disabled` 里：字和图标在面板底色上按 sRGB 混淡，能不能点只换停用态。
+fn action_button(label: &str, icon: Icon, icon_size: f32, height: f32) -> Button {
     let mut button = Button::new(label)
         .kind(ButtonKind::Ghost)
         .icon(icon)
         .icon_size(icon_size)
-        .icon_gap(6.0)
-        .disabled(disabled);
-    button.style.interaction.disabled = nana_ui::runtime::SemanticPaint::default();
-    if disabled {
-        button.style.interaction.base.foreground_mix = Some(nana_ui_core::SemanticColorMix::new(
-            SemanticColorRole::Text,
-            SemanticColorRole::Surface,
-            crate::theme_map::DISABLED_OPACITY,
-        ));
-    }
+        .icon_gap(6.0);
+    button.style.interaction.disabled =
+        disabled_paint(SemanticColorRole::Text, SemanticColorRole::Surface);
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
     layout.height = Some(LengthSpec::Px(height));
     layout.min_height = Some(LengthSpec::Px(height));
@@ -698,26 +699,16 @@ fn action_button(label: &str, icon: Icon, icon_size: f32, height: f32, disabled:
 /// 页头按钮的文字、图标、图标尺寸和高度。
 type ActionLook = (&'static str, Icon, f32, f32);
 
-/// 页头按钮，能不能点按字段绑定：禁用态和淡化的样式一起变。
+/// 页头按钮，能不能点按字段绑定。
 fn action(
     look: ActionLook,
     key: &'static str,
     disabled: impl Fn() -> bool + Send + Clone + 'static,
 ) -> nana_ui::runtime::view::El<Button> {
     let (label, icon, icon_size, height) = look;
-    let style_disabled = disabled.clone();
-    widget(action_button(
-        label,
-        icon,
-        icon_size,
-        height,
-        untrack(&disabled),
-    ))
-    .prop::<bool, fields::button::disabled>(disabled)
-    .prop::<NodeStyle, StyleField>(move || {
-        action_button(label, icon, icon_size, height, style_disabled()).style
-    })
-    .key(key)
+    widget(action_button(label, icon, icon_size, height).disabled(untrack(&disabled)))
+        .prop::<bool, fields::button::disabled>(disabled)
+        .key(key)
 }
 
 /// 11px 半粗、弱色、字距 0.4 的眉题。
@@ -731,9 +722,7 @@ pub(super) fn eyebrow(label: &str) -> Text {
 
 /// 同眉题，字重 700。事实行和导语的标签用它。
 pub(super) fn eyebrow_bold(label: &str) -> Text {
-    let mut node = eyebrow(label);
-    std::sync::Arc::make_mut(&mut node.style.layout).font_weight = Some(700);
-    node
+    eyebrow(label).weight(nana_ui_core::TextWeight::Bold)
 }
 
 pub(super) fn text(
@@ -743,10 +732,8 @@ pub(super) fn text(
     role: SemanticColorRole,
     line_height: f32,
 ) -> Text {
-    let mut node = Text::new(label)
+    let mut node = super::super::files_view::style::typed(Text::new(label), size, weight)
         .color(role)
-        .font_size(size)
-        .font_weight(weight)
         .line_height(line_height);
     let layout = std::sync::Arc::make_mut(&mut node.style.layout);
     layout.min_width = Some(LengthSpec::Px(0.0));

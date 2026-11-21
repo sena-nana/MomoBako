@@ -19,7 +19,7 @@ use nana_ui::runtime::view::{
 use nana_ui::runtime::{
     ActionMenu, ActionMenuItem, Activate, AlignSpec, JustifySpec, LengthSpec, NodeStyle,
     PopoverAlignment, PopoverToggled, RadiusTier, Select, SelectChanged, SelectOption,
-    SemanticColorRole, Stack, TextChanged, TextInput,
+    SemanticColorRole, Stack, TextChanged, TextInput, Toolbar,
 };
 
 use super::super::files::{DisplayMode, FileContext, FileDialog, FilesMessage};
@@ -376,18 +376,24 @@ fn toolbar(signals: HeaderSignals) -> AnyView {
             FilesMessage::EmptyTrash,
         ),
     );
+    // NanaUI 的工具栏：读屏把这一排念成一组。父级卡片已经有底，不画工具栏自己的表面，
+    // 排法照原来的折行行。行里有下拉框和输入框，方向键留给它们，不做方向键焦点组。
+    let row = Stack::row(10.0)
+        .wrap(true)
+        .justify(JustifySpec::End)
+        .align(AlignSpec::Center)
+        .grow(1.0)
+        .shrink(1.0)
+        .min_width(LengthSpec::Px(0.0))
+        .with_layout(|layout| {
+            layout.flex_basis = Some(LengthSpec::Px(0.0));
+            layout.row_gap = Some(LengthSpec::Px(10.0));
+        });
     widget(
-        Stack::row(10.0)
-            .wrap(true)
-            .justify(JustifySpec::End)
-            .align(AlignSpec::Center)
-            .grow(1.0)
-            .shrink(1.0)
-            .min_width(LengthSpec::Px(0.0))
-            .with_layout(|layout| {
-                layout.flex_basis = Some(LengthSpec::Px(0.0));
-                layout.row_gap = Some(LengthSpec::Px(10.0));
-            }),
+        Toolbar::new()
+            .chrome(false)
+            .label("文件工具")
+            .style(row.node_style()),
     )
     .children(items)
     .key("file-toolbar")

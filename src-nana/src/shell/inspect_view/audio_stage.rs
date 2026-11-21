@@ -10,6 +10,7 @@ use nana_ui::runtime::{
     ScrollAxes, ScrollOffset, ScrollView, ScrollViewportChanged, SemanticColorRole, StableNodeId,
     Stack, TextHorizontalAlignment,
 };
+use nana_ui_core::ScrollEdgeFade;
 use serde_json::Value;
 
 use super::super::ShellMessage;
@@ -19,7 +20,6 @@ use super::preview_paint::VinylRecord;
 
 mod diameter;
 mod lyric_box;
-mod lyric_fade;
 pub(crate) mod lyric_focus;
 pub(crate) mod lyric_lift;
 mod lyric_pad;
@@ -37,6 +37,10 @@ const LYRIC_PASSED_MIX: f32 = LYRIC_INK * 0.62;
 const LYRIC_HOVER_MIX: f32 = 0.88 * 0.82;
 /// 歌词上下留白的初值。视口量出来以前，上下留白先用它。
 const LYRIC_INSET_INITIAL: f32 = 104.0;
+/// 歌词视口顶上渐隐带占视口高度的比例。
+const LYRIC_FADE_TOP: f32 = 0.12;
+/// 歌词视口底下渐隐带占视口高度的比例。
+const LYRIC_FADE_BOTTOM: f32 = 0.14;
 /// 唱片舞台上的三行字：标题、副标题，以及非空时画在「音频」旁边的专辑。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct AudioCaption {
@@ -397,6 +401,7 @@ fn lyric_body(
             .into_any();
     }
     let inset = signal(LYRIC_INSET_INITIAL);
+    let fade = signal(ScrollEdgeFade::default());
     let rows = lines
         .iter()
         .enumerate()
@@ -443,17 +448,20 @@ fn lyric_body(
     }))
     .children((track,))
     .key("inspect-audio-lyric-scroll")
+    .bind(move |view: &mut ScrollView| set_lyric_edge_fade(view, fade.get()))
     .on_cx(move |_view, event: &ScrollViewportChanged, cx| {
-        center_lyric_viewport(event, active, inset, cx)
+        center_lyric_viewport(event, active, inset, fade, cx)
     })
     .into_any()
 }
 
-/// 视口高度有了以后收成按视口算的留白，并按行号先滚一次。实测盒子由 [`follow_active_lyric`] 收口。
+/// 视口高度有了以后收成按视口算的留白和上下渐隐带，并按行号先滚一次。
+/// 实测盒子由 [`follow_active_lyric`] 收口。
 fn center_lyric_viewport(
     event: &ScrollViewportChanged,
     active: Option<usize>,
     inset: nana_ui::runtime::view::Signal<f32>,
+    fade: nana_ui::runtime::view::Signal<ScrollEdgeFade>,
     cx: &mut nana_ui::runtime::ViewContext<'_, ScrollView>,
 ) {
     if !event.height.is_finite() {
@@ -463,6 +471,7 @@ fn center_lyric_viewport(
     if event.height <= 0.0 {
         return;
     }
+    fade.set_if_changed(lyric_edge_fade(event.height));
     let next = lyric_inset(event.height);
     if inset.with_untracked(|current| (*current - next).abs() >= 0.5) {
         inset.set(next);
@@ -474,6 +483,26 @@ fn center_lyric_viewport(
     let id = cx.entity().stable_id();
     cx.mutations()
         .set_scroll_offset(id, ScrollOffset { x: 0.0, y });
+}
+
+/// 把渐隐带写进滚动区样式。滚动区连同歌词合成一层淡出，每一行原来的明暗、放大和投影都不动。
+/// 视口量出来以前两条带都是 0，不做合成。带长没变时不改样式。
+fn set_lyric_edge_fade(view: &mut ScrollView, fade: ScrollEdgeFade) {
+    let next = fade.is_active().then_some(fade);
+    if view.style.layout.paint.scroll_edge_fade == next {
+        return;
+    }
+    std::sync::Arc::make_mut(&mut view.style.layout)
+        .paint
+        .scroll_edge_fade = next;
+}
+
+/// 视口高度对应的上下渐隐带：顶上 12%，底下 14%，按整像素取，免得布局的亚像素抖动来回改样式。
+fn lyric_edge_fade(viewport: f32) -> ScrollEdgeFade {
+    ScrollEdgeFade::new(
+        (viewport * LYRIC_FADE_TOP).round(),
+        (viewport * LYRIC_FADE_BOTTOM).round(),
+    )
 }
 
 /// 歌词上下留白：至少 96，否则是视口高度的一半，向下取整。
@@ -505,20 +534,14 @@ pub(crate) struct LyricFollow {
     scroll: StableNodeId,
     active: Option<StableNodeId>,
     viewport: u32,
-    fade_key: Option<u64>,
 }
 
-/// 当前行滚到视口正中，再按上下遮罩给每行套不透明度。滚或淡出变了就再画一帧。
+/// 当前行滚到视口正中。没有滚动区或当前行就不改偏移，视口高或当前行变了才滚。
+/// 滚动偏移变了返回 `true`，调用方据此再画一帧。
 pub(crate) fn follow_active_lyric(
     document: &mut RuntimeDocument,
     followed: &mut Option<LyricFollow>,
 ) -> bool {
-    let moved = sync_lyric_center(document, followed);
-    lyric_fade::apply(document, followed) || moved
-}
-
-/// 没有滚动区或当前行就不改偏移。视口高或当前行变了才滚。
-fn sync_lyric_center(document: &mut RuntimeDocument, followed: &mut Option<LyricFollow>) -> bool {
     if followed
         .as_ref()
         .is_some_and(|state| lyric_follow_holds(document, state))
@@ -553,7 +576,6 @@ fn sync_lyric_center(document: &mut RuntimeDocument, followed: &mut Option<Lyric
             scroll,
             active: None,
             viewport: viewport_bits,
-            fade_key: None,
         });
         return false;
     };
@@ -586,7 +608,6 @@ fn sync_lyric_center(document: &mut RuntimeDocument, followed: &mut Option<Lyric
         scroll,
         active: Some(active_id),
         viewport: viewport_bits,
-        fade_key: None,
     });
     moved
 }

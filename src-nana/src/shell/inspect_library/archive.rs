@@ -171,15 +171,12 @@ pub(super) fn archive_stage_view(stage: ArchiveStage) -> AnyView {
     } else {
         SemanticColorRole::Text
     };
-    let mut title = Text::new(stage.title)
+    let mut title = typed(Text::new(stage.title), 13.0, 600)
         .color(title_role)
-        .font_size(13.0)
-        .font_weight(600)
         .line_height(20.15);
     title.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
-    let mut detail = Text::new(stage.detail)
+    let mut detail = typed(Text::new(stage.detail), 12.0, 400)
         .color(SemanticColorRole::Muted)
-        .font_size(12.0)
         .line_height(18.6);
     detail.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
     widget(
@@ -285,12 +282,14 @@ pub(super) fn archive_row(
         ArchiveRow::File(name, note) => {
             archive_file_row(key, name, note, directory, open_files, picked)
         }
-        ArchiveRow::Ellipsis => widget(ListItem::new("…")).key(key).into_any(),
+        ArchiveRow::Ellipsis => widget(ListItem::new("…").read_only(true))
+            .key(key)
+            .into_any(),
     }
 }
 
 /// zip/7z 的文件行单击就打开，点开的这一行标成当前项。
-/// rar 的整路径列表没有目录头，行不可点。行首种类不改大小。
+/// rar 的整路径列表没有目录头，行只显示，不接指针也不进 Tab。行首种类不改大小。
 pub(super) fn archive_file_row(
     key: String,
     name: &str,
@@ -302,7 +301,7 @@ pub(super) fn archive_file_row(
     let kind_key = archive_kind_key(&key);
     let mut item = ListItem::new(name.to_string()).detail(note.to_string());
     if !open_files {
-        return widget(item)
+        return widget(item.read_only(true))
             .key(key)
             .leading(archive_kind_mark(&file_kind_label(name), &kind_key))
             .into_any();
@@ -336,7 +335,7 @@ pub(super) fn archive_kind_mark(label: &str, key: &str) -> AnyView {
     let mark = Text::new(label.to_string())
         .color(SemanticColorRole::Muted)
         .font_size(10.0)
-        .font_weight(700);
+        .weight(TextWeight::Bold);
     widget(
         Stack::row(0.0)
             .align(AlignSpec::Center)

@@ -18,8 +18,8 @@ use std::collections::BTreeMap;
 use nana_ui::ButtonKind;
 use nana_ui::runtime::view::{AnyView, IntoView, widget};
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, EmptyState, JustifySpec, LengthSpec, ListItem, ListItemRole,
-    RadiusTier, ScrollAxes, ScrollView, SemanticColorRole, Stack, Text,
+    Activate, AlignSpec, Button, EmptyState, JustifySpec, LengthSpec, List, ListItem, RadiusTier,
+    RovingFocusGroup, ScrollAxes, ScrollView, SemanticColorRole, Stack, Text, Toolbar,
 };
 use serde_json::Value;
 
@@ -318,6 +318,7 @@ pub(super) fn panels_view(panels: &AsmrPanels) -> AnyView {
         let mut card = vec![queue_head("作品队列", count, "inspect-asmr-queue-head")];
         card.push(queue_list(
             work_queue_rows(items),
+            "作品队列",
             "inspect-asmr-queue-list",
         ));
         rows.push(queue_card("inspect-asmr-queue", card));
@@ -336,13 +337,11 @@ pub(super) fn panels_view(panels: &AsmrPanels) -> AnyView {
 }
 
 /// 作品队列有条目时的行。左右结构和播放列表相同，但作品队列不标当前项
-/// （当前音轨已经滤掉），所以不铺 `--accent-soft`，底保持透明。没有条目时不调用。
+/// （当前音轨已经滤掉），所以没有选中行。没有条目时不调用。
 fn work_queue_rows(items: &[QueueLine]) -> Vec<AnyView> {
-    let last = items.len().saturating_sub(1);
     items
         .iter()
-        .enumerate()
-        .map(|(index, line)| {
+        .map(|line| {
             queue_item(
                 format!(
                     "inspect-asmr-queue-{}",
@@ -352,19 +351,16 @@ fn work_queue_rows(items: &[QueueLine]) -> Vec<AnyView> {
                 &line.status,
                 &line.path,
                 false,
-                index != last,
             )
         })
         .collect()
 }
 
-/// 播放列表有条目时的行。正在预览的那一条铺 `--accent-soft`，悬停也留着这层底。没有条目时不调用。
+/// 播放列表有条目时的行。正在预览的那一条是选中行。没有条目时不调用。
 fn playlist_lines(items: &[playlist::PlaylistLine]) -> Vec<AnyView> {
-    let last = items.len().saturating_sub(1);
     items
         .iter()
-        .enumerate()
-        .map(|(index, line)| {
+        .map(|line| {
             queue_item(
                 format!(
                     "inspect-asmr-playlist-{}",
@@ -374,106 +370,29 @@ fn playlist_lines(items: &[playlist::PlaylistLine]) -> Vec<AnyView> {
                 &line.status,
                 &line.path,
                 line.current,
-                index != last,
             )
         })
         .collect()
 }
 
-/// 队列里的一行：左标题、右 11px 弱色状态，间距 12。
-/// 整行至少 36px，内边距 7×10，除最后一条外底边 border-soft。`current` 为真时铺 `--accent-soft`。
-/// 点了打开这个文件。
-fn queue_item(
-    key: String,
-    title: &str,
-    status: &str,
-    path: &str,
-    current: bool,
-    ruled: bool,
-) -> AnyView {
+/// 队列里的一行：NanaUI 的 `ListItem`，标题是主文本、状态画在行尾。
+/// `current` 为真时是选中行。点了打开这个文件。
+fn queue_item(key: String, title: &str, status: &str, path: &str, current: bool) -> AnyView {
     let target = path.to_string();
-    let mut item = ListItem::new(title.to_string()).role(ListItemRole::Button);
-    let mut style = item.style.clone();
-    style.background = current.then_some(SemanticColorRole::AccentSoft);
-    style.radius = None;
-    style.control_height = None;
-    style.control_padding_x = None;
-    style.foreground = Some(SemanticColorRole::Text);
-    let resting = if current {
-        Some(SemanticColorRole::AccentSoft)
-    } else {
-        Some(SemanticColorRole::Hover)
-    };
-    style.interaction.hovered.background = resting;
-    style.interaction.pressed.background = resting;
-    if ruled {
-        style.border = Some(SemanticColorRole::BorderSoft);
-    }
-    let layout = std::sync::Arc::make_mut(&mut style.layout);
+    let mut item = ListItem::new(title.to_string())
+        .detail(status.to_string())
+        .selected(current);
+    let layout = std::sync::Arc::make_mut(&mut item.style.layout);
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
-    layout.min_height = Some(LengthSpec::Px(36.0));
-    layout.padding_left = Some(LengthSpec::Px(10.0));
-    layout.padding_right = Some(LengthSpec::Px(10.0));
-    layout.padding_top = Some(LengthSpec::Px(7.0));
-    layout.padding_bottom = Some(LengthSpec::Px(7.0));
-    layout.font_size = None;
-    layout.line_height = None;
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
-    if ruled {
-        layout.border_sides.bottom_width = Some(1.0);
-    }
-    item = item.style(style);
-    let mut children = vec![widget(queue_title(title)).into_any()];
-    if !status.is_empty() {
-        children.push(
-            widget(queue_status(status))
-                .key(format!("{key}-status"))
-                .into_any(),
-        );
-    }
     widget(item)
-        .content(
-            widget(
-                Stack::row(12.0)
-                    .align(AlignSpec::Center)
-                    .justify(JustifySpec::SpaceBetween)
-                    .width(LengthSpec::Fill)
-                    .min_width(LengthSpec::Px(0.0)),
-            )
-            .children(children),
-        )
         .key(key)
         .on_cx(move |_, _: &Activate, cx| {
             cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::Open(target.clone())))
         })
         .into_any()
-}
-
-/// 行左的标题。字号跟着页面正文走，过长省略。
-fn queue_title(title: &str) -> Text {
-    let mut text = Text::new(title.to_string()).color(SemanticColorRole::Text);
-    let layout = std::sync::Arc::make_mut(&mut text.style.layout);
-    layout.min_width = Some(LengthSpec::Px(0.0));
-    layout.flex_grow = Some(1.0);
-    layout.flex_shrink = Some(1.0);
-    layout.width = Some(LengthSpec::Px(0.0));
-    layout.text_overflow_ellipsis = true;
-    layout.white_space_nowrap = true;
-    text
-}
-
-/// 行右的状态：11px、弱色、不收缩。
-fn queue_status(status: &str) -> Text {
-    let mut text = Text::new(status.to_string())
-        .color(SemanticColorRole::Muted)
-        .font_size(11.0);
-    let layout = std::sync::Arc::make_mut(&mut text.style.layout);
-    layout.flex_grow = Some(0.0);
-    layout.flex_shrink = Some(0.0);
-    layout.width = Some(LengthSpec::Shrink);
-    text
 }
 
 fn playlist_view(playlist: &playlist::PlaylistPanel) -> AnyView {
@@ -489,6 +408,7 @@ fn playlist_view(playlist: &playlist::PlaylistPanel) -> AnyView {
     } else {
         rows.push(queue_list(
             playlist_lines(&playlist.items),
+            "播放列表",
             "inspect-asmr-playlist-list",
         ));
     }
@@ -496,6 +416,7 @@ fn playlist_view(playlist: &playlist::PlaylistPanel) -> AnyView {
 }
 
 /// 「加入作品」「随机」「清空」：间距 6、内边距 8×10、底边 border-soft。
+/// 是一条 NanaUI 工具栏，左右方向键在三个按钮之间走。
 fn playlist_actions(audio: bool, empty: bool) -> AnyView {
     let row = super::workbench::with_bottom_divider(
         Stack::row(6.0)
@@ -505,26 +426,32 @@ fn playlist_actions(audio: bool, empty: bool) -> AnyView {
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
     );
-    widget(row)
-        .key("inspect-asmr-playlist-actions")
-        .children((
-            widget(queue_action("加入作品", !audio))
-                .key("inspect-asmr-add-work")
-                .on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::AddWork));
-                }),
-            widget(queue_action("随机", !audio))
-                .key("inspect-asmr-random")
-                .on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::AddRandom));
-                }),
-            widget(queue_action("清空", empty))
-                .key("inspect-asmr-clear")
-                .on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::ClearPlaylist));
-                }),
-        ))
-        .into_any()
+    widget(
+        Toolbar::new()
+            .chrome(false)
+            .label("播放列表操作")
+            .style(row.node_style()),
+    )
+    .roving_focus(RovingFocusGroup::horizontal())
+    .key("inspect-asmr-playlist-actions")
+    .children((
+        widget(queue_action("加入作品", !audio))
+            .key("inspect-asmr-add-work")
+            .on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::AddWork));
+            }),
+        widget(queue_action("随机", !audio))
+            .key("inspect-asmr-random")
+            .on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::AddRandom));
+            }),
+        widget(queue_action("清空", empty))
+            .key("inspect-asmr-clear")
+            .on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::ClearPlaylist));
+            }),
+    ))
+    .into_any()
 }
 
 /// 队列操作钮：至少 28px 高，左右 8、上下 4，12px 字，幽灵按钮样式。
@@ -572,17 +499,23 @@ fn queue_head(label: &str, count: &str, key: &str) -> AnyView {
         .children((
             widget(super::workbench::meta(label)),
             widget(
-                Text::new(count.to_string())
-                    .color(SemanticColorRole::Text)
-                    .font_size(12.0)
-                    .font_weight(700),
+                super::files_view::style::typed(Text::new(count.to_string()), 12.0, 700)
+                    .color(SemanticColorRole::Text),
             ),
         ))
         .into_any()
 }
 
 /// 条目列表最高 176px，多了就在卡片里滚动，整张队列仍留在页底播放条上方。
-fn queue_list(items: Vec<AnyView>, key: &str) -> AnyView {
+/// 行放在带可访问名的 NanaUI `List` 里，读屏按列表念；列表四周留 4px，行的悬停和选中底不贴卡片边。
+fn queue_list(items: Vec<AnyView>, label: &str, key: &str) -> AnyView {
+    let list = List::new().label(label).style(
+        Stack::column(0.0)
+            .width(LengthSpec::Fill)
+            .min_width(LengthSpec::Px(0.0))
+            .padding(4.0)
+            .node_style(),
+    );
     widget(ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
         layout.max_height = Some(LengthSpec::Px(176.0));
         layout.width = Some(LengthSpec::Fill);
@@ -590,7 +523,7 @@ fn queue_list(items: Vec<AnyView>, key: &str) -> AnyView {
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(0.0);
     }))
-    .children(items)
+    .children((widget(list).children(items),))
     .key(key.to_string())
     .into_any()
 }

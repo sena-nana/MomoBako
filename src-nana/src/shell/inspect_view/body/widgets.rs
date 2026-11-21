@@ -19,28 +19,9 @@ pub(super) fn toolbar(chips: Vec<AnyView>, key: &'static str) -> AnyView {
     widget(bar).children(chips).key(key).into_any()
 }
 
-/// 顶栏标签：bg-elev 底、border 细边、8px 圆角，12px 字。第一枚是种类，正文色半粗。
+/// 顶栏标签：只显示的 NanaUI 标签，第一枚是种类，正文色半粗。
 pub(super) fn chip(label: &str, emphasis: bool, key: &str) -> AnyView {
-    let role = if emphasis {
-        SemanticColorRole::Text
-    } else {
-        SemanticColorRole::Muted
-    };
-    let weight = if emphasis { 600 } else { 400 };
-    widget(
-        Stack::row(6.0)
-            .align(AlignSpec::Center)
-            .min_height(LengthSpec::Px(26.0))
-            .padding_xy(8.0, 4.0)
-            .surface(SemanticColorRole::Surface)
-            .border(SemanticColorRole::Border, 1.0)
-            .radius(RadiusTier::Md)
-            .grow(0.0)
-            .shrink(0.0),
-    )
-    .children((widget(text(label, 12.0, weight, role, 18.6)),))
-    .key(key.to_string())
-    .into_any()
+    inspect_library::label_tag(label, emphasis, key)
 }
 
 /// 把 RGBA 按 contain（或 cover）画进铺满的盒子，底色是 bg。
@@ -248,35 +229,22 @@ pub(super) fn orbit_controls() -> AnyView {
     .into_any()
 }
 
-/// 画面上的小标签：26px 高、border 细边、8px 圆角，12px 半粗弱色字。尺寸底是 bg-elev 的 88%。
+/// 画面上的小标签：NanaUI 的标签，浮在模型画面上，所以底换成 bg-elev；尺寸标签的底是 bg-elev 的 88%。
 pub(super) fn hud_chip(label: &str, key: &'static str) -> AnyView {
-    let frame = Stack::row(0.0)
-        .align(AlignSpec::Center)
-        .min_height(LengthSpec::Px(26.0))
-        .padding_xy(8.0, 4.0)
-        .border(SemanticColorRole::Border, 1.0)
-        .radius(RadiusTier::Md);
+    let frame = tag_frame();
     let frame = if key == "inspect-model-hud-size" {
-        let style = frame
+        let mut style = frame
             .node_style()
             .surface_mix(nana_ui_core::SemanticColorMix::alpha(
                 SemanticColorRole::Surface,
                 0.88,
             ));
+        style.background = None;
         frame.style(style)
     } else {
         frame.surface(SemanticColorRole::Surface)
     };
-    widget(frame)
-        .children((widget(text(
-            label,
-            12.0,
-            600,
-            SemanticColorRole::Muted,
-            18.6,
-        )),))
-        .key(key)
-        .into_any()
+    inspect_library::label_tag_in(frame, label, false, key)
 }
 
 /// 失败浮层铺满预览框。底是 `color-mix(in srgb, var(--bg) 74%, transparent)`，失败时才画。
