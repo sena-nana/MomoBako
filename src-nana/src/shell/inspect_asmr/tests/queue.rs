@@ -25,7 +25,7 @@ fn work_queue_sorts_tracks_naturally() {
 
 /// 作品队列行是左标题、右状态，不是「标题 状态」一整句。状态是 `listeningStatus` 原文，
 /// 没有这个字段时是占位 `unlistened`。正在预览的音轨不在队列里，
-/// 行底保持透明（作品队列不标当前项）；没有别的音轨时不编造作品。
+/// 作品队列不标当前项，行不画成选中；没有别的音轨时不编造作品。
 #[test]
 fn work_queue_splits_the_title_from_the_status() {
     let files = [
@@ -78,52 +78,26 @@ fn work_queue_splits_the_title_from_the_status() {
 
     let mut harness = crate::shell::view_harness::ShellHarness::mount(model);
     harness.frame();
-    let labels = harness
-        .nodes()
-        .into_iter()
-        .filter_map(|node| node.label.map(|label| label.to_string()))
-        .collect::<Vec<_>>();
-    assert!(labels.iter().any(|label| label == "第二轨"), "{labels:?}");
-    assert!(
-        labels.iter().any(|label| label == "unlistened"),
-        "{labels:?}"
-    );
-    assert!(
-        !labels.iter().any(|label| label.contains("第二轨 ")),
-        "标题和状态还粘在一句里：{labels:?}"
-    );
-
     let row_key = "inspect-asmr-queue-work\u{2215}02.mp3";
     let row = harness.keyed(row_key).expect("作品队列行");
-    let row_style = harness
-        .document()
-        .context()
-        .world()
-        .node_style(row)
-        .expect("行样式");
+    let world = harness.document().context().world();
+    assert_eq!(world.text(row), Some("第二轨"), "行上主文本只有标题");
+    let access = world.accessibility(row).expect("行的无障碍");
     assert_eq!(
-        row_style.background, None,
-        "作品队列没有 is-active，不铺 accent-soft"
+        access.label.as_deref(),
+        Some("第二轨  unlistened"),
+        "状态是行尾补充，读屏在标题后面念"
     );
-    assert_eq!(
-        row_style.interaction.hovered.background,
-        Some(nana_ui::runtime::SemanticColorRole::Hover)
-    );
-
-    let status = harness
-        .keyed(&format!("{row_key}-status"))
-        .expect("右侧状态");
-    let status_style = harness
-        .document()
-        .context()
-        .world()
-        .node_style(status)
-        .expect("状态样式");
-    assert_eq!(status_style.layout.font_size, Some(11.0));
-    assert_eq!(
-        status_style.foreground,
-        Some(nana_ui::runtime::SemanticColorRole::Muted)
-    );
+    assert_ne!(access.selected, Some(true), "作品队列没有当前项，不画成选中");
+    let list = harness
+        .keyed("inspect-asmr-queue-list")
+        .expect("作品队列列表");
+    let named = harness.nodes().into_iter().any(|node| {
+        node.role == nana_ui::runtime::AccessibilityRole::List
+            && node.label.as_deref() == Some("作品队列")
+            && world.is_descendant_or_self(node.id, list)
+    });
+    assert!(named, "队列行放在带名字的列表里");
 }
 
 /// 作品队列按预览条目和当前列表取音轨：

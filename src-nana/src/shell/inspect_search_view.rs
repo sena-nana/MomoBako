@@ -17,7 +17,7 @@ use nana_ui::runtime::view::{
 };
 use nana_ui_core::StatusTone;
 use nana_ui::runtime::{
-    Activate, AlignSpec, EmptyState, JustifySpec, LengthSpec, ListItem, RadiusTier,
+    Activate, AlignSpec, EmptyState, JustifySpec, LengthSpec, List, ListItem, RadiusTier,
     SemanticColorRole, Spinner, Stack,
 };
 
@@ -45,13 +45,12 @@ type HitItem = Item<Store<Vec<HitRow>>, String, HitRow>;
 /// 面板不撑满整页：撑满整页的大虚线框违背 DESIGN.md「避免装饰面板」的克制原则，这里保留实际的内容高度。
 pub(crate) fn resident_search_panel(signals: SearchPanelSignals) -> AnyView {
     let status = signals.status;
-    let results = signals
-        .hits
-        .keyed(HitRow::key)
-        .each(result_row)
-        .gap(10.0)
-        .visible(move || status.with(|status| status.listed))
-        .key("search-workbench-results");
+    // 结果行直接是 NanaUI `List` 的子节点，读屏按「搜索结果」列表念。
+    let results = signals.hits.keyed(HitRow::key).each(result_row).container(
+        widget(List::new().label("搜索结果").style(Stack::column(10.0).node_style()))
+            .visible(move || status.with(|status| status.listed))
+            .key("search-workbench-results"),
+    );
     widget(
         Stack::column(16.0)
             .padding(23.0)
