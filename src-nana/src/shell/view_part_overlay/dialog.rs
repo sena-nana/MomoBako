@@ -33,7 +33,9 @@ use super::session::{OverlaySession, register};
 use crate::shell::ShellMessage;
 
 mod form;
-pub(crate) use form::{Choices, select_field, text_area_field, text_field, two_columns};
+pub(crate) use form::{
+    Choices, form_field, select_field, text_area_field, text_field, two_columns,
+};
 
 /// 处理中的判断，事件处理器和绑定都要读，所以共享一份。
 pub(crate) type BusyFn = Arc<dyn Fn() -> bool + Send + Sync>;

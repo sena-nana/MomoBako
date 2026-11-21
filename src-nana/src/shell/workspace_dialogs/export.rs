@@ -22,8 +22,8 @@ use nana_ui_core::Icon;
 use crate::shell::files::FilesMessage;
 use crate::shell::files_view::style;
 use crate::shell::view_part_overlay::dialog::{
-    Choices, DialogFrame, action, action_button, footer, select_field, text_field, two_columns,
-    wrapping_text,
+    Choices, DialogFrame, action, action_button, footer, form_field, select_field, text_field,
+    two_columns, wrapping_text,
 };
 use crate::shell::view_part_overlay::session::{Draft, Projected};
 use crate::shell::{ShellMessage, ShellViewModel};
@@ -286,29 +286,17 @@ fn output_field(
     let input = PathField::new(path.get_untracked())
         .label("输出路径")
         .placeholder("选择保存位置");
-    widget(Stack::column(6.0).width(LengthSpec::Fill))
-        .children((
-            widget(style::text(
-                "输出路径",
-                12.0,
-                600,
-                SemanticColorRole::Muted,
-                18.6,
-            ))
-            .key("export-output-label"),
-            widget(input)
-                .key("export-output")
-                .prop::<String, PathValue>(path)
-                .prop::<bool, PathDisabled>(busy)
-                .on_cx(|_, event: &TextChanged, cx| {
-                    cx.dispatch_program_all(export_field("output")(event.value.to_string()))
-                })
-                .on_cx(|_, _: &BrowseRequested, cx| {
-                    cx.dispatch_program_all(file_message(FilesMessage::ChooseExportOutput))
-                }),
-        ))
-        .key("export-output-row")
-        .into_any()
+    let control = widget(input)
+        .key("export-output")
+        .prop::<String, PathValue>(path)
+        .prop::<bool, PathDisabled>(busy)
+        .on_cx(|_, event: &TextChanged, cx| {
+            cx.dispatch_program_all(export_field("output")(event.value.to_string()))
+        })
+        .on_cx(|_, _: &BrowseRequested, cx| {
+            cx.dispatch_program_all(file_message(FilesMessage::ChooseExportOutput))
+        });
+    form_field("输出路径", "export-output", control)
 }
 
 /// 路径框的值。框架把用户输入写回 `value`，所以回显同一个值时不动输入框。
