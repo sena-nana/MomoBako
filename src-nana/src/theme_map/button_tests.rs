@@ -10,51 +10,6 @@ use std::path::Path;
 /// 写死、两套主题共用的颜色。没用上的条目也算失败，免得清单过时。
 const ALLOWED_LITERALS: &[(&str, &str, &str)] = &[
     (
-        "files_view/style.rs",
-        "[58.0 / 255.0, 58.0 / 255.0, 58.0 / 255.0, 1.0]",
-        "缩略图占位底（深色），index.css `--thumbnail-placeholder-bg`",
-    ),
-    (
-        "files_view/style.rs",
-        "[216.0 / 255.0, 220.0 / 255.0, 226.0 / 255.0, 1.0]",
-        "缩略图占位底（浅色），index.css `--thumbnail-placeholder-bg`",
-    ),
-    (
-        "files_view/style.rs",
-        "[199.0 / 255.0, 165.0 / 255.0, 102.0 / 255.0, 1.0]",
-        "文件夹缩略图渐变起点，filePresentation.ts",
-    ),
-    (
-        "files_view/style.rs",
-        "[115.0 / 255.0, 85.0 / 255.0, 47.0 / 255.0, 1.0]",
-        "文件夹缩略图渐变终点，filePresentation.ts",
-    ),
-    (
-        "files_view/style.rs",
-        "[1.0, 1.0, 1.0, 0.92]",
-        "缩略图上的类型图标，workspace.css `rgba(255, 255, 255, 0.92)`",
-    ),
-    (
-        "inspect_metadata_view.rs",
-        "[212.0 / 255.0, 166.0 / 255.0, 61.0 / 255.0, 1.0]",
-        "评分星的金色，`.file-metadata-card__star.is-active`",
-    ),
-    (
-        "inspect_view/body/widgets.rs",
-        "[0.02, 0.02, 0.02, 1.0]",
-        "视频画面的黑底，`.media-preview__video`",
-    ),
-    (
-        "inspect_view/page.rs",
-        "[1.0, 1.0, 1.0, 1.0]",
-        "PDF 页纸，`.office-preview__viewer--pdf canvas`",
-    ),
-    (
-        "inspect_view/page.rs",
-        "[0.0, 0.0, 0.0, 0.24]",
-        "PDF 页纸投影，`.office-preview__viewer--pdf canvas`",
-    ),
-    (
         "admin/source_page.rs",
         "[1.0, 1.0, 1.0, 1.0]",
         "扫码登录二维码图片的白底，`.source-auth-settings__qr` 的 `background: white`",
