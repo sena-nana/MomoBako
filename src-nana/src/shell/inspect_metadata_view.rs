@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use nana_ui::icons_tabler::{COPY, EXTERNAL_LINK, LINK, MESSAGE, STAR};
 use nana_ui::runtime::view::{
-    AnyView, El, IntoView, Signal, dynamic, each, fields, signal, widget,
+    AnyView, El, IntoView, Signal, css, dynamic, each, fields, signal, widget,
 };
 use nana_ui::runtime::{
     Activate, AlignSpec, IconButton, IconGlyph, JustifySpec, LengthSpec, ListItem, NodeStyle,
@@ -29,7 +29,7 @@ use nana_ui::runtime::{
 use nana_ui_core::{Icon, SpacingStep};
 use serde_json::Value;
 
-use crate::theme_map::tiers::{self, Edge};
+use crate::theme_map::tiers::{self, Edge, Hairline};
 
 use crate::host_api::openable_url;
 
@@ -248,7 +248,7 @@ pub(super) fn metadata_panel(signals: MetadataSignals) -> AnyView {
             LibrarySection::clone,
             super::inspect_library::library_card,
         )
-        .gap(tiers::space_px(SpacingStep::Xl))
+        .css(css! { gap: theme(space-xl); })
         .visible(move || library.with(|sections| !sections.is_empty())),
         parts::candidate_section(signals),
         each(
@@ -263,7 +263,7 @@ pub(super) fn metadata_panel(signals: MetadataSignals) -> AnyView {
                 )
             },
         )
-        .gap(tiers::space_px(SpacingStep::Xl))
+        .css(css! { gap: theme(space-xl); })
         .key("inspect-custom")
         .visible(move || custom.with(|rows| !rows.is_empty())),
     );
@@ -392,7 +392,7 @@ fn inline_field(
     tiers::padding(layout, &Edge::X, SpacingStep::Lg);
     layout.border_width = Some(0.0);
     layout.theme.border_width = None;
-    let frame = style::hairline(
+    let frame = Hairline::hairline(
         style::row(SpacingStep::Md)
             .align(AlignSpec::Center)
             .width(LengthSpec::Fill)
@@ -492,7 +492,7 @@ fn star_style(active: bool, locked: bool) -> NodeStyle {
     }
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
-    layout.opacity = locked.then_some(style::disabled_opacity());
+    layout.opacity = locked.then_some(crate::theme_map::tiers::DISABLED_OPACITY);
     style.radius(RadiusTier::Full)
 }
 

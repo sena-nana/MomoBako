@@ -12,8 +12,8 @@ use nana_ui::runtime::{
 };
 use nana_ui_core::{RadiusTier, SemanticColorMix, SemanticColorRole};
 
-use super::super::files_view::style::mix_rgb;
 use super::presenter::SwatchColor;
+use crate::theme_map::mix_rgb;
 
 /// 色块直径 9px：色块尺寸不是间距，照写像素。
 pub(crate) const SWATCH_SIZE: f32 = 9.0;

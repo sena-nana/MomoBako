@@ -10,7 +10,7 @@ use nana_ui::runtime::{Button, ScrollView, TextInput};
 
 pub(crate) use super::super::field_bind::ButtonIcon;
 use super::super::hot::ModelField;
-use super::style::disabled_opacity;
+use crate::theme_map::tiers::DISABLED_OPACITY;
 
 /// 行里的一段文字。行已经删掉时读空串，不去读不存在的行。
 pub(crate) fn row_text<P: StorePath>(
@@ -48,7 +48,7 @@ impl FieldWrite<Button, bool> for ActionDisabled {
 
     fn write(target: &mut Button, disabled: bool) {
         target.disabled = disabled;
-        let opacity = disabled.then_some(disabled_opacity());
+        let opacity = disabled.then_some(DISABLED_OPACITY);
         if target.style.layout.opacity != opacity {
             std::sync::Arc::make_mut(&mut target.style.layout).opacity = opacity;
         }
@@ -56,7 +56,7 @@ impl FieldWrite<Button, bool> for ActionDisabled {
 
     fn differs(target: &Button, disabled: &bool) -> bool {
         target.disabled != *disabled
-            || target.style.layout.opacity != disabled.then_some(disabled_opacity())
+            || target.style.layout.opacity != disabled.then_some(DISABLED_OPACITY)
     }
 }
 

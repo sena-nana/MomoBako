@@ -613,7 +613,7 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
             None,
         )
     };
-    let mut note = crate::theme_map::text_line_height(
+    let mut note = crate::theme_map::tiers::text_line_px(
         parts::label_text(
             "当前仅完成后端配置入口与服务端抽象。远端适配器尚未实现，请先用于配置演进与契约联调。",
             12.0,
@@ -738,7 +738,7 @@ fn popover_error(error: impl Fn() -> String + Send + 'static) -> AnyView {
 fn top_divider(column: Stack, gap: SpacingStep) -> Stack {
     let column = column.with_layout(|layout| {
         tiers::padding(layout, &[Edge::Top], gap);
-        crate::theme_map::border_side(layout, Edge::Top, 1);
+        crate::theme_map::tiers::border_side(layout, Edge::Top, 1);
     });
     let mut style = column.node_style();
     style.border = Some(SemanticColorRole::BorderSoft);

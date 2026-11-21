@@ -29,7 +29,7 @@ use super::super::{ShellMessage, ShellViewModel};
 use super::bind::DraftField;
 use super::file_message;
 use super::style::{self, ButtonLook, Height};
-use crate::theme_map::tiers::{self, Edge};
+use crate::theme_map::tiers::{self, Edge, Hairline};
 use nana_ui_core::{ControlSize, SpacingStep, TextWeight};
 
 /// 左列的文字：眉题和分类视图的说明（空时不占位）。
@@ -451,8 +451,7 @@ fn display_mode_field(mode: Signal<DisplayMode>) -> AnyView {
         layout.min_height = Some(LengthSpec::Px(style::TOOLBAR_HEIGHT));
         layout.width = Some(LengthSpec::percent_offset(100.0, hairline * 2.0));
         layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.margin_left = Some(LengthSpec::Px(-hairline));
-        layout.margin_top = Some(LengthSpec::Px(-hairline));
+        tiers::margin_by(layout, &[Edge::Left, Edge::Top], tiers::hairline_expr(-1.0));
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(0.0);
     }
@@ -464,7 +463,7 @@ fn display_mode_field(mode: Signal<DisplayMode>) -> AnyView {
         .with_layout(|layout| {
             layout.flex_basis = Some(LengthSpec::Px(0.0));
             // 选择框文字有 `Lg` 内边距；往左让一根发丝边后，值正好落在标签后 `Md` 处。
-            layout.margin_left = Some(LengthSpec::Px(-hairline));
+            tiers::margin_by(layout, &[Edge::Left], tiers::hairline_expr(-1.0));
             layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
             layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
         });
@@ -569,7 +568,7 @@ const CREATE_FIELD_WIDTH: f32 = 222.0;
 /// 工具条里的描边框：白底、`--border` 发丝边、`Lg` 圆角、左右 `Lg`、子项间距 `Md`，和工具栏按钮一样高。
 fn field_box(min_width: f32) -> Stack {
     let height = style::TOOLBAR_HEIGHT;
-    style::hairline(
+    Hairline::hairline(
         style::row(SpacingStep::Md)
             .align(AlignSpec::Center)
             .with_layout(|layout| {

@@ -1,6 +1,7 @@
 //! 内容引用的视图构建、预览内容区与文本插件视图。
 
 use super::*;
+use crate::theme_map::tiers::Hairline;
 
 impl ContentRef<'_> {
     /// 身份：画面读到的每样东西。大块像素和文本只认缓冲区地址和长度。
@@ -464,7 +465,7 @@ pub(super) fn text_plugin(
     }
     // 全局 `pre`：bg-subtle 底、border-soft 发丝边、`Md` 圆角、上下 `Xl` 左右 `Xxl` 内边距，至少铺满内容区。
     let sheet = widget(
-        super::super::super::files_view::style::hairline(
+        Hairline::hairline(
             Stack::column(0.0)
                 .width(LengthSpec::Fill)
                 .min_width(LengthSpec::Px(0.0))

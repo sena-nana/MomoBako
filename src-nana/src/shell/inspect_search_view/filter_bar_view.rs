@@ -33,7 +33,7 @@ use super::super::inspect_shortcuts::SearchShortcut;
 use super::filter_state::{FilterBarSignals, FilterSelection};
 use super::presenter::{self, RATING_OPTIONS};
 use super::widgets::{self, CONTROL_HEIGHT, INPUT_WIDTH};
-use crate::theme_map::tiers::{self, Edge};
+use crate::theme_map::tiers::{self, Edge, Hairline};
 use nana_ui_core::SpacingStep;
 
 /// 芯片、评分和高级格子之间的间距档。
@@ -145,8 +145,8 @@ const ADVANCED_INPUTS: [AdvancedInput; 12] = [
 /// 显隐跟着 `signals.open`（有仓库且筛选栏打开），藏起时节点留着、不占布局。
 pub(crate) fn resident_filter_bar(signals: FilterBarSignals) -> AnyView {
     widget(
-        files_style::hairline(
-            files_style::pad(
+        Hairline::hairline(
+            crate::theme_map::tiers::pad_xy(
                 files_style::column(SpacingStep::Lg),
                 SpacingStep::Xxl,
                 SpacingStep::Xl,

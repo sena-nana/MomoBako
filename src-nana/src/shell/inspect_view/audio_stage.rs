@@ -18,7 +18,7 @@ use super::super::files_view::style as files_style;
 use super::super::player::PlayerMessage;
 use super::frame::text;
 use super::preview_paint::VinylRecord;
-use crate::theme_map::tiers;
+use crate::theme_map::tiers::{self, Hairline};
 
 mod diameter;
 mod lyric_box;
@@ -323,7 +323,7 @@ pub(super) fn audio_stage(
     ))
     .key("inspect-audio-caption")
     .into_any();
-    // 栏距：宽窗口 `clamp(24px, 4vw, 58px)`（跟着窗口宽连续变，不是档位），窄窗口 `Xxl`。
+    // 栏距：宽窗口 `clamp(24px, 4vw, 58px)`（下限 24 是 `Page` 档，其上跟着窗口宽连续变），窄窗口 `Xxl`。
     // 列和行的 minmax 用同一段间距。
     let gap = if stacked {
         tiers::space_px(STACKED_GAP)
@@ -362,7 +362,13 @@ pub(super) fn audio_stage(
     let layout = if stacked {
         Stack::fill_column(0.0).gap_theme(STACKED_GAP)
     } else {
-        Stack::fill_row(gap).align(AlignSpec::Stretch)
+        // 下限是 `Page` 档，宽窗口按 4vw 多出来的一段加在档位上：主题换间距刻度时下限跟着变。
+        let wide = (gap - tiers::space_px(SpacingStep::Page)).max(0.0);
+        Stack::fill_row(0.0)
+            .align(AlignSpec::Stretch)
+            .with_layout(move |layout| {
+                tiers::gap_by(layout, tiers::space_expr(SpacingStep::Page).offset(wide));
+            })
     };
     let shell_pad = if stacked {
         SpacingStep::PageTight
@@ -370,8 +376,8 @@ pub(super) fn audio_stage(
         SpacingStep::Page
     };
     let shell = widget(
-        files_style::pad(
-            files_style::hairline(
+        crate::theme_map::tiers::pad_xy(
+            Hairline::hairline(
                 Stack::fill_column(0.0).surface(SemanticColorRole::Surface),
                 SemanticColorRole::BorderSoft,
             ),
@@ -813,8 +819,8 @@ pub(super) fn loading_card(name: &str, video: bool) -> AnyView {
         "准备音频"
     };
     let card = widget(
-        files_style::pad(
-            files_style::hairline(
+        crate::theme_map::tiers::pad_xy(
+            Hairline::hairline(
                 files_style::column(SpacingStep::Lg).surface(SemanticColorRole::Surface),
                 SemanticColorRole::BorderSoft,
             ),

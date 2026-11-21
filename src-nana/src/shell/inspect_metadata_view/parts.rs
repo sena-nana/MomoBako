@@ -65,9 +65,9 @@ pub(super) fn tags_row(signals: MetadataSignals) -> AnyView {
         .control_height(nana_ui_core::ControlHeight::Exact(ControlSize::Medium));
     let layout = Arc::make_mut(&mut item_style.layout);
     layout.width = Some(LengthSpec::Fill);
-    layout.height = Some(LengthSpec::Px(
-        ControlSize::Medium.height_in(nana_ui::theme::UI_METRICS),
-    ));
+    tiers::control_height(layout, ControlSize::Medium, true);
+    layout.min_height = None;
+    layout.theme.min_height = None;
     layout.min_width = Some(LengthSpec::Px(0.0));
     let collapse = widget(ListItem::new("标签组").style(item_style))
         .content(
@@ -213,7 +213,7 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
             each(groups, TagGroupOption::clone, move |group| {
                 tag_group(group, group_locked.clone())
             })
-            .gap(tiers::space_px(SpacingStep::Md))
+            .css(css! { gap: theme(space-md); })
             .key("inspect-tag-groups-list"),
         ))
         .key("inspect-tag-groups");

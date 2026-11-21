@@ -195,7 +195,7 @@ const VINYL_EDGE: SemanticColorMix = SemanticColorMix::alpha(SemanticColorRole::
 fn vinyl_tone(cx: &PaintContext<'_>, level: u8) -> PaintColor {
     let scrim = cx.theme().effects().media_scrim.as_rgba_array();
     let light = cx.color(SemanticColorRole::OnMedia);
-    PaintColor::Rgba(super::super::files_view::style::mix_rgb(
+    PaintColor::Rgba(crate::theme_map::mix_rgb(
         scrim,
         light,
         f32::from(level) / 255.0,
@@ -397,46 +397,6 @@ impl Painter for MediaBackdrop {
 
     fn paint_key(&self) -> u64 {
         7
-    }
-}
-
-/// 节点后面一层主题高度档的落影，跟着节点的圆角档（没有圆角时是直角）。
-/// 底色、边和内容仍走节点自己的外观。PDF 页纸用它。
-pub(super) struct Elevated {
-    role: ElevationRole,
-    radius: Option<nana_ui_core::RadiusTier>,
-}
-
-impl Elevated {
-    /// 直角节点的落影。
-    pub(super) const fn square(role: ElevationRole) -> Self {
-        Self { role, radius: None }
-    }
-}
-
-impl Painter for Elevated {
-    fn paint(&self, cx: &mut PaintContext<'_>) {
-        let [width, height] = cx.size();
-        if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
-            eprintln!("Nana 落影没有可画的盒子：{width} x {height}");
-            return;
-        }
-        let radius = self.radius.map_or(0.0, |tier| cx.radius(tier));
-        let rect = LayoutBox {
-            x: 0.0,
-            y: 0.0,
-            width,
-            height,
-        };
-        cx.rounded_rect(rect, radius, BoxPaint::default().shadow(self.role));
-        cx.draw_default();
-    }
-
-    fn paint_key(&self) -> u64 {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.role.hash(&mut hasher);
-        self.radius.hash(&mut hasher);
-        hasher.finish()
     }
 }
 

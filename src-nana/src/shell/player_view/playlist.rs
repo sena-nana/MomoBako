@@ -38,11 +38,12 @@ use nana_ui_core::{
 
 use crate::backend::services::repository::PlaylistItem;
 
-use super::super::admin::style::{LINE, disabled_opacity, lined, typeset};
+use super::super::admin::style::{LINE, lined, typeset};
 use super::super::player::PlayerMessage;
 use super::super::row_sync::sync_rows;
 use super::super::{ShellMessage, ShellViewModel};
 use super::{icons, key_part, player_message, playlist_plugin_missing};
+use crate::theme_map::tiers::DISABLED_OPACITY;
 use crate::theme_map::tiers::{self, Edge};
 
 /// 不能播放的条目整行的透明度。
@@ -747,7 +748,7 @@ impl ToolbarLook {
         Self {
             disabled,
             mix: disabled
-                .then(|| nana_ui_core::SemanticColorMix::new(role, base, disabled_opacity())),
+                .then(|| nana_ui_core::SemanticColorMix::new(role, base, DISABLED_OPACITY)),
         }
     }
 }

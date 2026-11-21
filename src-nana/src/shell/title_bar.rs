@@ -204,7 +204,7 @@ fn filter_toggle(signals: TitleSignals) -> AnyView {
             }),
     )
     .visible(move || count.get() > 0)
-    .children((widget(crate::theme_map::text_line_height(
+    .children((widget(crate::theme_map::tiers::text_line_px(
         parts::label_text(
             "0",
             10.0,

@@ -11,7 +11,7 @@ use nana_ui_core::SemanticColorMix;
 use crate::shell::sidebar::PopoverMode;
 use crate::shell::view_harness::ShellHarness;
 use crate::shell::{ShellPage, ShellViewModel, SidebarPlaylist, WorkspacePanel};
-use crate::theme_map::DISABLED_OPACITY;
+use crate::theme_map::tiers::DISABLED_OPACITY;
 
 fn scene(name: &str) -> ShellViewModel {
     crate::shell::acceptance_gap_models()

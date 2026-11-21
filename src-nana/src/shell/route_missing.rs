@@ -7,6 +7,7 @@
 //!
 //! 版式：警示图标、眉题、仓库名、说明、路径框、错误和三个操作。
 
+use crate::theme_map::tiers::Hairline;
 use nana_ui_core::SpacingStep;
 use std::sync::Arc;
 
@@ -215,15 +216,12 @@ fn path_box(view: Signal<MissingView>) -> AnyView {
     );
     Arc::make_mut(&mut node.style.layout).text_ext.font_family = Some(MONO_FONTS.into());
     widget(
-        crate::theme_map::bordered(
-            Stack::column(0.0)
-                .width(LengthSpec::Fill)
-                .padding_step(SpacingStep::Xl, SpacingStep::Lg)
-                .surface(SemanticColorRole::Background),
-            SemanticColorRole::Border,
-            1,
-        )
-        .radius(RadiusTier::Sm),
+        Stack::column(0.0)
+            .width(LengthSpec::Fill)
+            .padding_step(SpacingStep::Xl, SpacingStep::Lg)
+            .surface(SemanticColorRole::Background)
+            .hairline(SemanticColorRole::Border)
+            .radius(RadiusTier::Sm),
     )
     .children((widget(node)
         .prop::<String, fields::text::value>(move || view.with(|view| view.path.clone()))

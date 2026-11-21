@@ -20,7 +20,7 @@ use nana_ui_core::{
 use super::super::files_view::style as files_style;
 use super::paint::SwatchChipPainter;
 use super::presenter::SwatchColor;
-use crate::theme_map::tiers::{self, Edge};
+use crate::theme_map::tiers::{self, Edge, Hairline};
 
 /// 行高倍数 1.55。
 pub(crate) const LINE_RATIO: f32 = 1.55;
@@ -182,7 +182,7 @@ pub(crate) fn bar_button(content: &str, disabled: bool) -> Button {
         foreground_mix: Some(SemanticColorMix::new(
             SemanticColorRole::Text,
             SemanticColorRole::Surface,
-            files_style::disabled_opacity(),
+            crate::theme_map::tiers::DISABLED_OPACITY,
         )),
         ..SemanticPaint::default()
     };
@@ -212,11 +212,7 @@ pub(crate) fn close_button(name: &str) -> IconButton {
 
 /// 按钮左右内边距：标准控件内边距档（默认 10）。
 fn control_inset(layout: &mut nana_ui_core::LayoutStyle) {
-    let padding = Some(LengthSpec::Px(
-        ControlPadding::Standard.resolve(nana_ui::theme::UI_METRICS),
-    ));
-    layout.padding_left = padding;
-    layout.padding_right = padding;
+    crate::theme_map::tiers::control_padding_x(layout, ControlPadding::Standard);
 }
 
 /// 透明底、正文色，悬停 `--bg-hover`、按下 `--bg-active`。
@@ -239,7 +235,7 @@ fn ghost_paint(style: &mut NodeStyle) {
 
 /// 输入胶囊：26px 高，一圈发丝边、主表面底，里面放输入框和可选按钮。
 pub(crate) fn input_pill(fill: bool) -> Stack {
-    let pill = files_style::hairline(
+    let pill = Hairline::hairline(
         Stack::row(0.0)
             .align(AlignSpec::Stretch)
             .height(LengthSpec::Px(CONTROL_HEIGHT))
@@ -347,12 +343,12 @@ pub(crate) fn pill_button(content: &str, disabled: bool) -> Button {
         foreground_mix: Some(SemanticColorMix::new(
             SemanticColorRole::Muted,
             SemanticColorRole::Background,
-            files_style::disabled_opacity(),
+            crate::theme_map::tiers::DISABLED_OPACITY,
         )),
         background_mix: Some(SemanticColorMix::new(
             SemanticColorRole::Subtle,
             SemanticColorRole::Background,
-            files_style::disabled_opacity(),
+            crate::theme_map::tiers::DISABLED_OPACITY,
         )),
         ..SemanticPaint::default()
     };

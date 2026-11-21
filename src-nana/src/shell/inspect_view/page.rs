@@ -12,7 +12,7 @@ use super::super::ShellMessage;
 use super::super::inspect::InspectMessage;
 use super::body::Pixels;
 use super::frame::text;
-use crate::theme_map::tiers::{self, Edge};
+use crate::theme_map::tiers::{self, Edge, Hairline};
 use nana_ui_core::{ControlHeight, ControlSize, ElevationRole, SpacingStep, TextWeight};
 
 /// 用页位图画白纸。高度跟宽高比走，超出时滚动区滚动，不裁掉页底。编码失败时是一张空白的纸位。
@@ -34,7 +34,7 @@ pub(super) fn page_bitmap(raster: &Pixels) -> AnyView {
         sampling: nana_ui_core::ImageSampling::Resample,
     };
     let aspect = width as f32 / height as f32;
-    let frame = super::super::files_view::style::hairline(
+    let frame = Hairline::hairline(
         Stack::column(0.0)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0))
@@ -44,7 +44,7 @@ pub(super) fn page_bitmap(raster: &Pixels) -> AnyView {
     )
     // 纸张在深浅主题里都是白的：取媒体前景色，它在每套主题里都是白。
     .surface(SemanticColorRole::OnMedia)
-    .painter(super::preview_paint::Elevated::square(
+    .painter(crate::theme_map::tiers::Elevated::square(
         ElevationRole::Overlay,
     ))
     .with_layout(|layout| {
@@ -62,7 +62,7 @@ pub(super) fn page_scroller(page: AnyView, nav: Option<(usize, usize)>, key: Str
         children.push(page_nav(index, total));
     }
     children.push(page);
-    let sheet = widget(super::super::files_view::style::pad(
+    let sheet = widget(crate::theme_map::tiers::pad_xy(
         Stack::column(0.0)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
@@ -128,13 +128,9 @@ fn page_button(label: &str, disabled: bool) -> Button {
     button.style.interaction.disabled =
         crate::theme_map::disabled_paint(SemanticColorRole::Text, SemanticColorRole::Background);
     button.style.control_height = Some(ControlHeight::Exact(ControlSize::Medium));
-    let height = ControlSize::Medium.height_in(nana_ui::theme::UI_METRICS);
-    let padding = nana_ui_core::ControlPadding::Standard.resolve(nana_ui::theme::UI_METRICS);
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
-    layout.height = Some(LengthSpec::Px(height));
-    layout.min_height = Some(LengthSpec::Px(height));
-    layout.padding_left = Some(LengthSpec::Px(padding));
-    layout.padding_right = Some(LengthSpec::Px(padding));
+    tiers::control_height(layout, ControlSize::Medium, true);
+    tiers::control_padding_x(layout, nana_ui_core::ControlPadding::Standard);
     layout.width = Some(LengthSpec::Shrink);
     button
 }

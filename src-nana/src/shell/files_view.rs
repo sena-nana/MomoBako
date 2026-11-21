@@ -40,7 +40,7 @@ pub(crate) use menu::EntryMenuView;
 #[cfg(test)]
 pub(crate) use menu::open_and_reveal_targets;
 
-use crate::theme_map::tiers;
+use crate::theme_map::tiers::{self, Edge, Hairline};
 use bind::StyleField;
 use nana_ui_core::{SpacingStep, TextWeight};
 
@@ -267,19 +267,21 @@ fn card_style(look: ColumnLook) -> NodeStyle {
     let mut card = Stack::fill_column(0.0)
         .min_width(LengthSpec::Px(0.0))
         .min_height(LengthSpec::Px(0.0))
-        .with_layout(style::hairline_padding)
+        .with_layout(|layout| {
+            tiers::padding_by(layout, &Edge::ALL, tiers::hairline_expr(1.0));
+        })
         .surface(SemanticColorRole::Surface)
         .radius(RadiusTier::Xxl)
         .with_layout(|layout| layout.position = PositionSpec::Relative);
     if look.dragging {
-        card = style::hairline(card, SemanticColorRole::Accent);
+        card = Hairline::hairline(card, SemanticColorRole::Accent);
     }
     card.node_style()
 }
 
 /// 拖入提示：四周内缩 `Xl` 的虚线框，中间写「拖放到此处添加」。拖入时才显示。
 fn drop_hint(look: Signal<ColumnLook>) -> AnyView {
-    let frame = style::hairline(
+    let frame = Hairline::hairline(
         Stack::column(0.0)
             .align(AlignSpec::Center)
             .justify(nana_ui::runtime::JustifySpec::Center),
@@ -288,7 +290,7 @@ fn drop_hint(look: Signal<ColumnLook>) -> AnyView {
     .radius(RadiusTier::Xl)
     .with_layout(|layout| {
         layout.position = PositionSpec::Absolute;
-        style::inset(layout, SpacingStep::Xl);
+        crate::theme_map::tiers::offset(layout, &Edge::ALL, SpacingStep::Xl);
         layout.z_index = Some(2);
         layout.border_style = Some(nana_ui_core::BorderStyle::Dashed);
         layout.pointer_events = Some(nana_ui_core::PointerEventsSpec::None);

@@ -13,9 +13,7 @@ use nana_ui::runtime::{
     Text, TextHorizontalAlignment,
 };
 use nana_ui_core::{
-    BorderWidth, ControlHeight, ControlPadding, ControlSize, Icon, LayoutStyle, LineHeightSpec,
-    LineRole, SemanticColorMix, SpacingStep, TextWeight, ThemeExpr, ThemeToken, TypeRole,
-    TypographyTokens,
+    ControlHeight, ControlPadding, ControlSize, Icon, SemanticColorMix, SpacingStep, TextWeight,
 };
 
 use crate::theme_map::tiers::{self, Edge};
@@ -33,97 +31,7 @@ pub(crate) fn row(step: SpacingStep) -> Stack {
     Stack::row(0.0).gap_theme(step)
 }
 
-/// 内边距取主题间距档：左右一档、上下一档。
-pub(crate) fn pad(stack: Stack, x: SpacingStep, y: SpacingStep) -> Stack {
-    stack.with_layout(|layout| tiers::padding_xy(layout, x, y))
-}
-
-/// `count` 根发丝边的主题表达式：边框宽度、给边框预留的内边距用。
-pub(crate) fn hairline_expr(count: f32) -> ThemeExpr {
-    ThemeExpr {
-        constant: 0.0,
-        terms: vec![(ThemeToken::Border(BorderWidth::Hairline), count)],
-    }
-}
-
-/// 四边各留一根发丝边宽的内边距：给只在某些状态描出来的边先占好位置，描边时内容不挪。
-pub(crate) fn hairline_padding(layout: &mut LayoutStyle) {
-    let px = Some(LengthSpec::Px(tiers::hairline_px()));
-    layout.padding_top = px;
-    layout.padding_right = px;
-    layout.padding_bottom = px;
-    layout.padding_left = px;
-    layout.theme.padding_top = Some(hairline_expr(1.0));
-    layout.theme.padding_right = Some(hairline_expr(1.0));
-    layout.theme.padding_bottom = Some(hairline_expr(1.0));
-    layout.theme.padding_left = Some(hairline_expr(1.0));
-}
-
-/// 绝对定位的四边偏移都取这一档：盖在父级上、四周内缩一档的浮层用。
-pub(crate) fn inset(layout: &mut LayoutStyle, step: SpacingStep) {
-    offset(layout, &Edge::ALL, step);
-}
-
-/// 绝对定位时给出的每条边的偏移都取这一档：浮在父级角上、离边一档的小件用。
-pub(crate) fn offset(layout: &mut LayoutStyle, edges: &[Edge], step: SpacingStep) {
-    let px = Some(LengthSpec::Px(tiers::space_px(step)));
-    for edge in edges {
-        let expr = Some(tiers::space_expr(step));
-        match edge {
-            Edge::Top => {
-                layout.offset_top = px;
-                layout.theme.offset_top = expr;
-            }
-            Edge::Right => {
-                layout.offset_right = px;
-                layout.theme.offset_right = expr;
-            }
-            Edge::Bottom => {
-                layout.offset_bottom = px;
-                layout.theme.offset_bottom = expr;
-            }
-            Edge::Left => {
-                layout.offset_left = px;
-                layout.theme.offset_left = expr;
-            }
-        }
-    }
-}
-
-/// 停用、锁住时整块淡下去的不透明度：主题的停用状态层档。节点不透明度在建树时就要定，
-/// 深浅两套主题的这一档相同，取深色档。
-pub(crate) const fn disabled_opacity() -> f32 {
-    tiers::opacity(nana_ui_core::StateLayer::Disabled, true)
-}
-
-/// 四边一圈发丝边，颜色取主题角色，宽度取主题的发丝边档。
-pub(crate) fn hairline(stack: Stack, role: SemanticColorRole) -> Stack {
-    stack
-        .border(role, tiers::hairline_px())
-        .with_layout(|layout| tiers::border(layout, 1))
-}
-
-/// 行高写成主题档位。正好是行盒档（16 / 18）的取 [`LineRole`]；字号在主题字阶上的按字号档的倍数写，
-/// 比例不变，主题换字阶时一起变；字号不在字阶上的照写像素。
-pub(crate) fn line_height(layout: &mut LayoutStyle, role: Option<TypeRole>, size: f32, px: f32) {
-    let tokens = TypographyTokens::DEFAULT;
-    if let Some(line) = [LineRole::Line, LineRole::Tall]
-        .into_iter()
-        .find(|line| tokens.line_height(*line) == px)
-    {
-        tiers::line(layout, line);
-        return;
-    }
-    match role {
-        Some(role) if size > 0.0 => tiers::line_ratio(layout, role, px / size),
-        _ => {
-            layout.line_height = Some(LineHeightSpec::Absolute(px));
-            layout.theme.line_height = None;
-        }
-    }
-}
-
-/// 一段文字。行高给像素，按 [`line_height`] 折成主题档位。
+/// 一段文字。行高给像素，按 [`tiers::line_px`] 折成主题档位。
 pub(crate) fn text(
     label: impl Into<String>,
     size: f32,
@@ -131,15 +39,8 @@ pub(crate) fn text(
     role: SemanticColorRole,
     line_height_px: f32,
 ) -> Text {
-    let mut node = crate::theme_map::typed_text(Text::new(label.into()), size, weight).color(role);
-    let type_role = node.style.type_role;
-    line_height(
-        std::sync::Arc::make_mut(&mut node.style.layout),
-        type_role,
-        size,
-        line_height_px,
-    );
-    node
+    let node = crate::theme_map::typed_text(Text::new(label.into()), size, weight).color(role);
+    tiers::text_line_px(node, line_height_px)
 }
 
 /// 正文：14px、400、主文本色，行高 1.55 倍。
@@ -266,8 +167,7 @@ pub(crate) fn top_rule(stack: Stack, padding_top: SpacingStep) -> Stack {
     let mut style = stack.node_style();
     style.border = Some(SemanticColorRole::BorderSoft);
     let layout = std::sync::Arc::make_mut(&mut style.layout);
-    layout.border_sides.top_width = Some(tiers::hairline_px());
-    layout.theme.border_top_width = Some(hairline_expr(1.0));
+    tiers::border_side(layout, Edge::Top, 1);
     tiers::padding(layout, &[Edge::Top], padding_top);
     stack.style(style)
 }
@@ -276,9 +176,7 @@ pub(crate) fn top_rule(stack: Stack, padding_top: SpacingStep) -> Stack {
 pub(crate) fn bottom_rule(stack: Stack) -> Stack {
     let mut style = stack.node_style();
     style.border = Some(SemanticColorRole::BorderSoft);
-    let layout = std::sync::Arc::make_mut(&mut style.layout);
-    layout.border_sides.bottom_width = Some(tiers::hairline_px());
-    layout.theme.border_bottom_width = Some(hairline_expr(1.0));
+    tiers::border_side(std::sync::Arc::make_mut(&mut style.layout), Edge::Bottom, 1);
     stack.style(style)
 }
 
@@ -379,12 +277,13 @@ pub(crate) fn styled_button(
         ..Default::default()
     };
     let layout = std::sync::Arc::make_mut(&mut style.layout);
-    let height = match look.height {
-        Height::Control(size) => size.height_in(nana_ui::theme::UI_METRICS),
-        Height::Px(px) => px,
-    };
-    layout.height = Some(LengthSpec::Px(height));
-    layout.min_height = Some(LengthSpec::Px(height));
+    match look.height {
+        Height::Control(size) => tiers::control_height(layout, size, true),
+        Height::Px(px) => {
+            layout.height = Some(LengthSpec::Px(px));
+            layout.min_height = Some(LengthSpec::Px(px));
+        }
+    }
     match look.padding_x {
         Inset::None => {
             layout.padding_left = Some(LengthSpec::Px(0.0));
@@ -392,11 +291,7 @@ pub(crate) fn styled_button(
             layout.theme.padding_left = None;
             layout.theme.padding_right = None;
         }
-        Inset::Control(padding) => {
-            let px = Some(LengthSpec::Px(padding.resolve(nana_ui::theme::UI_METRICS)));
-            layout.padding_left = px;
-            layout.padding_right = px;
-        }
+        Inset::Control(padding) => tiers::control_padding_x(layout, padding),
         Inset::Step(step) => tiers::padding(layout, &Edge::X, step),
     }
     layout.padding_top = Some(LengthSpec::Px(0.0));
@@ -438,16 +333,6 @@ const PREVIEW_ICON: SemanticColorMix = SemanticColorMix::alpha(SemanticColorRole
 /// 文件夹渐变末端压进媒体遮罩色的比例。
 const FOLDER_SHADE: f32 = 0.45;
 
-/// 两个颜色在 sRGB 里按比例混，结果不透明：`t` 是 `b` 的份额。
-pub(crate) fn mix_rgb(a: [f32; 4], b: [f32; 4], t: f32) -> [f32; 4] {
-    [
-        a[0] + (b[0] - a[0]) * t,
-        a[1] + (b[1] - a[1]) * t,
-        a[2] + (b[2] - a[2]) * t,
-        1.0,
-    ]
-}
-
 /// 135° 线性渐变线：起点在左上、终点在右下，`from` 到 `to`。
 ///
 /// 算法：CSS 渐变线穿过盒子中心，方向角 135°，长度是 |w·sinθ| + |h·cosθ|，
@@ -487,7 +372,7 @@ impl Painter for PreviewPainter {
             Tone::Folder => {
                 let warning = cx.color(SemanticColorRole::Warning);
                 let scrim = cx.theme().effects().media_scrim.as_rgba_array();
-                let shaded = mix_rgb(warning, scrim, FOLDER_SHADE);
+                let shaded = crate::theme_map::mix_rgb(warning, scrim, FOLDER_SHADE);
                 cx.rounded_rect(
                     bounds,
                     radius,
@@ -586,24 +471,5 @@ mod tests {
         );
         let length = ((end[0] - start[0]).powi(2) + (end[1] - start[1]).powi(2)).sqrt();
         assert!((length - (130.0 + 112.0) * std::f32::consts::FRAC_1_SQRT_2).abs() < 0.01);
-    }
-
-    /// 行高落在行盒档上的取行盒档，字号在字阶上的按字号档的倍数写，其余照写像素；都写进主题令牌。
-    #[test]
-    fn line_heights_land_on_theme_tiers() {
-        let mut layout = LayoutStyle::default();
-        line_height(&mut layout, Some(TypeRole::Meta), 12.0, 16.0);
-        assert_eq!(
-            layout.theme.line_height,
-            Some(nana_ui_core::ThemeToken::Line(LineRole::Line).into())
-        );
-        line_height(&mut layout, Some(TypeRole::Section), 14.0, 14.0 * LINE_BODY);
-        assert!(
-            matches!(layout.line_height, Some(LineHeightSpec::Absolute(px)) if (px - 21.7).abs() < 0.001)
-        );
-        assert!(layout.theme.line_height.is_some());
-        line_height(&mut layout, None, 17.0, 20.0);
-        assert_eq!(layout.line_height, Some(LineHeightSpec::Absolute(20.0)));
-        assert_eq!(layout.theme.line_height, None);
     }
 }

@@ -51,7 +51,7 @@ pub use popover::repository_popover;
 pub use tree::folder_menu;
 pub(crate) use tree::folder_row_key;
 
-use crate::theme_map::text_line_height;
+use crate::theme_map::tiers::text_line_px;
 use crate::theme_map::tiers::{self, Edge};
 use nana_ui::runtime::view::css;
 use nana_ui_core::{SpacingRole, SpacingStep, TextWeight};
@@ -108,7 +108,7 @@ fn sidebar_switcher(signals: &SidebarSignals) -> AnyView {
         popover::repository_switcher(signals.head, signals.repository, signals.popover_slot);
     let top = Stack::column(0.0).with_layout(|layout| {
         tiers::padding(layout, &[Edge::Bottom], SpacingStep::Md);
-        crate::theme_map::border_side(layout, Edge::Bottom, 1);
+        crate::theme_map::tiers::border_side(layout, Edge::Bottom, 1);
     });
     let mut top_style = top.node_style();
     top_style.border = Some(SemanticColorRole::BorderSoft);
@@ -204,7 +204,7 @@ fn progress_line(status: Signal<StatusLine>) -> AnyView {
         })
     };
     let (label, percent) = progress_of();
-    let mut text = text_line_height(
+    let mut text = text_line_px(
         parts::label_text(
             label,
             12.0,
@@ -229,7 +229,7 @@ fn progress_line(status: Signal<StatusLine>) -> AnyView {
         widget(text)
             .prop::<String, fields::text::value>(move || progress_of().0)
             .key("sidebar-status-progress-label"),
-        widget(text_line_height(
+        widget(text_line_px(
             parts::label_text(
                 format!("{percent}%"),
                 12.0,
@@ -752,7 +752,7 @@ fn task_badge(footer: Signal<FooterView>) -> AnyView {
             }),
     )
     .visible(move || footer.with(|footer| footer.tasks > 0))
-    .children((widget(text_line_height(
+    .children((widget(text_line_px(
         parts::label_text(
             count.to_string(),
             9.0,

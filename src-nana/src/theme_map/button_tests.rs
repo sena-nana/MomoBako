@@ -8,13 +8,11 @@ use std::path::Path;
 
 /// 画按钮的壳层文件里允许出现的颜色字面量：文件名、字面量原文和出处。都不是按钮的配色，而是设计上
 /// 写死、两套主题共用的颜色。没用上的条目也算失败，免得清单过时。
-const ALLOWED_LITERALS: &[(&str, &str, &str)] = &[
-    (
-        "admin/source_page.rs",
-        "[1.0, 1.0, 1.0, 1.0]",
-        "扫码登录二维码图片的白底，`.source-auth-settings__qr` 的 `background: white`",
-    ),
-];
+const ALLOWED_LITERALS: &[(&str, &str, &str)] = &[(
+    "admin/source_page.rs",
+    "[1.0, 1.0, 1.0, 1.0]",
+    "扫码登录二维码图片的白底，`.source-auth-settings__qr` 的 `background: white`",
+)];
 
 /// 别的文件拿来建按钮的壳层函数。调用它们的文件也算画按钮。
 const BUTTON_HELPERS: &[&str] = &[

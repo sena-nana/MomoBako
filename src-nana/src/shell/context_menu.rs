@@ -760,7 +760,7 @@ fn note(entry: &MenuEntry, key: String) -> AnyView {
         });
     widget(row)
         .children((widget(
-            crate::theme_map::text_line_height(
+            crate::theme_map::tiers::text_line_px(
                 crate::theme_map::typed_text(
                     Text::new(entry.label.clone()),
                     12.0,

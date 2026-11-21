@@ -34,7 +34,7 @@ use super::board::{BoardSignals, GroupPresence};
 use super::file_message;
 use super::style;
 use super::virtual_rows::{self, GAP_STEP};
-use crate::theme_map::tiers::{self, Edge};
+use crate::theme_map::tiers::{self, Edge, Hairline};
 
 /// 列表区左右内边距的档。
 const LIST_PADDING_STEP: SpacingStep = SpacingStep::PageTight;
@@ -233,8 +233,8 @@ fn state_box(label: String, error: bool, spinner: bool) -> AnyView {
             .key("file-error")
             .into_any();
     }
-    let frame = state_margin(style::hairline(
-        style::pad(
+    let frame = state_margin(Hairline::hairline(
+        crate::theme_map::tiers::pad_xy(
             style::row(SpacingStep::Md)
                 .align(AlignSpec::Center)
                 .width(LengthSpec::Fill),

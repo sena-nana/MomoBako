@@ -32,7 +32,7 @@ use super::{ShellMessage, ShellViewModel};
 use nana_ui::runtime::view::css;
 use nana_ui_core::{SpacingRole, SpacingStep, TextWeight};
 
-use crate::theme_map::{bordered, tiers};
+use crate::theme_map::tiers::{self, Hairline};
 
 /// 启动页内容最宽 680px。
 const PANEL_WIDTH: f32 = 680.0;
@@ -249,24 +249,20 @@ fn step_row(item: StartupStepItem) -> AnyView {
         .align(AlignSpec::Center)
         .justify(JustifySpec::Center);
     let badge = match item.state {
-        StartupStepState::Current => bordered(
-            badge.surface(SemanticColorRole::AccentSoft),
-            SemanticColorRole::Accent,
-            1,
-        )
-        .radius(RadiusTier::Full),
+        StartupStepState::Current => badge
+            .surface(SemanticColorRole::AccentSoft)
+            .hairline(SemanticColorRole::Accent)
+            .radius(RadiusTier::Full),
         StartupStepState::Done => {
             badge.painter(SoftFill::ok().border(SemanticColorRole::Success, 1).pill())
         }
         StartupStepState::Error => {
             badge.painter(SoftFill::err().border(SemanticColorRole::Danger, 1).pill())
         }
-        StartupStepState::Pending => bordered(
-            badge.surface(SemanticColorRole::Subtle),
-            SemanticColorRole::Border,
-            1,
-        )
-        .radius(RadiusTier::Full),
+        StartupStepState::Pending => badge
+            .surface(SemanticColorRole::Subtle)
+            .hairline(SemanticColorRole::Border)
+            .radius(RadiusTier::Full),
     };
     let copy = widget(
         Stack::column(0.0)
@@ -368,18 +364,15 @@ fn log_panel(logs: Signal<Vec<LogRow>>) -> AnyView {
     )
     .children((content,));
     widget(
-        bordered(
-            Stack::column(0.0)
-                .width(LengthSpec::Fill)
-                .surface(SemanticColorRole::Subtle),
-            SemanticColorRole::Border,
-            1,
-        )
-        .radius(RadiusTier::Sm)
-        .with_layout(|layout| {
-            layout.max_height = Some(LengthSpec::Px(LOG_PANEL_MAX_HEIGHT));
-            layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
-        }),
+        Stack::column(0.0)
+            .width(LengthSpec::Fill)
+            .surface(SemanticColorRole::Subtle)
+            .hairline(SemanticColorRole::Border)
+            .radius(RadiusTier::Sm)
+            .with_layout(|layout| {
+                layout.max_height = Some(LengthSpec::Px(LOG_PANEL_MAX_HEIGHT));
+                layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
+            }),
     )
     .visible(move || logs.with(|logs| !logs.is_empty()))
     .children((scroll,))

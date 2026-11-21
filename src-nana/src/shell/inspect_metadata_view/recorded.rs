@@ -400,12 +400,12 @@ pub(super) fn source_action(icon: Icon, key: &str, title: &'static str) -> El<Ic
         foreground_mix: Some(nana_ui_core::SemanticColorMix::new(
             SemanticColorRole::Muted,
             SemanticColorRole::Background,
-            style::disabled_opacity(),
+            crate::theme_map::tiers::DISABLED_OPACITY,
         )),
         border_mix: Some(nana_ui_core::SemanticColorMix::new(
             SemanticColorRole::BorderSoft,
             SemanticColorRole::Background,
-            style::disabled_opacity(),
+            crate::theme_map::tiers::DISABLED_OPACITY,
         )),
         background: Some(SemanticColorRole::Background),
         ..SemanticPaint::default()

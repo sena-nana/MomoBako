@@ -11,13 +11,14 @@ use nana_ui::runtime::{
     SemanticPaint, Stack, Text, TextHorizontalAlignment, TextInput,
 };
 use nana_ui_core::{
-    BorderWidth, ButtonKind, ControlHeight, ControlPadding, ControlSize, Icon, LayoutStyle,
-    OverflowWrapSpec, RadiusTier, SemanticColorRole as Role, SpacingRole, SpacingStep, StateLayer,
-    TextWeight, ThemeToken, TypeRole, TypographyTokens,
+    ButtonKind, ControlHeight, ControlPadding, ControlSize, Icon, OverflowWrapSpec, RadiusTier,
+    SemanticColorRole as Role, SpacingRole, SpacingStep, TextWeight, TypeRole, TypographyTokens,
 };
 
 use crate::theme_map::tiers;
-pub(crate) use crate::theme_map::tiers::Edge;
+pub(crate) use crate::theme_map::tiers::{
+    DISABLED_OPACITY, Edge, Hairline, control_height, inset, lined, pad, pad_xy,
+};
 
 /// 正文行高倍数。
 pub(crate) const LINE: f32 = 1.55;
@@ -32,12 +33,6 @@ pub(crate) fn bound(node: Text, value: impl IntoProp<String>) -> El<Text> {
 /// 16 `Heading`、18 `Title`、20 `Display`，换了字阶的主题跟着变。行高另外设。
 pub(crate) fn typeset(text: Text, role: TypeRole, weight: TextWeight) -> Text {
     text.role(role).weight(weight)
-}
-
-/// 行高取字号档的倍数，例如正文 1.55 倍；主题换字阶时行高跟着字号变，比例不变。
-pub(crate) fn lined(mut text: Text, role: TypeRole, ratio: f32) -> Text {
-    tiers::line_ratio(Arc::make_mut(&mut text.style.layout), role, ratio);
-    text
 }
 
 /// 一段文字：字号、字重、颜色，行高按默认的 1.55 倍。
@@ -111,41 +106,10 @@ pub(crate) fn glyph(icon: Icon, size: TypeRole, color: Role) -> IconGlyph {
     IconGlyph::new(icon).size_role(size).role(color)
 }
 
-/// 停用控件的整体不透明度：主题状态层的停用档（深浅两套主题都是 0.5）。
-pub(crate) const fn disabled_opacity() -> f32 {
-    tiers::opacity(StateLayer::Disabled, true)
-}
-
-/// 控件高度取主题的控件档：`exact` 定高，否则是最小高、内容可以撑高。
-pub(crate) fn control_height(layout: &mut LayoutStyle, size: ControlSize, exact: bool) {
-    let px = Some(LengthSpec::Px(
-        ControlHeight::Exact(size).resolve(nana_ui::theme::UI_METRICS),
-    ));
-    let expr = Some(ThemeToken::Control(size).into());
-    layout.min_height = px;
-    layout.theme.min_height = expr.clone();
-    if exact {
-        layout.height = px;
-        layout.theme.height = expr;
-    }
-}
-
-/// 只在上边画一根发丝线，其余三边为 0。
-fn hairline_top(layout: &mut LayoutStyle) {
-    layout.border_width = None;
-    layout.theme.border_width = None;
-    let sides = &mut layout.border_sides;
-    sides.top_width = Some(tiers::hairline_px());
-    sides.right_width = Some(0.0);
-    sides.bottom_width = Some(0.0);
-    sides.left_width = Some(0.0);
-    layout.theme.border_top_width = Some(ThemeToken::Border(BorderWidth::Hairline).into());
-}
-
 /// 普通按钮：配色按 `kind` 取主题按钮配方（`Ghost` 透明底正文色、`Primary` 强调浅底、`Danger` 红字），
 /// 这里只改版式：中号控件定高（32）、中号控件的左右内边距（10）、字 `Section`/500、主操作 600、行高 1.55 倍、
 /// 图标 14（`Section` 字号）、图标间距取主题默认（`Sm`）。
-/// 停用时整体按主题停用档淡化（[`disabled_opacity`]），不换颜色（主题的禁用配色会换成弱色和浅底）。
+/// 停用时整体按主题停用档淡化（[`DISABLED_OPACITY`]），不换颜色（主题的禁用配色会换成弱色和浅底）。
 /// 要绑定禁用时用 `bind::ActionDisabled`，透明度一起换；进行中用 `fields::button::loading`，图标位转圈。
 pub(crate) fn action(
     text: impl Into<String>,
@@ -180,7 +144,7 @@ pub(crate) fn action(
         crate::theme_map::control_weight(layout, TextWeight::Semibold);
     }
     if disabled {
-        layout.opacity = Some(disabled_opacity());
+        layout.opacity = Some(DISABLED_OPACITY);
     }
     button
 }
@@ -281,38 +245,18 @@ pub(crate) fn fixed(stack: Stack, width: Option<f32>, height: Option<f32>) -> St
     })
 }
 
-/// 给出的几条边取同一档内边距，其余边不动。
-pub(crate) fn pad(stack: Stack, edges: &[Edge], step: SpacingStep) -> Stack {
-    stack.with_layout(|layout| tiers::padding(layout, edges, step))
-}
-
-/// 左右一档、上下一档的内边距。
-pub(crate) fn pad_xy(stack: Stack, x: SpacingStep, y: SpacingStep) -> Stack {
-    stack.with_layout(|layout| tiers::padding_xy(layout, x, y))
-}
-
-/// 四边同一档的内边距。
-pub(crate) fn inset(stack: Stack, step: SpacingStep) -> Stack {
-    pad(stack, &Edge::ALL, step)
-}
-
-/// 一圈发丝边：边色取 `role`，线宽是主题的发丝边，主题换发丝边时跟着变。
-pub(crate) trait Hairline {
-    fn hairline(self, role: Role) -> Self;
-}
-
-impl Hairline for Stack {
-    fn hairline(self, role: Role) -> Self {
-        self.border(role, tiers::hairline_px())
-            .with_layout(|layout| tiers::border(layout, 1))
-    }
-}
-
 /// 只画上边线的盒子，对应 `border-top: 1px solid var(--border-soft)`，线宽是主题的发丝边。
 pub(crate) fn top_rule(stack: Stack) -> Stack {
     let mut style = stack.node_style();
     style.border = Some(Role::BorderSoft);
-    hairline_top(Arc::make_mut(&mut style.layout));
+    let layout = Arc::make_mut(&mut style.layout);
+    layout.border_width = None;
+    layout.theme.border_width = None;
+    let sides = &mut layout.border_sides;
+    sides.right_width = Some(0.0);
+    sides.bottom_width = Some(0.0);
+    sides.left_width = Some(0.0);
+    tiers::border_side(layout, Edge::Top, 1);
     stack.style(style)
 }
 
@@ -484,12 +428,7 @@ pub(crate) fn native_field_style() -> NodeStyle {
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
         tiers::border(layout, 1);
-        let field = ControlPadding::Field;
-        let field_px = Some(LengthSpec::Px(field.resolve(nana_ui::theme::UI_METRICS)));
-        layout.padding_left = field_px;
-        layout.padding_right = field_px;
-        layout.theme.padding_left = Some(ThemeToken::ControlPadding(field).into());
-        layout.theme.padding_right = Some(ThemeToken::ControlPadding(field).into());
+        tiers::control_padding_x(layout, ControlPadding::Field);
         tiers::padding(layout, &Edge::Y, SpacingStep::Sm);
         crate::theme_map::control_font(layout, TypeRole::Body);
         tiers::line_ratio(layout, TypeRole::Body, LINE);

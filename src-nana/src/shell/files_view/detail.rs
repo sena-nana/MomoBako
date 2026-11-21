@@ -408,7 +408,7 @@ fn scroller(key: &DetailKey, signals: DetailSignals, metadata: MetadataSignals) 
         DetailKind::Directory => (directory_card(signals.summary), false),
         DetailKind::Empty { smart, trash } => (empty_card(*smart, *trash), true),
     };
-    let mut content = style::pad(
+    let mut content = crate::theme_map::tiers::pad_xy(
         style::column(SpacingStep::Xxl)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),

@@ -42,7 +42,7 @@ pub(super) fn line(
     color: SemanticColorRole,
     line_height: f32,
 ) -> Text {
-    crate::theme_map::text_line_height(label_text(value, size, weight, Some(color)), line_height)
+    crate::theme_map::tiers::text_line_px(label_text(value, size, weight, Some(color)), line_height)
 }
 
 /// 占满列宽、可在任意位置折行的一段字。

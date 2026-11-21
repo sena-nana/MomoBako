@@ -5,11 +5,11 @@
 //! 标题下的是 `color-mix(in srgb, var(--bg) 24%, transparent)`。
 //! 标题下那一层很透，卡片上的浅光能从胶囊后面透出来。
 
+use crate::theme_map::tiers::Hairline;
 use nana_ui::runtime::view::{AnyView, IntoView, widget};
 use nana_ui::runtime::{LengthSpec, SemanticColorRole, Stack};
 use nana_ui_core::{SemanticColorMix, SpacingStep, TextWeight};
 
-use super::super::super::files_view::style as files_style;
 use super::super::frame::text;
 
 /// 胶囊至少 26 高：一行字加上下内边距再加边，不是控件档，照写像素。
@@ -36,8 +36,8 @@ pub(super) fn pill(label: &str, chip: bool, key: &'static str) -> AnyView {
     } else {
         SemanticColorMix::alpha(SemanticColorRole::Background, META_FILL)
     };
-    let frame = files_style::hairline(
-        files_style::pad(
+    let frame = Hairline::hairline(
+        crate::theme_map::tiers::pad_xy(
             Stack::row(0.0)
                 .align(nana_ui::runtime::AlignSpec::Center)
                 .min_height(LengthSpec::Px(PILL_MIN_HEIGHT))

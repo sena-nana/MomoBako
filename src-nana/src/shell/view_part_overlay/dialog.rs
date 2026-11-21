@@ -422,7 +422,7 @@ pub(crate) fn busy_note(visible: impl IntoProp<bool>, key: &'static str) -> AnyV
 
 /// 占满宽度、任意处折行的一段字。行高按像素给，挂成主题档位（见 `theme_map::text_line_height`）。
 pub(crate) fn wrapping_text(size: f32, line_height: f32, color: SemanticColorRole) -> Text {
-    let mut node = crate::theme_map::text_line_height(
+    let mut node = crate::theme_map::tiers::text_line_px(
         crate::theme_map::typed_text(Text::new(String::new()), size, TextWeight::Regular)
             .color(color),
         line_height,
@@ -444,7 +444,7 @@ impl FieldWrite<ListItem, bool> for DimmedDisabled {
     fn write(target: &mut ListItem, disabled: bool) {
         target.disabled = disabled;
         Arc::make_mut(&mut target.style.layout).opacity =
-            disabled.then_some(crate::theme_map::DISABLED_OPACITY);
+            disabled.then_some(crate::theme_map::tiers::DISABLED_OPACITY);
     }
 
     fn differs(target: &ListItem, disabled: &bool) -> bool {

@@ -22,7 +22,7 @@ use nana_ui::runtime::{
 use nana_ui_core::{SpacingStep, StatusTone, TextWeight};
 
 use super::files_view::style as files_style;
-use crate::theme_map::tiers::{self, Edge};
+use crate::theme_map::tiers::{self, Edge, Hairline};
 
 /// 结果行左侧图标块边长 40：图标块尺寸不是间距，照写像素。
 const HIT_TILE: f32 = 40.0;
@@ -62,7 +62,7 @@ pub(crate) fn resident_search_panel(signals: SearchPanelSignals) -> AnyView {
         .key("search-workbench-results"),
     );
     widget(
-        files_style::pad(
+        crate::theme_map::tiers::pad_xy(
             files_style::column(SpacingStep::Xxxl),
             SpacingStep::Page,
             SpacingStep::Page,
@@ -148,7 +148,7 @@ fn header(head: Signal<SearchHead>) -> AnyView {
 /// 搜索进行中的一行提示：NanaUI 的 `Spinner` 转圈，文字写在右边。
 fn searching_state(status: Signal<SearchStatus>) -> AnyView {
     widget(
-        files_style::hairline(state_box(), SemanticColorRole::Border)
+        Hairline::hairline(state_box(), SemanticColorRole::Border)
             .surface(SemanticColorRole::Background),
     )
     .visible(move || status.with(|status| status.searching))
@@ -194,7 +194,7 @@ fn state_margin(frame: Stack) -> Stack {
 /// 搜索中提示框：圆角小框，横排转圈和文字。
 fn state_box() -> Stack {
     state_margin(
-        files_style::pad(
+        crate::theme_map::tiers::pad_xy(
             files_style::row(SpacingStep::Md).align(AlignSpec::Center),
             SpacingStep::Xl,
             SpacingStep::Lg,
@@ -237,7 +237,7 @@ fn hit_text(item: HitItem, pick: fn(&HitRow) -> &String) -> impl Fn() -> String 
 /// 结果行右侧芯片的排版：`horizontal(Sm)` 之外补上和旧视图
 /// `Stack::row(6).wrap(true).justify(End).grow(0).shrink(1)` 相同的字段。
 fn chips_style() -> nana_ui::runtime::view::InlineStyle {
-    css! { flex-wrap: wrap; justify-content: flex-end; flex-grow: 0; flex-shrink: 1; }
+    css! { flex-wrap: wrap; gap: theme(space-sm); justify-content: flex-end; flex-grow: 0; flex-shrink: 1; }
 }
 
 /// 一条结果：图标块、文件名和「仓库 / 路径」、上下文芯片。点一下打开这条命中。

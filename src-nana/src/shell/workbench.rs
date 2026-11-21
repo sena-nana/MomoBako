@@ -33,7 +33,7 @@ pub(crate) fn meta(label: impl Into<String>) -> Text {
 pub(crate) fn with_bottom_divider(column: Stack) -> Stack {
     let mut style = column.node_style();
     style.border = Some(SemanticColorRole::BorderSoft);
-    crate::theme_map::border_side(
+    crate::theme_map::tiers::border_side(
         std::sync::Arc::make_mut(&mut style.layout),
         crate::theme_map::tiers::Edge::Bottom,
         1,

@@ -13,10 +13,11 @@ use nana_ui::{ControlSize, PopoverPlacement};
 use nana_ui_core::{SpacingStep, TextWeight, TypeRole};
 
 use super::super::super::ShellMessage;
-use super::super::super::admin::style::{LINE, disabled_opacity, lined, typeset};
+use super::super::super::admin::style::{LINE, lined, typeset};
 use super::super::super::player::{PlayerMessage, QueueItem};
 use super::{BarProps, display_title};
 use crate::theme_map::tiers;
+use crate::theme_map::tiers::DISABLED_OPACITY;
 
 /// 队列面板宽。
 const QUEUE_WIDTH: f32 = 360.0;
@@ -382,7 +383,7 @@ fn queue_row(item: &QueueItem, media: &'static str, active: bool) -> AnyView {
     } else {
         SemanticColorRole::Text
     };
-    let dim = (!ready).then_some((SemanticColorRole::Surface, disabled_opacity()));
+    let dim = (!ready).then_some((SemanticColorRole::Surface, DISABLED_OPACITY));
     let meta = widget(
         Stack::column(0.0)
             .gap_step(SpacingStep::Xxs)
@@ -759,7 +760,7 @@ mod tests {
         if faded {
             assert_eq!(
                 fade,
-                Some(crate::shell::admin::style::disabled_opacity()),
+                Some(crate::theme_map::tiers::DISABLED_OPACITY),
                 "{id} 不可播放时应按停用档把这张图淡一次"
             );
         } else {

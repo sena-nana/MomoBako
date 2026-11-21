@@ -28,7 +28,7 @@ use super::super::player_view::icons;
 use super::super::{ShellMessage, ShellViewModel};
 use super::body::{self, PreviewSnapshot};
 use crate::theme_map::disabled_paint;
-use crate::theme_map::tiers::{self, Edge};
+use crate::theme_map::tiers::{self, Edge, Hairline};
 
 mod facts;
 
@@ -253,7 +253,11 @@ fn page_style() -> NodeStyle {
             layout.flex_basis = Some(LengthSpec::Px(0.0));
             layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
             layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
-            files_style::hairline_padding(layout);
+            crate::theme_map::tiers::padding_by(
+                layout,
+                &crate::theme_map::tiers::Edge::ALL,
+                crate::theme_map::tiers::hairline_expr(1.0),
+            );
         })
         .node_style()
 }
@@ -461,7 +465,7 @@ fn main(key: &MainKey, signals: PreviewSignals, metadata: MetadataSignals) -> An
             .gap_theme(DETAIL_GAP_STEP)
             .align(AlignSpec::Stretch)
     };
-    let frame = files_style::pad(frame, DETAIL_GAP_STEP, DETAIL_GAP_STEP)
+    let frame = crate::theme_map::tiers::pad_xy(frame, DETAIL_GAP_STEP, DETAIL_GAP_STEP)
         .min_height(LengthSpec::Px(0.0))
         .with_layout(|layout| {
             layout.flex_basis = Some(LengthSpec::Px(0.0));
@@ -549,7 +553,11 @@ fn box_style(plugin: bool) -> NodeStyle {
             layout.flex_basis = Some(LengthSpec::Px(0.0));
             layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
             layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
-            files_style::hairline_padding(layout);
+            crate::theme_map::tiers::padding_by(
+                layout,
+                &crate::theme_map::tiers::Edge::ALL,
+                crate::theme_map::tiers::hairline_expr(1.0),
+            );
         });
     let frame = if plugin {
         frame.painter(super::preview_paint::PluginGlow)
@@ -624,7 +632,7 @@ fn palette_slot(colors: &[String]) -> AnyView {
         .enumerate()
         .map(|(index, (color, rgba))| {
             widget(
-                files_style::hairline(
+                Hairline::hairline(
                     Stack::row(0.0)
                         .width(LengthSpec::Px(34.0))
                         .height(LengthSpec::Px(12.0))
@@ -727,19 +735,18 @@ fn action_button(label: &str, icon: Icon, icon_size: f32, height: ActionHeight) 
         .icon_gap(tiers::space_px(SpacingStep::Sm));
     button.style.interaction.disabled =
         disabled_paint(SemanticColorRole::Text, SemanticColorRole::Surface);
-    let px = match height {
-        ActionHeight::Control(size) => {
-            button.style.control_height = Some(ControlHeight::Exact(size));
-            size.height_in(nana_ui::theme::UI_METRICS)
-        }
-        ActionHeight::Px(px) => px,
-    };
-    let padding = nana_ui_core::ControlPadding::Standard.resolve(nana_ui::theme::UI_METRICS);
+    if let ActionHeight::Control(size) = height {
+        button.style.control_height = Some(ControlHeight::Exact(size));
+    }
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
-    layout.height = Some(LengthSpec::Px(px));
-    layout.min_height = Some(LengthSpec::Px(px));
-    layout.padding_left = Some(LengthSpec::Px(padding));
-    layout.padding_right = Some(LengthSpec::Px(padding));
+    match height {
+        ActionHeight::Control(size) => tiers::control_height(layout, size, true),
+        ActionHeight::Px(px) => {
+            layout.height = Some(LengthSpec::Px(px));
+            layout.min_height = Some(LengthSpec::Px(px));
+        }
+    }
+    tiers::control_padding_x(layout, nana_ui_core::ControlPadding::Standard);
     layout.width = Some(LengthSpec::Shrink);
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
@@ -791,11 +798,8 @@ pub(super) fn text(
     role: SemanticColorRole,
     line_height: f32,
 ) -> Text {
-    let mut node = crate::theme_map::typed_text(Text::new(label), size, weight).color(role);
-    let type_role = node.style.type_role;
-    let layout = std::sync::Arc::make_mut(&mut node.style.layout);
-    files_style::line_height(layout, type_role, size, line_height);
-    layout.min_width = Some(LengthSpec::Px(0.0));
+    let mut node = files_style::text(label, size, weight, role, line_height);
+    std::sync::Arc::make_mut(&mut node.style.layout).min_width = Some(LengthSpec::Px(0.0));
     node
 }
 

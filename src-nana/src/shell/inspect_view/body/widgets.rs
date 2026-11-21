@@ -1,7 +1,7 @@
 //! 预览工具栏、图片与视频、文档与模型视图、覆盖层、状态层与字节数格式化等小部件。
 
 use super::*;
-use crate::theme_map::tiers::{self, Edge};
+use crate::theme_map::tiers::{self, Edge, Hairline};
 use nana_ui_core::{SpacingStep, TextWeight};
 
 use super::super::super::files_view::style as files_style;
@@ -114,7 +114,7 @@ pub(super) fn document_view(
     } else if let Some(error) = error {
         if let Some((index, total)) = nav {
             rows.push(
-                widget(files_style::pad(
+                widget(crate::theme_map::tiers::pad_xy(
                     Stack::column(0.0)
                         .width(LengthSpec::Fill)
                         .min_width(LengthSpec::Px(0.0)),
@@ -129,7 +129,7 @@ pub(super) fn document_view(
         rows.push(overlay("无法预览该文档", error, "inspect-native-error"));
     } else {
         rows.push(
-            widget(files_style::pad(
+            widget(crate::theme_map::tiers::pad_xy(
                 Stack::fill_column(0.0),
                 SpacingStep::PageTight,
                 SpacingStep::PageTight,
@@ -172,7 +172,7 @@ pub(super) fn model_view(
         .to_ascii_uppercase();
     let picture = match raster {
         Some(raster) => super::super::page::page_bitmap(raster),
-        None => widget(files_style::pad(
+        None => widget(crate::theme_map::tiers::pad_xy(
             Stack::fill_column(0.0),
             SpacingStep::PageTight,
             SpacingStep::PageTight,
@@ -198,7 +198,7 @@ pub(super) fn model_view(
         layers.push(
             widget(files_style::row(SpacingStep::Md).with_layout(|layout| {
                 layout.position = nana_ui_core::PositionSpec::Absolute;
-                files_style::offset(layout, &[Edge::Left, Edge::Bottom], CORNER_STEP);
+                crate::theme_map::tiers::offset(layout, &[Edge::Left, Edge::Bottom], CORNER_STEP);
             }))
             .children(chips)
             .key("inspect-model-hud")
@@ -265,7 +265,7 @@ pub(super) fn orbit_controls() -> AnyView {
     .collect::<Vec<_>>();
     widget(files_style::row(SpacingStep::Xs).with_layout(|layout| {
         layout.position = nana_ui_core::PositionSpec::Absolute;
-        files_style::offset(layout, &[Edge::Right, Edge::Top], CORNER_STEP);
+        crate::theme_map::tiers::offset(layout, &[Edge::Right, Edge::Top], CORNER_STEP);
     }))
     .children(buttons)
     .key("inspect-orbit")
@@ -331,7 +331,7 @@ pub(super) fn failed_mask(
                 .into_any(),
         );
     }
-    let frame = files_style::pad(
+    let frame = crate::theme_map::tiers::pad_xy(
         Stack::fill_column(0.0)
             .gap_theme(SpacingStep::Md)
             .align(AlignSpec::Center)
@@ -415,7 +415,7 @@ pub(super) fn status_layer(pill: AnyView, toolbar: Option<AnyView>) -> AnyView {
     let corner = tiers::space_px(CORNER_STEP);
     let pill = widget(Stack::row(0.0).with_layout(move |layout| {
         layout.position = nana_ui_core::PositionSpec::Absolute;
-        files_style::offset(layout, &[Edge::Left, Edge::Top], CORNER_STEP);
+        crate::theme_map::tiers::offset(layout, &[Edge::Left, Edge::Top], CORNER_STEP);
         if below_toolbar {
             layout.offset_top = Some(LengthSpec::Px(TOOLBAR_MIN_HEIGHT + corner));
             layout.theme.offset_top = Some(nana_ui_core::ThemeExpr {
@@ -465,8 +465,8 @@ pub(super) fn status_pill(title: &str, detail: &str, progress: bool) -> AnyView 
     if progress {
         children.push(super::super::preview_paint::status_progress());
     }
-    let frame = files_style::hairline(
-        files_style::pad(
+    let frame = Hairline::hairline(
+        crate::theme_map::tiers::pad_xy(
             files_style::row(SpacingStep::Md).align(AlignSpec::Center),
             SpacingStep::Md,
             SpacingStep::Sm,

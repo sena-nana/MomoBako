@@ -20,8 +20,9 @@ use nana_ui::runtime::{
 };
 use nana_ui::{ControlSize, Icon};
 
+use crate::theme_map::disabled_paint;
+use crate::theme_map::tiers::DISABLED_OPACITY;
 use crate::theme_map::tiers::{self, Edge};
-use crate::theme_map::{DISABLED_OPACITY, disabled_paint};
 use nana_ui_core::{EasingRole, LineRole, MotionRole, SpacingRole, SpacingStep, TextWeight};
 
 /// 分组标题高度。

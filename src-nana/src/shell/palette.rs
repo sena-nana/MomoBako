@@ -13,7 +13,7 @@ use nana_ui_core::SpacingStep;
 use serde_json::Value;
 
 use super::files_view::style as files_style;
-use crate::theme_map::tiers;
+use crate::theme_map::tiers::{self, Hairline};
 
 /// 色板药丸的宽高 34×12、元数据小方块的边长 14：色块尺寸不是间距，没有对应的档，照写像素。
 const PILL_WIDTH: f32 = 34.0;
@@ -250,7 +250,7 @@ fn swatch(
         eprintln!("Nana 色板颜色无效，跳过：{color}");
         return None;
     };
-    let frame = files_style::hairline(
+    let frame = Hairline::hairline(
         files_style::fixed(Stack::row(0.0), width, height),
         SemanticColorRole::BorderSoft,
     )

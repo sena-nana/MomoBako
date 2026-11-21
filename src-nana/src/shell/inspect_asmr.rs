@@ -28,7 +28,7 @@ use super::files_view::style as files_style;
 use super::inspect::support::display_value;
 use super::inspect_library::{asmr_enabled, matches_asmr};
 use super::{ShellMessage, ShellViewModel};
-use crate::theme_map::tiers::{self, Edge};
+use crate::theme_map::tiers::{self, Edge, Hairline};
 use nana_ui_core::{ControlHeight, ControlPadding, ControlSize, SpacingStep, TextWeight};
 
 /// 作品队列和播放列表最高 176：滚动视口的高度不是间距，照写像素。
@@ -424,7 +424,7 @@ fn playlist_view(playlist: &playlist::PlaylistPanel) -> AnyView {
 /// 「加入作品」「随机」「清空」：间距 `Sm`、上下 `Md` 左右 `Lg` 内边距、底边 border-soft。
 /// 是一条 NanaUI 工具栏，左右方向键在三个按钮之间走。
 fn playlist_actions(audio: bool, empty: bool) -> AnyView {
-    let row = super::workbench::with_bottom_divider(files_style::pad(
+    let row = super::workbench::with_bottom_divider(crate::theme_map::tiers::pad_xy(
         files_style::row(SpacingStep::Sm)
             .align(AlignSpec::Center)
             .wrap(true)
@@ -470,14 +470,9 @@ fn queue_action(label: &str, disabled: bool) -> Button {
     style.control_height = Some(ControlHeight::Exact(ControlSize::Small));
     style.control_padding_x = Some(ControlPadding::Compact);
     style.control_padding_y = None;
-    let metrics = nana_ui::theme::UI_METRICS;
-    let height = ControlSize::Small.height_in(metrics);
-    let inset = ControlPadding::Compact.resolve(metrics);
     let layout = std::sync::Arc::make_mut(&mut style.layout);
-    layout.min_height = Some(LengthSpec::Px(height));
-    layout.height = Some(LengthSpec::Px(height));
-    layout.padding_left = Some(LengthSpec::Px(inset));
-    layout.padding_right = Some(LengthSpec::Px(inset));
+    tiers::control_height(layout, ControlSize::Small, true);
+    tiers::control_padding_x(layout, ControlPadding::Compact);
     tiers::padding(layout, &Edge::Y, SpacingStep::Xs);
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
@@ -494,7 +489,7 @@ fn queue_empty(label: &str, key: &str) -> AnyView {
 
 /// 标题在左、计数在右，四周 `Lg` 内边距，底边 border-soft，两端对齐。
 fn queue_head(label: &str, count: &str, key: &str) -> AnyView {
-    let row = super::workbench::with_bottom_divider(files_style::pad(
+    let row = super::workbench::with_bottom_divider(crate::theme_map::tiers::pad_xy(
         files_style::row(SpacingStep::Xl)
             .align(AlignSpec::Center)
             .justify(JustifySpec::SpaceBetween)
@@ -519,7 +514,7 @@ fn queue_head(label: &str, count: &str, key: &str) -> AnyView {
 /// 行放在带可访问名的 NanaUI `List` 里，读屏按列表念；列表四周留 `Xs`，行的悬停和选中底不贴卡片边。
 fn queue_list(items: Vec<AnyView>, label: &str, key: &str) -> AnyView {
     let list = List::new().label(label).style(
-        files_style::pad(
+        crate::theme_map::tiers::pad_xy(
             Stack::column(0.0)
                 .width(LengthSpec::Fill)
                 .min_width(LengthSpec::Px(0.0)),
@@ -543,7 +538,7 @@ fn queue_list(items: Vec<AnyView>, label: &str, key: &str) -> AnyView {
 /// 队列卡片：bg-elev 底、border-soft 发丝边、中圆角，子项紧贴、不留段间距。
 fn queue_card(key: &str, rows: Vec<AnyView>) -> AnyView {
     widget(
-        files_style::hairline(
+        Hairline::hairline(
             Stack::column(0.0)
                 .width(LengthSpec::Fill)
                 .min_width(LengthSpec::Px(0.0))

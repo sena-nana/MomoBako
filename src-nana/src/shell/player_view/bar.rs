@@ -10,13 +10,13 @@ use nana_ui::runtime::view::{AnyView, FieldWrite, IntoView, widget};
 use nana_ui::runtime::{
     Activate, AlignSpec, ElevationRole, IconButton, LengthSpec, ListItem, MediaTransportBar,
     MediaTransportDensity, MediaTransportEvent, MediaTransportIcons, MediaTransportPlacement,
-    PaintContext, PaintPath, Painter, RadiusTier, SemanticColorRole, SizeChanged, Stack,
+    RadiusTier, SemanticColorRole, SizeChanged, Stack,
 };
 use nana_ui::{ControlSize, Icon};
 use nana_ui_core::{SpacingRole, SpacingStep, TextWeight, TypeRole};
 
-use super::super::admin::style::{Hairline, LINE};
-use crate::theme_map::tiers;
+use super::super::admin::style::LINE;
+use crate::theme_map::tiers::{self, Elevated, Hairline};
 
 use super::super::player::{PlaybackMode, PlayerMessage, QueueItem};
 use super::super::{ShellMessage, ShellViewModel, hot};
@@ -219,7 +219,7 @@ pub(crate) fn position_ms(current_ms: u64, duration_ms: u64) -> f64 {
 
 /// 播放条。卡片里上面是媒体行，下面是 NanaUI 的 `MediaTransportBar`；窗口不宽于 1120px 时传输条
 /// 换成 `Stacked`，进度单独占一行，整张卡片是媒体、进度、按钮三行。卡片是 `--radius-2xl`、发丝边、
-/// 主题的 `Surface` 抬起投影，内边距左右 `Xxxl` 上下 `Xl`，都跟着主题变。
+/// 主题的 `Surface` 抬起投影（[`Elevated`]），内边距左右 `Xxxl` 上下 `Xl`，都跟着主题变。
 pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
     let props = BarProps::from_model(model);
     let narrow = model.narrow_viewport();
@@ -229,7 +229,7 @@ pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
         .surface(SemanticColorRole::Surface)
         .hairline(SemanticColorRole::BorderStrong)
         .radius(CARD_RADIUS)
-        .painter(LiftedCard);
+        .painter(Elevated::rounded(ElevationRole::Surface, CARD_RADIUS));
     widget(card)
         .children((media(&props), transport_bar(&props, narrow)))
         .key("player-card")
@@ -241,24 +241,6 @@ pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
 
 /// 播放条卡片的圆角档。
 const CARD_RADIUS: RadiusTier = RadiusTier::Xxl;
-
-/// 播放条卡片的投影：先沿卡片的圆角画主题的 `Surface` 抬起投影，再画卡片自己的底和边。
-/// 投影颜色、偏移和模糊都按装上的主题解析，深浅主题各有一套。
-struct LiftedCard;
-
-impl Painter for LiftedCard {
-    fn paint(&self, cx: &mut PaintContext<'_>) {
-        let radius = cx.radius(CARD_RADIUS);
-        let mut outline = PaintPath::new();
-        outline.rounded_rect(cx.bounds(), [radius; 4]);
-        cx.shadow(&outline, ElevationRole::Surface);
-        cx.draw_default();
-    }
-
-    fn paint_key(&self) -> u64 {
-        0
-    }
-}
 
 /// 传输条：进度、「当前 / 总长」和音量弹层由 `MediaTransportBar` 自己画，前导槽放循环模式、上一首、
 /// 播放 / 暂停、下一首和当前队列，第二行放图片、视频才有的设置。条自己的播放钮、设置菜单和全屏都藏起来。
@@ -337,7 +319,7 @@ fn media(props: &BarProps) -> AnyView {
     let title = props.title();
     let dim = (!props.has_item()).then_some((
         SemanticColorRole::Surface,
-        super::super::admin::style::disabled_opacity(),
+        crate::theme_map::tiers::DISABLED_OPACITY,
     ));
     // 两行字的宽度来自剩下的空间，不换行，超出时省略号收尾。
     let meta = widget(
