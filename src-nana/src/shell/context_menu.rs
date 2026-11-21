@@ -67,11 +67,6 @@ const SUBMENU_GAP: SpacingStep = SpacingStep::Xs;
 /// 分组后面的箭头。
 const BRANCH_MARK: &str = "›";
 
-/// 菜单面板的内边距：主题菜单配方的面板内边距（默认 `Xs` 档 4px）。
-fn menu_padding_px() -> f32 {
-    tiers::space_px(SpacingStep::Xs)
-}
-
 /// 菜单里行与行的间距和面板内边距都取主题菜单配方的档（`MenuItemGap`、`MenuSurfacePadding`）。
 fn menu_spacing(layout: &mut nana_ui_core::LayoutStyle) {
     layout.gap = Some(LengthSpec::Px(tiers::space_px(SpacingStep::Xxs)));
@@ -671,7 +666,10 @@ fn submenu(view: Signal<MenuView>, entry: &MenuEntry, chrome: MenuChrome) -> Any
         });
     let bridge = Stack::column(0.0).hittable().with_layout(|layout| {
         layout.position = PositionSpec::Absolute;
-        layout.offset_top = Some(LengthSpec::Px(-menu_padding_px()));
+        // 往上提一个菜单面板内边距，子菜单第一项和分组那一行齐。
+        layout.offset_top = Some(LengthSpec::Px(-tiers::space_px(SpacingStep::Xs)));
+        layout.theme.offset_top =
+            Some(ThemeExpr::from(ThemeToken::MenuSurfacePadding).scaled(-1.0));
         layout.offset_left = Some(LengthSpec::Percent(100.0));
         layout.width = Some(LengthSpec::Shrink);
         tiers::padding(layout, &[Edge::Left], SUBMENU_GAP);
