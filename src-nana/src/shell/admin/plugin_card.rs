@@ -18,14 +18,17 @@ use nana_ui::runtime::view::{
 use nana_ui::runtime::{
     Activate, AlignSpec, Card, LengthSpec, Stack, StatusTone, Switch, ToggleChanged,
 };
-use nana_ui_core::{CardKind, GridTrack, SemanticColorRole as Role, SwitchControlPosition};
+use nana_ui_core::{
+    ButtonKind, CardKind, GridTrack, SemanticColorRole as Role, SwitchControlPosition, TextWeight,
+    TypeRole,
+};
 
 use super::super::ShellMessage;
 use super::AdminMessage;
 use super::bind::{ActionDisabled, row_flag, row_text};
 use super::icons;
 use super::plugins_state::{ExecutionView, PluginCardView, PluginPanelSignals};
-use super::style::{self, Tone, action, column, label, pad, row, wrapping};
+use super::style::{self, action, column, label, pad, row, wrapping};
 
 /// 卡片在 Store 里的句柄。
 pub(crate) type CardItem = Item<
@@ -48,7 +51,12 @@ pub(super) fn plugin_card(card: CardItem, signals: PluginPanelSignals) -> AnyVie
     let head = widget(style::spread(10.0, AlignSpec::Center))
         .children((
             style::bound(
-                label(String::new(), 14.0, 700, Role::Text),
+                label(
+                    String::new(),
+                    TypeRole::Section,
+                    TextWeight::Bold,
+                    Role::Text,
+                ),
                 row_text(card, |card| &card.name),
             )
             .key(format!("admin-plugin-{pid}")),
@@ -56,7 +64,12 @@ pub(super) fn plugin_card(card: CardItem, signals: PluginPanelSignals) -> AnyVie
         ))
         .into_any();
     let description = style::bound(
-        wrapping(label(String::new(), 14.0, 400, Role::Muted)),
+        wrapping(label(
+            String::new(),
+            TypeRole::Section,
+            TextWeight::Regular,
+            Role::Muted,
+        )),
         row_text(card, |card| &card.description),
     )
     .key(format!("admin-plugin-desc-{pid}"))
@@ -64,11 +77,21 @@ pub(super) fn plugin_card(card: CardItem, signals: PluginPanelSignals) -> AnyVie
     let meta = widget(row(10.0).wrap(true))
         .children((
             style::bound(
-                label(String::new(), 12.0, 400, Role::Muted),
+                label(
+                    String::new(),
+                    TypeRole::Meta,
+                    TextWeight::Regular,
+                    Role::Muted,
+                ),
                 row_text(card, |card| &card.plugin_id),
             ),
             style::bound(
-                label(String::new(), 12.0, 400, Role::Muted),
+                label(
+                    String::new(),
+                    TypeRole::Meta,
+                    TextWeight::Regular,
+                    Role::Muted,
+                ),
                 row_text(card, |card| &card.version),
             ),
         ))
@@ -239,7 +262,13 @@ fn section_with_body(title: &str, body: AnyView) -> AnyView {
     });
     widget(grid)
         .children((
-            widget(style::label_px(title, 12.0, 400, Role::Muted, 24.0)),
+            widget(style::label_px(
+                title,
+                TypeRole::Meta,
+                TextWeight::Regular,
+                Role::Muted,
+                24.0,
+            )),
             body,
         ))
         .into_any()
@@ -250,8 +279,18 @@ fn execution_item(record: &ExecutionView) -> AnyView {
     let mut lines = vec![
         widget(row(6.0).wrap(true))
             .children((
-                widget(label(record.title.clone(), 12.0, 700, Role::Text)),
-                widget(label(record.slot.clone(), 12.0, 400, Role::Muted)),
+                widget(label(
+                    record.title.clone(),
+                    TypeRole::Meta,
+                    TextWeight::Bold,
+                    Role::Text,
+                )),
+                widget(label(
+                    record.slot.clone(),
+                    TypeRole::Meta,
+                    TextWeight::Regular,
+                    Role::Muted,
+                )),
             ))
             .into_any(),
     ];
@@ -259,8 +298,8 @@ fn execution_item(record: &ExecutionView) -> AnyView {
         lines.push(
             widget(wrapping(style::label_lh(
                 record.message.clone(),
-                12.0,
-                400,
+                TypeRole::Meta,
+                TextWeight::Regular,
                 Role::Muted,
                 1.45,
             )))
@@ -270,8 +309,8 @@ fn execution_item(record: &ExecutionView) -> AnyView {
     lines.push(
         widget(style::label_lh(
             record.time.clone(),
-            12.0,
-            400,
+            TypeRole::Meta,
+            TextWeight::Regular,
             Role::Muted,
             1.45,
         ))
@@ -322,23 +361,33 @@ fn card_actions(card: CardItem, signals: PluginPanelSignals, plugin_id: &str) ->
                     enabled: event.checked,
                 }));
             }),
-        widget(action("设置", Some(icons::SETTINGS), Tone::Plain, false))
-            .prop::<bool, ActionDisabled>(managing)
-            .key(format!("admin-plugin-settings-{pid}"))
-            .on_cx(move |_, _: &Activate, cx| {
-                cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ToggleSettings(
-                    settings_id.clone(),
-                )));
-            }),
-        widget(action("删除", Some(icons::TRASH2), Tone::Danger, false))
-            .prop::<bool, ActionDisabled>(managing)
-            .visible(row_flag(card, |card| card.can_delete))
-            .key(format!("admin-plugin-delete-{pid}"))
-            .on_cx(move |_, _: &Activate, cx| {
-                cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::RequestDelete(
-                    delete_id.clone(),
-                )));
-            }),
+        widget(action(
+            "设置",
+            Some(icons::SETTINGS),
+            ButtonKind::Ghost,
+            false,
+        ))
+        .prop::<bool, ActionDisabled>(managing)
+        .key(format!("admin-plugin-settings-{pid}"))
+        .on_cx(move |_, _: &Activate, cx| {
+            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ToggleSettings(
+                settings_id.clone(),
+            )));
+        }),
+        widget(action(
+            "删除",
+            Some(icons::TRASH2),
+            ButtonKind::Danger,
+            false,
+        ))
+        .prop::<bool, ActionDisabled>(managing)
+        .visible(row_flag(card, |card| card.can_delete))
+        .key(format!("admin-plugin-delete-{pid}"))
+        .on_cx(move |_, _: &Activate, cx| {
+            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::RequestDelete(
+                delete_id.clone(),
+            )));
+        }),
     );
     widget(row(8.0).wrap(true).width(LengthSpec::Fill))
         .children(buttons)
@@ -368,14 +417,21 @@ fn settings_section(plugin_id: &str, signals: PluginPanelSignals) -> AnyView {
             .shrink(1.0),
     )
     .children((
-        style::bound(label(String::new(), 13.0, 700, Role::Text), move || {
-            settings.with(|head| head.label.clone())
-        })
+        style::bound(
+            label(String::new(), TypeRole::Body, TextWeight::Bold, Role::Text),
+            move || settings.with(|head| head.label.clone()),
+        )
         .key(format!("admin-plugin-settings-title-{pid}")),
         widget(pad(column(0.0), 4.0, 0.0, 0.0, 0.0))
             .visible(move || settings.with(|head| !head.description.is_empty()))
             .children((style::bound(
-                wrapping(style::label_lh(String::new(), 12.0, 400, Role::Muted, 1.5)),
+                wrapping(style::label_lh(
+                    String::new(),
+                    TypeRole::Meta,
+                    TextWeight::Regular,
+                    Role::Muted,
+                    1.5,
+                )),
                 move || settings.with(|head| head.description.clone()),
             )
             .key(format!("admin-plugin-settings-desc-{pid}")),)),
@@ -386,7 +442,7 @@ fn settings_section(plugin_id: &str, signals: PluginPanelSignals) -> AnyView {
             widget(action(
                 "打开目录",
                 Some(icons::FOLDER_OPEN),
-                Tone::Plain,
+                ButtonKind::Ghost,
                 false,
             ))
             .prop::<bool, ActionDisabled>(move || head_signal.with(|head| head.managing))

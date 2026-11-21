@@ -4,13 +4,16 @@
 
 use nana_ui::runtime::view::{AnyView, IntoView, segmented_option, widget};
 use nana_ui::runtime::{
-    Activate, AlignSpec, JustifySpec, LengthSpec, ListItem, Popover, PopoverAlignment,
-    PopoverToggled, RadiusTier, RangeField, RangeInput, ScrollAxes, ScrollView, SegmentedControl,
-    SegmentedOptionChosen, SemanticColorRole, Stack, Text, TextHorizontalAlignment,
+    Activate, AlignSpec, JustifySpec, LengthSpec, List, ListItem, Popover, PopoverAlignment,
+    PopoverToggled, RadiusTier, RangeField, RangeInput, RovingFocusGroup, ScrollAxes, ScrollView,
+    SegmentedControl, SegmentedOptionChosen, SemanticColorRole, Stack, Text,
+    TextHorizontalAlignment,
 };
 use nana_ui::{ControlSize, PopoverPlacement};
+use nana_ui_core::{TextWeight, TypeRole};
 
 use super::super::super::ShellMessage;
+use super::super::super::admin::style::{FontSize, typeset};
 use super::super::super::player::{PlayerMessage, QueueItem};
 use super::{BarProps, display_title};
 
@@ -19,18 +22,15 @@ const QUEUE_WIDTH: f32 = 360.0;
 /// 队列条目滚动区的上限高度。
 const QUEUE_LIST_MAX_HEIGHT: f32 = 260.0;
 
-/// 单行文字：给定字号、字重、颜色和行高，超长省略。
+/// 单行文字：给定字号档（没有档位时写像素）、字重档、颜色和行高，超长省略。
 pub(super) fn line(
     label: impl Into<String>,
-    size: f32,
-    weight: u16,
+    size: impl Into<FontSize>,
+    weight: TextWeight,
     role: SemanticColorRole,
     line_height: f32,
 ) -> Text {
-    let mut text = Text::new(label.into())
-        .color(role)
-        .font_size(size)
-        .font_weight(weight)
+    let mut text = typeset(Text::new(label.into()).color(role), size, weight)
         .line_height(line_height)
         .truncating();
     let layout = std::sync::Arc::make_mut(&mut text.style.layout);
@@ -76,8 +76,8 @@ pub(super) fn type_cover(
 ) -> AnyView {
     let mut text = Text::new(label)
         .color(SemanticColorRole::Muted)
-        .font_size(11.0)
-        .font_weight(700)
+        .role(TypeRole::Hint)
+        .weight(TextWeight::Bold)
         .line_height(17.05);
     text.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
     let frame = Stack::column(0.0)
@@ -315,15 +315,15 @@ fn queue_body(props: &BarProps) -> AnyView {
         widget(
             Text::new("当前队列")
                 .color(SemanticColorRole::Text)
-                .font_size(13.0)
-                .font_weight(700)
+                .role(TypeRole::Body)
+                .weight(TextWeight::Bold)
                 .line_height(20.15),
         )
         .key("player-queue-title"),
         widget(
             Text::new(format!("{} 项", props.queue.len()))
                 .color(SemanticColorRole::Muted)
-                .font_size(12.0)
+                .role(TypeRole::Meta)
                 .line_height(18.6),
         )
         .key("player-queue-count"),
@@ -335,7 +335,13 @@ fn queue_body(props: &BarProps) -> AnyView {
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(1.0);
     }))
-    .children((widget(Stack::column(4.0)).children(rows),))
+    .children((widget(
+        List::new()
+            .label("队列条目")
+            .style(Stack::column(4.0).node_style()),
+    )
+    .roving_focus(RovingFocusGroup::vertical())
+    .children(rows),))
     .key(props.queue_key.clone())
     .into_any();
     widget(Stack::column(8.0).width(LengthSpec::Fill))
@@ -371,11 +377,23 @@ fn queue_row(item: &QueueItem, media: &'static str, active: bool) -> AnyView {
     )
     .children((
         widget(dim_text(
-            line(title.clone(), 14.0, 700, title_role, 21.7),
+            line(
+                title.clone(),
+                TypeRole::Section,
+                TextWeight::Bold,
+                title_role,
+                21.7,
+            ),
             dim,
         )),
         widget(dim_text(
-            line(detail, 11.667, 500, SemanticColorRole::Muted, 18.08),
+            line(
+                detail,
+                11.667,
+                TextWeight::Medium,
+                SemanticColorRole::Muted,
+                18.08,
+            ),
             dim,
         )),
     ));

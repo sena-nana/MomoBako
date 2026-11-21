@@ -22,7 +22,9 @@ use nana_ui::runtime::{
     Activate, LengthSpec, RangeField, RangeInput, SegmentedOption, SegmentedOptionChosen, Select,
     SelectChanged, SelectOption, Stack, StatusTone, ValidationIntent,
 };
-use nana_ui_core::{GridTrack, Icon, RadiusTier, SemanticColorRole as Role};
+use nana_ui_core::{
+    ButtonKind, GridTrack, Icon, RadiusTier, SemanticColorRole as Role, TextWeight, TypeRole,
+};
 
 use super::super::ShellMessage;
 use super::AdminMessage;
@@ -30,7 +32,7 @@ use super::bind::ActionDisabled;
 use super::icons;
 use super::plugins_state::PluginPanelSignals;
 use super::settings_state::{ExternalCard, KvRow, SettingsSignals};
-use super::style::{self, Tone, action, align_end, column, label, pad, row};
+use super::style::{self, action, column, label, pad, row};
 use super::support;
 
 /// 设置页整页。卡片之间留 12，插件管理面板之后不留。
@@ -62,11 +64,17 @@ fn spaced(view: AnyView, bottom: f32) -> AnyView {
 fn page_header() -> AnyView {
     widget(column(4.0))
         .children((
-            widget(label("设置", 18.0, 600, Role::Text)).key("admin-settings-title"),
+            widget(label(
+                "设置",
+                TypeRole::Title,
+                TextWeight::Semibold,
+                Role::Text,
+            ))
+            .key("admin-settings-title"),
             widget(label(
                 "管理仓库服务、插件、缓存与 API 契约。",
-                13.0,
-                400,
+                TypeRole::Body,
+                TextWeight::Regular,
                 Role::Muted,
             ))
             .key("admin-settings-subline"),
@@ -250,8 +258,8 @@ fn choice(
         })
 }
 
-/// 圆角控件：220 宽滑杆加 44 宽右对齐的「Npx」。滑杆的值和文字跟着已保存的半径。
-/// 滑杆保留轨道，按设计意图画出。
+/// 圆角控件：NanaUI 滑杆，轨道右边是滑杆自己的「N px」读数，宽 274（轨道加读数）。
+/// 滑杆的值跟着已保存的半径，读屏读到的值也带单位。
 fn radius_control(radius: Signal<f64>) -> AnyView {
     let mut range = RangeField::new(
         radius.get_untracked(),
@@ -261,47 +269,24 @@ fn radius_control(radius: Signal<f64>) -> AnyView {
     )
     .label("圆角半径")
     .show_label(false)
-    .show_value(false);
+    .unit("px");
     {
         let layout = Arc::make_mut(&mut range.style.layout);
-        layout.width = Some(LengthSpec::Px(220.0));
-        layout.min_width = Some(LengthSpec::Px(140.0));
+        layout.width = Some(LengthSpec::Px(274.0));
+        layout.min_width = Some(LengthSpec::Px(194.0));
         layout.height = Some(LengthSpec::Px(16.0));
     }
-    let output = widget(style::fixed(
-        row(0.0).justify(nana_ui::runtime::JustifySpec::End),
-        Some(44.0),
-        None,
-    ))
-    .children((style::bound(
-        align_end(label(String::new(), 12.0, 400, Role::Muted)),
-        move || radius.with(|radius| format!("{}px", format_radius(*radius))),
-    )
-    .key("admin-radius-value"),));
-    widget(row(10.0))
-        .children((
-            // 拖动中每一格都写入，所以只听 `RangeInput`。
-            // 松手的 `RangeChanged` 是同一格的提交，再听一次会把这次拖动写两遍。范围仍是 0 到 20。
-            widget(range)
-                .prop::<f64, fields::slider::value>(radius)
-                .key("admin-corner-radius")
-                .on_cx(|_, event: &RangeInput, cx| {
-                    cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SetCornerRadius(
-                        event.value.to_string(),
-                    )));
-                }),
-            output,
-        ))
+    // 拖动中每一格都写入，所以只听 `RangeInput`。
+    // 松手的 `RangeChanged` 是同一格的提交，再听一次会把这次拖动写两遍。范围仍是 0 到 20。
+    widget(range)
+        .prop::<f64, fields::slider::value>(radius)
+        .key("admin-corner-radius")
+        .on_cx(|_, event: &RangeInput, cx| {
+            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SetCornerRadius(
+                event.value.to_string(),
+            )));
+        })
         .into_any()
-}
-
-/// 半径按整数显示，带小数时保留原值。
-fn format_radius(radius: f64) -> String {
-    if radius.fract() == 0.0 {
-        format!("{}", radius as i64)
-    } else {
-        format!("{radius}")
-    }
 }
 
 /// 键值行：NanaUI 的标签和值，标签靠左、值靠右。值可以绑定。
@@ -396,7 +381,7 @@ fn external_card(external: Signal<ExternalCard>) -> AnyView {
             widget(action(
                 "导出 JSON",
                 Some(icons::DOWNLOAD),
-                Tone::Primary,
+                ButtonKind::Primary,
                 false,
             ))
             .prop::<bool, ActionDisabled>(no_json)
@@ -489,7 +474,7 @@ fn copy_action(
     key: &'static str,
     external: Signal<ExternalCard>,
 ) -> AnyView {
-    widget(action(text, Some(icon), Tone::Plain, false))
+    widget(action(text, Some(icon), ButtonKind::Ghost, false))
         .prop::<bool, ActionDisabled>(disabled)
         .key(key)
         .on_cx(move |_, _: &Activate, cx| {
@@ -557,8 +542,23 @@ fn metric(value: impl Fn() -> String + Send + 'static, name: &str, key: &'static
     .children((
         widget(style::glyph(icons::DATABASE, 16.0, Role::Text)),
         widget(Stack::column(0.0).width(LengthSpec::Shrink)).children((
-            style::bound(label(String::new(), 14.0, 700, Role::Text), value).key(key),
-            widget(label(name, 12.0, 400, Role::Muted)).key(format!("{key}-name")),
+            style::bound(
+                label(
+                    String::new(),
+                    TypeRole::Section,
+                    TextWeight::Bold,
+                    Role::Text,
+                ),
+                value,
+            )
+            .key(key),
+            widget(label(
+                name,
+                TypeRole::Meta,
+                TextWeight::Regular,
+                Role::Muted,
+            ))
+            .key(format!("{key}-name")),
         )),
     ))
     .into_any()

@@ -15,8 +15,8 @@ use nana_ui::runtime::view::{
 };
 use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, QrCode, Stack};
 use nana_ui_core::{
-    BackgroundImage, BackgroundImageFit, BackgroundPosition, BackgroundRepeat, ImageSampling,
-    RadiusTier, SemanticColorRole as Role,
+    BackgroundImage, BackgroundImageFit, BackgroundPosition, BackgroundRepeat, ButtonKind,
+    ImageSampling, RadiusTier, SemanticColorRole as Role, TextWeight, TypeRole,
 };
 
 use super::super::{ShellMessage, ShellViewModel};
@@ -25,7 +25,7 @@ use super::bind::{ActionDisabled, row_text};
 use super::icons;
 use super::marks;
 use super::source_provision::{self as flow};
-use super::style::{self, Tone, action, column, label, pad, row, wrapping};
+use super::style::{self, action, column, label, pad, row, wrapping};
 use crate::backend::services::repository::PluginManifest;
 
 /// 二维码边长。
@@ -202,19 +202,24 @@ fn head(plugin_id: &str, busy: impl Fn() -> bool + Send + 'static) -> AnyView {
                     .shrink(1.0),
             )
             .children((
-                widget(label("账号与仓库", 14.0, 700, Role::Text))
-                    .key(format!("admin-source-title-{}", style::key_part(plugin_id))),
+                widget(label(
+                    "账号与仓库",
+                    TypeRole::Section,
+                    TextWeight::Bold,
+                    Role::Text,
+                ))
+                .key(format!("admin-source-title-{}", style::key_part(plugin_id))),
                 widget(wrapping(label(
                     "认证由 Source 插件处理，宿主只保存安全凭据引用。",
-                    12.0,
-                    400,
+                    TypeRole::Meta,
+                    TextWeight::Regular,
                     Role::Muted,
                 ))),
             )),
             widget(action(
                 "连接新账号",
                 Some(icons::KEY_ROUND),
-                Tone::Primary,
+                ButtonKind::Primary,
                 false,
             ))
             .prop::<bool, ActionDisabled>(busy)
@@ -257,7 +262,7 @@ fn repository_row(
         button(
             "检查",
             Some(icons::REFRESH_CW),
-            Tone::Plain,
+            ButtonKind::Ghost,
             AdminMessage::CheckSourceAuth {
                 plugin_id: plugin_id.into(),
                 repo_id: repo_id.clone(),
@@ -267,7 +272,7 @@ fn repository_row(
         button(
             "重新登录",
             None,
-            Tone::Plain,
+            ButtonKind::Ghost,
             AdminMessage::BeginSourceAuth {
                 plugin_id: plugin_id.into(),
                 repo_id: Some(repo_id.clone()),
@@ -277,7 +282,7 @@ fn repository_row(
         button(
             "退出",
             Some(icons::LOG_OUT),
-            Tone::Danger,
+            ButtonKind::Danger,
             AdminMessage::ClearSourceAuth {
                 plugin_id: plugin_id.into(),
                 repo_id: repo_id.clone(),
@@ -306,12 +311,22 @@ fn repository_row(
             )
             .children((
                 style::bound(
-                    label(String::new(), 14.0, 700, Role::Text),
+                    label(
+                        String::new(),
+                        TypeRole::Section,
+                        TextWeight::Bold,
+                        Role::Text,
+                    ),
                     row_text(item, |row| &row.name),
                 )
                 .key(format!("admin-source-repo-{}", style::key_part(&repo_id))),
                 style::bound(
-                    wrapping(label(String::new(), 12.0, 400, Role::Muted)),
+                    wrapping(label(
+                        String::new(),
+                        TypeRole::Meta,
+                        TextWeight::Regular,
+                        Role::Muted,
+                    )),
                     row_text(item, |row| &row.status),
                 )
                 .key(format!(
@@ -353,7 +368,7 @@ fn session_flow(plugin_id: &str, source: Signal<Option<SourceAuthView>>) -> AnyV
     let pid = style::key_part(plugin_id);
     let busy = move || source.with(|view| view.as_ref().is_some_and(|view| view.busy));
     // 流程区是网格，按钮拉满整行，文字居中。
-    let mut cache = action("选择缓存目录", None, Tone::Plain, false);
+    let mut cache = action("选择缓存目录", None, ButtonKind::Ghost, false);
     std::sync::Arc::make_mut(&mut cache.style.layout).width = Some(LengthSpec::Fill);
     let cache = widget(cache)
         .prop::<String, fields::button::label>(session_value(source, |session| {
@@ -366,7 +381,12 @@ fn session_flow(plugin_id: &str, source: Signal<Option<SourceAuthView>>) -> AnyV
             cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ChooseSourceCache))
         });
     let cache_path = style::bound(
-        wrapping(label(String::new(), 12.0, 400, Role::Muted)),
+        wrapping(label(
+            String::new(),
+            TypeRole::Meta,
+            TextWeight::Regular,
+            Role::Muted,
+        )),
         session_value(source, |session| session.cache_path.clone()),
     )
     .visible(session_value(source, |session| {
@@ -416,7 +436,6 @@ fn session_flow(plugin_id: &str, source: Signal<Option<SourceAuthView>>) -> AnyV
     .children((qr, image));
     let refresh_id = plugin_id.to_string();
     let poll_id = plugin_id.to_string();
-    let poll_icon = move || busy().then_some(icons::LOADER_CIRCLE);
     let actions = widget(
         row(10.0)
             .wrap(true)
@@ -424,13 +443,13 @@ fn session_flow(plugin_id: &str, source: Signal<Option<SourceAuthView>>) -> AnyV
             .justify(nana_ui::runtime::JustifySpec::End),
     )
     .children((
-        widget(action("取消", None, Tone::Plain, false))
+        widget(action("取消", None, ButtonKind::Ghost, false))
             .prop::<bool, ActionDisabled>(busy)
             .key(format!("admin-source-cancel-{pid}"))
             .on_cx(|_, _: &Activate, cx| {
                 cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::CancelSourceAuth))
             }),
-        widget(action("刷新二维码", None, Tone::Plain, false))
+        widget(action("刷新二维码", None, ButtonKind::Ghost, false))
             .prop::<bool, ActionDisabled>(busy)
             .key(format!("admin-source-refresh-{pid}"))
             .on_cx(move |_, _: &Activate, cx| {
@@ -445,8 +464,8 @@ fn session_flow(plugin_id: &str, source: Signal<Option<SourceAuthView>>) -> AnyV
                     repo_id,
                 }));
             }),
-        widget(action("检查登录结果", None, Tone::Primary, false))
-            .prop::<Option<nana_ui_core::Icon>, super::bind::ButtonIcon>(poll_icon)
+        widget(action("检查登录结果", None, ButtonKind::Primary, false))
+            .prop::<bool, fields::button::loading>(busy)
             .prop::<bool, ActionDisabled>(session_value(source, |session| !session.can_poll))
             .key(format!("admin-source-poll-{pid}"))
             .on_cx(move |_, _: &Activate, cx| {

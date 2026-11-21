@@ -1,6 +1,7 @@
 //! 设置、插件、日志和工具页的版式原语。
 //!
-//! 字号、字重、行高、内边距、间距和控件高度写成固定值；颜色只用主题角色。
+//! 字号和字重按主题档位写（没有档位的字号写像素），行高、内边距、间距和控件高度写成固定值；
+//! 颜色只用主题角色。
 //! 圆角一律用 `RadiusTier`，形状和半径基数由渲染层统一生效。
 
 use std::sync::Arc;
@@ -10,7 +11,11 @@ use nana_ui::runtime::{
     AlignSpec, Button, IconGlyph, InteractionStyle, JustifySpec, LengthSpec, NodeStyle,
     SemanticPaint, Stack, Text, TextHorizontalAlignment, TextInput,
 };
-use nana_ui_core::{Icon, LineHeightSpec, OverflowWrapSpec, RadiusTier, SemanticColorRole as Role};
+use nana_ui::theme::type_scale;
+use nana_ui_core::{
+    ButtonKind, Icon, LineHeightSpec, OverflowWrapSpec, RadiusTier, SemanticColorRole as Role,
+    TextWeight, ThemeToken, TypeRole,
+};
 
 /// 正文行高倍数。
 pub(crate) const LINE: f32 = 1.55;
@@ -21,23 +26,58 @@ pub(crate) fn bound(node: Text, value: impl IntoProp<String>) -> El<Text> {
     widget(node).prop::<String, fields::text::value>(value)
 }
 
+/// 字号：主题字号档（11 `Hint`、12 `Meta`、13 `Body`、14 `Section`、15 `CardTitle`、18 `Title`、
+/// 20 `Display`），换了字号刻度的主题跟着变；没有对应档位的字号（22、24 和小数）写像素。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum FontSize {
+    Role(TypeRole),
+    Px(f32),
+}
+
+impl From<TypeRole> for FontSize {
+    fn from(role: TypeRole) -> Self {
+        Self::Role(role)
+    }
+}
+
+impl From<f32> for FontSize {
+    fn from(px: f32) -> Self {
+        Self::Px(px)
+    }
+}
+
+/// 按字号档和字重档写文字的字号、字重。行高另外设，不跟着档位变。
+pub(crate) fn typeset(text: Text, size: impl Into<FontSize>, weight: TextWeight) -> Text {
+    let text = match size.into() {
+        FontSize::Role(role) => text.role(role),
+        FontSize::Px(px) => {
+            let mut text = text;
+            Arc::make_mut(&mut text.style.layout).font_size = Some(px);
+            text
+        }
+    };
+    text.weight(weight)
+}
+
 /// 一段文字：字号、字重、颜色，行高按默认的 1.55 倍。
-pub(crate) fn label(value: impl Into<String>, size: f32, weight: u16, color: Role) -> Text {
+pub(crate) fn label(
+    value: impl Into<String>,
+    size: impl Into<FontSize>,
+    weight: TextWeight,
+    color: Role,
+) -> Text {
     label_lh(value, size, weight, color, LINE)
 }
 
 /// 指定行高倍数的文字。标题 1.25、说明 1.45 或 1.5 这类单独写。
 pub(crate) fn label_lh(
     value: impl Into<String>,
-    size: f32,
-    weight: u16,
+    size: impl Into<FontSize>,
+    weight: TextWeight,
     color: Role,
     line: f32,
 ) -> Text {
-    let mut text = Text::new(value.into())
-        .color(color)
-        .font_size(size)
-        .font_weight(weight);
+    let mut text = typeset(Text::new(value.into()).color(color), size, weight);
     Arc::make_mut(&mut text.style.layout).line_height = Some(LineHeightSpec::Relative(line));
     text.style.text_horizontal_alignment = TextHorizontalAlignment::Start;
     text
@@ -46,8 +86,8 @@ pub(crate) fn label_lh(
 /// 行高写成像素的文字，用于行高固定为 24px 一类的标签。
 pub(crate) fn label_px(
     value: impl Into<String>,
-    size: f32,
-    weight: u16,
+    size: impl Into<FontSize>,
+    weight: TextWeight,
     color: Role,
     line_px: f32,
 ) -> Text {
@@ -57,15 +97,20 @@ pub(crate) fn label_px(
 }
 
 /// 等宽文字。
-pub(crate) fn mono(value: impl Into<String>, size: f32, weight: u16, color: Role) -> Text {
+pub(crate) fn mono(
+    value: impl Into<String>,
+    size: impl Into<FontSize>,
+    weight: TextWeight,
+    color: Role,
+) -> Text {
     mono_lh(value, size, weight, color, LINE)
 }
 
 /// 指定行高倍数的等宽文字，日志上下文的 `<pre>` 用 1.6。
 pub(crate) fn mono_lh(
     value: impl Into<String>,
-    size: f32,
-    weight: u16,
+    size: impl Into<FontSize>,
+    weight: TextWeight,
     color: Role,
     line: f32,
 ) -> Text {
@@ -94,100 +139,50 @@ pub(crate) fn glyph(icon: Icon, size: f32, color: Role) -> IconGlyph {
     IconGlyph::new(icon).size(size).role(color)
 }
 
-/// 按钮的语气。
-/// 按 DESIGN.md 5.1 画：主操作低饱和蓝，危险操作红字。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Tone {
-    /// 普通按钮：透明底、正文色。
-    Plain,
-    /// 主操作：`accent-soft` 底、`accent-on-soft` 字、600 字重。
-    Primary,
-    /// 危险操作：透明底、危险色字。
-    Danger,
-}
-
-/// 普通按钮：高 32、左右内边距 10、字 14/500、图标 14、间距 6、圆角 sm。
-/// 禁用时整体 45% 不透明，不换颜色。要绑定禁用时用 `bind::ActionDisabled`，透明度一起换。
+/// 普通按钮：配色按 `kind` 取主题按钮配方（`Ghost` 透明底正文色、`Primary` 强调浅底、`Danger` 红字），
+/// 这里只改版式：高 32、左右内边距 10、字 14（`Section`）/500、主操作 600、图标 14、间距 6。
+/// 禁用时整体 45% 不透明，不换颜色（主题的禁用配色会换成弱色和浅底）。要绑定禁用时用
+/// `bind::ActionDisabled`，透明度一起换；进行中用 `fields::button::loading`，图标位转圈。
 pub(crate) fn action(
     text: impl Into<String>,
     icon: Option<Icon>,
-    tone: Tone,
+    kind: ButtonKind,
     disabled: bool,
 ) -> Button {
-    let (foreground, background, hovered, pressed, weight) = match tone {
-        Tone::Plain => (Role::Text, None, Some(Role::Hover), Some(Role::Active), 500),
-        Tone::Primary => (
-            Role::AccentOnSoft,
-            Some(Role::AccentSoft),
-            Some(Role::AccentSoftHover),
-            Some(Role::AccentSoftPressed),
-            600,
-        ),
-        Tone::Danger => (
-            Role::Danger,
-            None,
-            Some(Role::DangerSoftHover),
-            Some(Role::DangerSoftPressed),
-            500,
-        ),
-    };
-    let mut style = NodeStyle {
-        foreground: Some(foreground),
-        background,
-        radius: Some(RadiusTier::Sm),
-        interaction: InteractionStyle {
-            hovered: SemanticPaint {
-                background: hovered,
-                foreground: Some(foreground),
-                ..SemanticPaint::default()
-            },
-            pressed: SemanticPaint {
-                background: pressed,
-                foreground: Some(foreground),
-                ..SemanticPaint::default()
-            },
-            focused: SemanticPaint {
-                background: hovered,
-                foreground: Some(foreground),
-                ..SemanticPaint::default()
-            },
-            disabled: SemanticPaint {
-                background,
-                foreground: Some(foreground),
-                ..SemanticPaint::default()
-            },
-            ..InteractionStyle::default()
-        }
-        .into(),
-        text_horizontal_alignment: TextHorizontalAlignment::Center,
-        text_vertical_alignment: nana_ui::runtime::TextVerticalAlignment::Center,
-        ..NodeStyle::default()
-    };
-    {
-        let layout = Arc::make_mut(&mut style.layout);
-        layout.height = Some(LengthSpec::Px(32.0));
-        layout.min_height = Some(LengthSpec::Px(32.0));
-        layout.width = Some(LengthSpec::Shrink);
-        layout.padding_left = Some(LengthSpec::Px(10.0));
-        layout.padding_right = Some(LengthSpec::Px(10.0));
-        layout.padding_top = Some(LengthSpec::Px(0.0));
-        layout.padding_bottom = Some(LengthSpec::Px(0.0));
-        layout.font_size = Some(14.0);
-        layout.font_weight = Some(weight);
-        layout.line_height = Some(LineHeightSpec::Relative(LINE));
-        layout.white_space_nowrap = true;
-        layout.flex_grow = Some(0.0);
-        layout.flex_shrink = Some(0.0);
-        if disabled {
-            layout.opacity = Some(crate::theme_map::DISABLED_OPACITY);
-        }
-    }
     let mut button = Button::new(text)
+        .kind(kind)
+        .icon_size(14.0)
         .icon_gap(6.0)
-        .disabled(disabled)
-        .style(style);
+        .disabled(disabled);
     if let Some(icon) = icon {
-        button = button.icon(icon).icon_size(14.0);
+        button = button.icon(icon);
+    }
+    let style = &mut button.style;
+    style.interaction.disabled = SemanticPaint::default();
+    style.control_height = None;
+    style.control_padding_x = None;
+    let layout = Arc::make_mut(&mut style.layout);
+    layout.height = Some(LengthSpec::Px(32.0));
+    layout.min_height = Some(LengthSpec::Px(32.0));
+    layout.width = Some(LengthSpec::Shrink);
+    layout.padding_left = Some(LengthSpec::Px(10.0));
+    layout.padding_right = Some(LengthSpec::Px(10.0));
+    layout.padding_top = Some(LengthSpec::Px(0.0));
+    layout.padding_bottom = Some(LengthSpec::Px(0.0));
+    layout.border_width = None;
+    layout.font_size = Some(type_scale::SECTION);
+    layout.line_height = Some(LineHeightSpec::Relative(LINE));
+    layout.flex_grow = Some(0.0);
+    layout.flex_shrink = Some(0.0);
+    layout.theme.border_width = None;
+    layout.theme.line_height = None;
+    layout.theme.font_size = Some(ThemeToken::Type(TypeRole::Section).into());
+    if kind == ButtonKind::Primary {
+        layout.font_weight = Some(type_scale::SEMIBOLD);
+        layout.theme.font_weight = Some(ThemeToken::Weight(TextWeight::Semibold).into());
+    }
+    if disabled {
+        layout.opacity = Some(crate::theme_map::DISABLED_OPACITY);
     }
     button
 }
@@ -315,14 +310,20 @@ pub(crate) fn workbench_header(
             .key(format!("{key}-eyebrow"))
             .into_any(),
         widget(pad(column(0.0), 4.0, 0.0, 0.0, 0.0))
-            .children((widget(label(title, 24.0, 700, Role::Text)).key(format!("{key}-title")),))
+            .children((widget(label(title, 24.0, TextWeight::Bold, Role::Text))
+                .key(format!("{key}-title")),))
             .into_any(),
     ];
     if !subline.is_empty() {
         left.push(
             widget(pad(column(0.0), 8.0, 0.0, 0.0, 0.0))
-                .children((widget(wrapping(label(subline, 14.0, 400, Role::Muted)))
-                    .key(format!("{key}-subline")),))
+                .children((widget(wrapping(label(
+                    subline,
+                    TypeRole::Section,
+                    TextWeight::Regular,
+                    Role::Muted,
+                )))
+                .key(format!("{key}-subline")),))
                 .into_any(),
         );
     }
@@ -352,7 +353,12 @@ pub(crate) fn workbench_header(
 
 /// 眉题：11/600 弱色、大写、字距 0.4。
 pub(crate) fn eyebrow_text(value: &str) -> Text {
-    let mut text = label(value.to_uppercase(), 11.0, 600, Role::Faint);
+    let mut text = label(
+        value.to_uppercase(),
+        TypeRole::Hint,
+        TextWeight::Semibold,
+        Role::Faint,
+    );
     Arc::make_mut(&mut text.style.layout)
         .text_ext
         .letter_spacing = Some(0.4);
@@ -398,35 +404,6 @@ pub(crate) fn bare_input(input: TextInput) -> TextInput {
 /// 聚焦时换主背景。
 pub(crate) fn native_input(input: TextInput) -> TextInput {
     input.style(native_field_style(32.0))
-}
-
-/// 勾选框的配色：主背景、`border-strong` 边线。尺寸由调用方的布局给，不吃主题的控件最小高。
-///
-/// 选中后 NanaUI 画「✓」，颜色取主题勾选框配方的选中字色（强调色上的字色），不读这里给的前景，
-/// 所以选中底用强调色，勾才看得见。
-pub(crate) fn native_checkbox(
-    mut checkbox: nana_ui::runtime::Checkbox,
-    size: f32,
-) -> nana_ui::runtime::Checkbox {
-    let selected = SemanticPaint {
-        background: Some(Role::Accent),
-        border: Some(Role::Accent),
-        ..SemanticPaint::default()
-    };
-    let style = &mut checkbox.style;
-    style.control_height = None;
-    style.background = Some(Role::Background);
-    style.border = Some(Role::BorderStrong);
-    style.interaction.selected = selected.clone();
-    style.interaction.selected_hovered = selected.clone();
-    style.interaction.selected_pressed = selected;
-    let layout = Arc::make_mut(&mut style.layout);
-    layout.width = Some(LengthSpec::Px(size));
-    layout.height = Some(LengthSpec::Px(size));
-    layout.min_width = Some(LengthSpec::Px(size));
-    layout.min_height = Some(LengthSpec::Px(size));
-    layout.flex_shrink = Some(0.0);
-    checkbox
 }
 
 /// 原生输入框和文本域共用的外形。`height` 给单行高度，文本域另设最小高。

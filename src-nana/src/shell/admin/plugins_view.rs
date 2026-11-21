@@ -15,7 +15,7 @@ use nana_ui::runtime::view::{
     AnyView, IntoView, Item, Store, StoreList, StorePath, signal, widget,
 };
 use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, TextChanged, TextInput};
-use nana_ui_core::SemanticColorRole as Role;
+use nana_ui_core::{SemanticColorRole as Role, TextWeight, TypeRole};
 
 use super::super::hot::ModelField;
 use super::super::view_part_overlay::dialog::{DialogFrame, MODAL_CARD, intent_button};
@@ -28,7 +28,7 @@ use super::marks;
 use super::plugins_state::{
     PanelState, PluginCardView, PluginGroupView, PluginGroupViewStoreFields, PluginPanelSignals,
 };
-use super::style::{self, Tone, action, column, label};
+use super::style::{self, action, column, label};
 
 /// 面板上随入口变化的文案。
 pub(crate) struct PanelCopy {
@@ -77,17 +77,22 @@ pub(crate) fn manager_panel(signals: PluginPanelSignals, copy: &'static PanelCop
                 "admin-plugin-count",
             )
             .into_any(),
-            widget(action("刷新", Some(icons::REFRESH_CW), Tone::Plain, false))
-                .prop::<bool, ActionDisabled>(managing)
-                .key("admin-plugin-refresh")
-                .on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::RefreshPlugins))
-                })
-                .into_any(),
+            widget(action(
+                "刷新",
+                Some(icons::REFRESH_CW),
+                ButtonKind::Ghost,
+                false,
+            ))
+            .prop::<bool, ActionDisabled>(managing)
+            .key("admin-plugin-refresh")
+            .on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::RefreshPlugins))
+            })
+            .into_any(),
             widget(action(
                 "从 .momoplug 安装",
                 Some(icons::UPLOAD),
-                Tone::Primary,
+                ButtonKind::Primary,
                 false,
             ))
             .prop::<bool, ActionDisabled>(managing)
@@ -190,12 +195,23 @@ fn group_view(group: GroupItem, signals: PluginPanelSignals) -> AnyView {
     )
     .children((
         style::bound(
-            style::label_lh(String::new(), 15.0, 700, Role::Text, 1.25),
+            style::label_lh(
+                String::new(),
+                TypeRole::CardTitle,
+                TextWeight::Bold,
+                Role::Text,
+                1.25,
+            ),
             row_text(group, |group| &group.label),
         )
         .key(format!("admin-plugin-group-{category}")),
         style::bound(
-            label(String::new(), 12.0, 400, Role::Muted),
+            label(
+                String::new(),
+                TypeRole::Meta,
+                TextWeight::Regular,
+                Role::Muted,
+            ),
             row_text(group, |group| &group.count),
         )
         .key(format!("admin-plugin-group-count-{category}")),

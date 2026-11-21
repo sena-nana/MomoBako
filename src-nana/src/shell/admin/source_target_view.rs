@@ -1,5 +1,5 @@
 //! 「选择目标资源库」对话框：来源条目「下载到其他资源库」有几个候选时弹出。
-//! 宽 `min(560px, 92vw)`；每个候选一张卡片，名称下面一行路径，都按省略号收尾；
+//! 宽 `min(560px, 92vw)`；候选是一张 NanaUI 列表（上下方向键在卡片间移焦点），每个候选一张卡片，名称下面一行路径，都按省略号收尾；
 //! 底栏只有「取消」。点卡片开始下载，取消、点外面和 Escape 不下载（`shell/admin/source_target.rs`）。
 //!
 //! 卡片按内容高画，名称和路径不叠在一起；悬停描强调色，和别的悬停行一致。
@@ -9,10 +9,10 @@ use std::sync::Arc;
 use nana_ui::ButtonKind;
 use nana_ui::runtime::view::{AnyView, IntoView, widget};
 use nana_ui::runtime::{
-    Activate, AlignSpec, LengthSpec, ListItem, NodeStyle, RadiusTier, SemanticColorRole,
-    SemanticPaint, Stack, Text,
+    Activate, AlignSpec, LengthSpec, List, ListItem, NodeStyle, RadiusTier, RovingFocusGroup,
+    SemanticColorRole, SemanticPaint, Stack, Text,
 };
-use nana_ui_core::DialogSize;
+use nana_ui_core::{DialogSize, TextWeight, TypeRole};
 
 use super::super::view_part_overlay::dialog::{DialogFrame, action, footer};
 use super::super::{ShellMessage, ShellViewModel};
@@ -34,7 +34,11 @@ pub(crate) fn target_dialog(model: &ShellViewModel) -> Option<AnyView> {
         .iter()
         .map(candidate_card)
         .collect::<Vec<_>>();
-    let body = widget(Stack::column(10.0).width(LengthSpec::Fill))
+    let list = List::new()
+        .label("候选资源库")
+        .style(Stack::column(10.0).width(LengthSpec::Fill).node_style());
+    let body = widget(list)
+        .roving_focus(RovingFocusGroup::vertical())
         .children(cards)
         .key("download-target-list");
     let buttons = vec![action(
@@ -88,8 +92,18 @@ fn candidate_card(candidate: &TargetCandidate) -> AnyView {
             .min_width(LengthSpec::Px(0.0)),
     )
     .children((
-        widget(line(&candidate.name, 14.0, 600, SemanticColorRole::Text)),
-        widget(line(&candidate.path, 12.0, 400, SemanticColorRole::Muted)),
+        widget(line(
+            &candidate.name,
+            TypeRole::Section,
+            TextWeight::Semibold,
+            SemanticColorRole::Text,
+        )),
+        widget(line(
+            &candidate.path,
+            TypeRole::Meta,
+            TextWeight::Regular,
+            SemanticColorRole::Muted,
+        )),
     ));
     let repo_id = candidate.repo_id.clone();
     widget(ListItem::new(format!("下载到 {}", candidate.name)).style(style))
@@ -106,11 +120,11 @@ fn candidate_card(candidate: &TargetCandidate) -> AnyView {
         .into_any()
 }
 
-/// 单行、超出按省略号收尾的一段字。
-fn line(value: &str, size: f32, weight: u16, color: SemanticColorRole) -> Text {
+/// 单行、超出按省略号收尾的一段字。字号和行盒按主题的字号档。
+fn line(value: &str, role: TypeRole, weight: TextWeight, color: SemanticColorRole) -> Text {
     let mut node = Text::new(value.to_string())
-        .font_size(size)
-        .font_weight(weight)
+        .typography(role)
+        .weight(weight)
         .color(color)
         .truncating();
     let layout = Arc::make_mut(&mut node.style.layout);

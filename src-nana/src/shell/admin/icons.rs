@@ -133,13 +133,6 @@ static KEY_ROUND_DATA: IconData = IconData {
     shapes: EMPTY,
     svg: r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg>"#,
 };
-/// lucide `loader-circle`（`LoaderCircle`）。
-pub(crate) const LOADER_CIRCLE: Icon = lucide(&LOADER_CIRCLE_DATA);
-static LOADER_CIRCLE_DATA: IconData = IconData {
-    name: "lucide-loader-circle",
-    shapes: EMPTY,
-    svg: r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>"#,
-};
 /// lucide `log-out`（`LogOut`）。
 pub(crate) const LOG_OUT: Icon = lucide(&LOG_OUT_DATA);
 static LOG_OUT_DATA: IconData = IconData {

@@ -530,10 +530,10 @@ fn asmr_shortcuts_publish_onto_the_filter_bar() {
     assert_eq!(model.inspect.shortcuts[0].metadata, "libraryKind=asmr");
 }
 
-/// 选中的勾选框：NanaUI 的「✓」用主题勾选框配方的选中字色，选中底要和它拉开对比，勾上了才看得出来。
-/// 以前选中底是 `accent-soft`，白色的勾落在几乎同色的浅底上，浅色主题下看不见。
+/// 选中的勾选框（API 调试页的鉴权勾选框用 NanaUI 默认配色）：「✓」用主题勾选框配方的选中字色，
+/// 选中底要和它拉开对比，勾上了才看得出来；选中底是 `accent-soft` 时白色的勾在浅色主题下看不见。
 #[test]
-fn a_checked_native_checkbox_keeps_its_mark_visible() {
+fn a_checked_checkbox_keeps_its_mark_visible() {
     use nana_ui::theme::{ComponentRecipeId, ThemeAppearance, builtin_theme_arc};
 
     fn luminance(color: [f32; 4]) -> f32 {
@@ -546,8 +546,7 @@ fn a_checked_native_checkbox_keeps_its_mark_visible() {
         };
         0.2126 * channel(color[0]) + 0.7152 * channel(color[1]) + 0.0722 * channel(color[2])
     }
-    let checkbox =
-        super::super::style::native_checkbox(nana_ui::runtime::Checkbox::new("", true), 18.0);
+    let checkbox = nana_ui::runtime::Checkbox::new("Authorization: Bearer token", true);
     let fill_role = checkbox
         .style
         .interaction

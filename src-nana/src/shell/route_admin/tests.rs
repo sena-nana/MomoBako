@@ -850,7 +850,7 @@ fn office_convert_cache_scrolls_into_the_extensions_page() {
     let cache = bounds(&harness, "admin-office-cache-title");
     let mode = bounds(
         &harness,
-        "admin-field-label-momobako.service.office-convert-converterMode",
+        "admin-field-momobako.service.office-convert-converterMode",
     );
     assert!(
         status.y >= body.y && status.y < body.y + body.height,

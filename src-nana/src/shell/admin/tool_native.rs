@@ -19,7 +19,9 @@
 
 use nana_ui::runtime::view::{AnyView, IntoView, Signal, fields, signal, widget};
 use nana_ui::runtime::{Activate, AlignSpec, Card, LengthSpec, Stack};
-use nana_ui_core::{CardKind, RadiusTier, SemanticColorRole as Role};
+use nana_ui_core::{
+    ButtonKind, CardKind, RadiusTier, SemanticColorRole as Role, TextWeight, TypeRole,
+};
 
 use super::super::files::{
     EagleImportReport, EagleImportWarning, FileContext, FileDialog, FilesMessage,
@@ -28,7 +30,7 @@ use super::super::{ShellMessage, ShellViewModel};
 use super::AdminMessage;
 use super::bind::ActionDisabled;
 use super::marks;
-use super::style::{self, Tone, action, column, label, mono, pad, row, wrapping};
+use super::style::{self, action, column, label, mono, pad, row, wrapping};
 use super::support::{TOOL_EAGLE_IMPORTER, TOOL_FILE_MANAGER};
 use crate::backend::services::repository::{
     EagleLibraryImportResponse, EagleLibraryImportSummary, EagleLibraryImportWarning,
@@ -46,7 +48,7 @@ pub(crate) use file_import::{
 pub(crate) struct ImportButton {
     pub id: &'static str,
     pub label: &'static str,
-    pub tone: Tone,
+    pub tone: ButtonKind,
     pub message: FilesMessage,
 }
 
@@ -146,20 +148,26 @@ pub(super) fn import_page(id: &str, signals: ImportSignals) -> AnyView {
                 .children((
                     widget(style::eyebrow_text(eyebrow)).key(format!("admin-tool-eyebrow-{id}")),
                     widget(pad(column(0.0), 4.0, 0.0, 0.0, 0.0)).children((style::bound(
-                        style::label_lh(String::new(), 22.0, 700, Role::Text, 1.25),
+                        style::label_lh(String::new(), 22.0, TextWeight::Bold, Role::Text, 1.25),
                         text(|view| &view.title),
                     )
                     .key(format!("admin-tool-title-{id}")),)),
-                    widget(pad(column(0.0), 8.0, 0.0, 0.0, 0.0))
-                        .children((widget(wrapping(label(subline, 13.0, 400, Role::Muted)))
-                            .key(format!("admin-tool-subline-{id}")),)),
+                    widget(pad(column(0.0), 8.0, 0.0, 0.0, 0.0)).children((widget(wrapping(
+                        label(subline, TypeRole::Body, TextWeight::Regular, Role::Muted),
+                    ))
+                    .key(format!("admin-tool-subline-{id}")),)),
                 ))
                 .into_any(),
             target_card(vec![
                 target_row(
                     "目标仓库",
                     style::bound(
-                        label(String::new(), 14.0, 600, Role::Text),
+                        label(
+                            String::new(),
+                            TypeRole::Section,
+                            TextWeight::Semibold,
+                            Role::Text,
+                        ),
                         text(|view| &view.repository),
                     )
                     .key(format!("admin-tool-repo-{id}"))
@@ -203,8 +211,8 @@ pub(super) fn import_page(id: &str, signals: ImportSignals) -> AnyView {
         body.push(
             widget(wrapping(label(
                 "ZIP 首版固定支持 .zip，并按解压导入保留内部目录结构。",
-                12.0,
-                400,
+                TypeRole::Meta,
+                TextWeight::Regular,
                 Role::Muted,
             )))
             .key(format!("admin-tool-note-{id}"))
@@ -235,7 +243,15 @@ fn target_card(rows: Vec<AnyView>) -> AnyView {
 
 fn target_row(name: &str, value: AnyView) -> AnyView {
     widget(row(8.0).wrap(true))
-        .children((widget(label(name, 13.0, 400, Role::Muted)), value))
+        .children((
+            widget(label(
+                name,
+                TypeRole::Body,
+                TextWeight::Regular,
+                Role::Muted,
+            )),
+            value,
+        ))
         .into_any()
 }
 
@@ -247,7 +263,16 @@ fn code(text: impl nana_ui::runtime::view::IntoProp<String>, key: String) -> Any
             .border(Role::BorderSoft, 1.0)
             .radius(RadiusTier::Xs),
     )
-    .children((style::bound(mono(String::new(), 12.0, 400, Role::Text), text).key(key),))
+    .children((style::bound(
+        mono(
+            String::new(),
+            TypeRole::Meta,
+            TextWeight::Regular,
+            Role::Text,
+        ),
+        text,
+    )
+    .key(key),))
     .into_any()
 }
 
@@ -307,13 +332,13 @@ pub(crate) fn import_buttons(page_id: &str) -> Vec<ImportButton> {
             button(
                 "folder",
                 "从文件夹导入",
-                Tone::Primary,
+                ButtonKind::Primary,
                 FilesMessage::OpenDialog(FileDialog::Import),
             ),
             button(
                 "zip",
                 "从 ZIP 导入",
-                Tone::Plain,
+                ButtonKind::Ghost,
                 FilesMessage::OpenDialog(FileDialog::ImportArchive),
             ),
         ],
@@ -432,7 +457,12 @@ fn count_row(
     };
     widget(row(8.0).wrap(true))
         .children((
-            widget(label(name, 13.0, 400, Role::Muted)),
+            widget(label(
+                name,
+                TypeRole::Body,
+                TextWeight::Regular,
+                Role::Muted,
+            )),
             code(text, key.into()),
         ))
         .into_any()
@@ -458,10 +488,18 @@ fn warning_title(view: Signal<ImportView>) -> AnyView {
                 .is_some_and(|report| report.warning_count > 0)
         })
     };
-    style::bound(label(String::new(), 11.0, 600, Role::Faint), text)
-        .key("admin-tool-eagle-warnings")
-        .visible(shown)
-        .into_any()
+    style::bound(
+        label(
+            String::new(),
+            TypeRole::Hint,
+            TextWeight::Semibold,
+            Role::Faint,
+        ),
+        text,
+    )
+    .key("admin-tool-eagle-warnings")
+    .visible(shown)
+    .into_any()
 }
 
 /// 一条警告：类型在左，说明在右。超过 20 条的不建这一行。
@@ -487,8 +525,16 @@ fn warning_row(view: Signal<ImportView>, index: usize) -> AnyView {
     let key = format!("admin-tool-eagle-warning-{index}");
     widget(row(8.0).wrap(true))
         .children((
-            style::bound(label(String::new(), 13.0, 400, Role::Muted), kind)
-                .key(format!("{key}-kind")),
+            style::bound(
+                label(
+                    String::new(),
+                    TypeRole::Body,
+                    TextWeight::Regular,
+                    Role::Muted,
+                ),
+                kind,
+            )
+            .key(format!("{key}-kind")),
             code(text, format!("{key}-text")),
         ))
         .visible(shown)
@@ -672,8 +718,8 @@ fn import_target(model: &ShellViewModel) -> (String, String) {
 fn eagle_action_row(page_id: &str, view: Signal<ImportView>) -> AnyView {
     let buttons = vec![
         eagle_choose_button(page_id, view),
-        eagle_submit_button(page_id, view, "copy", "复制导入", Tone::Primary),
-        eagle_submit_button(page_id, view, "move", "剪切导入", Tone::Plain),
+        eagle_submit_button(page_id, view, "copy", "复制导入", ButtonKind::Primary),
+        eagle_submit_button(page_id, view, "move", "剪切导入", ButtonKind::Ghost),
     ];
     widget(
         Stack::row(8.0)
@@ -686,7 +732,7 @@ fn eagle_action_row(page_id: &str, view: Signal<ImportView>) -> AnyView {
 }
 
 fn eagle_choose_button(page_id: &str, view: Signal<ImportView>) -> AnyView {
-    widget(action("选择目录", None, Tone::Plain, false))
+    widget(action("选择目录", None, ButtonKind::Ghost, false))
         .prop::<bool, ActionDisabled>(move || view.with(|view| !view.enabled))
         .key(format!("admin-tool-action-{page_id}-choose"))
         .on_cx(move |_, _: &Activate, cx| {
@@ -703,7 +749,7 @@ fn eagle_submit_button(
     view: Signal<ImportView>,
     mode: &'static str,
     label: &'static str,
-    tone: Tone,
+    tone: ButtonKind,
 ) -> AnyView {
     let label_view = view;
     let text = move || label_view.with(|view| eagle_submit_label(view, mode).to_string());
