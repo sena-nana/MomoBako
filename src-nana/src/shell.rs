@@ -24,7 +24,7 @@ mod pointer_gesture;
 mod progress_fill;
 mod sidebar_resize;
 pub use pointer_gesture::observe_live_pointer;
-pub(crate) use pointer_gesture::{note_external_folder_drag, tick_external_folder_hover};
+pub(crate) use pointer_gesture::{note_routed_input, tick_external_folder_hover};
 pub use sidebar_resize::note_sidebar_resize;
 mod files_selection_box;
 mod files_view;

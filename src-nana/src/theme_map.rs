@@ -5,9 +5,9 @@
 //! 具体数值由 `SemanticPalette` 持有；本模块只锁住颜色角色、字号、侧栏宽度和圆角刻度的对应，另给离屏
 //! 清屏色比对用的背景色。
 
-use nana_ui::runtime::{SemanticColorRole, SemanticPaint};
+use nana_ui::runtime::{SemanticColorRole, SemanticPaint, Text};
 use nana_ui::theme::{SemanticPalette, ThemeAppearance, ThemeMetrics, UI_METRICS, type_scale};
-use nana_ui_core::SemanticColorMix;
+use nana_ui_core::{SemanticColorMix, TextWeight, TypeRole as NanaTypeRole};
 
 /// 一条 CSS 变量到 Nana 调色板字段的对应。
 pub struct ColorRole {
@@ -140,6 +140,34 @@ pub const TYPE_ROLES: &[TypeRole] = &[
         nana_px: type_scale::HINT,
     },
 ];
+
+/// 写一段字的字号和字重。字号正好是 [`TYPE_ROLES`] 里的台阶（或 20px 的展示字号）时用 Nana 的字号角色，
+/// 字重正好是 400 / 500 / 600 / 700 时用字重台阶，都跟着装上的主题走；落在台阶之间的照写像素。
+pub fn typed_text(node: Text, size: f32, weight: u16) -> Text {
+    let steps = [
+        (type_scale::HINT, NanaTypeRole::Hint),
+        (type_scale::META, NanaTypeRole::Meta),
+        (type_scale::BODY, NanaTypeRole::Body),
+        (type_scale::SECTION, NanaTypeRole::Section),
+        (type_scale::TITLE, NanaTypeRole::Title),
+        (type_scale::DISPLAY, NanaTypeRole::Display),
+    ];
+    let node = match steps.iter().find(|(px, _)| *px == size) {
+        Some((_, role)) => node.role(*role),
+        None => node.font_size(size),
+    };
+    let weight_step = match weight {
+        400 => Some(TextWeight::Regular),
+        500 => Some(TextWeight::Medium),
+        600 => Some(TextWeight::Semibold),
+        700 => Some(TextWeight::Bold),
+        _ => None,
+    };
+    match weight_step {
+        Some(step) => node.weight(step),
+        None => node.font_weight(weight),
+    }
+}
 
 /// 禁用控件的整体不透明度 0.45，右键菜单项和滑杆也是这个值。
 /// 有的控件直接写节点透明度，有的在 sRGB 里和所在底色混成不透明色（渲染器按线性空间合成会更亮），

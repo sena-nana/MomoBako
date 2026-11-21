@@ -12,12 +12,14 @@ use crate::host_api::{ExternalOpenRequest, HostInputRequest, HostRequest};
 
 use super::{ShellMessage, ShellViewModel};
 
+mod gesture;
 mod reduce;
 mod source_prompt;
 mod support;
 mod thumbnail_prompt;
 mod view;
 
+pub use gesture::{BlankPress, DragSample, LiveGesture};
 pub(crate) use reduce::{begin_relocate_dialog, reduce_message};
 pub(crate) use support::{CloseDecision, decide_close};
 pub(crate) use view::close_prompt;
@@ -244,6 +246,10 @@ pub enum InputMessage {
         paths: Vec<String>,
         append: bool,
     },
+    /// 卡片或列表空白处的一次拖动采样（NanaUI `PointerDragged`）。
+    PointerDrag(DragSample),
+    /// 指针进出侧栏底部入口那一排（NanaUI `PointerHoverChanged`）。
+    FooterHover(bool),
     /// 用系统程序打开条目。`path` 是仓库内相对路径，打开的同时记一次访问。
     OpenEntry {
         has_repo: bool,
@@ -368,19 +374,6 @@ pub(crate) fn pointer_leave_message(
     }))
 }
 
-/// 实况树上还没松手的指针。`row` 为空时是框选。
-#[derive(Clone, Debug)]
-pub struct LiveGesture {
-    pub row: Option<String>,
-    pub origin_x: f32,
-    pub origin_y: f32,
-    pub x: f32,
-    pub y: f32,
-    pub armed: bool,
-    /// 按下时 Ctrl 或 Meta 是否按着。文档不保留修饰键时为 false。
-    pub append: bool,
-}
-
 /// 拖放会话、关闭确认和已排队的宿主命令。
 #[derive(Clone, Debug, Default)]
 pub struct InputState {
@@ -403,6 +396,8 @@ pub struct InputState {
     pub sidebar_dragging: bool,
     pub sidebar_resize_dirty: bool,
     pub live_gesture: Option<LiveGesture>,
+    /// 列表空白处按下、还没松手。松手时没走出拖动容差就是点空白。
+    pub blank_press: Option<BlankPress>,
     /// 最近一次输入按着的修饰键。
     pub modifiers: HeldModifiers,
     /// 模型画面上的指针拖拽：上一帧坐标。没有可旋转的网格时不记。

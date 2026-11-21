@@ -40,10 +40,7 @@ fn aligned(
     color: SemanticColorRole,
     align: TextHorizontalAlignment,
 ) -> Text {
-    let mut node = Text::new(label.into())
-        .color(color)
-        .font_size(size)
-        .font_weight(weight);
+    let mut node = crate::theme_map::typed_text(Text::new(label.into()), size, weight).color(color);
     node.style.text_horizontal_alignment = align;
     node
 }

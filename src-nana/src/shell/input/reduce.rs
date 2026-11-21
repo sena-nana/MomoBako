@@ -218,6 +218,10 @@ fn reduce_input(model: &mut ShellViewModel, message: InputMessage) {
             &repo_root,
         ),
         InputMessage::BoxSelect { paths, append } => box_select(model, &paths, append),
+        InputMessage::PointerDrag(sample) => {
+            super::gesture::record(&mut model.input.live_gesture, sample);
+        }
+        InputMessage::FooterHover(hovered) => model.input.footer_hover = hovered,
         InputMessage::OpenEntry {
             has_repo,
             absolute_path,
@@ -303,8 +307,6 @@ fn begin_drag(
     };
     model.input.dragged_paths = drag_paths.clone();
     model.input.internal_active = true;
-    // 拖动已经起步，松手时这一行上的点击丢掉。
-    super::super::files_view::suppress_row_click(path);
     model.input.session = Some(InternalSession {
         start_x: x,
         start_y: y,

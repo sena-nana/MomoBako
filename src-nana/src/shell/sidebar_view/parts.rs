@@ -130,7 +130,7 @@ pub(crate) fn label_text(
     weight: u16,
     color: Option<SemanticColorRole>,
 ) -> Text {
-    let mut node = Text::new(value).font_size(size).font_weight(weight);
+    let mut node = crate::theme_map::typed_text(Text::new(value), size, weight);
     if let Some(color) = color {
         node = node.color(color);
     }

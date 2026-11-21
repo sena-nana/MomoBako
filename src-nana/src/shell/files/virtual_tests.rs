@@ -17,8 +17,6 @@ use crate::shell::{GapMessage, ShellMessage, ShellViewModel, SidebarMessage};
 
 use super::{DisplayMode, FileRow, FilesMessage};
 
-const MARK: &str = "momobako-entry:";
-
 /// `index` 号文件。名字带五位序号，从卡片上就能读出它是第几条。
 fn numbered_file(index: usize) -> FileRow {
     let name = format!("file-{index:05}.png");
@@ -85,19 +83,14 @@ fn settle(window: &mut ApplicationWindow) {
 
 /// 建出来的卡片：序号和卡片框。
 fn built_cards(window: &ApplicationWindow) -> Vec<(usize, LayoutBox)> {
-    let document = window.document.document();
-    let world = window.document.context().world();
-    world
-        .document_order(document)
+    crate::shell::pointer_gesture::mounted_cards(&window.document)
         .into_iter()
-        .filter_map(|id| {
-            let path = world.text(id)?.strip_prefix(MARK)?.split_once(':')?.1;
+        .filter_map(|(_, path, bounds)| {
             let index = path
                 .strip_prefix("file-")?
                 .strip_suffix(".png")?
                 .parse::<usize>()
                 .ok()?;
-            let bounds = world.layout_box(world.parent_id(id)?)?;
             Some((index, bounds))
         })
         .collect()
@@ -345,7 +338,6 @@ fn box_select_includes_unmounted_rows_in_the_scroll_range() {
             start.1,
         )
         .expect("按下");
-    crate::shell::observe_live_pointer(&mut model, &window.document);
     input
         .pointer(
             window.document.context_mut(),
@@ -354,6 +346,10 @@ fn box_select_includes_unmounted_rows_in_the_scroll_range() {
             end.1,
         )
         .expect("拖动");
+    // 列表框收到的拖动采样排成程序消息，照生产先归约，准备帧再结算框选。
+    for message in window.document.context_mut().take_program_messages() {
+        model.reduce(*message.downcast::<ShellMessage>().expect("壳层消息"));
+    }
     crate::shell::observe_live_pointer(&mut model, &window.document);
     let selected = model.files.selected_paths();
     let extra = selected.iter().any(|path| {

@@ -755,11 +755,7 @@ fn folder_imports_external_drop_into_the_directory() {
             input
                 .route(harness.window.document.context_mut(), payload.clone())
                 .expect("拖放事件");
-            crate::shell::note_external_folder_drag(
-                &mut harness.model,
-                &harness.window.document,
-                &payload,
-            );
+            crate::shell::note_routed_input(&mut harness.model, &harness.window.document, &payload);
             for message in harness.take_messages() {
                 harness.apply(message);
             }

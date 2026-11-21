@@ -28,7 +28,6 @@ pub(super) mod style;
 pub(crate) use grid::load_more_if_sentinel_near;
 #[cfg(test)]
 pub(crate) use grid::reset_row_click_state;
-pub(crate) use grid::suppress_row_click;
 mod cards;
 mod virtual_rows;
 pub(crate) use board::estimated_list_width;

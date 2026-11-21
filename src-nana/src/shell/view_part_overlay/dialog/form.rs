@@ -1,17 +1,17 @@
 //! 对话框正文里的字段：标签加输入框、多行输入、下拉框和两列栅格。
 //!
-//! 标签 12px/600 次要色，下面是控件，间距 6；输入框、多行输入和下拉框最小高 32、左右内边距 8、
-//! `--radius-sm` 圆角、14px 字。输入框和多行输入用 `.model(草稿信号)` 受控，草稿由浮层会话按
+//! 每个字段是 NanaUI 的 `FormField`：小号字段的标签是次要色小字，控件在标签下面。
+//! 输入框、多行输入和下拉框最小高 32、左右内边距 8、`--radius-sm` 圆角、14px 字。
+//! 输入框和多行输入用 `.model(草稿信号)` 受控，草稿由浮层会话按
 //! `ModelField` 的规矩回写，按键不会被排在后台消息后面的旧草稿冲掉；改动和回车只发消息。
 
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{
-    AnyView, IntoProp, IntoView, NodeRef, Signal, fields, node_ref, widget,
-};
+use nana_ui::ControlSize;
+use nana_ui::runtime::view::{AnyView, IntoProp, IntoView, Signal, fields, widget};
 use nana_ui::runtime::{
-    AlignSpec, LengthSpec, RadiusTier, Select, SelectChanged, SelectOption, SemanticColorRole,
-    Stack, Text, TextArea, TextChanged, TextInput, TextSubmitted,
+    AlignSpec, FormField, LengthSpec, RadiusTier, Select, SelectChanged, SelectOption, Stack,
+    TextArea, TextChanged, TextInput, TextSubmitted,
 };
 
 use super::MessageFn;
@@ -20,20 +20,12 @@ use crate::shell::ShellMessage;
 /// 下拉框的选项：值和显示文字。
 pub(crate) type Choices = Vec<(String, String)>;
 
-/// 字段的竖排：标签在上，控件在下，间距 6，占满宽度。
-fn field_column() -> Stack {
-    Stack::column(6.0)
-        .width(LengthSpec::Fill)
-        .min_width(LengthSpec::Px(0.0))
-}
-
-/// 字段标签：12px、600、次要文字色。
-fn caption(label: &'static str) -> Text {
-    Text::new(label)
-        .font_size(12.0)
-        .font_weight(600)
-        .color(SemanticColorRole::Muted)
-        .line_height(18.6)
+/// 一个字段：小号 `FormField`，标签在上，`control` 在下，占满宽度。标签也是字段的读屏名。
+pub(crate) fn form_field(label: &'static str, key: &str, control: impl IntoView) -> AnyView {
+    widget(FormField::new(label).size(ControlSize::Small))
+        .key(format!("{key}-field"))
+        .control(control)
+        .into_any()
 }
 
 /// 输入框字段。`draft` 是浮层会话登记的草稿信号；`on_submit` 为 `Some` 时回车提交。
@@ -74,10 +66,7 @@ pub(crate) fn text_field(
     if let Some(submit) = on_submit {
         control = control.on_cx(move |_, _: &TextSubmitted, cx| cx.dispatch_program_all(submit()));
     }
-    widget(field_column())
-        .key(format!("{key}-field"))
-        .children((widget(caption(label)).key(format!("{key}-label")), control))
-        .into_any()
+    form_field(label, key, control)
 }
 
 /// 多行输入字段：`rows` 行高，每行 20px 加上下内边距。
@@ -111,13 +100,10 @@ pub(crate) fn text_area_field(
         .on_cx(move |_, event: &TextChanged, cx| {
             cx.dispatch_program_all(on_change(event.value.to_string()))
         });
-    widget(field_column())
-        .key(format!("{key}-field"))
-        .children((widget(caption(label)).key(format!("{key}-label")), control))
-        .into_any()
+    form_field(label, key, control)
 }
 
-/// 下拉框字段。下拉框没有自己的名称，用 `.labelled_by` 以字段名命名；
+/// 下拉框字段。下拉框的读屏名是字段名；
 /// `value` 和 `choices` 都可以读信号，打开期间变了只改这两个字段。
 pub(crate) fn select_field(
     label: &'static str,
@@ -127,8 +113,9 @@ pub(crate) fn select_field(
     disabled: impl IntoProp<bool>,
     on_change: impl Fn(String) -> ShellMessage + Send + Sync + 'static,
 ) -> AnyView {
-    let named: NodeRef = node_ref();
-    let mut select = Select::new(value()).options(options(choices()));
+    let mut select = Select::new(value())
+        .options(options(choices()))
+        .label(label);
     select.style.radius = Some(RadiusTier::Sm);
     select.style.control_height = None;
     {
@@ -141,22 +128,13 @@ pub(crate) fn select_field(
     }
     let control = widget(select)
         .key(key)
-        .labelled_by(named)
         .prop::<Option<Arc<str>>, fields::select::value>(move || value().map(Arc::from))
         .prop::<Vec<SelectOption>, fields::select::options>(move || options(choices()))
         .prop::<bool, fields::select::disabled>(disabled)
         .on_cx(move |_, event: &SelectChanged, cx| {
             cx.dispatch_program_all(on_change(event.value.to_string()))
         });
-    widget(field_column())
-        .key(format!("{key}-field"))
-        .children((
-            widget(caption(label))
-                .node_ref(named)
-                .key(format!("{key}-label")),
-            control,
-        ))
-        .into_any()
+    form_field(label, key, control)
 }
 
 fn options(choices: Choices) -> Vec<SelectOption> {

@@ -148,7 +148,7 @@ fn modifier_clicks_extend_and_toggle_the_selection() {
     assert_eq!(selected(&harness), ["assets"], "松开修饰键以后单击是替换");
 }
 
-/// 从列表空白拖到 cover.png：没过 3px 不画选框；拖过以后选框盖住这段指针，松手选框消失、选择留下。
+/// 从列表空白拖到 cover.png：没拖出容差不画选框；拖过以后选框盖住这段指针，松手选框消失、选择留下。
 #[test]
 fn box_drag_paints_the_vue_selection_rectangle() {
     let mut harness = ShellHarness::mount(list_page());
@@ -156,22 +156,24 @@ fn box_drag_paints_the_vue_selection_rectangle() {
     let end = center(&card(&harness, "cover.png"));
     assert!(box_opacity(&harness) < 0.01, "还没拖时选框不该出现");
 
-    harness.pointer(PointerPhase::Down, start.0, start.1, PLAIN);
-    harness.frame();
-    harness.pointer(PointerPhase::Move, start.0 + 2.0, start.1, PLAIN);
-    harness.frame();
+    drag(&mut harness, PointerPhase::Down, start, PLAIN);
+    drag(
+        &mut harness,
+        PointerPhase::Move,
+        (start.0 + 2.0, start.1),
+        PLAIN,
+    );
     assert!(
         box_opacity(&harness) < 0.01,
-        "2px 还没到 Vue 的 3px，选框不该出现"
+        "2px 还在拖动容差里，选框不该出现"
     );
-    assert!(selected(&harness).is_empty(), "没拖过 3px 时选择不动");
+    assert!(selected(&harness).is_empty(), "没拖出容差时选择不动");
 
-    harness.pointer(PointerPhase::Move, end.0, end.1, PLAIN);
-    harness.frame();
+    drag(&mut harness, PointerPhase::Move, end, PLAIN);
     let (style, bounds) = selection_box(&harness);
     assert!(
         (style.layout.opacity.unwrap_or(0.0) - 1.0).abs() < 0.01,
-        "拖过 3px 以后选框该出现：{style:?}"
+        "拖出容差以后选框该出现：{style:?}"
     );
     let left = start.0.min(end.0);
     let top = start.1.min(end.1);
@@ -207,8 +209,7 @@ fn box_drag_paints_the_vue_selection_rectangle() {
         "选框盖住 cover.png 时它该被选中"
     );
 
-    harness.pointer(PointerPhase::Up, end.0, end.1, PLAIN);
-    harness.frame();
+    drag(&mut harness, PointerPhase::Up, end, PLAIN);
     assert!(box_opacity(&harness) < 0.01, "松手以后选框消失");
     assert!(
         selected(&harness).iter().any(|path| path == "cover.png"),
@@ -227,14 +228,24 @@ fn control_box_select_appends_to_the_selection() {
         click(&mut harness, "page.pdf", PLAIN);
         let start = empty_list_point(&harness, "cover.png");
         let end = center(&card(&harness, "cover.png"));
-        harness.pointer(PointerPhase::Down, start.0, start.1, modifiers);
-        harness.frame();
-        harness.pointer(PointerPhase::Move, end.0, end.1, modifiers);
-        harness.frame();
-        harness.pointer(PointerPhase::Up, end.0, end.1, modifiers);
-        harness.frame();
+        drag(&mut harness, PointerPhase::Down, start, modifiers);
+        drag(&mut harness, PointerPhase::Move, end, modifiers);
+        drag(&mut harness, PointerPhase::Up, end, modifiers);
         assert_eq!(selected(&harness), expected, "修饰键 {modifiers:?}");
     }
+}
+
+/// 送一次指针输入，照生产先归约列表发的拖动采样，再跑一帧准备。
+fn drag(
+    harness: &mut ShellHarness,
+    phase: PointerPhase,
+    (x, y): (f32, f32),
+    modifiers: nana_ui::InputModifiers,
+) {
+    harness.pointer(phase, x, y, modifiers);
+    let queued = harness.take_messages();
+    harness.settle(queued);
+    harness.frame();
 }
 
 /// 选框节点的样式和布局。节点一直在，没拖时透明且没有尺寸。

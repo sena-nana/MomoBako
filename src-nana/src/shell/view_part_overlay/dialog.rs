@@ -33,7 +33,9 @@ use super::session::{OverlaySession, register};
 use crate::shell::ShellMessage;
 
 mod form;
-pub(crate) use form::{Choices, select_field, text_area_field, text_field, two_columns};
+pub(crate) use form::{
+    Choices, form_field, select_field, text_area_field, text_field, two_columns,
+};
 
 /// 处理中的判断，事件处理器和绑定都要读，所以共享一份。
 pub(crate) type BusyFn = Arc<dyn Fn() -> bool + Send + Sync>;
@@ -421,9 +423,7 @@ pub(crate) fn busy_note(visible: impl IntoProp<bool>, key: &'static str) -> AnyV
 
 /// 占满宽度、任意处折行的一段字。
 pub(crate) fn wrapping_text(size: f32, line_height: f32, color: SemanticColorRole) -> Text {
-    let mut node = Text::new(String::new())
-        .font_size(size)
-        .font_weight(400)
+    let mut node = crate::theme_map::typed_text(Text::new(String::new()), size, 400)
         .color(color)
         .line_height(line_height);
     let layout = Arc::make_mut(&mut node.style.layout);

@@ -1,7 +1,7 @@
 //! 空库路由（常驻）：还没有资源库时的拖入引导，整节是系统文件拖放目标。
 //!
 //! 照启动页的样板改成常驻：[`EmptyView`] 是投影，[`EmptySignals`] 建在主区块的常驻作用域里，
-//! 视图只建一次。拖着文件夹经过时面板换底色和描边、附加失败的错误条，都按字段绑定。
+//! 视图只建一次。附加失败的错误条按字段绑定。拖着文件夹经过时的悬停样子由 NanaUI 画在整节拖放目标上。
 //! 拖放处理器在事件到达时现读信号里的拖放条件，不抄建视图那一刻的值。
 //!
 //! 版式：NanaUI 的空状态（图标、标题、拖入说明）和附加失败的提示条。
@@ -10,12 +10,10 @@ use std::sync::Arc;
 
 use nana_ui::icons_tabler::{ALERT_CIRCLE, FOLDER};
 use nana_ui::runtime::view::{
-    AnyView, FieldWrite, IntoView, Signal, StyledComponent, callout, empty_state, node_ref, signal,
-    widget,
+    AnyView, IntoView, Signal, callout, empty_state, node_ref, signal, widget,
 };
 use nana_ui::runtime::{
-    AlignSpec, FileDropEvent, JustifySpec, LengthSpec, RadiusTier, SemanticColorRole, Stack,
-    StatusTone,
+    AlignSpec, FileDropEvent, JustifySpec, LengthSpec, RadiusTier, Stack, StatusTone,
 };
 
 use super::ShellViewModel;
@@ -24,8 +22,6 @@ use super::input::{FileDropFlags, accept_file_drops, file_drop_flags, file_drop_
 /// 空库页要显示的东西，以及拖放消息要带的仓库条件。
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct EmptyView {
-    /// 拖着文件夹经过：面板 `--accent-soft` 底、1px 强调色描边。
-    pub dragging: bool,
     /// 附加失败的错误，空时不显示错误条。
     pub error: String,
     pub drop: FileDropFlags,
@@ -35,7 +31,6 @@ impl EmptyView {
     /// 从 ViewModel 取空库页的投影。
     pub(crate) fn project(model: &ShellViewModel) -> Self {
         Self {
-            dragging: model.input.dragging_repository_folder,
             error: model.input.empty_repository_error.clone(),
             drop: file_drop_flags(model),
         }
@@ -71,7 +66,7 @@ pub(super) fn view(signals: EmptySignals) -> AnyView {
 }
 
 /// 拖入引导：NanaUI 的空状态（`empty_state`，文件夹图标、标题和说明）和附加失败的提示条（`callout`）。
-/// 整节都是拖放目标，悬停和放下走同一条宿主拖放消息。
+/// 整节都是拖放目标，悬停和放下走同一条宿主拖放消息；拖着文件夹经过时 NanaUI 在整节上画悬停样子。
 fn panel(view: Signal<EmptyView>) -> AnyView {
     let error_text = move || view.with(|view| view.error.clone());
     let error = widget(
@@ -105,51 +100,9 @@ fn panel(view: Signal<EmptyView>) -> AnyView {
             let flags = view.with_untracked(|view| view.drop.clone());
             cx.dispatch_program_all(file_drop_message(&flags, event));
         })
-        .children((widget(panel)
-            .prop::<bool, DropHighlight>(move || view.with(|view| view.dragging))
-            .children(rows)
-            .key("empty-panel"),))
+        .children((widget(panel).children(rows).key("empty-panel"),))
         .key("empty-repository-page")
         .into_any()
-}
-
-/// 拖着文件夹经过时的面板：`--accent-soft` 底、1px 强调色描边；平时没有底色和描边。
-/// 描边和 `Stack::outline` 写的一样：边框色、清掉交互态的边框，再写边框宽度。
-struct DropHighlight;
-
-impl FieldWrite<Stack, bool> for DropHighlight {
-    const FIELD: &'static str = "Stack.style.background+border+layout.border_width";
-
-    fn write(target: &mut Stack, dragging: bool) {
-        let style = <Stack as StyledComponent>::node_style_mut(target);
-        if dragging {
-            style.background = Some(SemanticColorRole::AccentSoft);
-            style.border = Some(SemanticColorRole::Accent);
-            style.interaction.base.border = None;
-            style.interaction.base.border_mix = None;
-            Arc::make_mut(&mut style.layout).border_width = Some(1.0);
-        } else {
-            style.background = None;
-            style.border = None;
-            Arc::make_mut(&mut style.layout).border_width = None;
-        }
-    }
-
-    fn differs(target: &Stack, dragging: &bool) -> bool {
-        let style = <Stack as StyledComponent>::node_style(target);
-        let (background, border, width) = if *dragging {
-            (
-                Some(SemanticColorRole::AccentSoft),
-                Some(SemanticColorRole::Accent),
-                Some(1.0),
-            )
-        } else {
-            (None, None, None)
-        };
-        style.background != background
-            || style.border != border
-            || style.layout.border_width != width
-    }
 }
 
 #[cfg(test)]

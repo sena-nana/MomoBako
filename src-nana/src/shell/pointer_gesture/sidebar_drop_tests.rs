@@ -15,9 +15,9 @@ fn sidebar_folder_drop_moves_imports_and_opens() {
     let mut input = bind(&mut window);
     let cover = row_center(&window, "cover.png");
     let folder = labeled_center(&window, "照片");
-    pointer(&mut window, &mut input, nana_ui::PointerPhase::Down, cover.0, cover.1);
+    pointer(&mut model, &mut window, &mut input, nana_ui::PointerPhase::Down, cover.0, cover.1);
     prepare_motion(&mut model, &mut window);
-    pointer(&mut window, &mut input, nana_ui::PointerPhase::Move, folder.0, folder.1);
+    pointer(&mut model, &mut window, &mut input, nana_ui::PointerPhase::Move, folder.0, folder.1);
     prepare_motion(&mut model, &mut window);
     assert_ne!(model.current_directory, "photos", "刚拖到侧栏文件夹还不到 450ms");
     assert!(model.input.internal_active, "越过 7px 以后内部拖动应该起步");
@@ -26,7 +26,7 @@ fn sidebar_folder_drop_moves_imports_and_opens() {
     }
     assert_eq!(model.current_directory, "photos", "在侧栏文件夹上停满 450ms 应该打开它");
     assert_eq!(model.input.hover_folder.as_deref(), Some("photos"), "拖动中的放下目标是侧栏这个文件夹");
-    pointer(&mut window, &mut input, nana_ui::PointerPhase::Up, folder.0, folder.1);
+    pointer(&mut model, &mut window, &mut input, nana_ui::PointerPhase::Up, folder.0, folder.1);
     prepare_motion(&mut model, &mut window);
     let effects = model.files.take_effects();
     assert!(
@@ -39,7 +39,7 @@ fn sidebar_folder_drop_moves_imports_and_opens() {
     let mut input = bind(&mut window);
     let folder = labeled_center(&window, "照片");
     drag_file(&mut window, &mut input, FileDragKind::Hover, "D:\\other\\c.png", folder);
-    crate::shell::note_external_folder_drag(&mut model, &window.document, &file_drag(FileDragKind::Hover, "D:\\other\\c.png", folder));
+    crate::shell::note_routed_input(&mut model, &window.document, &file_drag(FileDragKind::Hover, "D:\\other\\c.png", folder));
     reduce_queued(&mut model, &mut window);
     assert_eq!(model.input.hover_folder.as_deref(), Some("photos"));
     assert!(model.input.hover_on_sidebar, "外部拖放应记在侧栏行上");
@@ -48,7 +48,7 @@ fn sidebar_folder_drop_moves_imports_and_opens() {
     }
     assert_eq!(model.current_directory, "photos", "外部拖放停在侧栏文件夹上满 450ms 也应该打开");
     drag_file(&mut window, &mut input, FileDragKind::Drop, "D:\\other\\c.png", folder);
-    crate::shell::note_external_folder_drag(&mut model, &window.document, &file_drag(FileDragKind::Drop, "D:\\other\\c.png", folder));
+    crate::shell::note_routed_input(&mut model, &window.document, &file_drag(FileDragKind::Drop, "D:\\other\\c.png", folder));
     reduce_queued(&mut model, &mut window);
     let effects = model.files.take_effects();
     assert!(
