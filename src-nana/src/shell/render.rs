@@ -25,8 +25,8 @@ fn primary_min_px() -> f32 {
     (NARROW_WINDOW_PX - crate::theme_map::SIDEBAR_DEFAULT_PX).max(96.0)
 }
 
-/// 标题栏高度。启动页的最小高度要扣掉它和主区内边距。
-pub(super) const TITLE_BAR_PX: f32 = 36.0;
+/// 标题栏高度：NanaUI 标题栏的窗口几何（默认 36）。启动页的最小高度要扣掉它和主区内边距。
+pub(super) const TITLE_BAR_PX: f32 = nana_ui_core::TITLE_BAR_HEIGHT;
 
 /// 骨架里的工作区：资源区和主区，资源区宽度按侧栏宽度给，侧栏收起时资源区也收起。主区圆角，不画常驻浅色分割条。
 /// 区域内容由 `ShellView` 挂好后放进来，宽度和收起之后由 `ShellView` 跟着 ViewModel 写。

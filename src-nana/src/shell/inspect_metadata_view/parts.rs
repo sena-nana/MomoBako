@@ -180,7 +180,7 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
         let layout = Arc::make_mut(&mut input.style.layout);
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.min_height = Some(LengthSpec::Px(style::TOOLBAR_HEIGHT));
+        tiers::min_height(layout, style::TOOLBAR_HEIGHT);
     }
     let label = move || tags.with(|view| view.add_label.clone());
     let create_locked = locked.clone();

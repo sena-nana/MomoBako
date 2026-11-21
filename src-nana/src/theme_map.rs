@@ -210,12 +210,24 @@ pub const DEFAULT_CORNER_RADIUS_PX: f32 = 8.0;
 /// 圆角半径设置的上下限。
 pub const CORNER_RADIUS_RANGE: std::ops::RangeInclusive<f32> = 0.0..=20.0;
 
+/// MomoBako 的控件度量：小、中、大号控件高 28、32、36，控件内边距、面板内边距、开关、树、键帽都和 NanaUI
+/// 默认桌面度量相同；图标按钮边长是 22（NanaUI 默认 28）。
+///
+/// 22 见方是侧栏分组标题的工具钮、播放集行的删除钮、添加资源库弹层的关闭钮这类贴在行里的图标按钮，
+/// 写 `SquareSize::IconButton`。NanaUI 自己的 `IconButton` 不另定尺寸时也是这一档；要 28 见方的
+/// （标题栏的侧栏和筛选开关、播放集的拖动柄）写 `SquareSize::Control(ControlSize::Small)`，和搜索框一样高。
+/// 控件高度档不动：NanaUI 的侧栏行、按钮、输入框、芯片、开关按它排，改了会整页跟着变。
+pub const CONTROL_METRICS: ThemeMetrics = ThemeMetrics {
+    icon_button_size: 22.0,
+    ..UI_METRICS
+};
+
 /// 圆角半径基数换成主题半径刻度。
 ///
 /// 刻度都从 `--app-corner-radius` 乘出来：xs=0.5r、sm=0.75r、md=r、lg=1.25r，
 /// MomoBako 另加 xl=1.5r、2xl=2r。2xl 落到 `RadiusTier::Xxl`，
 /// 播放条、文件卡、预览页和工作台面板这类大块表面写这一档，装主题后跟着设置变。
-/// 其余控件尺寸沿用 Nana 默认度量。
+/// 控件尺寸取 [`CONTROL_METRICS`]。
 pub fn corner_metrics(radius: f32) -> ThemeMetrics {
     let radius = clamp_corner_radius(radius);
     ThemeMetrics {
@@ -225,7 +237,7 @@ pub fn corner_metrics(radius: f32) -> ThemeMetrics {
         radius_lg: radius * 1.25,
         radius_xl: radius * 1.5,
         radius_xxl: radius * 2.0,
-        ..UI_METRICS
+        ..CONTROL_METRICS
     }
 }
 
@@ -415,6 +427,28 @@ mod tests {
         assert_eq!(
             corner_metrics(8.0).control_height,
             UI_METRICS.control_height
+        );
+        assert_eq!(corner_metrics(13.0).icon_button_size, 22.0);
+    }
+
+    /// MomoBako 只改图标按钮边长，控件高度、内边距和其余几何都是 NanaUI 默认桌面度量。
+    #[test]
+    fn control_metrics_only_move_the_icon_button() {
+        assert_eq!(
+            ThemeMetrics {
+                icon_button_size: UI_METRICS.icon_button_size,
+                ..CONTROL_METRICS
+            },
+            UI_METRICS
+        );
+        assert_eq!(
+            [
+                ControlSize::Small.height_in(CONTROL_METRICS),
+                ControlSize::Medium.height_in(CONTROL_METRICS),
+                ControlSize::Large.height_in(CONTROL_METRICS),
+                CONTROL_METRICS.icon_button_size,
+            ],
+            [28.0, 32.0, 36.0, 22.0]
         );
     }
 }

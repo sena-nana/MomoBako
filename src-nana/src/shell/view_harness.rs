@@ -1,7 +1,7 @@
 //! 壳层视图的测试支撑，只在测试里编译。
 //!
-//! 挂一棵和生产窗口相同的壳层，归约消息后按生产 `update` 末尾那一步同步视图，按生产 `prepare`
-//! 跑准备帧；按无障碍名找节点，往聚焦的输入框注入输入法预编辑，读响应式计数和视图的同步计数，
+//! 挂一棵和生产窗口相同的壳层，装上设置里的外观（主题模式、圆角和 MomoBako 的控件度量）；
+//! 归约消息后按生产 `update` 末尾那一步同步视图，按生产 `prepare` 跑准备帧；按无障碍名找节点，往聚焦的输入框注入输入法预编辑，读响应式计数和视图的同步计数，
 //! 并把增量更新后的文档和同一 ViewModel 新挂的文档逐个节点比对（无障碍树、组装路径、状态和整份样式）。
 
 use std::collections::HashMap;
@@ -40,6 +40,7 @@ impl ShellHarness {
         model.surface_dirty = false;
         let mut window = ApplicationWindow::new();
         window.document = RuntimeDocument::new(DocumentId::new(1).expect("文档编号"));
+        install_appearance(&mut window.document, &model);
         let view = ShellView::mount(&mut window.document, &model).expect("挂载生产壳层");
         let document_id = window.document.document();
         let input = HeadlessInput::bind(window.document.context_mut(), document_id);
@@ -556,6 +557,7 @@ impl ShellHarness {
     pub fn assert_same_as_fresh_mount(&mut self) {
         self.finish_motion();
         let mut fresh = RuntimeDocument::new(DocumentId::new(1).expect("文档编号"));
+        install_appearance(&mut fresh, &self.model);
         let _view = ShellView::mount(&mut fresh, &self.model).expect("新挂对照文档");
         fresh
             .flush(self.viewport, &mut self.shaper)
@@ -578,6 +580,15 @@ impl ShellHarness {
         );
         assert_lines_match("组装路径、状态和样式", &ours, &structure_lines(&fresh));
     }
+}
+
+/// 和生产窗口一样，把设置里的外观（主题模式、圆角和 MomoBako 的控件度量）装进文档。
+fn install_appearance(document: &mut RuntimeDocument, model: &ShellViewModel) {
+    crate::appearance::install(
+        document,
+        crate::appearance::Appearance::from_shell(model, None),
+    )
+    .expect("装上设置里的外观");
 }
 
 /// 把文档里有尽头的动画推到放完：从最近的一个截止时刻再往后推两秒，开合动效（不到 200ms）都放完了，

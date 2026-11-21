@@ -1,5 +1,8 @@
 //! 主题档位：间距、行高、圆角、边框宽度、控件尺寸、动效、不透明度、投影都从这里取。
 //!
+//! 控件尺寸按 MomoBako 的控件度量（[`CONTROL_METRICS`]）折像素：小、中、大号控件 28、32、36，
+//! 图标按钮 22。
+//!
 //! 每个写进样式的函数都写两份：默认主题下的数值进布局字段，主题表达式进 `layout.theme`。解析时主题表达式盖过
 //! 数值，装上的主题换刻度时跟着变；只写数值的地方在自带令牌的控件上不生效。容器优先用 NanaUI 自己的
 //! `gap_step` / `gap_theme` / `padding_step` / `radius` 构建方法，这里给直接改 `LayoutStyle` 的地方和
@@ -13,15 +16,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use nana_ui::runtime::{
-    BoxPaint, LayoutBox, PaintContext, Painter, SemanticColorRole, Stack, Text,
+    BoxPaint, LayoutBox, NodeStyle, PaintContext, Painter, SemanticColorRole, Stack, Text,
 };
 use nana_ui::theme::UI_METRICS;
 use nana_ui_core::{
-    BorderTokens, BorderWidth, ControlHeight, ControlPadding, ControlSize, Easing, EasingRole,
-    ElevationRole, LayoutStyle, LengthSpec, LineHeightSpec, LineRole, MotionRole, MotionTokens,
-    OpacityTokens, RadiusTier, SpacingStep, SpacingTokens, StateLayer, ThemeAppearance, ThemeExpr,
+    BorderTokens, BorderWidth, ControlPadding, ControlSize, Easing, EasingRole, ElevationRole,
+    LayoutStyle, LengthSpec, LineHeightSpec, LineRole, MotionRole, MotionTokens, OpacityTokens,
+    RadiusTier, SpacingStep, SpacingTokens, SquareSize, StateLayer, ThemeAppearance, ThemeExpr,
     ThemeToken, TypeRole, TypographyTokens, builtin_theme,
 };
+
+use super::CONTROL_METRICS;
 
 /// 盒子的一条边。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -311,9 +316,7 @@ impl Hairline for Stack {
 
 /// 控件高度取主题的控件档：`exact` 定高，否则是最小高、内容可以撑高。
 pub fn control_height(layout: &mut LayoutStyle, size: ControlSize, exact: bool) {
-    let px = Some(LengthSpec::Px(
-        ControlHeight::Exact(size).resolve(UI_METRICS),
-    ));
+    let px = Some(LengthSpec::Px(control_px(size)));
     let expr = Some(ThemeToken::Control(size).into());
     layout.min_height = px;
     layout.theme.min_height = expr.clone();
@@ -323,9 +326,110 @@ pub fn control_height(layout: &mut LayoutStyle, size: ControlSize, exact: bool) 
     }
 }
 
+/// 控件宽度取主题的控件档：宽和最小宽都是这一档的控件高（例如和中号控件一样宽的关闭钮）。
+pub fn control_width(layout: &mut LayoutStyle, size: ControlSize) {
+    let px = Some(LengthSpec::Px(control_px(size)));
+    let expr: Option<ThemeExpr> = Some(ThemeToken::Control(size).into());
+    layout.width = px;
+    layout.min_width = px;
+    layout.theme.width = expr.clone();
+    layout.theme.min_width = expr;
+}
+
+/// 控件档在 MomoBako 度量下的像素高。
+pub const fn control_px(size: ControlSize) -> f32 {
+    size.height_in(CONTROL_METRICS)
+}
+
+/// 行或控件的高度：主题的控件档；套一圈发丝边框的控件档（框里的控件是这一档，框比它高两根发丝边，
+/// 工具条里的描边框和跟它们站在一起的按钮一类）；或者档里没有的像素高（照写）。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Height {
+    Control(ControlSize),
+    Framed(ControlSize),
+    Px(f32),
+}
+
+impl Height {
+    /// MomoBako 度量下的像素高。
+    pub const fn px(self) -> f32 {
+        match self {
+            Self::Control(size) => control_px(size),
+            Self::Framed(size) => control_px(size) + hairline_px() * 2.0,
+            Self::Px(px) => px,
+        }
+    }
+
+    /// 主题表达式；照写的像素高没有。
+    pub fn expr(self) -> Option<ThemeExpr> {
+        match self {
+            Self::Control(size) => Some(ThemeToken::Control(size).into()),
+            Self::Framed(size) => {
+                let mut expr = hairline_expr(2.0);
+                expr.terms.push((ThemeToken::Control(size), 1.0));
+                Some(expr)
+            }
+            Self::Px(_) => None,
+        }
+    }
+}
+
+/// 定高：高和最小高同值，档位同时写数值和主题表达式，像素高照写。
+pub fn height(layout: &mut LayoutStyle, height: Height) {
+    min_height(layout, height);
+    layout.height = Some(LengthSpec::Px(height.px()));
+    layout.theme.height = height.expr();
+}
+
+/// 最小高：内容可以撑高。档位同时写数值和主题表达式，像素高照写。
+pub fn min_height(layout: &mut LayoutStyle, height: Height) {
+    layout.min_height = Some(LengthSpec::Px(height.px()));
+    layout.theme.min_height = height.expr();
+}
+
+/// 方形控件的边长：主题的方块档，或者档里没有的像素边长（照写）。
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Square {
+    Tier(SquareSize),
+    Px(f32),
+}
+
+impl Square {
+    /// MomoBako 度量下的像素边长。
+    pub const fn px(self) -> f32 {
+        match self {
+            Self::Tier(size) => size.resolve(CONTROL_METRICS),
+            Self::Px(px) => px,
+        }
+    }
+}
+
+/// 给节点定方形边长。档位交给 NanaUI 的 `square`：按装上的度量写最小宽高，宽高不写（写了的轴不跟方块档），
+/// 内容比方块小时盒子就是方块；像素边长照写宽高和最小宽高。
+pub fn square(style: &mut NodeStyle, square: Square) {
+    let layout = Arc::make_mut(&mut style.layout);
+    match square {
+        Square::Tier(size) => {
+            style.square = Some(size);
+            layout.width = None;
+            layout.height = None;
+            layout.min_width = None;
+            layout.min_height = None;
+        }
+        Square::Px(px) => {
+            style.square = None;
+            let edge = Some(LengthSpec::Px(px));
+            layout.width = edge;
+            layout.height = edge;
+            layout.min_width = edge;
+            layout.min_height = edge;
+        }
+    }
+}
+
 /// 控件左右内边距取主题的控件内边距档。
 pub fn control_padding_x(layout: &mut LayoutStyle, padding: ControlPadding) {
-    let px = Some(LengthSpec::Px(padding.resolve(UI_METRICS)));
+    let px = Some(LengthSpec::Px(padding.resolve(CONTROL_METRICS)));
     let expr: ThemeExpr = ThemeToken::ControlPadding(padding).into();
     layout.padding_left = px;
     layout.padding_right = px;
@@ -472,6 +576,35 @@ mod tests {
         assert_eq!(
             DISABLED_OPACITY,
             OpacityTokens::DARK.resolve(StateLayer::Disabled)
+        );
+    }
+
+    /// 控件尺寸按 MomoBako 度量折像素，同时挂主题表达式；方块档交给 NanaUI 的 `square`，不写宽高。
+    #[test]
+    fn control_sizes_write_the_metrics_and_their_tokens() {
+        let mut layout = LayoutStyle::default();
+        height(&mut layout, Height::Framed(ControlSize::Medium));
+        assert_eq!(layout.height, Some(LengthSpec::Px(34.0)));
+        assert_eq!(default_px(layout.theme.height.as_ref().unwrap()), 34.0);
+        assert_eq!(layout.theme.min_height, layout.theme.height);
+        height(&mut layout, Height::Px(24.0));
+        assert_eq!(layout.min_height, Some(LengthSpec::Px(24.0)));
+        assert_eq!(layout.theme.height, None);
+        control_width(&mut layout, ControlSize::Medium);
+        assert_eq!(layout.width, Some(LengthSpec::Px(32.0)));
+        assert!(layout.theme.min_width.is_some());
+
+        let mut style = NodeStyle::default();
+        square(&mut style, Square::Px(26.0));
+        assert_eq!(style.layout.width, Some(LengthSpec::Px(26.0)));
+        square(&mut style, Square::Tier(SquareSize::IconButton));
+        assert_eq!(style.square, Some(SquareSize::IconButton));
+        assert_eq!(style.layout.width, None);
+        assert_eq!(style.layout.min_height, None);
+        assert_eq!(Square::Tier(SquareSize::IconButton).px(), 22.0);
+        assert_eq!(
+            Square::Tier(SquareSize::Control(ControlSize::Small)).px(),
+            28.0
         );
     }
 

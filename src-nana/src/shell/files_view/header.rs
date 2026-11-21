@@ -447,8 +447,7 @@ fn display_mode_field(mode: Signal<DisplayMode>) -> AnyView {
     let hairline = tiers::hairline_px();
     {
         let layout = Arc::make_mut(&mut select.style.layout);
-        layout.height = Some(LengthSpec::Px(style::TOOLBAR_HEIGHT));
-        layout.min_height = Some(LengthSpec::Px(style::TOOLBAR_HEIGHT));
+        tiers::height(layout, style::TOOLBAR_HEIGHT);
         layout.width = Some(LengthSpec::percent_offset(100.0, hairline * 2.0));
         layout.min_width = Some(LengthSpec::Px(0.0));
         tiers::margin_by(layout, &[Edge::Left, Edge::Top], tiers::hairline_expr(-1.0));
@@ -456,11 +455,11 @@ fn display_mode_field(mode: Signal<DisplayMode>) -> AnyView {
         layout.flex_shrink = Some(0.0);
     }
     let clip = Stack::row(0.0)
-        .height(LengthSpec::Px(style::TOOLBAR_HEIGHT - hairline * 2.0))
         .min_width(LengthSpec::Px(0.0))
         .grow(1.0)
         .shrink(1.0)
         .with_layout(|layout| {
+            tiers::height(layout, style::TOOLBAR_INNER);
             layout.flex_basis = Some(LengthSpec::Px(0.0));
             // 选择框文字有 `Lg` 内边距；往左让一根发丝边后，值正好落在标签后 `Md` 处。
             tiers::margin_by(layout, &[Edge::Left], tiers::hairline_expr(-1.0));
@@ -524,9 +523,7 @@ fn create_name_field(signals: HeaderSignals) -> AnyView {
     input.style.interaction.disabled.background = None;
     input.style.interaction.disabled.border = None;
     let layout = Arc::make_mut(&mut input.style.layout);
-    let height = style::TOOLBAR_HEIGHT - tiers::hairline_px() * 2.0;
-    layout.height = Some(LengthSpec::Px(height));
-    layout.min_height = Some(LengthSpec::Px(height));
+    tiers::height(layout, style::TOOLBAR_INNER);
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
     layout.flex_grow = Some(1.0);
@@ -567,7 +564,6 @@ const CREATE_FIELD_WIDTH: f32 = 222.0;
 
 /// 工具条里的描边框：白底、`--border` 发丝边、`Lg` 圆角、左右 `Lg`、子项间距 `Md`，和工具栏按钮一样高。
 fn field_box(min_width: f32) -> Stack {
-    let height = style::TOOLBAR_HEIGHT;
     Hairline::hairline(
         style::row(SpacingStep::Md)
             .align(AlignSpec::Center)
@@ -575,9 +571,8 @@ fn field_box(min_width: f32) -> Stack {
                 tiers::padding(layout, &Edge::X, SpacingStep::Lg);
                 layout.padding_top = Some(LengthSpec::Px(0.0));
                 layout.padding_bottom = Some(LengthSpec::Px(0.0));
+                tiers::height(layout, style::TOOLBAR_HEIGHT);
             })
-            .height(LengthSpec::Px(height))
-            .min_height(LengthSpec::Px(height))
             .min_width(LengthSpec::Px(min_width))
             .grow(0.0)
             .shrink(0.0)

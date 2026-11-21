@@ -411,7 +411,7 @@ pub(super) fn source_action(icon: Icon, key: &str, title: &'static str) -> El<Ic
         ..SemanticPaint::default()
     };
     let layout = Arc::make_mut(&mut button.style.layout);
-    // 26 方：图标按钮档是 28，没有 26 这一档，照写像素。
+    // 26 方：图标按钮档是 22、小号控件是 28，没有 26 这一档，照写像素。
     layout.width = Some(LengthSpec::Px(SOURCE_ACTION));
     layout.height = Some(LengthSpec::Px(SOURCE_ACTION));
     layout.min_width = Some(LengthSpec::Px(SOURCE_ACTION));

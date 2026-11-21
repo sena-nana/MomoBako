@@ -400,10 +400,7 @@ impl Painter for MediaBackdrop {
     }
 }
 
-/// 进度轨粗 6：NanaUI 的进度条没有粗细档，照写像素。
-const TRACK_THICKNESS: f32 = 6.0;
-
-/// 准备卡上的 6px 进度轨：NanaUI 的不定进度 `Progress`，铺满准备卡宽。
+/// 准备卡上的进度轨：NanaUI 的不定进度 `Progress`，铺满准备卡宽。
 /// 扫动是组件自己的循环时间线，减弱动态效果时换成整条淡填充。
 pub(super) fn loading_progress() -> AnyView {
     widget(sweep_track(LengthSpec::Fill))
@@ -418,11 +415,11 @@ pub(super) fn status_progress() -> AnyView {
         .into_any()
 }
 
-/// 不知道还要多久的 6px 进度轨，轨道是 `--border-soft`，填充走主题的指示色。
+/// 不知道还要多久的进度轨，轨道是 `--border-soft`，填充走主题的指示色。粗细不写，取 NanaUI 进度条的
+/// 默认粗细：装上主题的 `Sm` 间距档（默认 6）。
 fn sweep_track(width: LengthSpec) -> Progress {
     let mut track = Progress::new(0.0, 1.0)
         .indeterminate(true)
-        .thickness(TRACK_THICKNESS)
         .track(SemanticColorRole::BorderSoft);
     let layout = Arc::make_mut(&mut track.style.layout);
     layout.width = Some(width);

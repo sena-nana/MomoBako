@@ -199,12 +199,8 @@ pub(crate) enum Inset {
     Step(SpacingStep),
 }
 
-/// 按钮高度：控件高度档，或者控件档以外的像素（工具栏 34、文字行盒一类）。
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum Height {
-    Control(ControlSize),
-    Px(f32),
-}
+/// 按钮高度：控件高度档、套发丝边框的控件档（工具栏），或者控件档以外的像素（文字行盒一类）。
+pub(crate) use crate::theme_map::tiers::Height;
 
 /// 文件页专用按钮的外观（工具栏按钮、面包屑项一类）。
 #[derive(Clone, Copy, Debug)]
@@ -219,15 +215,18 @@ pub(crate) struct ButtonLook {
     pub gap: SpacingStep,
 }
 
-/// 工具栏按钮高 34：控件档在 32 和 36 之间，没有对应的档，照写像素。
-pub(crate) const TOOLBAR_HEIGHT: f32 = 34.0;
+/// 工具栏的高度：中号控件套一圈发丝边框（默认 32 + 2 = 34）。工具条里的描边框（展示方式、新建文件名）
+/// 里面放中号控件，框外的按钮和它们一样高。
+pub(crate) const TOOLBAR_HEIGHT: Height = Height::Framed(ControlSize::Medium);
+/// 描边框里控件的高度：中号控件档（默认 32）。
+pub(crate) const TOOLBAR_INNER: Height = Height::Control(ControlSize::Medium);
 /// 工具栏图标 14px。主题没有图标尺寸档，照写像素。
 pub(crate) const TOOLBAR_ICON: f32 = 14.0;
 
 impl ButtonLook {
-    /// 工具栏按钮：高 34，左右取控件内边距档，字号、字重取按钮的正文档和中等档，常态透明，悬停 `--bg-hover`。
+    /// 工具栏按钮：工具栏高（中号控件加两根发丝边，默认 34），左右取控件内边距档，字号、字重取按钮的正文档和中等档，常态透明，悬停 `--bg-hover`。
     pub(crate) const TOOLBAR: Self = Self {
-        height: Height::Px(TOOLBAR_HEIGHT),
+        height: TOOLBAR_HEIGHT,
         padding_x: Inset::Control(ControlPadding::Standard),
         foreground: SemanticColorRole::Text,
         background: None,
@@ -256,7 +255,7 @@ pub(crate) fn styled_button(
     style.radius = Some(look.radius);
     style.control_height = match look.height {
         Height::Control(size) => Some(ControlHeight::Exact(size)),
-        Height::Px(_) => None,
+        Height::Framed(_) | Height::Px(_) => None,
     };
     style.control_padding_x = match look.padding_x {
         Inset::Control(padding) => Some(padding),
@@ -277,13 +276,7 @@ pub(crate) fn styled_button(
         ..Default::default()
     };
     let layout = std::sync::Arc::make_mut(&mut style.layout);
-    match look.height {
-        Height::Control(size) => tiers::control_height(layout, size, true),
-        Height::Px(px) => {
-            layout.height = Some(LengthSpec::Px(px));
-            layout.min_height = Some(LengthSpec::Px(px));
-        }
-    }
+    tiers::height(layout, look.height);
     match look.padding_x {
         Inset::None => {
             layout.padding_left = Some(LengthSpec::Px(0.0));

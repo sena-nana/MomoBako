@@ -150,7 +150,7 @@ fn card_box(model: crate::shell::ShellViewModel, width: f32, height: f32) -> (f3
         appearance::install(&mut harness.window.document, theme).is_some(),
         "主题装不上"
     );
-    harness.flush();
+    harness.finish_motion();
     let card = harness
         .nodes()
         .into_iter()

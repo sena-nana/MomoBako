@@ -52,9 +52,9 @@ pub use tree::folder_menu;
 pub(crate) use tree::folder_row_key;
 
 use crate::theme_map::tiers::text_line_px;
-use crate::theme_map::tiers::{self, Edge};
+use crate::theme_map::tiers::{self, Edge, Height, Square};
 use nana_ui::runtime::view::css;
-use nana_ui_core::{SpacingRole, SpacingStep, TextWeight};
+use nana_ui_core::{SpacingRole, SpacingStep, SquareSize, TextWeight};
 use parts::{
     FooterLook, NavLook, PlayBase, bound_hint, footer_button, footer_popover, group_header,
     group_title, nav_row, tree_action, tree_action_titled,
@@ -484,7 +484,7 @@ fn playlist_title(state: Signal<PlaylistGroup>) -> AnyView {
         }),
     ));
     let mut style = parts::row_style(
-        24.0,
+        Height::Px(24.0),
         None,
         None,
         Some(SpacingStep::Sm),
@@ -533,7 +533,7 @@ fn playlist_row(item: PlaylistItem) -> AnyView {
     .truncating();
     Arc::make_mut(&mut meta.style.layout).width = Some(LengthSpec::Fill);
     let mut main_style = parts::row_style(
-        42.0,
+        Height::Px(42.0),
         Some(SpacingStep::Md),
         Some(SpacingStep::Md),
         None,
@@ -629,7 +629,12 @@ pub(super) fn danger_tree_action_titled(
         .size(ControlSize::Medium)
         .kind(ButtonKind::Danger)
         .with_tooltip(tip);
-    button.style = parts::icon_button_style(22.0, RadiusTier::Xs, SemanticColorRole::Faint, None);
+    button.style = parts::icon_button_style(
+        Square::Tier(SquareSize::IconButton),
+        RadiusTier::Xs,
+        SemanticColorRole::Faint,
+        None,
+    );
     button.style.interaction.hovered.background = Some(SemanticColorRole::DangerSoftHover);
     button.style.interaction.hovered.foreground = Some(SemanticColorRole::Danger);
     widget(button.colors_from_style())

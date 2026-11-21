@@ -386,9 +386,7 @@ fn inline_field(
     layout.flex_shrink = Some(1.0);
     layout.min_width = Some(LengthSpec::Px(0.0));
     layout.width = Some(LengthSpec::Fill);
-    layout.height = Some(LengthSpec::Px(
-        style::TOOLBAR_HEIGHT - tiers::hairline_px() * 2.0,
-    ));
+    tiers::height(layout, style::TOOLBAR_INNER);
     tiers::padding(layout, &Edge::X, SpacingStep::Lg);
     layout.border_width = Some(0.0);
     layout.theme.border_width = None;
@@ -401,8 +399,8 @@ fn inline_field(
                 tiers::padding(layout, &Edge::X, SpacingStep::Lg);
                 layout.padding_top = Some(LengthSpec::Px(0.0));
                 layout.padding_bottom = Some(LengthSpec::Px(0.0));
+                tiers::min_height(layout, style::TOOLBAR_HEIGHT);
             })
-            .min_height(LengthSpec::Px(style::TOOLBAR_HEIGHT))
             .surface(SemanticColorRole::Background),
         SemanticColorRole::BorderSoft,
     )

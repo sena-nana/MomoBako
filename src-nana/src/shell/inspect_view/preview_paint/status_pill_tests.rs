@@ -34,7 +34,11 @@ fn image_status_capsule_sweeps_on_its_fill() {
     assert_fill(&harness, "inspect-status-pill");
     let track = sweep_track(&harness, "inspect-status-progress");
     assert!(track.indeterminate, "图片读取是不定进度");
-    assert_eq!(track.thickness, Some(6.0));
+    assert_eq!(track.thickness, None, "粗细不写，跟主题的 Sm 间距档");
+    assert_eq!(
+        super::loading_card_tests::track_thickness(&harness, "inspect-status-progress"),
+        crate::theme_map::tiers::space_px(nana_ui_core::SpacingStep::Sm),
+    );
     assert_eq!(
         track.style.layout.width,
         Some(LengthSpec::Px(TRACK)),

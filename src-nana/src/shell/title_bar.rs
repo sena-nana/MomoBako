@@ -6,10 +6,10 @@
 //! 窗口按钮用 `AppTitleBar` 自带的自定义控件：指针点击由 Nana 宿主执行（关闭经 `close_requested`
 //! 走关闭确认），键盘和读屏的激活由这里接到同一套窗口动作。
 
-use nana_ui_core::{ControlHeight, ControlPadding, SpacingStep};
+use nana_ui_core::{ControlHeight, ControlPadding, SpacingStep, SquareSize};
 use std::sync::Arc;
 
-use crate::theme_map::tiers::{self, Edge};
+use crate::theme_map::tiers::{self, Edge, Square};
 
 use nana_ui::icons_tabler::{
     ADJUSTMENTS_HORIZONTAL, LAYOUT_SIDEBAR_LEFT_COLLAPSE, LAYOUT_SIDEBAR_LEFT_EXPAND,
@@ -30,7 +30,8 @@ use nana_ui_core::TextWeight;
 
 /// 搜索框宽度：搜索组 392px，扣掉筛选开关 28px、间距 4px。
 const SEARCH_WIDTH: f32 = 360.0;
-const CONTROL_EDGE: f32 = 28.0;
+/// 侧栏开关和筛选开关的边长：和搜索框一样高的小号控件档（默认 28 见方）。
+const CONTROL_EDGE: Square = Square::Tier(SquareSize::Control(ControlSize::Small));
 
 /// 左侧侧栏开关，中间全局搜索和筛选开关。窗口控件槽保持打开。
 ///
@@ -113,7 +114,7 @@ impl FieldWrite<IconButton, bool> for SidebarToggleField {
     }
 }
 
-/// 标题栏图标按钮：28×28、`--radius-sm`、`--text-muted`，悬停 `--bg-hover`。
+/// 标题栏图标按钮：小号控件见方（默认 28）、`--radius-sm`、`--text-muted`，悬停 `--bg-hover`。
 /// 侧栏开关从不停用，所以没有停用的样子；要停用时得照所在底色写 `interaction.disabled`，
 /// `colors_from_style` 的按钮 NanaUI 不会替它淡化。
 fn chrome_button(icon: Icon, label: &'static str) -> IconButton {

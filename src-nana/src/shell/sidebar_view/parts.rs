@@ -22,15 +22,17 @@ use nana_ui::{ControlSize, Icon};
 
 use crate::theme_map::disabled_paint;
 use crate::theme_map::tiers::DISABLED_OPACITY;
-use crate::theme_map::tiers::{self, Edge};
-use nana_ui_core::{EasingRole, LineRole, MotionRole, SpacingRole, SpacingStep, TextWeight};
+use crate::theme_map::tiers::{self, Edge, Height, Square};
+use nana_ui_core::{
+    EasingRole, LineRole, MotionRole, SpacingRole, SpacingStep, SquareSize, TextWeight,
+};
 
 /// 分组标题高度。
 const GROUP_HEADER_HEIGHT: f32 = 24.0;
-/// 标题工具：22×22。
-const TREE_ACTION_EDGE: f32 = 22.0;
-/// 底部入口：26×26。
-const FOOTER_BUTTON_EDGE: f32 = 26.0;
+/// 标题工具：图标按钮档（MomoBako 度量 22 见方）。
+const TREE_ACTION_EDGE: Square = Square::Tier(SquareSize::IconButton);
+/// 底部入口：26 见方。图标按钮档是 22、小号控件是 28，没有 26 这一档，照写像素。
+const FOOTER_BUTTON_EDGE: Square = Square::Px(26.0);
 
 /// 底部入口平时的透明度：主题状态层的禁用档（默认 0.5），压在正常墨色以下；亮起（悬停底栏、当前入口、
 /// 有任务）时为 1。
@@ -88,7 +90,7 @@ pub(crate) enum ActiveTone {
 /// 侧栏行的节点样式。`height` 和左右内边距、子项间距按行的种类给（间距取主题档位，`None` 是不留），
 /// 悬停和当前态换底色和前景。
 pub(crate) fn row_style(
-    height: f32,
+    height: Height,
     pad_left: Option<SpacingStep>,
     pad_right: Option<SpacingStep>,
     gap: Option<SpacingStep>,
@@ -105,8 +107,7 @@ pub(crate) fn row_style(
         }
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.height = Some(LengthSpec::Px(height));
-        layout.min_height = Some(LengthSpec::Px(height));
+        tiers::height(layout, height);
         if let Some(step) = pad_left {
             tiers::padding(layout, &[Edge::Left], step);
         }
@@ -382,22 +383,18 @@ fn play_disabled_paint(selected: bool) -> SemanticPaint {
     disabled_paint(SemanticColorRole::Faint, base)
 }
 
-/// 方形图标按钮的样式：常态透明，悬停换 `--bg-hover` 和正文色。会停用的按钮另写停用样子
-/// （`theme_map::disabled_paint`），要按它实际所在的底色混。
+/// 方形图标按钮的样式：边长取方块档（或照写的像素），常态透明，悬停换 `--bg-hover` 和正文色。
+/// 会停用的按钮另写停用样子（`theme_map::disabled_paint`），要按它实际所在的底色混。
 pub(crate) fn icon_button_style(
-    edge: f32,
+    edge: Square,
     radius: RadiusTier,
     foreground: SemanticColorRole,
     background: Option<SemanticColorRole>,
 ) -> NodeStyle {
     let mut style = NodeStyle::default();
+    tiers::square(&mut style, edge);
     {
         let layout = Arc::make_mut(&mut style.layout);
-        let edge = LengthSpec::Px(edge);
-        layout.width = Some(edge);
-        layout.height = Some(edge);
-        layout.min_width = Some(edge);
-        layout.min_height = Some(edge);
         layout.padding_left = Some(LengthSpec::Px(0.0));
         layout.padding_right = Some(LengthSpec::Px(0.0));
         layout.flex_grow = Some(0.0);

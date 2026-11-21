@@ -63,7 +63,11 @@ fn loading_card_sweeps_and_drops_its_shadow() {
 
     let track = sweep_track(&harness, "inspect-media-loading-progress");
     assert!(track.indeterminate, "准备卡不知道要多久，进度轨是不定进度");
-    assert_eq!(track.thickness, Some(6.0));
+    assert_eq!(track.thickness, None, "粗细不写，跟主题的 Sm 间距档");
+    assert_eq!(
+        track_thickness(&harness, "inspect-media-loading-progress"),
+        crate::theme_map::tiers::space_px(nana_ui_core::SpacingStep::Sm),
+    );
     assert_eq!(track.track, Some(SemanticColorRole::BorderSoft));
     assert_eq!(
         track.style.layout.width,
@@ -80,6 +84,18 @@ pub(super) fn sweep_track(harness: &ShellHarness, key: &str) -> Progress {
         .context()
         .read(Entity::<Progress>::from_stable_id(id), Progress::clone)
         .unwrap_or_else(|_| panic!("{key} 应该是 NanaUI 的 Progress"))
+}
+
+/// 键上的进度轨排出来的粗细（盒子高）。
+pub(super) fn track_thickness(harness: &ShellHarness, key: &str) -> f32 {
+    let id = harness.keyed(key).unwrap_or_else(|| panic!("没有 {key}"));
+    harness
+        .document()
+        .context()
+        .world()
+        .layout_box(id)
+        .unwrap_or_else(|| panic!("{key} 没有布局"))
+        .height
 }
 
 /// 主题表面高度档的落影。档位写死，不跟着实现常量走。

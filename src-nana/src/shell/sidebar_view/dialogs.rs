@@ -6,7 +6,7 @@
 //! 每个对话框常驻：打开时按投影建一次，之后浮层同步只把新的投影写进信号，文字、禁用和错误这些
 //! 字段原地改；输入框用 `.model` 加草稿信号受控。按钮和选项卡片的事件只发意图消息。
 
-use crate::theme_map::tiers::{self, Edge};
+use crate::theme_map::tiers::{self, Edge, Height};
 use nana_ui_core::SpacingStep;
 use std::sync::Arc;
 
@@ -242,7 +242,7 @@ fn option_card(
     message: impl Fn() -> ShellMessage + Send + Sync + 'static,
 ) -> AnyView {
     let mut style = parts::row_style(
-        0.0,
+        Height::Px(0.0),
         Some(SpacingStep::Xxl),
         Some(SpacingStep::Xxl),
         Some(SpacingStep::Sm),

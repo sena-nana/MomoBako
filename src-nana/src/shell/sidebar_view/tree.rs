@@ -30,7 +30,7 @@ use nana_ui::runtime::{
 };
 use nana_ui_core::{SemanticColorMix, SpacingRole, SpacingStep, TextWeight};
 
-use crate::theme_map::tiers::{self, Edge};
+use crate::theme_map::tiers::{self, Edge, Height, Square};
 
 use super::super::field_bind::StyleField;
 use super::super::input::{HostDragPhase, InputMessage};
@@ -229,7 +229,7 @@ fn owned_paths(paths: &[std::path::PathBuf]) -> Vec<String> {
 /// 放下目标：强调色 14% 混进当前底，一根发丝边，边是 55% 强调色。
 fn card_style(drop_target: bool) -> NodeStyle {
     let mut style = parts::row_style(
-        ROW_HEIGHT,
+        Height::Px(ROW_HEIGHT),
         Some(SpacingStep::Xs),
         Some(SpacingStep::Sm),
         Some(SpacingStep::Md),
@@ -358,7 +358,7 @@ fn caret(
     let (icon, label) = look(expanded());
     let mut button = IconButton::new(icon, label).size(ControlSize::Small);
     let mut style = parts::icon_button_style(
-        TOGGLE_WIDTH,
+        Square::Px(TOGGLE_WIDTH),
         nana_ui::runtime::RadiusTier::Xs,
         SemanticColorRole::Faint,
         None,

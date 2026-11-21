@@ -33,9 +33,9 @@ use super::super::view_part_sidebar::project::HeadView;
 use super::super::{ShellMessage, ShellViewModel, SidebarMessage};
 use super::parts::{self, ActiveTone, PopoverOpen};
 use super::sidebar_message;
-use crate::theme_map::tiers::{self, Edge};
+use crate::theme_map::tiers::{self, Edge, Height, Square};
 use nana_ui::runtime::view::css;
-use nana_ui_core::{SpacingStep, TextWeight};
+use nana_ui_core::{SpacingStep, SquareSize, TextWeight};
 
 /// 侧栏和仓库头的左右内边距合起来（侧栏 `Md`、仓库头 `Xxs`，两边各一份）：切换列表比侧栏窄这么多，
 /// 和仓库头同宽。
@@ -91,7 +91,7 @@ pub(crate) fn repository_switcher(
     let name = head.with_untracked(|head| head.name.clone());
     let width = popover.with_untracked(|view| view.width);
     let mut style = parts::row_style(
-        28.0,
+        Height::Control(ControlSize::Small),
         Some(SpacingStep::Md),
         Some(SpacingStep::Md),
         Some(SpacingStep::Sm),
@@ -358,7 +358,7 @@ fn repository_row(row: RepositoryRow) -> AnyView {
         .children((widget(name), missing)),
     ));
     let mut style = parts::row_style(
-        30.0,
+        Height::Px(30.0),
         Some(SpacingStep::Md),
         Some(SpacingStep::Md),
         Some(SpacingStep::Md),
@@ -476,7 +476,7 @@ fn menu_item(
     message: impl Fn() -> ShellMessage + Send + Sync + 'static,
 ) -> AnyView {
     let mut style = parts::row_style(
-        28.0,
+        Height::Control(ControlSize::Small),
         Some(SpacingStep::Lg),
         Some(SpacingStep::Lg),
         Some(SpacingStep::Lg),
@@ -567,7 +567,12 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
     let mut close = IconButton::new(X, "关闭添加资源库")
         .size(ControlSize::Small)
         .with_tooltip("关闭");
-    close.style = parts::icon_button_style(22.0, RadiusTier::Sm, SemanticColorRole::Faint, None);
+    close.style = parts::icon_button_style(
+        Square::Tier(SquareSize::IconButton),
+        RadiusTier::Sm,
+        SemanticColorRole::Faint,
+        None,
+    );
     // 提交中停用：按主题的禁用不透明度和弹层底色（`--bg-elev`）在 sRGB 里混。
     close.style.interaction.disabled =
         crate::theme_map::disabled_paint(SemanticColorRole::Faint, SemanticColorRole::Surface);

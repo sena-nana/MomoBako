@@ -33,7 +33,8 @@ use nana_ui::runtime::{
 };
 use nana_ui::{ButtonKind, Icon};
 use nana_ui_core::{
-    ControlHeight, ControlPadding, ControlSize, SpacingStep, TextWeight, TypeRole, TypographyTokens,
+    ControlHeight, ControlPadding, ControlSize, SpacingStep, SquareSize, TextWeight, TypeRole,
+    TypographyTokens,
 };
 
 use crate::backend::services::repository::PlaylistItem;
@@ -44,7 +45,7 @@ use super::super::row_sync::sync_rows;
 use super::super::{ShellMessage, ShellViewModel};
 use super::{icons, key_part, player_message, playlist_plugin_missing};
 use crate::theme_map::tiers::DISABLED_OPACITY;
-use crate::theme_map::tiers::{self, Edge};
+use crate::theme_map::tiers::{self, Edge, Square};
 
 /// 不能播放的条目整行的透明度。
 const UNREADY_OPACITY: f32 = 0.72;
@@ -522,14 +523,19 @@ fn entry_row(item: EntryItem, head: Signal<PageHead>) -> AnyView {
         .into_any()
 }
 
-/// 拖动柄：NanaUI 的 `IconButton`，竖握把图标。
+/// 拖动柄：NanaUI 的 `IconButton`，竖握把图标，小号控件见方（默认 28）：比行里的图标按钮档大一号，好抓。
 ///
 /// 读屏名是「拖动排序」，不挂悬停提示。单击不打开预览；
 /// 400 毫秒内再点同一柄，和整行双击一样从这一条播放。不能播或没有播放插件时第二下不播。
 fn drag_handle(id: &str, item: EntryItem, head: Signal<PageHead>) -> AnyView {
     let play_id = id.to_string();
     let ready = move || item.try_with(|entry| entry.ready).unwrap_or(false);
-    widget(IconButton::new(icons::GRIP_VERTICAL, "拖动排序"))
+    let mut handle = IconButton::new(icons::GRIP_VERTICAL, "拖动排序");
+    tiers::square(
+        &mut handle.style,
+        Square::Tier(SquareSize::Control(ControlSize::Small)),
+    );
+    widget(handle)
         .key(format!("playlist-item-drag-{}", key_part(id)))
         .on_cx(move |_, _: &Activate, cx| {
             if !double_pressed(&play_id) {

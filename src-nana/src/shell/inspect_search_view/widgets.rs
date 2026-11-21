@@ -34,8 +34,8 @@ pub(crate) const BAR_BUTTON_HEIGHT: f32 = BAR_BUTTON_SIZE.height_in(nana_ui::the
 const CHIP_GAP: SpacingStep = SpacingStep::Sm;
 /// 胶囊里的输入框高：胶囊高减去上下两根发丝边。
 const PILL_INNER_HEIGHT: f32 = CONTROL_HEIGHT - tiers::hairline_px() * 2.0;
-/// 关闭按钮宽 32：和中号控件一样宽，照写像素。
-const CLOSE_WIDTH: f32 = 32.0;
+/// 关闭按钮和中号控件一样宽（默认 32）。
+const CLOSE_WIDTH: ControlSize = ControlSize::Medium;
 /// 输入框最窄 86（`minmax(86px, 120px)` 的下限）。
 const INPUT_MIN_WIDTH: f32 = 86.0;
 /// 眉题字距 0.4：主题没有字距档，照写像素。
@@ -198,8 +198,7 @@ pub(crate) fn close_button(name: &str) -> IconButton {
     {
         let layout = Arc::make_mut(&mut style.layout);
         fixed_height(layout, BAR_BUTTON_HEIGHT);
-        layout.width = Some(LengthSpec::Px(CLOSE_WIDTH));
-        layout.min_width = Some(LengthSpec::Px(CLOSE_WIDTH));
+        tiers::control_width(layout, CLOSE_WIDTH);
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(0.0);
     }
