@@ -2,13 +2,13 @@
 //!
 //! - [`row_text`]、[`row_flag`]：列表行里的字段绑定，行已经删掉时读默认值；
 //! - [`row_draft`]：列表行里受控输入框的草稿，行里的 ViewModel 值相对上次投影变了才写回；
-//! - [`ActionDisabled`]、[`ReadOnly`]、[`FollowEnd`]：控件表里没有的可绑定字段；按钮图标和整份样式用各页共用的
-//!   [`ButtonIcon`]、[`StyleField`]（`field_bind.rs`）。
+//! - [`ActionDisabled`]、[`ReadOnly`]、[`FollowEnd`]：控件表里没有的可绑定字段；按钮图标用各页共用的
+//!   [`ButtonIcon`]（`field_bind.rs`）。
 
 use nana_ui::runtime::view::{FieldWrite, StorePath, untrack, watch_effect};
 use nana_ui::runtime::{Button, ScrollView, TextInput};
 
-pub(crate) use super::super::field_bind::{ButtonIcon, StyleField};
+pub(crate) use super::super::field_bind::ButtonIcon;
 use super::super::hot::ModelField;
 use crate::theme_map::DISABLED_OPACITY;
 

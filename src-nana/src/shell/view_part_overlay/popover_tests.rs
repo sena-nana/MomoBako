@@ -253,23 +253,23 @@ fn task_popover_patches_progress_in_place_and_closes_from_outside() {
     assert!(!harness.model.admin.popover_open);
 }
 
-/// 任务弹层里进度条填充的透明度。
-fn fill_opacity(harness: &ShellHarness, task_id: &str) -> Option<f32> {
+/// 任务弹层里一条进度条在读屏里的样子：是否忙碌（不确定进度）和报出的数值。
+fn progress_state(harness: &ShellHarness, task_id: &str) -> (bool, Option<f64>) {
     let id = harness
         .keyed(&format!("admin-task-fill-{task_id}"))
         .unwrap_or_else(|| panic!("没有 {task_id} 的进度条"));
-    harness
-        .document()
-        .context()
-        .world()
-        .node_style(id)
-        .and_then(|style| style.layout.opacity)
+    let node = harness
+        .nodes()
+        .into_iter()
+        .find(|node| node.id == id)
+        .unwrap_or_else(|| panic!("{task_id} 的进度条不在读屏树里"));
+    (node.busy, node.numeric_value)
 }
 
-/// 不确定进度的填充照 `progress-pulse 1.15s` 呼吸，确定进度的不呼吸；
-/// 呼吸只改填充的透明度，不重建这一行。减少动态效果时停在不透明；弹层关上以后不再为呼吸要帧。
+/// 不确定进度是 NanaUI 的不确定进度条：读屏标成忙、不报数值，沿轨道扫的动画由组件自己跑；
+/// 确定进度报出数值。换成不确定和换回来都不重建这一行；弹层关上以后不再为它要帧。
 #[test]
-fn indeterminate_progress_breathes_in_the_task_popover() {
+fn indeterminate_progress_sweeps_in_the_task_popover() {
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
     harness.apply(ShellMessage::Admin(AdminMessage::ToggleTaskPopover));
     let mut scanning = task("task-1", 0.0);
@@ -280,65 +280,55 @@ fn indeterminate_progress_breathes_in_the_task_popover() {
     ]));
     harness.flush();
     let row = harness.keyed("admin-task-task-1").expect("任务行");
-    let start = fill_opacity(&harness, "task-1").expect("填充绑了透明度");
-    for _ in 0..30 {
-        harness.frame();
-    }
-    let later = fill_opacity(&harness, "task-1").expect("填充绑了透明度");
-    assert!(
-        (start - later).abs() > 0.1,
-        "不确定进度在呼吸：{start} → {later}"
-    );
-    assert!(
-        matches!(harness.window.demand, nana_ui::FrameDemand::Continuous(_)),
-        "呼吸要帧"
+    assert_eq!(
+        progress_state(&harness, "task-1"),
+        (true, None),
+        "不确定进度标成忙、不报数值"
     );
     assert_eq!(
-        fill_opacity(&harness, "task-2"),
-        Some(1.0),
-        "确定进度不呼吸"
+        progress_state(&harness, "task-2"),
+        (false, Some(30.0)),
+        "确定进度报出数值"
+    );
+    for _ in 0..5 {
+        harness.frame();
+    }
+    assert!(
+        matches!(harness.window.demand, nana_ui::FrameDemand::Continuous(_)),
+        "不确定进度在扫，要帧"
+    );
+
+    harness.model.motion.set_reduced(true);
+    harness.apply(ShellMessage::TaskProgressLoaded(vec![task("task-1", 50.0)]));
+    harness.flush();
+    assert_eq!(
+        progress_state(&harness, "task-1"),
+        (false, Some(50.0)),
+        "有了百分比以后报出数值"
     );
     assert_eq!(
         harness.keyed("admin-task-task-1"),
         Some(row),
-        "呼吸不重建这一行"
-    );
-
-    harness.model.motion.set_reduced(true);
-    changed(&mut harness);
-    harness.frame();
-    assert_eq!(
-        fill_opacity(&harness, "task-1"),
-        Some(1.0),
-        "减少动态效果时不呼吸"
+        "换成确定进度不重建这一行"
     );
     harness.model.motion.set_reduced(false);
     harness.apply(ShellMessage::Admin(AdminMessage::CloseTaskPopover));
     for _ in 0..20 {
         harness.frame();
     }
-    assert!(!harness.model.motion.active(), "弹层关着时不为呼吸要帧");
+    assert!(!harness.model.motion.active(), "弹层关着时不为进度要帧");
 }
 
-/// 任务弹层里进度条填充的宽度百分比。
+/// 任务弹层里进度条的值（百分比），取读屏报出的数值。
 fn fill_width(harness: &ShellHarness, task_id: &str) -> f32 {
-    let id = harness
-        .keyed(&format!("admin-task-fill-{task_id}"))
-        .unwrap_or_else(|| panic!("没有 {task_id} 的进度条"));
-    match harness
-        .document()
-        .context()
-        .world()
-        .node_style(id)
-        .and_then(|style| style.layout.width)
-    {
-        Some(nana_ui::runtime::LengthSpec::Percent(percent)) => percent,
-        other => panic!("填充宽度不是百分比：{other:?}"),
+    match progress_state(harness, task_id) {
+        (false, Some(value)) => value as f32,
+        other => panic!("进度条没有报出数值：{other:?}"),
     }
 }
 
-/// 进度条填充按 `transition: width 0.18s ease` 过渡：新出现的行直接是目标宽度，进度推进时从原来的
-/// 宽度过渡过去，走完 180ms 停在新值；过渡只改填充的宽度，不重建这一行。减少动态效果时直接跳到新值。
+/// 进度条的值按 `transition: width 0.18s ease` 过渡：新出现的行直接是目标值，进度推进时从原来的
+/// 值过渡过去，走完 180ms 停在新值；过渡只改进度条的值，不重建这一行。减少动态效果时直接跳到新值。
 #[test]
 fn task_progress_widths_transition_like_vue() {
     let mut harness = ShellHarness::mount(scene("live-files-plain"));

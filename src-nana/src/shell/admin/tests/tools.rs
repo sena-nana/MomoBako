@@ -599,13 +599,13 @@ fn cache_card_shows_the_active_repository_usage() {
         .cache
         .entries
         .iter()
-        .map(|row| (row.name.as_str(), row.value.as_str(), row.last))
+        .map(|row| (row.name.as_str(), row.value.as_str()))
         .collect();
     assert_eq!(
         rows,
         [
-            ("缩略图", "3 个文件 · 2.0 KB", false),
-            ("Office 预览 PDF", "2 个文件 · 1.5 MB", true),
+            ("缩略图", "3 个文件 · 2.0 KB"),
+            ("Office 预览 PDF", "2 个文件 · 1.5 MB"),
         ]
     );
 

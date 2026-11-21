@@ -1,8 +1,10 @@
 //! 系统日志面板。
 //!
-//! 页头带缓存数和命中数，工具条是搜索、插件和仓库下拉、
-//! 暂停追踪、重置筛选、清空日志，下面是级别和来源两组筛选芯片，再下面是日志卡片列表。
-//! 每条日志一张主背景卡片：级别徽章、来源芯片、时间、动作、消息、上下文标签和可展开的上下文。
+//! 页头带缓存数和命中数（NanaUI 标签），工具条是搜索、插件和仓库下拉、
+//! 暂停追踪、重置筛选、清空日志，下面是级别和来源两组筛选芯片（NanaUI `Chip`），再下面是日志卡片列表。
+//! 读历史时是 NanaUI 的转圈，没有日志时是 NanaUI 的 `EmptyState`。
+//! 每条日志一张主背景卡片：级别徽章（`StatusBadge`）、种类和来源标签、时间、动作、消息、上下文标签和
+//! 可展开的上下文。
 //!
 //! 页面主体和日志列表都是滚动区。
 //! 面板至少撑满主体，列表分走页头、工具条和筛选以下的高度、自己滚动：追踪时跟随末尾，暂停后停在原位。
@@ -15,20 +17,22 @@
 use std::sync::Arc;
 
 use nana_ui::runtime::view::{
-    AnyView, IntoView, Item, Signal, Store, StoreList, StorePath, css, fields, node_ref, widget,
+    AnyView, IntoView, Item, Signal, Store, StoreList, StorePath, chip, css, fields, node_ref,
+    status_badge, tag_frame, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, JustifySpec, LengthSpec, NodeStyle, ScrollAxes, ScrollView,
-    Select, SelectChanged, SelectOption, Stack, Text, TextChanged, TextInput,
+    Activate, AlignSpec, Button, JustifySpec, LengthSpec, ScrollAxes, ScrollView, Select,
+    SelectChanged, SelectOption, Stack, StatusTone, TextChanged, TextInput,
 };
 use nana_ui_core::{RadiusTier, SemanticColorMix, SemanticColorRole as Role};
 
 use super::super::ShellMessage;
 use super::AdminMessage;
-use super::bind::{ActionDisabled, ButtonIcon, FollowEnd, StyleField, row_flag, row_text};
+use super::bind::{ActionDisabled, ButtonIcon, FollowEnd, row_flag, row_text};
 use super::icons;
 use super::logs_state::{LogRowView, LogsSignals, LogsToolbar};
-use super::style::{self, Soft, SoftFill, Tone, action, column, label, mono, pad, row, wrapping};
+use super::marks;
+use super::style::{self, Tone, action, column, label, mono, pad, row, wrapping};
 use super::support;
 
 const LEVELS: [&str; 4] = ["debug", "info", "warn", "error"];
@@ -62,23 +66,25 @@ pub(crate) fn logs_panel(signals: LogsSignals) -> AnyView {
             "系统日志",
             "统一查看宿主、插件与辅助进程的实时日志流。",
             vec![
-                style::stat(
+                marks::bound_tag(
                     move || head.with(|head| head.cached.clone()),
                     "admin-log-cached",
-                ),
-                style::stat(
+                )
+                .into_any(),
+                marks::bound_tag(
                     move || head.with(|head| head.hits.clone()),
                     "admin-log-hits",
-                ),
+                )
+                .into_any(),
             ],
             "admin-log",
         ),
         toolbar(signals),
         filters(signals.filters),
-        style::state_notice("正在加载系统日志", false, "admin-log-loading")
+        marks::loading("正在加载系统日志", "admin-log-loading")
             .visible(move || loading.get())
             .into_any(),
-        style::dashed_empty(
+        marks::empty(
             move || {
                 empty.with(|empty| {
                     empty
@@ -323,7 +329,7 @@ fn filters(selected: Signal<(Vec<String>, Vec<String>)>) -> AnyView {
             )
         })
         .collect::<Vec<_>>();
-    widget(column(10.0))
+    widget(column(8.0))
         .children((filter_group("级别", levels), filter_group("来源", kinds)))
         .key("admin-log-filters")
         .into_any()
@@ -353,61 +359,15 @@ fn filter_group(title: &str, chips: Vec<AnyView>) -> AnyView {
         .into_any()
 }
 
-/// 芯片常态的字色、底色和描边：选中是强调色，未选是主背景、弱色字。
-fn chip_roles(active: bool) -> (Role, Role, Role) {
-    if active {
-        (Role::Accent, Role::AccentSoft, Role::Accent)
-    } else {
-        (Role::Muted, Role::Background, Role::Border)
-    }
-}
-
-/// 筛选芯片：高 26、左右 9、药丸、1px 边线、主背景、12/500 弱色；
-/// 选中时强调色边线、`accent-soft` 底和强调色字。高按组件声明的 26 画，不被全局按钮高 32
-/// 顶高，和左侧标题的 5px 顶距才对得齐。
+/// 筛选芯片：NanaUI 的 `Chip`，选中态绑在已选的级别和来源上；点了切换这一项。
 fn filter_chip(
     text: &str,
     active: impl Fn() -> bool + Send + Copy + 'static,
     message: AdminMessage,
     key: String,
 ) -> AnyView {
-    let (foreground, background, border) = chip_roles(active());
-    let mut node = nana_ui::runtime::NodeStyle {
-        foreground: Some(foreground),
-        background: Some(background),
-        border: Some(border),
-        interaction: nana_ui::runtime::InteractionStyle {
-            hovered: nana_ui::runtime::SemanticPaint {
-                foreground: Some(Role::Accent),
-                background: Some(Role::AccentSoft),
-                border: Some(Role::Accent),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-        .into(),
-        text_horizontal_alignment: nana_ui::runtime::TextHorizontalAlignment::Center,
-        text_vertical_alignment: nana_ui::runtime::TextVerticalAlignment::Center,
-        ..Default::default()
-    };
-    {
-        let layout = Arc::make_mut(&mut node.layout);
-        layout.height = Some(LengthSpec::Px(26.0));
-        layout.min_height = Some(LengthSpec::Px(26.0));
-        layout.padding_left = Some(LengthSpec::Px(9.0));
-        layout.padding_right = Some(LengthSpec::Px(9.0));
-        layout.border_width = Some(1.0);
-        layout.border_radius = Some(style::PILL);
-        layout.font_size = Some(12.0);
-        layout.font_weight = Some(500);
-        layout.line_height = Some(nana_ui_core::LineHeightSpec::Relative(style::LINE));
-        layout.white_space_nowrap = true;
-        layout.flex_shrink = Some(0.0);
-    }
-    widget(Button::new(text.to_string()).style(node))
-        .foreground(move || Some(chip_roles(active()).0))
-        .background(move || Some(chip_roles(active()).1))
-        .border(move || Some(chip_roles(active()).2))
+    chip(text.to_string())
+        .selected(active)
         .key(key)
         .on_cx(move |_, _: &Activate, cx| {
             cx.dispatch_program_all(ShellMessage::Admin(message.clone()))
@@ -419,7 +379,7 @@ fn filter_chip(
 fn log_item(item: LogItem) -> AnyView {
     let id = item.get_untracked().id;
     let key = style::key_part(&id);
-    let source = style::hint_chip(
+    let source = marks::bound_tag(
         row_text(item, |row| &row.source),
         format!("admin-log-source-{key}"),
     )
@@ -427,7 +387,7 @@ fn log_item(item: LogItem) -> AnyView {
     .into_any();
     let badges = vec![
         level_badge(item, &key),
-        style::hint_chip(
+        marks::bound_tag(
             row_text(item, |row| &row.kind),
             format!("admin-log-kind-chip-{key}"),
         )
@@ -477,86 +437,29 @@ fn log_item(item: LogItem) -> AnyView {
         .into_any()
 }
 
-/// 级别徽章的外框和字样：底色按级别和主背景混色，警告和调试用写死的颜色。
-fn level_look(level: &str) -> (NodeStyle, Text) {
-    let (soft, color): (Soft, Option<[u8; 3]>) = match level {
-        "debug" => (
-            Soft::RgbMix {
-                rgb: [0x5c, 0x70, 0x88],
-                ratio: 0.18,
-                base: Role::Background,
-            },
-            Some([0x5c, 0x70, 0x88]),
-        ),
-        "info" => (
-            Soft::RoleMix {
-                role: Role::Accent,
-                ratio: 0.18,
-                base: Role::Background,
-            },
-            None,
-        ),
-        "warn" => (
-            Soft::RgbMix {
-                rgb: [0xdc, 0xa3, 0x3a],
-                ratio: 0.22,
-                base: Role::Background,
-            },
-            Some([0xb6, 0x7a, 0x09]),
-        ),
-        _ => (
-            Soft::RoleMix {
-                role: Role::Danger,
-                ratio: 0.18,
-                base: Role::Background,
-            },
-            None,
-        ),
-    };
-    let role = if level == "info" {
-        Role::Accent
-    } else {
-        Role::Danger
-    };
-    let mut text = label(String::new(), 12.0, 700, role);
-    if let Some(rgb) = color {
-        text = style::fixed_color(text, rgb);
+/// 级别徽章的色调：调试中性、信息、警告、错误各一档。
+fn level_tone(level: &str) -> StatusTone {
+    match level {
+        "debug" => StatusTone::Neutral,
+        "info" => StatusTone::Info,
+        "warn" => StatusTone::Warning,
+        _ => StatusTone::Danger,
     }
-    let body = style::rounded(
-        pad(
-            style::fixed(row(0.0), None, Some(28.0)),
-            0.0,
-            12.0,
-            0.0,
-            12.0,
-        ),
-        None,
-    )
-    .painter(SoftFill::new(soft, None));
-    (body.node_style(), text)
 }
 
-/// 级别徽章：高 28、左右 12、药丸、12/700，底色按级别和主背景混色。
+/// 级别徽章：NanaUI 的 `StatusBadge`，文字是级别名，色调按级别。
 fn level_badge(item: LogItem, key: &str) -> AnyView {
-    let level = move || item.try_with(|row| row.level.clone()).unwrap_or_default();
-    let (frame, text) = level_look(&level());
-    widget(Stack::row(0.0).style(frame))
-        .prop::<NodeStyle, StyleField>(move || level_look(&level()).0)
-        .children((style::bound(text, row_text(item, |row| &row.level_label))
-            .prop::<NodeStyle, StyleField>(move || level_look(&level()).1.style)
-            .key(format!("admin-log-level-badge-{key}")),))
+    let text = row_text(item, |row| &row.level_label);
+    status_badge(move || std::sync::Arc::<str>::from(text()))
+        .tone(move || level_tone(&item.try_with(|row| row.level.clone()).unwrap_or_default()))
+        .key(format!("admin-log-level-badge-{key}"))
         .into_any()
 }
 
-/// 日志元信息芯片：最小高 24、内边距 3/9、药丸、`bg-subtle`、等宽 11 号弱色。
+/// 日志元信息标签：NanaUI 的 `tag_frame`，里面是等宽 11 号弱色字。
 /// 分类总在；插件、仓库和位置是 `optional`，值为空时不显示。
 fn meta_chip(item: LogItem, pick: fn(&LogRowView) -> &String, optional: bool) -> AnyView {
-    let body = style::rounded(pad(row(0.0), 3.0, 9.0, 3.0, 9.0), None)
-        .surface(Role::Subtle)
-        .with_layout(|layout| {
-            layout.min_height = Some(LengthSpec::Px(24.0));
-        });
-    widget(body)
+    widget(tag_frame())
         .visible(move || !optional || item.try_with(|row| !pick(row).is_empty()).unwrap_or(false))
         .children((style::bound(
             mono(String::new(), 11.0, 400, Role::Muted),

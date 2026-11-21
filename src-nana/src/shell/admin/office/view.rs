@@ -1,5 +1,6 @@
 //! Office 转换设置块的视图：面板、标题、操作按钮、缓存区、仓库选择与状态行。
 
+use super::super::marks;
 use super::*;
 
 /// 设置区里的状态和缓存清理。不是 Office 转换时整块不占布局。
@@ -15,7 +16,7 @@ pub(in super::super) fn settings_block(status: Signal<Option<OfficeConvertView>>
     .into_any()
 }
 
-/// 整张设置卡：运行状态在上，资源库缓存清理在下，通用配置字段仍在这块下面。
+/// 整张设置卡（NanaUI 的选中样式卡片）：运行状态在上，资源库缓存清理在下，通用配置字段仍在这块下面。
 pub(super) fn panel(view: &OfficeConvertView) -> AnyView {
     let mut body = vec![head(view.loading)];
     if !view.error.is_empty() {
@@ -28,29 +29,11 @@ pub(super) fn panel(view: &OfficeConvertView) -> AnyView {
     if view.rows.is_empty() {
         body.push(note(WAITING, "admin-office-waiting"));
     } else {
-        body.push(rows(&view.rows, "status"));
+        body.push(marks::status_rows(&view.rows, "admin-office-status"));
     }
     body.push(actions(view));
     body.push(cache_section(view));
-    let fill = style::SoftFill::new(
-        style::Soft::RoleMix {
-            role: Role::AccentSoft,
-            ratio: 0.42,
-            base: Role::Subtle,
-        },
-        Some(RadiusTier::Md),
-    )
-    .bordered(Role::BorderSoft, 1.0);
-    widget(
-        pad(column(10.0), 10.0, 10.0, 10.0, 10.0)
-            .painter(fill)
-            .with_layout(|layout| {
-                layout.width = Some(LengthSpec::Fill);
-            }),
-    )
-    .children(body)
-    .key("admin-office-card")
-    .into_any()
+    marks::status_card(body, "admin-office-card")
 }
 
 /// 页头：眉题、标题和刷新。读取中按钮写「刷新中」并禁用。
@@ -146,9 +129,9 @@ pub(super) fn cache_section(view: &OfficeConvertView) -> AnyView {
                 ))
                 .key("admin-office-cache-title"),)),
             )),
-            rows(
+            marks::status_rows(
                 &[("当前资源库".into(), view.selected_repo_name.clone())],
-                "repo",
+                "admin-office-repo",
             ),
             widget(row(8.0).align(AlignSpec::Center).width(LengthSpec::Fill)).children((
                 repo_select(view),
@@ -215,67 +198,7 @@ pub(super) fn repo_options(repos: &[(String, String)]) -> Vec<SelectOption> {
     options
 }
 
-/// 警告色说明。错误、结果、空状态和页底说明都用警告色浅底。
+/// 警示色调的说明条。错误、结果、空状态和页底说明都用它。
 pub(super) fn note(text: &str, key: &'static str) -> AnyView {
-    let fill = style::SoftFill::new(
-        style::Soft::Alpha {
-            role: Role::Warning,
-            alpha: 0.12,
-        },
-        Some(RadiusTier::Sm),
-    );
-    widget(
-        pad(column(0.0), 8.0, 10.0, 8.0, 10.0)
-            .painter(fill)
-            .with_layout(|layout| {
-                layout.width = Some(LengthSpec::Fill);
-            }),
-    )
-    .children((widget(style::wrapping(style::label_lh(
-        text,
-        12.0,
-        400,
-        Role::Warning,
-        1.45,
-    )))
-    .key(key),))
-    .into_any()
-}
-
-/// 状态行：上为 11 号大写弱标签，下为右对齐的值。第一行没有上边线。
-pub(super) fn rows(items: &[(String, String)], prefix: &str) -> AnyView {
-    let lines = items
-        .iter()
-        .enumerate()
-        .map(|(index, (name, value))| {
-            let mut line = column(6.0).width(LengthSpec::Fill);
-            if index > 0 {
-                line = style::top_rule(line)
-                    .with_layout(|layout| layout.padding_top = Some(LengthSpec::Px(12.0)));
-            }
-            widget(line)
-                .children((
-                    widget(field_label(name)).key(format!("admin-office-{prefix}-label-{index}")),
-                    widget(value_text(value)).key(format!("admin-office-{prefix}-value-{index}")),
-                ))
-                .key(format!("admin-office-{prefix}-row-{index}"))
-                .into_any()
-        })
-        .collect::<Vec<_>>();
-    widget(column(8.0).width(LengthSpec::Fill))
-        .children(lines)
-        .key(format!("admin-office-{prefix}-rows"))
-        .into_any()
-}
-
-pub(super) fn field_label(text: &str) -> nana_ui::runtime::Text {
-    let mut text = label(text.to_uppercase(), 11.0, 700, Role::Faint);
-    Arc::make_mut(&mut text.style.layout)
-        .text_ext
-        .letter_spacing = Some(0.4);
-    text
-}
-
-pub(super) fn value_text(text: &str) -> nana_ui::runtime::Text {
-    style::align_end(style::wrapping(label(text, 13.0, 400, Role::Text)))
+    marks::warning_note(text, key)
 }

@@ -3,28 +3,34 @@
 //! 结构：页头、音频播放、外观、仓库服务、外部素材接入、
 //! 插件管理、缓存、API 设计。页根是普通竖排，外边距和纵向滚动由壳层的主区提供。
 //!
-//! 页面只建一次，只读 [`SettingsSignals`] 和插件管理面板的信号：卡片里的文字、下拉框、滑杆和
+//! 每张卡是 NanaUI 的设置分组（`settings_group`）：可调的项是 `settings_row`（主题和圆角样式用
+//! `SegmentedControl`，音频的提示写在行的提示行里），只读的键值是 `LabeledValue`，服务状态是
+//! `StatusBadge`，外部接入的错误和结果是分组下面的 `callout`。缓存的三格容量 NanaUI 没有对应组件，
+//! 照原样拼。
+//!
+//! 页面只建一次，只读 [`SettingsSignals`] 和插件管理面板的信号：卡片里的文字、下拉框、分段、滑杆和
 //! 按钮状态按字段绑定；缓存条目和 API 端点按内容做键；复制按钮点下去时现读连接信息。
 
 use std::sync::Arc;
 
+use nana_ui::icons_tabler::{ALERT_CIRCLE, INFO_CIRCLE};
 use nana_ui::runtime::view::{
-    AnyView, El, IntoProp, IntoView, NodeRef, Signal, each, fields, node_ref, widget,
+    AnyView, El, GroupRow, IntoProp, IntoView, SettingsGroupView, Signal, callout, each, fields,
+    group_row_on_line, labeled_value, segmented, settings_group, settings_row, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, InteractionStyle, LengthSpec, NodeStyle, RangeField, RangeInput, Select,
-    SelectChanged, SelectOption, SemanticPaint, Stack, Text, TextHorizontalAlignment,
-    TextVerticalAlignment,
+    Activate, LengthSpec, RangeField, RangeInput, SegmentedOption, SegmentedOptionChosen, Select,
+    SelectChanged, SelectOption, Stack, StatusTone, ValidationIntent,
 };
 use nana_ui_core::{GridTrack, Icon, RadiusTier, SemanticColorRole as Role};
 
 use super::super::ShellMessage;
 use super::AdminMessage;
-use super::bind::{ActionDisabled, StyleField};
+use super::bind::ActionDisabled;
 use super::icons;
 use super::plugins_state::PluginPanelSignals;
 use super::settings_state::{ExternalCard, KvRow, SettingsSignals};
-use super::style::{self, Soft, SoftFill, Tone, action, align_end, column, label, pad, row};
+use super::style::{self, Tone, action, align_end, column, label, pad, row};
 use super::support;
 
 /// 设置页整页。卡片之间留 12，插件管理面板之后不留。
@@ -69,103 +75,19 @@ fn page_header() -> AnyView {
         .into_any()
 }
 
-/// 卡片：`bg-elev` 底、md 圆角、1px 透明边加 14/16 内边距。
-pub(crate) fn card(key: &'static str, children: Vec<AnyView>) -> AnyView {
-    widget(
-        pad(column(0.0), 15.0, 17.0, 15.0, 17.0)
-            .surface(Role::Surface)
-            .radius(RadiusTier::Md),
-    )
-    .children(children)
-    .key(key)
-    .into_any()
+/// 一张设置卡：NanaUI 的设置分组（标题在上，凸起卡片在下，行间是缩进的细线），外面一层带键的列。
+fn card(key: &'static str, title: &str, rows: Vec<GroupRow>) -> AnyView {
+    card_with(key, settings_group(Some(title.to_string()), rows))
 }
 
-/// 卡片标题：13/600 弱色、大写、字距 0.5，下边距 8。
-pub(crate) fn card_title(text: &str, key: &'static str) -> AnyView {
-    let mut title = label(text.to_uppercase(), 13.0, 600, Role::Muted);
-    Arc::make_mut(&mut title.style.layout)
-        .text_ext
-        .letter_spacing = Some(0.5);
-    widget(pad(column(0.0), 0.0, 0.0, 8.0, 0.0))
-        .children((widget(title).key(key),))
-        .into_any()
-}
-
-/// 设置行的位置：首行上内边距 4，末行下内边距 4 且没有分割线。
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum RowPlace {
-    Middle,
-    Last,
-}
-
-/// 设置行的外框：上下 12，中间的行有 `border-soft` 分割线，末行下内边距 4、没有分割线。
-fn row_frame(place: RowPlace) -> Stack {
-    let bottom = if place == RowPlace::Last { 4.0 } else { 12.0 };
-    let body = pad(
-        style::spread(16.0, AlignSpec::Center),
-        12.0,
-        0.0,
-        bottom,
-        0.0,
-    );
-    if place == RowPlace::Last {
-        body
-    } else {
-        style::bottom_rule(body)
-    }
-}
-
-/// 设置行：左边粗体标签加弱色说明，右边控件。`caption` 给没有自己名字的控件当读屏名称。
-fn settings_row(
-    title: &str,
-    hint: &str,
-    control: AnyView,
-    place: RowPlace,
-    key: &'static str,
-    caption: Option<NodeRef>,
-) -> El<Stack, (AnyView, AnyView)> {
-    let title = widget(label(title, 13.0, 500, Role::Text)).key(format!("{key}-label"));
-    let title = match caption {
-        Some(caption) => title.node_ref(caption).into_any(),
-        None => title.into_any(),
-    };
-    let text = widget(
-        Stack::column(2.0)
-            .width(LengthSpec::Shrink)
-            .min_width(LengthSpec::Px(0.0))
-            .grow(1.0)
-            .shrink(1.0),
-    )
-    .children((
-        title,
-        widget(label(hint, 12.0, 500, Role::Muted)).key(format!("{key}-hint")),
-    ))
-    .into_any();
-    widget(row_frame(place))
-        .children((
-            text,
-            widget(row(0.0).shrink(0.0)).children((control,)).into_any(),
-        ))
-        .key(key)
-}
-
-/// 设置卡里的提示行，错误时用危险色。文字和颜色可以绑定。
-fn notice(
-    text: impl IntoProp<String>,
-    error: impl Fn() -> bool + Send + 'static,
-    key: &'static str,
-) -> El<Stack, (El<Text>,)> {
-    widget(pad(column(0.0), 10.0, 0.0, 0.0, 0.0)).children((style::bound(
-        label(String::new(), 12.0, 400, Role::Muted),
-        text,
-    )
-    .foreground(move || Some(if error() { Role::Danger } else { Role::Muted }))
-    .key(key),))
+/// 给设置分组套一层带键的列，键给测试和滚动定位用。
+fn card_with(key: &'static str, group: SettingsGroupView) -> AnyView {
+    widget(column(0.0)).children((group,)).key(key).into_any()
 }
 
 /// 音频播放：喇叭图标加下拉框。实现音频能力的插件从插件清单里找；一个都没有时下拉框禁用，
-/// 写出实际播放音频的内置解码器。下拉框没有自己的名字，用行标题当读屏名称。
+/// 写出实际播放音频的内置解码器。回退或缺失的提示写在这一行下面的提示行里，错误时用错误档。
+/// 下拉框没有自己的名字，设置行把行标题给它当读屏名称。
 fn audio_card(signals: SettingsSignals) -> AnyView {
     let audio = signals.audio;
     let initial = audio.get_untracked();
@@ -175,20 +97,13 @@ fn audio_card(signals: SettingsSignals) -> AnyView {
             .map(|(value, text)| SelectOption::new(value.clone(), text.clone()))
             .collect::<Vec<_>>()
     };
+    // 按最长的选项定宽，不占满整行，行标题和说明留在左边。
     let mut select = Select::new(Some(initial.selected.clone()))
         .options(options(&initial.options))
-        .disabled(!initial.selectable);
-    {
-        let layout = Arc::make_mut(&mut select.style.layout);
-        layout.width = Some(LengthSpec::Shrink);
-        // 没有可选项时空下拉框仍有内边距和箭头，约 42 宽。
-        layout.min_width = Some(LengthSpec::Px(42.0));
-        layout.height = Some(LengthSpec::Px(32.0));
-        layout.font_size = Some(14.0);
-        layout.line_height = Some(nana_ui_core::LineHeightSpec::Relative(style::LINE));
-    }
-    let caption = node_ref();
-    let picker = widget(row(0.0))
+        .disabled(!initial.selectable)
+        .fit_options(true);
+    Arc::make_mut(&mut select.style.layout).width = Some(LengthSpec::Shrink);
+    let picker = widget(row(8.0))
         .children((
             widget(style::glyph(icons::VOLUME2, 14.0, Role::Text)).key("admin-audio-icon"),
             widget(select)
@@ -201,7 +116,6 @@ fn audio_card(signals: SettingsSignals) -> AnyView {
                 .prop::<bool, fields::select::disabled>(move || {
                     audio.with(|audio| !audio.selectable)
                 })
-                .labelled_by(caption)
                 .key("admin-audio-player")
                 .on_cx(|_, event: &SelectChanged, cx| {
                     cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SetAudioPlayer(
@@ -210,211 +124,130 @@ fn audio_card(signals: SettingsSignals) -> AnyView {
                 }),
         ))
         .into_any();
-    // 下面有提示时这一行不是卡片最后一个子元素：保留分割线和 12 的下内边距。
-    let place = move || {
-        if audio.with(|audio| audio.notice.is_some()) {
-            RowPlace::Middle
-        } else {
-            RowPlace::Last
-        }
-    };
-    let audio_row = settings_row(
-        "默认音频播放器",
-        "按插件 ID 固定选择；不可用时只回退到官方播放器。",
-        picker,
-        place(),
-        "admin-audio-row",
-        Some(caption),
-    )
-    .prop::<NodeStyle, StyleField>(move || row_frame(place()).node_style())
-    .into_any();
-    let notice_text = move || {
-        audio.with(|audio| {
-            audio
-                .notice
-                .as_ref()
-                .map(|(text, _)| text.clone())
-                .unwrap_or_default()
+    let audio_row = settings_row("默认音频播放器")
+        .hint(Some(Arc::from(
+            "按插件 ID 固定选择；不可用时只回退到官方播放器。",
+        )))
+        .notice(move || {
+            audio.with(|audio| {
+                audio
+                    .notice
+                    .as_ref()
+                    .map(|(text, _)| Arc::from(text.as_str()))
+            })
         })
-    };
-    let notice_error =
-        move || audio.with(|audio| audio.notice.as_ref().is_some_and(|(_, error)| *error));
+        .notice_tone(move || {
+            if audio.with(|audio| audio.notice.as_ref().is_some_and(|(_, error)| *error)) {
+                ValidationIntent::Danger
+            } else {
+                ValidationIntent::Warning
+            }
+        })
+        .control(picker)
+        .key("admin-audio-row");
     card(
         "admin-audio-card",
-        vec![
-            card_title("音频播放", "admin-audio-title"),
-            audio_row,
-            notice(notice_text, notice_error, "admin-audio-notice")
-                .visible(move || audio.with(|audio| audio.notice.is_some()))
-                .into_any(),
-        ],
+        "音频播放",
+        vec![group_row_on_line(audio_row)],
     )
 }
 
 /// 外观：主题、圆角样式和圆角半径。主题有暗色、浅色和「跟随系统」（默认）三档。
 fn appearance_card(signals: SettingsSignals) -> AnyView {
-    let theme = segmented(
-        vec![
-            theme_segment("dark", icons::MOON, "暗色", signals.theme),
-            theme_segment("light", icons::SUN, "浅色", signals.theme),
-            theme_segment("system", icons::MONITOR, "跟随系统", signals.theme),
-        ],
-        "admin-theme",
-    );
-    let corners = segmented(
-        vec![
-            corner_segment(
+    let theme = signals.theme;
+    let theme_picker = segmented()
+        .children((
+            choice(
+                "dark",
+                icons::MOON,
+                "暗色",
+                theme,
+                "settings-theme",
+                |value| ShellMessage::SettingsThemeChanged(value.into()),
+            ),
+            choice(
+                "light",
+                icons::SUN,
+                "浅色",
+                theme,
+                "settings-theme",
+                |value| ShellMessage::SettingsThemeChanged(value.into()),
+            ),
+            choice(
+                "system",
+                icons::MONITOR,
+                "跟随系统",
+                theme,
+                "settings-theme",
+                |value| ShellMessage::SettingsThemeChanged(value.into()),
+            ),
+        ))
+        .key("admin-theme");
+    let corner = signals.corner_style;
+    let corner_message =
+        |value: &str| ShellMessage::Admin(AdminMessage::SetCornerStyle(value.into()));
+    let corner_picker = segmented()
+        .children((
+            choice(
                 "smooth",
                 icons::SQUARE_ROUND_CORNER,
                 "平滑",
-                signals.corner_style,
+                corner,
+                "admin-corner",
+                corner_message,
             ),
-            corner_segment("round", icons::RADIUS, "普通", signals.corner_style),
-        ],
-        "admin-corner",
-    );
+            choice(
+                "round",
+                icons::RADIUS,
+                "普通",
+                corner,
+                "admin-corner",
+                corner_message,
+            ),
+        ))
+        .key("admin-corner");
     card(
         "admin-appearance-card",
+        "外观",
         vec![
-            card_title("外观", "admin-appearance-title"),
-            settings_row(
-                "主题",
-                "选择应用配色，立即生效并记忆到本地。",
-                theme,
-                RowPlace::Middle,
-                "admin-theme-row",
-                None,
-            )
-            .into_any(),
-            settings_row(
-                "圆角",
-                "选择平滑超椭圆或普通圆角，立即全局生效。",
-                corners,
-                RowPlace::Middle,
-                "admin-corner-row",
-                None,
-            )
-            .into_any(),
-            settings_row(
-                "圆角半径",
-                "调节普通与平滑圆角的全局半径。",
-                radius_control(signals.corner_radius),
-                RowPlace::Last,
-                "admin-radius-row",
-                None,
-            )
-            .into_any(),
+            group_row_on_line(
+                settings_row("主题")
+                    .hint(Some(Arc::from("选择应用配色，立即生效并记忆到本地。")))
+                    .control(theme_picker)
+                    .key("admin-theme-row"),
+            ),
+            group_row_on_line(
+                settings_row("圆角")
+                    .hint(Some(Arc::from("选择平滑超椭圆或普通圆角，立即全局生效。")))
+                    .control(corner_picker)
+                    .key("admin-corner-row"),
+            ),
+            group_row_on_line(
+                settings_row("圆角半径")
+                    .hint(Some(Arc::from("调节普通与平滑圆角的全局半径。")))
+                    .control(radius_control(signals.corner_radius))
+                    .key("admin-radius-row"),
+            ),
         ],
     )
 }
 
-/// 分段控件：主背景、1px 边线、md 圆角、内边距 2、间距 2、高 34。
-fn segmented(items: Vec<AnyView>, key: &'static str) -> AnyView {
-    let body = style::fixed(row(2.0), None, Some(34.0));
-    let stack = pad(body, 2.0, 2.0, 2.0, 2.0)
-        .surface(Role::Background)
-        .border(Role::Border, 1.0)
-        .radius(RadiusTier::Md);
-    widget(stack).children(items).key(key).into_any()
-}
-
-/// 分段按钮的固定外形：高 28、左右 12、sm 圆角、13/500、图标 14、间距 6。
-fn segment_style(active: bool) -> NodeStyle {
-    let (foreground, background) = if active {
-        (Role::Text, Some(Role::Active))
-    } else {
-        (Role::Muted, None)
-    };
-    let mut node = NodeStyle {
-        foreground: Some(foreground),
-        background,
-        radius: Some(RadiusTier::Sm),
-        interaction: InteractionStyle {
-            hovered: SemanticPaint {
-                foreground: Some(Role::Text),
-                background: Some(if active {
-                    Role::SelectedHover
-                } else {
-                    Role::Hover
-                }),
-                ..SemanticPaint::default()
-            },
-            pressed: SemanticPaint {
-                foreground: Some(Role::Text),
-                background: Some(if active {
-                    Role::SelectedPressed
-                } else {
-                    Role::Active
-                }),
-                ..SemanticPaint::default()
-            },
-            ..InteractionStyle::default()
-        }
-        .into(),
-        text_horizontal_alignment: TextHorizontalAlignment::Center,
-        text_vertical_alignment: TextVerticalAlignment::Center,
-        ..NodeStyle::default()
-    };
-    let layout = Arc::make_mut(&mut node.layout);
-    layout.height = Some(LengthSpec::Px(28.0));
-    layout.min_height = Some(LengthSpec::Px(28.0));
-    layout.padding_left = Some(LengthSpec::Px(12.0));
-    layout.padding_right = Some(LengthSpec::Px(12.0));
-    layout.padding_top = Some(LengthSpec::Px(0.0));
-    layout.padding_bottom = Some(LengthSpec::Px(0.0));
-    layout.font_size = Some(13.0);
-    layout.font_weight = Some(500);
-    layout.line_height = Some(nana_ui_core::LineHeightSpec::Relative(style::LINE));
-    layout.white_space_nowrap = true;
-    layout.flex_shrink = Some(0.0);
-    node
-}
-
-/// 圆角样式分段。选中态跟着已保存的偏好整套换外观。
-fn corner_segment(
+/// 分段选择的一项：选中的是设置里的那一档（主题跟随系统时选中「跟随系统」，不按系统现在是深是浅
+/// 去点亮暗色或浅色）。选中时发 `message(value)`，立即生效并写进设置文件；选中态等投影回来再跟着换。
+fn choice(
     value: &'static str,
     icon: Icon,
     text: &'static str,
     current: Signal<String>,
-) -> AnyView {
-    let active = move || current.with(|current| current == value);
-    let button = nana_ui::runtime::Button::new(text)
-        .icon(icon)
-        .icon_size(14.0)
-        .icon_gap(6.0)
-        .style(segment_style(active()));
-    widget(button)
-        .prop::<NodeStyle, StyleField>(move || segment_style(active()))
-        .key(format!("admin-corner-{value}"))
-        .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SetCornerStyle(
-                value.into(),
-            )));
+    key: &'static str,
+    message: fn(&str) -> ShellMessage,
+) -> El<SegmentedOption> {
+    widget(SegmentedOption::new(text).icon(icon))
+        .selected(move || current.with(|current| current == value))
+        .key(format!("{key}-{value}"))
+        .on_cx(move |_, _: &SegmentedOptionChosen, cx| {
+            cx.dispatch_program_all(message(value));
         })
-        .into_any()
-}
-
-/// 主题分段：暗色、浅色和跟随系统。选中的是设置里的那一档（跟随系统时选中「跟随系统」，不按系统现在
-/// 是深是浅去点亮暗色或浅色），点了立即生效并写进设置文件。
-fn theme_segment(
-    value: &'static str,
-    icon: Icon,
-    text: &'static str,
-    current: Signal<String>,
-) -> AnyView {
-    let active = move || current.with(|current| current == value);
-    let button = nana_ui::runtime::Button::new(text)
-        .icon(icon)
-        .icon_size(14.0)
-        .icon_gap(6.0)
-        .style(segment_style(active()));
-    widget(button)
-        .prop::<NodeStyle, StyleField>(move || segment_style(active()))
-        .key(format!("settings-theme-{value}"))
-        .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program_all(ShellMessage::SettingsThemeChanged(value.into()));
-        })
-        .into_any()
 }
 
 /// 圆角控件：220 宽滑杆加 44 宽右对齐的「Npx」。滑杆的值和文字跟着已保存的半径。
@@ -471,43 +304,29 @@ fn format_radius(radius: f64) -> String {
     }
 }
 
-/// 键值表的一行：左边弱色标签，右边正文色值，上下 6，分割线 `border-soft`，末行无线。值可以绑定。
-pub(crate) fn kv_row(
-    name: &str,
-    value: impl IntoProp<String>,
-    last: bool,
-    key: impl Into<String>,
-) -> AnyView {
-    let key = key.into();
-    let body = pad(style::spread(12.0, AlignSpec::Start), 6.0, 0.0, 6.0, 0.0);
-    let body = if last { body } else { style::bottom_rule(body) };
-    widget(body)
-        .children((
-            widget(label(name, 14.0, 400, Role::Muted)).key(format!("{key}-label")),
-            widget(
-                Stack::row(0.0)
-                    .width(LengthSpec::Shrink)
-                    .min_width(LengthSpec::Px(0.0))
-                    .shrink(1.0)
-                    .justify(nana_ui::runtime::JustifySpec::End),
-            )
-            .children((style::bound(
-                align_end(label(String::new(), 14.0, 400, Role::Text)),
-                value,
-            )
-            .key(format!("{key}-value")),)),
-        ))
-        .key(key)
+/// 键值行：NanaUI 的标签和值，标签靠左、值靠右。值可以绑定。
+fn kv_row(name: &str, value: impl IntoProp<String>, key: impl Into<String>) -> AnyView {
+    let value = value.into_source();
+    labeled_value(name.to_string())
+        .value(move || Arc::<str>::from(value.get()))
+        .compact(false)
+        .key(key.into())
         .into_any()
 }
 
-/// 按内容做键的一列键值行：条目没有编号，内容或末行变了那一行重建。
-fn kv_rows(rows: impl Fn() -> Vec<KvRow> + Send + 'static) -> AnyView {
+/// 分组里的一行键值，放在卡片的内容线上。
+fn kv_line(name: &str, value: impl IntoProp<String>, key: &'static str) -> GroupRow {
+    group_row_on_line(kv_row(name, value, key))
+}
+
+/// 按内容做键的一列键值行：条目没有编号，内容变了那一行重建。整列是分组里的一行，没有条目时连同
+/// 分隔线一起藏起来。
+fn kv_rows(rows: impl Fn() -> Vec<KvRow> + Send + 'static) -> GroupRow {
     let rows = nana_ui::runtime::view::computed(rows);
-    each(rows, KvRow::clone, |row: KvRow| {
-        kv_row(&row.name, row.value.clone(), row.last, row.key.clone())
-    })
-    .into_any()
+    group_row_on_line(each(rows, KvRow::clone, |row: KvRow| {
+        kv_row(&row.name, row.value.clone(), row.key.clone())
+    }))
+    .visible(move || rows.with(|rows| !rows.is_empty()))
 }
 
 /// 仓库服务：已注册仓库数、并发模型、同步方式和已接入后端。
@@ -515,25 +334,18 @@ fn repository_card(signals: SettingsSignals) -> AnyView {
     let repository = signals.repository;
     card(
         "admin-repository-card",
+        "仓库服务",
         vec![
-            card_title("仓库服务", "admin-repository-title"),
-            kv_row(
+            kv_line(
                 "已注册仓库",
                 move || repository.with(|card| card.count.clone()),
-                false,
                 "admin-repo-count",
             ),
-            kv_row(
-                "并发模型",
-                "SQLite WAL + 乐观锁",
-                false,
-                "admin-repo-concurrency",
-            ),
-            kv_row("同步方式", "全量扫描 + 事件表", false, "admin-repo-sync"),
-            kv_row(
+            kv_line("并发模型", "SQLite WAL + 乐观锁", "admin-repo-concurrency"),
+            kv_line("同步方式", "全量扫描 + 事件表", "admin-repo-sync"),
+            kv_line(
                 "已接入后端",
                 move || repository.with(|card| card.backends.clone()),
-                true,
                 "admin-backends",
             ),
         ],
@@ -548,23 +360,11 @@ fn external_text(
     move || external.with(|card| pick(card).clone())
 }
 
-/// 外部素材接入：标题右侧状态徽章、四行连接信息、四个按钮和提示。
+/// 外部素材接入：服务状态徽章和四行连接信息；卡片下面是四个按钮和提示条。
 fn external_card(external: Signal<ExternalCard>) -> AnyView {
-    let head = widget(pad(
-        style::spread(12.0, AlignSpec::Center),
-        0.0,
-        0.0,
-        8.0,
-        0.0,
-    ))
-    .children((
-        widget(label("外部素材接入", 13.0, 600, Role::Muted)).key("admin-external-title"),
-        status_badge(external),
-    ))
-    .into_any();
     let not_loaded = move || external.with(|card| !card.loaded);
     let no_json = move || external.with(|card| card.json.is_empty());
-    let actions = widget(pad(row(8.0).wrap(true), 12.0, 0.0, 0.0, 0.0))
+    let actions = widget(row(8.0).wrap(true))
         .children((
             copy_action(
                 "复制 Base URL",
@@ -607,85 +407,76 @@ fn external_card(external: Signal<ExternalCard>) -> AnyView {
             .into_any(),
         ))
         .into_any();
-    let has_error = move || external.with(|card| !card.error.is_empty());
-    let body = vec![
-        head,
-        kv_row(
-            "连接文件",
-            external_text(external, |card| &card.file),
-            false,
-            "admin-external-file",
-        ),
-        kv_row(
-            "Base URL",
-            external_text(external, |card| &card.url),
-            false,
-            "admin-external-url",
-        ),
-        kv_row(
-            "Token",
-            external_text(external, |card| &card.token),
-            false,
-            "admin-external-token",
-        ),
-        kv_row(
-            "启动时间",
-            external_text(external, |card| &card.started),
-            true,
-            "admin-external-started",
-        ),
+    // 出错时只显示错误，不同时显示上一次的操作结果。提示条文字为空时自己藏起来。
+    let message = move || {
+        external.with(|card| {
+            if card.error.is_empty() {
+                card.message.clone()
+            } else {
+                String::new()
+            }
+        })
+    };
+    let footer = widget(column(10.0)).children((
         actions,
-        notice(
-            external_text(external, |card| &card.error),
-            || true,
-            "admin-external-error",
-        )
-        .visible(has_error)
-        .into_any(),
-        notice(
-            external_text(external, |card| &card.message),
-            || false,
-            "admin-external-message",
-        )
-        .visible(move || !has_error() && external.with(|card| !card.message.is_empty()))
-        .into_any(),
-    ];
-    card("admin-external-card", body)
+        widget(column(0.0))
+            .key("admin-external-error")
+            .children((callout(
+                ALERT_CIRCLE,
+                StatusTone::Danger,
+                external_text(external, |card| &card.error),
+            ),)),
+        widget(column(0.0))
+            .key("admin-external-message")
+            .children((callout(INFO_CIRCLE, StatusTone::Info, message),)),
+    ));
+    let status = settings_row("服务状态")
+        .control(status_badge(external))
+        .key("admin-external-status-row");
+    let group = settings_group(
+        Some("外部素材接入".to_string()),
+        vec![
+            group_row_on_line(status),
+            kv_line(
+                "连接文件",
+                external_text(external, |card| &card.file),
+                "admin-external-file",
+            ),
+            kv_line(
+                "Base URL",
+                external_text(external, |card| &card.url),
+                "admin-external-url",
+            ),
+            kv_line(
+                "Token",
+                external_text(external, |card| &card.token),
+                "admin-external-token",
+            ),
+            kv_line(
+                "启动时间",
+                external_text(external, |card| &card.started),
+                "admin-external-started",
+            ),
+        ],
+    )
+    .footer(footer);
+    card_with("admin-external-card", group)
 }
 
-/// 状态徽章的外框和颜色：就绪时成功色柔和底，否则主背景、弱色。
-fn badge_look(ready: bool) -> (Stack, Role) {
-    let body = style::rounded(
-        pad(style::fixed(row(5.0), None, Some(24.0)), 0.0, 8.0, 0.0, 8.0),
-        None,
-    );
-    if ready {
-        (
-            body.painter(SoftFill::new(Soft::Success, None)),
-            Role::Success,
-        )
-    } else {
-        (body.surface(Role::Background), Role::Muted)
-    }
-}
-
-/// 状态胶囊：高 24、左右 8、药丸、12/600，图标 13；就绪时成功色柔和底。
+/// 服务状态徽章：NanaUI 的状态徽章，就绪时成功色，否则中性色。
 fn status_badge(external: Signal<ExternalCard>) -> AnyView {
-    let ready = move || external.with(|card| card.ready);
-    let (body, color) = badge_look(ready());
-    widget(body)
-        .prop::<NodeStyle, StyleField>(move || badge_look(ready()).0.node_style())
-        .children((
-            widget(style::glyph(icons::CHECK_CIRCLE2, 13.0, color))
-                .foreground(move || Some(badge_look(ready()).1)),
-            style::bound(
-                label(String::new(), 12.0, 600, color),
-                external_text(external, |card| &card.status),
-            )
-            .foreground(move || Some(badge_look(ready()).1))
-            .key("admin-external-status"),
-        ))
-        .into_any()
+    nana_ui::runtime::view::status_badge(move || {
+        external.with(|card| Arc::<str>::from(card.status.as_str()))
+    })
+    .tone(move || {
+        if external.with(|card| card.ready) {
+            StatusTone::Success
+        } else {
+            StatusTone::Neutral
+        }
+    })
+    .key("admin-external-status")
+    .into_any()
 }
 
 /// 复制按钮：点下去时现读这一刻的连接信息。
@@ -723,6 +514,7 @@ fn cache_card(signals: SettingsSignals) -> AnyView {
         ]);
         layout.gap = Some(LengthSpec::Px(10.0));
         layout.width = Some(LengthSpec::Fill);
+        layout.padding_top = Some(LengthSpec::Px(12.0));
         layout.padding_bottom = Some(LengthSpec::Px(12.0));
     });
     let cells = [
@@ -742,15 +534,16 @@ fn cache_card(signals: SettingsSignals) -> AnyView {
     .collect::<Vec<_>>();
     card(
         "admin-cache-card",
+        "缓存",
         vec![
-            card_title("缓存", "admin-cache-title"),
-            widget(grid).children(cells).into_any(),
+            group_row_on_line(widget(grid).children(cells)),
             kv_rows(move || cache.with(|card| card.entries.clone())),
         ],
     )
 }
 
 /// 缓存容量格：主背景、lg 圆角、内边距 12，数据库图标 16，数字 14/700 加 12 号弱色名称。
+/// NanaUI 没有统计格组件，照原样拼。
 fn metric(value: impl Fn() -> String + Send + 'static, name: &str, key: &'static str) -> AnyView {
     widget(
         pad(row(10.0), 12.0, 12.0, 12.0, 12.0)
@@ -771,22 +564,20 @@ fn metric(value: impl Fn() -> String + Send + 'static, name: &str, key: &'static
     .into_any()
 }
 
-/// API 设计：传输方式和端点列表。没有快照时写「本地服务契约未加载」。
+/// API 设计：传输方式（一行安静的提示）和端点列表。没有快照时写「本地服务契约未加载」。
 fn api_card(signals: SettingsSignals) -> AnyView {
     let api = signals.api;
+    let transport = widget(column(0.0))
+        .key("admin-api-transport")
+        .children((callout(icons::SERVER_COG, StatusTone::Neutral, move || {
+            api.with(|card| card.transport.clone())
+        })
+        .quiet(),));
     card(
         "admin-api-card",
+        "API 设计",
         vec![
-            card_title("API 设计", "admin-api-title"),
-            widget(row(4.0))
-                .children((
-                    widget(style::glyph(icons::SERVER_COG, 13.0, Role::Muted)),
-                    style::bound(label(String::new(), 14.0, 400, Role::Muted), move || {
-                        api.with(|card| card.transport.clone())
-                    })
-                    .key("admin-api-transport"),
-                ))
-                .into_any(),
+            group_row_on_line(transport),
             kv_rows(move || api.with(|card| card.endpoints.clone())),
         ],
     )

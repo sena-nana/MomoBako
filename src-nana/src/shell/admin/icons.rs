@@ -14,13 +14,6 @@ const fn lucide(data: &'static IconData) -> Icon {
     Icon::from_data(data)
 }
 
-/// lucide `circle-check`（`CheckCircle2`）。
-pub(crate) const CHECK_CIRCLE2: Icon = lucide(&CHECK_CIRCLE2_DATA);
-static CHECK_CIRCLE2_DATA: IconData = IconData {
-    name: "lucide-circle-check",
-    shapes: EMPTY,
-    svg: r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>"#,
-};
 /// lucide `copy`（`Copy`）。
 pub(crate) const COPY: Icon = lucide(&COPY_DATA);
 static COPY_DATA: IconData = IconData {
@@ -104,13 +97,6 @@ static FOLDER_OPEN_DATA: IconData = IconData {
     name: "lucide-folder-open",
     shapes: EMPTY,
     svg: r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></svg>"#,
-};
-/// lucide `power`（`Power`）。
-pub(crate) const POWER: Icon = lucide(&POWER_DATA);
-static POWER_DATA: IconData = IconData {
-    name: "lucide-power",
-    shapes: EMPTY,
-    svg: r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v10"/><path d="M18.4 6.6a9 9 0 1 1-12.77.04"/></svg>"#,
 };
 /// lucide `refresh-cw`（`RefreshCw`）。
 pub(crate) const REFRESH_CW: Icon = lucide(&REFRESH_CW_DATA);

@@ -1,10 +1,10 @@
 //! 插件设置表单。
 //!
 //! 每个字段一行三列网格，
-//! 左边粗体字段名和弱色说明，中间控件，右边「重置」。布尔字段是勾选框；选项字段是下拉框，
+//! 左边粗体字段名和弱色说明，中间控件，右边「重置」。布尔字段是 NanaUI 的开关；选项字段是下拉框，
 //! 第一项是空值；JSON 字段是等宽文本域，失焦提交；其余是单行输入，回车或失焦提交。
 //!
-//! 字段行按「字段键 + 控件类型」做键，只在展开设置的那张插件卡片里建一次；勾选、选项、禁用和
+//! 字段行按「字段键 + 控件类型」做键，只在展开设置的那张插件卡片里建一次；开关、选项、禁用和
 //! 文字都是绑定。单行输入和 JSON 文本域的草稿在行里建 `ModelField`，ViewModel 的草稿或配置值
 //! 变了才写回，组合输入和刚打的字不被冲掉。
 
@@ -14,10 +14,10 @@ use nana_ui::runtime::view::{
     AnyView, IntoView, Item, Store, StoreList, StorePath, fields, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, Checkbox, FocusWithinChanged, LengthSpec, Select, SelectChanged,
-    SelectOption, Stack, TextArea, TextChanged, TextInput, TextSubmitted, ToggleChanged,
+    Activate, AlignSpec, FocusWithinChanged, LengthSpec, Select, SelectChanged, SelectOption,
+    Stack, Switch, TextArea, TextChanged, TextInput, TextSubmitted, ToggleChanged,
 };
-use nana_ui_core::{GridTrack, SemanticColorRole as Role};
+use nana_ui_core::{GridTrack, SemanticColorRole as Role, SwitchControlPosition};
 use serde_json::Value;
 
 use super::admin::AdminMessage;
@@ -45,7 +45,7 @@ pub(crate) struct FieldRowView {
     pub label: String,
     pub description: String,
     pub placeholder: String,
-    /// 勾选框的勾选态。
+    /// 开关的开合。
     pub checked: bool,
     /// 下拉框的选项（第一项是空值）和当前值。
     pub options: Vec<(String, String)>,
@@ -205,7 +205,7 @@ fn field_row(item: FieldItem) -> AnyView {
         .into_any()
 }
 
-/// 字段的控件。勾选框、下拉框和文本域没有自己的名字，用左边的字段名当读屏名称。
+/// 字段的控件。开关、下拉框和文本域没有自己的名字，用左边的字段名当读屏名称。
 fn control(
     item: FieldItem,
     row: &FieldRowView,
@@ -216,11 +216,12 @@ fn control(
     let key = row.field_key.clone();
     match row.kind {
         FieldKind::Boolean => {
-            // 勾选框 18 见方。
-            let checkbox = style::native_checkbox(Checkbox::new("", row.checked), 18.0);
-            widget(checkbox)
-                .prop::<bool, fields::checkbox::checked>(row_flag(item, |row| row.checked))
-                .prop::<bool, fields::checkbox::disabled>(row_flag(item, |row| row.disabled))
+            // 开关画在控件列的起点，和其它控件左对齐。
+            let mut switch = Switch::new("", row.checked);
+            switch.control_position = SwitchControlPosition::Start;
+            widget(switch)
+                .checked(row_flag(item, |row| row.checked))
+                .disabled(row_flag(item, |row| row.disabled))
                 .labelled_by(caption)
                 .key(format!("admin-field-bool-{fkey}"))
                 .on_cx(move |_, event: &ToggleChanged, cx| {

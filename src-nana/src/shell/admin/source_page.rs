@@ -23,6 +23,7 @@ use super::super::{ShellMessage, ShellViewModel};
 use super::AdminMessage;
 use super::bind::{ActionDisabled, row_text};
 use super::icons;
+use super::marks;
 use super::source_provision::{self as flow};
 use super::style::{self, Tone, action, column, label, pad, row, wrapping};
 use crate::backend::services::repository::PluginManifest;
@@ -467,23 +468,28 @@ fn session_flow(plugin_id: &str, source: Signal<Option<SourceAuthView>>) -> AnyV
         .into_any()
 }
 
-/// 提示行：12 号，错误用危险色。没有提示时不占布局。
+/// 提示条：NanaUI 的 `callout`，错误用危险色调，否则信息色调。一次只显示一条，没有提示时不占布局。
 fn source_notice(source: Signal<Option<SourceAuthView>>, pid: &str) -> AnyView {
-    let notice = move || source.with(|view| view.as_ref().and_then(|view| view.notice.clone()));
-    widget(pad(column(0.0), 4.0, 0.0, 0.0, 0.0))
-        .visible(move || notice().is_some())
-        .children((style::bound(
-            wrapping(label(String::new(), 12.0, 400, Role::Muted)),
-            move || notice().map(|(text, _)| text).unwrap_or_default(),
-        )
-        .foreground(move || {
-            Some(if notice().is_some_and(|(_, error)| error) {
-                Role::Danger
-            } else {
-                Role::Muted
+    let text = move |error: bool| {
+        move || {
+            source.with(|view| {
+                view.as_ref()
+                    .and_then(|view| view.notice.as_ref())
+                    .filter(|(_, flagged)| *flagged == error)
+                    .map(|(text, _)| text.clone())
+                    .unwrap_or_default()
             })
+        }
+    };
+    widget(column(0.0))
+        .visible(move || {
+            source.with(|view| view.as_ref().is_some_and(|view| view.notice.is_some()))
         })
-        .key(format!("admin-source-notice-{pid}")),))
+        .children((
+            marks::notice(text(true), true, format!("admin-source-error-{pid}")),
+            marks::notice(text(false), false, format!("admin-source-message-{pid}")),
+        ))
+        .key(format!("admin-source-notice-{pid}"))
         .into_any()
 }
 

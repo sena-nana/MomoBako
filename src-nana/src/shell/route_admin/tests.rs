@@ -654,17 +654,17 @@ fn action(id: &str, status: &str, enabled: bool) -> RepositoryAction {
     }
 }
 
-fn background(harness: &ShellHarness, key: &str) -> Option<nana_ui_core::SemanticColorRole> {
+/// 列表行在读屏里是否选中。
+fn selected(harness: &ShellHarness, key: &str) -> Option<bool> {
     let node = harness.keyed(key).unwrap_or_else(|| panic!("缺少 {key}"));
     harness
-        .document()
-        .context()
-        .world()
-        .node_style(node)
-        .and_then(|style| style.background)
+        .nodes()
+        .into_iter()
+        .find(|item| item.id == node)
+        .and_then(|item| item.selected)
 }
 
-/// 仓库动作：动作行按 id 只建一次，点选别的动作时行不重建、选中底色换过去，详情跟着换；
+/// 仓库动作：动作行按 id 只建一次，点选别的动作时行不重建、选中态换过去，详情跟着换；
 /// 读取失败时提示出现，列表留着。
 #[test]
 fn actions_follow_selection_in_place() {
@@ -684,8 +684,8 @@ fn actions_follow_selection_in_place() {
     let rows = ["admin-action-import", "admin-action-copy"]
         .map(|key| harness.keyed(key).unwrap_or_else(|| panic!("缺少 {key}")));
     assert_eq!(
-        background(&harness, "admin-action-import"),
-        Some(nana_ui_core::SemanticColorRole::Hover),
+        selected(&harness, "admin-action-import"),
+        Some(true),
         "第一个动作默认选中"
     );
     assert!(harness.find("动作 import").is_some());
@@ -700,14 +700,14 @@ fn actions_follow_selection_in_place() {
         "点选换掉了动作行"
     );
     assert_eq!(
-        background(&harness, "admin-action-import"),
-        None,
-        "取消选中的动作还有底色"
+        selected(&harness, "admin-action-import"),
+        Some(false),
+        "取消选中的动作还是选中的"
     );
     assert_eq!(
-        background(&harness, "admin-action-copy"),
-        Some(nana_ui_core::SemanticColorRole::Hover),
-        "选中底色没有换过去"
+        selected(&harness, "admin-action-copy"),
+        Some(true),
+        "选中态没有换过去"
     );
     harness.assert_same_as_fresh_mount();
 

@@ -1,26 +1,31 @@
 //! 插件管理面板里的一张插件卡片和它展开的设置区。
 //!
-//! 卡片内容：名称和状态胶囊、说明、插件 id 和版本、禁用或降级原因、
-//! 分类到能力的芯片、依赖 / 权限 / Hook / 执行记录四段、底部的设置 / 启用 / 删除，展开设置时下面
-//! 多一块设置区（设置标题和说明、「打开目录」、下载服务或 Office 转换状态、来源账号区、字段表单）。
+//! 卡片是 NanaUI 的描边 `Card`，内容：名称和状态徽章（`StatusBadge`）、说明、插件 id 和版本、
+//! 禁用或降级原因（`callout` 提示条）、分类到能力的标签（`tag`）、依赖 / 权限 / Hook / 执行记录
+//! 四段（依赖和执行结果是状态徽章，权限和 Hook 是标签）、底部的启用开关（`Switch`）和设置 / 删除，
+//! 展开设置时下面多一块设置区（设置标题和说明、「打开目录」、下载服务或 Office 转换状态、来源账号区、
+//! 字段表单）。
 //!
-//! 卡片按插件 id 做键只建一次：文字、按钮文案和禁用状态绑定在卡片投影上；芯片、原因和四段没有
-//! 可聚焦的控件，内容变了整块换；设置区只在展开时建。处理器只带插件 id，会变的启用状态点下去时现读。
+//! 卡片按插件 id 做键只建一次：文字、徽章色调、开关和禁用状态绑定在卡片投影上；标签、原因和四段没有
+//! 可聚焦的控件，内容变了整块换；设置区只在展开时建。处理器只带插件 id。
 
+use std::sync::Arc;
+
+use nana_ui::icons_tabler::{ALERT_CIRCLE, ALERT_TRIANGLE};
 use nana_ui::runtime::view::{
-    AnyView, IntoView, Item, Store, StorePath, dynamic, fields, when, widget,
+    AnyView, IntoView, Item, Store, StorePath, callout, dynamic, status_badge, tag, when, widget,
 };
-use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, Stack};
-use nana_ui_core::{GridTrack, RadiusTier, SemanticColorRole as Role};
+use nana_ui::runtime::{
+    Activate, AlignSpec, Card, LengthSpec, Stack, StatusTone, Switch, ToggleChanged,
+};
+use nana_ui_core::{CardKind, GridTrack, SemanticColorRole as Role, SwitchControlPosition};
 
 use super::super::ShellMessage;
 use super::AdminMessage;
-use super::bind::{ActionDisabled, StyleField, row_flag, row_text};
+use super::bind::{ActionDisabled, row_flag, row_text};
 use super::icons;
-use super::plugins_state::{ChipTone, ExecutionView, PluginCardView, PluginPanelSignals};
-use super::style::{
-    self, PillTone, Soft, SoftFill, Tone, action, column, label, pad, row, wrapping,
-};
+use super::plugins_state::{ExecutionView, PluginCardView, PluginPanelSignals};
+use super::style::{self, Tone, action, column, label, pad, row, wrapping};
 
 /// 卡片在 Store 里的句柄。
 pub(crate) type CardItem = Item<
@@ -36,7 +41,7 @@ pub(crate) type CardItem = Item<
     PluginCardView,
 >;
 
-/// 插件卡片：主背景、xl 圆角、1px 透明边加 16 内边距，竖排间距 10。
+/// 插件卡片：NanaUI 的描边卡片，里面竖排间距 10。
 pub(super) fn plugin_card(card: CardItem, signals: PluginPanelSignals) -> AnyView {
     let plugin_id = card.get_untracked().plugin_id;
     let pid = style::key_part(&plugin_id);
@@ -102,61 +107,48 @@ pub(super) fn plugin_card(card: CardItem, signals: PluginPanelSignals) -> AnyVie
     body.extend(sections(card, &pid));
     body.push(card_actions(card, signals, &plugin_id));
     body.push(settings);
-    let card_box = pad(column(10.0), 17.0, 17.0, 17.0, 17.0)
-        .surface(Role::Background)
-        .radius(RadiusTier::Xl);
-    widget(card_box)
-        .children(body)
+    widget(Card::new().kind(CardKind::Outlined))
+        .children((widget(column(10.0)).children(body),))
         .key(format!("admin-plugin-card-{pid}"))
         .into_any()
 }
 
-/// 状态胶囊：外框和字色跟着语气整套换。
+/// 状态徽章：NanaUI 的 `StatusBadge`，文字和色调跟着卡片投影。
 fn status_pill(card: CardItem, pid: &str) -> AnyView {
-    let tone = move || card.try_with(|card| card.tone).unwrap_or(PillTone::Ghost);
-    let (body, color) = style::pill_look(tone());
-    widget(body)
-        .prop::<nana_ui::runtime::NodeStyle, StyleField>(move || {
-            style::pill_look(tone()).0.node_style()
+    let status = row_text(card, |card| &card.status);
+    status_badge(move || Arc::<str>::from(status()))
+        .tone(move || {
+            card.try_with(|card| card.tone)
+                .unwrap_or(StatusTone::Neutral)
         })
-        .children((style::bound(
-            label(String::new(), 11.0, 600, color),
-            row_text(card, |card| &card.status),
-        )
-        .foreground(move || Some(style::pill_look(tone()).1))
-        .key(format!("admin-plugin-status-{pid}")),))
+        .key(format!("admin-plugin-status-{pid}"))
         .into_any()
 }
 
-/// 卡片里的提示：内边距 8/10、md 圆角、12 号行高 1.5；禁用原因用危险色柔和底。
+/// 卡片里的提示条：禁用原因用危险色调，降级原因用警示色调。
 fn plugin_notice(text: &str, danger: bool) -> AnyView {
-    let body = pad(column(0.0), 8.0, 10.0, 8.0, 10.0);
-    let (body, color) = if danger {
-        (
-            body.painter(SoftFill::new(Soft::Danger, Some(RadiusTier::Md))),
-            Role::Danger,
-        )
+    let (icon, tone) = if danger {
+        (ALERT_CIRCLE, StatusTone::Danger)
     } else {
-        (
-            body.surface(Role::Subtle).radius(RadiusTier::Md),
-            Role::Muted,
-        )
+        (ALERT_TRIANGLE, StatusTone::Warning)
     };
-    widget(body)
-        .children((widget(wrapping(style::label_lh(
-            text, 12.0, 400, color, 1.5,
-        ))),))
+    callout(icon, tone, text.to_string()).into_any()
+}
+
+/// 一枚标签：NanaUI 的 `tag`，不能点。
+fn keyed_tag(text: &str, key: String) -> AnyView {
+    widget(column(0.0).width(LengthSpec::Shrink))
+        .children((tag(text.to_string()),))
+        .key(key)
         .into_any()
 }
 
-/// 芯片行：分类、类型、来源、运行时、依赖和能力，上边距 8、间距 8。
+/// 标签行：分类、类型、来源、运行时、依赖和能力，上边距 8、间距 8。
 fn chips_row(values: &[String], pid: &str) -> AnyView {
     let items = values
         .iter()
         .enumerate()
-        .map(|(index, value)| {
-            style::hint_chip(value.clone(), format!("admin-plugin-chip-{pid}-{index}"))
-        })
+        .map(|(index, value)| keyed_tag(value, format!("admin-plugin-chip-{pid}-{index}")))
         .collect::<Vec<_>>();
     widget(pad(row(8.0).wrap(true), 8.0, 0.0, 0.0, 0.0).width(LengthSpec::Fill))
         .children(items)
@@ -167,12 +159,12 @@ fn chips_row(values: &[String], pid: &str) -> AnyView {
 fn sections(card: CardItem, pid: &str) -> Vec<AnyView> {
     let dependencies = dynamic(
         row_flag(card, |card| card.dependencies.clone()),
-        |items: &Vec<(String, ChipTone)>| {
+        |items: &Vec<(String, StatusTone)>| {
             section(
                 "依赖",
                 items
                     .iter()
-                    .map(|(text, tone)| dependency_chip(text.clone(), *tone))
+                    .map(|(text, tone)| badge(text, *tone))
                     .collect(),
             )
         },
@@ -182,30 +174,14 @@ fn sections(card: CardItem, pid: &str) -> Vec<AnyView> {
     .into_any();
     let permissions = dynamic(
         row_flag(card, |card| card.permissions.clone()),
-        |items: &Vec<String>| {
-            section(
-                "权限",
-                items
-                    .iter()
-                    .map(|text| dependency_chip(text.clone(), ChipTone::Plain))
-                    .collect(),
-            )
-        },
+        |items: &Vec<String>| section("权限", items.iter().map(|text| tag(text.clone())).collect()),
     )
     .visible(row_flag(card, |card| !card.permissions.is_empty()))
     .key(format!("admin-plugin-permissions-{pid}"))
     .into_any();
     let hooks = dynamic(
         row_flag(card, |card| card.hooks.clone()),
-        |items: &Vec<String>| {
-            section(
-                "Hook",
-                items
-                    .iter()
-                    .map(|text| dependency_chip(text.clone(), ChipTone::Plain))
-                    .collect(),
-            )
-        },
+        |items: &Vec<String>| section("Hook", items.iter().map(|text| tag(text.clone())).collect()),
     )
     .visible(row_flag(card, |card| !card.hooks.is_empty()))
     .key(format!("admin-plugin-hooks-{pid}"))
@@ -227,28 +203,9 @@ fn sections(card: CardItem, pid: &str) -> Vec<AnyView> {
     vec![dependencies, permissions, hooks, executions]
 }
 
-/// 依赖项：最小高 24、内边距 4/8、md 圆角、`bg-subtle`、12 号。
-fn dependency_chip(text: String, tone: ChipTone) -> AnyView {
-    let body = pad(row(0.0), 4.0, 8.0, 4.0, 8.0).with_layout(|layout| {
-        layout.min_height = Some(LengthSpec::Px(24.0));
-    });
-    let (body, color) = match tone {
-        ChipTone::Plain => (
-            body.surface(Role::Subtle).radius(RadiusTier::Md),
-            Role::Text,
-        ),
-        ChipTone::Muted => (
-            body.surface(Role::Subtle).radius(RadiusTier::Md),
-            Role::Muted,
-        ),
-        ChipTone::Danger => (
-            body.painter(SoftFill::new(Soft::Danger, Some(RadiusTier::Md))),
-            Role::Danger,
-        ),
-    };
-    widget(body)
-        .children((widget(label(text, 12.0, 400, color)),))
-        .into_any()
+/// 依赖状态和执行结果：NanaUI 的 `StatusBadge`。
+fn badge(text: &str, tone: StatusTone) -> AnyView {
+    status_badge(text.to_string()).tone(tone).into_any()
 }
 
 fn section(title: &str, items: Vec<AnyView>) -> AnyView {
@@ -336,24 +293,35 @@ fn execution_item(record: &ExecutionView) -> AnyView {
     });
     widget(grid)
         .children((
-            dependency_chip(record.status.clone(), record.tone),
+            badge(&record.status, record.tone),
             widget(Stack::column(3.0).min_width(LengthSpec::Px(0.0))).children(lines),
         ))
         .key(format!("admin-plugin-execution-{}", record.key))
         .into_any()
 }
 
-/// 卡片底部的操作：设置、启用或禁用，用户插件多一个删除。靠右排。
+/// 卡片底部：左边启用开关（NanaUI 的 `Switch`，开关在文字前，占去余下的宽度），右边设置，
+/// 用户插件多一个删除。开关拨过去以后发启用或禁用；是否启用等插件列表回来再跟着写。
 fn card_actions(card: CardItem, signals: PluginPanelSignals, plugin_id: &str) -> AnyView {
     let pid = style::key_part(plugin_id);
     let head = signals.head;
     let managing = move || head.with(|head| head.managing);
-    let (settings_id, toggle_id, delete_id) = (
+    let (toggle_id, settings_id, delete_id) = (
         plugin_id.to_string(),
         plugin_id.to_string(),
         plugin_id.to_string(),
     );
     let buttons = (
+        widget(enable_switch(card))
+            .checked(move || card.try_with(|card| card.enabled).unwrap_or(false))
+            .disabled(managing)
+            .key(format!("admin-plugin-toggle-{pid}"))
+            .on_cx(move |_, event: &ToggleChanged, cx| {
+                cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SetEnabled {
+                    plugin_id: toggle_id.clone(),
+                    enabled: event.checked,
+                }));
+            }),
         widget(action("设置", Some(icons::SETTINGS), Tone::Plain, false))
             .prop::<bool, ActionDisabled>(managing)
             .key(format!("admin-plugin-settings-{pid}"))
@@ -361,28 +329,6 @@ fn card_actions(card: CardItem, signals: PluginPanelSignals, plugin_id: &str) ->
                 cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ToggleSettings(
                     settings_id.clone(),
                 )));
-            }),
-        widget(action("禁用", Some(icons::POWER), Tone::Plain, false))
-            .prop::<String, fields::button::label>(move || {
-                if card.try_with(|card| card.enabled).unwrap_or(false) {
-                    "禁用"
-                } else {
-                    "启用"
-                }
-                .to_string()
-            })
-            .prop::<bool, ActionDisabled>(managing)
-            .key(format!("admin-plugin-toggle-{pid}"))
-            .on_cx(move |_, _: &Activate, cx| {
-                // 启用状态随插件列表变，点下去时现读。
-                let Some(enabled) = card.try_with(|card| card.enabled) else {
-                    eprintln!("Nana 插件卡片已经不在列表里：{toggle_id}");
-                    return;
-                };
-                cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SetEnabled {
-                    plugin_id: toggle_id.clone(),
-                    enabled: !enabled,
-                }));
             }),
         widget(action("删除", Some(icons::TRASH2), Tone::Danger, false))
             .prop::<bool, ActionDisabled>(managing)
@@ -394,15 +340,17 @@ fn card_actions(card: CardItem, signals: PluginPanelSignals, plugin_id: &str) ->
                 )));
             }),
     );
-    widget(
-        row(8.0)
-            .wrap(true)
-            .width(LengthSpec::Fill)
-            .justify(nana_ui::runtime::JustifySpec::End),
-    )
-    .children(buttons)
-    .key(format!("admin-plugin-actions-{pid}"))
-    .into_any()
+    widget(row(8.0).wrap(true).width(LengthSpec::Fill))
+        .children(buttons)
+        .key(format!("admin-plugin-actions-{pid}"))
+        .into_any()
+}
+
+/// 启用开关：标签「启用」，开关画在文字前；初值取这张卡片现在的启用状态。
+fn enable_switch(card: CardItem) -> Switch {
+    let mut switch = Switch::new("启用", card.try_with(|card| card.enabled).unwrap_or(false));
+    switch.control_position = SwitchControlPosition::Start;
+    switch
 }
 
 /// 设置区：上边线、上内边距 12，竖排间距 12。头部是设置标题、说明和

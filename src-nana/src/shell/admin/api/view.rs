@@ -22,6 +22,7 @@ use super::super::super::hot::ModelField;
 use super::super::super::{ShellMessage, ShellViewModel};
 use super::super::AdminMessage;
 use super::super::bind::{ActionDisabled, ReadOnly};
+use super::super::marks;
 use super::super::style::{self, Tone, action, column, label, mono, pad, row, wrapping};
 use super::{
     ApiMessage, can_send, endpoints, request_summary, selected_ref, target_text, token_preview,
@@ -216,13 +217,13 @@ pub(crate) fn playground(signals: PlaygroundSignals) -> AnyView {
     let head = signals.head;
     let body = (
         header(signals),
-        style::state_notice(
+        marks::notice(
             move || head.with(|head| head.error.clone()),
             true,
             "admin-api-error",
         )
         .visible(move || head.with(|head| !head.error.is_empty())),
-        style::state_notice(
+        marks::notice(
             move || head.with(|head| head.notice.clone()),
             false,
             "admin-api-notice",

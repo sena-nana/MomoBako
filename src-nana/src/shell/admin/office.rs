@@ -9,12 +9,12 @@ use std::sync::Arc;
 
 use nana_ui::runtime::view::{AnyView, IntoView, Signal, fields, widget};
 use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, Select, SelectChanged, SelectOption};
-use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
+use nana_ui_core::SemanticColorRole as Role;
 use serde_json::Value;
 
 use super::super::{ShellMessage, ShellViewModel};
 use super::bind::ActionDisabled;
-use super::style::{self, Tone, action, column, label, pad, row};
+use super::style::{self, Tone, action, column, pad, row};
 use super::{AdminEffect, AdminMessage, OfficeCall, PluginCallOrigin};
 use crate::backend::services::repository::RepositorySummary;
 

@@ -440,7 +440,8 @@ fn theme_name(theme: ThemeName) -> &'static str {
         ThemeName::Dark => "dark",
     }
 }
-/// 场景画出了它名字所说的状态：`labels` 每一项都是某个节点的无障碍名，`values` 每一项都是某个输入框里的值。
+/// 场景画出了它名字所说的状态：`labels` 每一项都是某个节点的无障碍名，`values` 每一项都是某个节点读出的值
+/// （输入框里的值、空状态的说明）。
 fn assert_scene_drawn(
     nodes: &[nana_ui_devtools::agent::AccessibilityDumpNode],
     labels: &[&str],
@@ -608,11 +609,10 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
         "search-empty" => &["当前查询: 不存在的文件", "0 条结果", "没有匹配的文件"],
         // 有资源库，搜索派发出去时领域服务没起来：只画交回的失败原因，不写命中。
         "search-failed" => &["当前查询: 封面", "1 个仓库", "0 条结果", "领域服务未启动"],
-        // 没有资源库时的日志：历史答空，写空文案，不写四条夹具日志。
+        // 没有资源库时的日志：历史答空，写空文案（说明由 `scene_values` 检查），不写四条夹具日志。
         "logs-no-library" => &[
             "系统日志",
             "还没有系统日志",
-            "宿主、插件和辅助进程产生的关键操作会在这里持续汇总。",
             "0 条缓存",
             "0 条命中",
             "无资源库",
@@ -758,6 +758,8 @@ fn scene_values(scene_id: &str) -> &'static [&'static str] {
         "conflict" => &["封面改用暖色版本。"],
         "rename-dialog" => &["cover.png"],
         "folder-rename-dialog" => &["assets"],
+        // 日志空状态是 NanaUI 的 `EmptyState`：说明是它的读屏值。
+        "logs-no-library" => &["宿主、插件和辅助进程产生的关键操作会在这里持续汇总。"],
         _ => &[],
     }
 }

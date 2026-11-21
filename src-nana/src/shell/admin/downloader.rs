@@ -5,16 +5,15 @@
 //! 下载目录和下载源。还没有结果时只写空说明，不编任务数、目录或下载源。aria2 状态里的
 //! `secret` 丢掉，不进状态也不进界面。
 
-use std::sync::Arc;
-
 use nana_ui::runtime::view::{AnyView, IntoView, Signal, widget};
 use nana_ui::runtime::{Activate, AlignSpec, LengthSpec};
-use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
+use nana_ui_core::SemanticColorRole as Role;
 use serde_json::Value;
 
 use super::super::{ShellMessage, ShellViewModel};
 use super::bind::ActionDisabled;
-use super::style::{self, Tone, action, column, label, pad};
+use super::marks;
+use super::style::{self, Tone, action, column, pad};
 use super::{AdminEffect, AdminMessage, PluginCallOrigin};
 
 /// 下载服务插件。只有这一张设置页挂运行状态。
@@ -201,37 +200,19 @@ pub(super) fn settings_block(status: Signal<Option<DownloaderStatusView>>) -> An
     .into_any()
 }
 
-/// 整张状态卡：浅强调底、细边、页头、提示和状态行。
+/// 整张状态卡（NanaUI 的选中样式卡片）：页头、警示说明和状态行。
 fn panel(view: &DownloaderStatusView) -> AnyView {
     let mut body = vec![head(view.loading)];
     if !view.error.is_empty() {
-        body.push(note(&view.error, "admin-downloader-error"));
+        body.push(marks::warning_note(&view.error, "admin-downloader-error"));
     }
     if view.rows.is_empty() {
-        body.push(note(WAITING, "admin-downloader-waiting"));
+        body.push(marks::warning_note(WAITING, "admin-downloader-waiting"));
     } else {
-        body.push(rows(&view.rows));
+        body.push(marks::status_rows(&view.rows, "admin-downloader"));
     }
-    body.push(note(FOOTER, "admin-downloader-footer"));
-    let fill = style::SoftFill::new(
-        style::Soft::RoleMix {
-            role: Role::AccentSoft,
-            ratio: 0.42,
-            base: Role::Subtle,
-        },
-        Some(RadiusTier::Md),
-    )
-    .bordered(Role::BorderSoft, 1.0);
-    widget(
-        pad(column(10.0), 10.0, 10.0, 10.0, 10.0)
-            .painter(fill)
-            .with_layout(|layout| {
-                layout.width = Some(LengthSpec::Fill);
-            }),
-    )
-    .children(body)
-    .key("admin-downloader-card")
-    .into_any()
+    body.push(marks::warning_note(FOOTER, "admin-downloader-footer"));
+    marks::status_card(body, "admin-downloader-card")
 }
 
 /// 页头：眉题、标题和刷新。读取中按钮写「刷新中」并禁用。
@@ -270,71 +251,6 @@ fn head(loading: bool) -> AnyView {
         ))
         .key("admin-downloader-head")
         .into_any()
-}
-
-/// 警告色说明。错误、空状态和页底说明都用警告色浅底。
-fn note(text: &str, key: &'static str) -> AnyView {
-    let fill = style::SoftFill::new(
-        style::Soft::Alpha {
-            role: Role::Warning,
-            alpha: 0.12,
-        },
-        Some(RadiusTier::Sm),
-    );
-    widget(
-        pad(column(0.0), 8.0, 10.0, 8.0, 10.0)
-            .painter(fill)
-            .with_layout(|layout| {
-                layout.width = Some(LengthSpec::Fill);
-            }),
-    )
-    .children((widget(style::wrapping(style::label_lh(
-        text,
-        12.0,
-        400,
-        Role::Warning,
-        1.45,
-    )))
-    .key(key),))
-    .into_any()
-}
-
-/// 状态行：上为 11 号大写弱标签，下为右对齐的值。第一行没有上边线。
-fn rows(items: &[(String, String)]) -> AnyView {
-    let lines = items
-        .iter()
-        .enumerate()
-        .map(|(index, (name, value))| {
-            let mut line = column(6.0).width(LengthSpec::Fill);
-            if index > 0 {
-                line = style::top_rule(line)
-                    .with_layout(|layout| layout.padding_top = Some(LengthSpec::Px(12.0)));
-            }
-            widget(line)
-                .children((
-                    widget(field_label(name)).key(format!("admin-downloader-label-{index}")),
-                    widget(value_text(value)).key(format!("admin-downloader-value-{index}")),
-                ))
-                .key(format!("admin-downloader-row-{index}"))
-                .into_any()
-        })
-        .collect::<Vec<_>>();
-    widget(column(8.0).width(LengthSpec::Fill))
-        .children(lines)
-        .key("admin-downloader-rows")
-        .into_any()
-}
-
-fn field_label(text: &str) -> nana_ui::runtime::Text {
-    let mut text = label(text.to_uppercase(), 11.0, 700, Role::Faint);
-    Arc::make_mut(&mut text.style.layout)
-        .text_ext
-        .letter_spacing = Some(0.4);
-    text
-}
-
-fn value_text(text: &str) -> nana_ui::runtime::Text {
-    style::align_end(style::wrapping(label(text, 13.0, 400, Role::Text)))
 }
 
 #[cfg(test)]

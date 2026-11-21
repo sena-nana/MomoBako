@@ -10,21 +10,6 @@ use std::path::Path;
 /// 写死、两套主题共用的颜色。没用上的条目也算失败，免得清单过时。
 const ALLOWED_LITERALS: &[(&str, &str, &str)] = &[
     (
-        "admin/logs_view.rs",
-        "[0x5c, 0x70, 0x88]",
-        "日志级别「调试」徽章，workspace.css `.logs-workbench__level.is-debug`",
-    ),
-    (
-        "admin/logs_view.rs",
-        "[0xdc, 0xa3, 0x3a]",
-        "日志级别「警告」徽章底，`.logs-workbench__level.is-warn`",
-    ),
-    (
-        "admin/logs_view.rs",
-        "[0xb6, 0x7a, 0x09]",
-        "日志级别「警告」徽章字，`.logs-workbench__level.is-warn`",
-    ),
-    (
         "files_view/style.rs",
         "[58.0 / 255.0, 58.0 / 255.0, 58.0 / 255.0, 1.0]",
         "缩略图占位底（深色），index.css `--thumbnail-placeholder-bg`",

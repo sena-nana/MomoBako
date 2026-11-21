@@ -18,8 +18,8 @@
 //! 按钮的处理器点下去时现读能不能导入，不能时不进文件状态机。
 
 use nana_ui::runtime::view::{AnyView, IntoView, Signal, fields, signal, widget};
-use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, Stack};
-use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
+use nana_ui::runtime::{Activate, AlignSpec, Card, LengthSpec, Stack};
+use nana_ui_core::{CardKind, RadiusTier, SemanticColorRole as Role};
 
 use super::super::files::{
     EagleImportReport, EagleImportWarning, FileContext, FileDialog, FilesMessage,
@@ -27,6 +27,7 @@ use super::super::files::{
 use super::super::{ShellMessage, ShellViewModel};
 use super::AdminMessage;
 use super::bind::ActionDisabled;
+use super::marks;
 use super::style::{self, Tone, action, column, label, mono, pad, row, wrapping};
 use super::support::{TOOL_EAGLE_IMPORTER, TOOL_FILE_MANAGER};
 use crate::backend::services::repository::{
@@ -169,14 +170,14 @@ pub(super) fn import_page(id: &str, signals: ImportSignals) -> AnyView {
                     code(text(|view| &view.directory), format!("admin-tool-dir-{id}")),
                 ),
             ]),
-            style::state_notice(
+            marks::notice(
                 move || view.with(|view| view.reason.unwrap_or_default().to_string()),
                 false,
                 "admin-tool-reason",
             )
             .visible(move || view.with(|view| view.reason.is_some()))
             .into_any(),
-            style::state_notice(text(|view| &view.error), true, "admin-tool-error")
+            marks::notice(text(|view| &view.error), true, "admin-tool-error")
                 .visible(move || view.with(|view| !view.error.is_empty()))
                 .into_any(),
         ];
@@ -184,7 +185,7 @@ pub(super) fn import_page(id: &str, signals: ImportSignals) -> AnyView {
         let library = move || view.with(|view| eagle_path_label(&view.library_path));
         let notice = move || view.with(|view| view.notice.clone());
         body.push(
-            style::state_notice(notice, false, "admin-tool-eagle-notice")
+            marks::notice(notice, false, "admin-tool-eagle-notice")
                 .visible(move || view.with(|view| !view.notice.is_empty()))
                 .into_any(),
         );
@@ -225,16 +226,11 @@ fn plugin_name(model: &ShellViewModel, tool_id: &str) -> Option<String> {
         .map(|plugin| plugin.name.clone())
 }
 
-/// 目标卡片：主背景、`border-soft` 边线、md 圆角，内边距 12/14，行间 8。
+/// 目标卡片：NanaUI 的描边卡片，行间 8。
 fn target_card(rows: Vec<AnyView>) -> AnyView {
-    widget(
-        pad(column(8.0), 12.0, 14.0, 12.0, 14.0)
-            .surface(Role::Background)
-            .border(Role::BorderSoft, 1.0)
-            .radius(RadiusTier::Md),
-    )
-    .children(rows)
-    .into_any()
+    widget(Card::new().kind(CardKind::Outlined))
+        .children((widget(column(8.0)).children(rows),))
+        .into_any()
 }
 
 fn target_row(name: &str, value: AnyView) -> AnyView {

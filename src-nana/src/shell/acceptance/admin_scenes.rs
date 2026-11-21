@@ -871,13 +871,18 @@ mod no_library_scene_tests {
         for label in [
             "系统日志",
             "还没有系统日志",
-            "宿主、插件和辅助进程产生的关键操作会在这里持续汇总。",
             "0 条缓存",
             "0 条命中",
             "无资源库",
         ] {
             require(&harness, label);
         }
+        // 空状态的说明是 NanaUI `EmptyState` 的读屏值。
+        let detail = harness.spoken_value("还没有系统日志");
+        assert_eq!(
+            detail.as_deref(),
+            Some("宿主、插件和辅助进程产生的关键操作会在这里持续汇总。")
+        );
         for label in [
             "正在加载系统日志",
             "还没有可用资源库",

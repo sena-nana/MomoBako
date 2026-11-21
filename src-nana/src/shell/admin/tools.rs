@@ -4,17 +4,17 @@
 //! 最小高 520），再画「文件系统与插件」。插件清单只声明工具页，内置的 API Playground、文件导入和
 //! Eagle 导入画原生页面；宿主没有的工具页 id 只画页头和说明。
 //!
-//! 页面只建一次，只读 [`ToolsSignals`]：导航按工具页 id 做键，选中态和文字是绑定；右侧按当前工具页
+//! 页面只建一次，只读 [`ToolsSignals`]：导航是 NanaUI 的 `List`，每个工具页一行 `ListItem`，按工具页 id
+//! 做键，选中态是绑定；右侧按当前工具页
 //! 的种类换内容（原生页面的输入框和按钮在各自的页面里绑定），没有内置页面的工具页的说明随工具页一起换。
 
 use nana_ui::runtime::view::{AnyView, IntoView, Signal, css, dynamic, signal, widget};
-use nana_ui::runtime::{
-    Activate, AlignSpec, InteractionStyle, LengthSpec, NodeStyle, SemanticPaint, Stack,
-};
+use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, List, ListItem, Stack};
 use nana_ui_core::{GridTrack, RadiusTier, SemanticColorRole as Role};
 
 use super::super::{ShellMessage, ShellViewModel};
 use super::api::view::PlaygroundSignals;
+use super::marks;
 use super::plugins_state::PluginPanelSignals;
 use super::style::{self, column, label, pad, wrapping};
 use super::support::{self, TOOL_API_PLAYGROUND};
@@ -161,13 +161,14 @@ fn tools(signals: ToolsSignals) -> nana_ui::runtime::view::El<Stack, (AnyView, A
         .key("admin-tool-workbench")
 }
 
-/// 左侧导航：`bg-elev` 底、md 圆角、内边距 14、间距 8。工具页按 id 做键。
+/// 左侧导航：`bg-elev` 底、md 圆角、内边距 14、间距 8；工具页是一列 NanaUI 列表行，按 id 做键。
 fn nav(signals: ToolsSignals) -> AnyView {
     let active = signals.active;
-    let tabs = nana_ui::runtime::view::each(signals.tabs, ToolTab::clone, move |tab: ToolTab| {
-        tool_tab(tab, active)
-    })
-    .gap(8.0);
+    let tabs = widget(List::new().label("插件工具")).children((nana_ui::runtime::view::each(
+        signals.tabs,
+        ToolTab::clone,
+        move |tab: ToolTab| tool_tab(tab, active),
+    ),));
     widget(
         pad(column(8.0), 14.0, 14.0, 14.0, 14.0)
             .surface(Role::Surface)
@@ -181,54 +182,32 @@ fn nav(signals: ToolsSignals) -> AnyView {
     .into_any()
 }
 
-/// 导航里的一个工具：最小高 58、内边距 10、sm 圆角；13/700 名称和 12 号弱色说明。
-/// 选中时 `bg-hover` 底、强调色名称。行的身份是工具页 id，文字随建行时的工具页。
+/// 导航里的一个工具：NanaUI 的 `ListItem`，名称下面一行弱色说明，行高随内容；选中态绑在当前工具页上。
+/// 行的身份是工具页 id，文字随建行时的工具页。
 fn tool_tab(page: ToolTab, active: Signal<Option<String>>) -> AnyView {
     let tid = style::key_part(&page.id);
     let id = page.id.clone();
-    let selected = move || active.with(|active| active.as_deref() == Some(id.as_str()));
-    let is_selected = selected.clone();
-    let mut node = NodeStyle {
-        radius: Some(RadiusTier::Sm),
-        interaction: InteractionStyle {
-            hovered: SemanticPaint {
-                background: Some(Role::Hover),
-                ..SemanticPaint::default()
-            },
-            ..InteractionStyle::default()
-        }
-        .into(),
-        ..NodeStyle::default()
-    };
-    {
-        let layout = std::sync::Arc::make_mut(&mut node.layout);
-        layout.width = Some(LengthSpec::Fill);
-        layout.min_height = Some(LengthSpec::Px(58.0));
-        layout.padding_top = Some(LengthSpec::Px(10.0));
-        layout.padding_bottom = Some(LengthSpec::Px(10.0));
-        layout.padding_left = Some(LengthSpec::Px(10.0));
-        layout.padding_right = Some(LengthSpec::Px(10.0));
-        layout.direction = Some(nana_ui_core::FlexDirection::Column);
-        layout.gap = Some(LengthSpec::Px(4.0));
-        layout.align_items = AlignSpec::Start;
-    }
-    let stack = Stack::column(4.0).style(node).hittable();
+    let content = widget(
+        Stack::column(4.0)
+            .width(LengthSpec::Fill)
+            .min_width(LengthSpec::Px(0.0)),
+    )
+    .children((
+        widget(wrapping(label(page.label.clone(), 13.0, 700, Role::Text)))
+            .key(format!("admin-tool-{tid}")),
+        widget(wrapping(style::label_lh(
+            page.description.clone(),
+            12.0,
+            400,
+            Role::Muted,
+            1.35,
+        )))
+        .key(format!("admin-tool-desc-{tid}")),
+    ));
     let page_id = page.id.clone();
-    widget(stack)
-        .background(move || is_selected().then_some(Role::Hover))
-        .children((
-            widget(wrapping(label(page.label.clone(), 13.0, 700, Role::Text)))
-                .foreground(move || Some(if selected() { Role::Accent } else { Role::Text }))
-                .key(format!("admin-tool-{tid}")),
-            widget(wrapping(style::label_lh(
-                page.description.clone(),
-                12.0,
-                400,
-                Role::Muted,
-                1.35,
-            )))
-            .key(format!("admin-tool-desc-{tid}")),
-        ))
+    widget(ListItem::new(page.label.clone()).auto_height(true))
+        .selected(move || active.with(|active| active.as_deref() == Some(id.as_str())))
+        .content(content)
         .key(format!("admin-tool-tab-{tid}"))
         .on_cx(move |_, _: &Activate, cx| {
             cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SelectToolPage(
@@ -308,7 +287,7 @@ fn foreign_page(page: &ToolPageEntry) -> AnyView {
                 .into_any(),
         );
     }
-    let notice = style::state_notice(
+    let notice = marks::notice(
         "MomoBako 没有这个工具页：插件只能打开内置的工具页，不能自带页面。",
         false,
         "admin-foreign-tool-notice",

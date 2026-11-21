@@ -31,13 +31,20 @@
 | `thumbnail` | 文件卡片、预览兜底和播放条封面（`src-nana/src/shell/files_view/cards.rs`、`src-nana/src/shell/inspect_view/body.rs`、`src-nana/src/shell/player_view/bar.rs`） |
 | `gpu-texture-view` | 图片和视频预览，纹理槽 `file-preview`（`src-nana/src/shell/inspect_view/body.rs`） |
 | `qr-code` | 来源插件扫码登录（`src-nana/src/shell/admin/source_page.rs`） |
-| `empty-state`、`labeled-value` | 压缩包空目录和资源库扩展信息（`inspect_library.rs`） |
+| `empty-state`、`labeled-value` | 压缩包空目录和资源库扩展信息（`inspect_library.rs`）；插件、日志、动作页和任务弹层的空状态；设置页、下载服务和 Office 转换状态卡里的只读键值（`src-nana/src/shell/admin/marks.rs`、`src-nana/src/shell/admin/settings_view.rs`） |
+| `settings`（`settings_group`、`settings_row`）、`segmented-control` | 设置页的每张卡和可调的项，主题和圆角样式是分段（`src-nana/src/shell/admin/settings_view.rs`） |
+| `status-badge` | 插件状态、依赖和执行结果、日志级别、外部接入的服务状态（`src-nana/src/shell/admin/plugin_card.rs`、`src-nana/src/shell/admin/logs_view.rs`） |
+| `card` | 插件卡片、插件设置区里下载服务和 Office 转换的状态卡、导入工具页的目标卡 |
+| `switch` | 插件卡片的启用开关、插件布尔设置字段（`src-nana/src/shell/admin_fields.rs`） |
+| `chip` | 日志页的级别和来源筛选 |
+| `progress`、`spinner` | 任务弹层的进度条（`src-nana/src/shell/admin/view.rs`）；插件、日志和动作页读取中的转圈 |
+| `list`、`list-item` | 动作页的动作列表、拓展页的工具导航（`src-nana/src/shell/admin/actions_view.rs`、`src-nana/src/shell/admin/tools.rs`） |
 | `validation-message` | 元数据的版本冲突提示（`inspect_metadata_view.rs`） |
 | `text` | 文字 |
 
-目录外的公开类型用到 `SettingsCard`（`inspect_library.rs`、`src-nana/src/shell/inspect_metadata_view/parts.rs`）和 `List`（压缩包文件列表，`inspect_library.rs`）。文件列表用视图层的 `each_virtual` 按视口建行（`src-nana/src/shell/files_view/virtual_rows.rs`），不用 `VirtualListLayout`。
+视图层的 `callout`（提示条）和 `tag` / `tag_frame`（不能点的标签）用在设置、插件、日志、动作和拓展页（`src-nana/src/shell/admin/marks.rs`）。目录外的公开类型用到 `SettingsCard`（`inspect_library.rs`、`src-nana/src/shell/inspect_metadata_view/parts.rs`）和 `List`（压缩包文件列表，`inspect_library.rs`）。文件列表用视图层的 `each_virtual` 按视口建行（`src-nana/src/shell/files_view/virtual_rows.rs`），不用 `VirtualListLayout`。
 
-其余已编译组件产品里没有用到，包括 `context-menu`、`tree-view`、`sidebar-row`、`sidebar-section`、`sidebar-footer`、`native-markdown`、`selectable-rich-text`、`image-viewer`、`gpu-view`、`progress`、`spinner`、`settings`、`settings-collapsible-card`、`appearance-section`。设置页、日志页和插件页由 `Stack`、`Text`、`Button`、`RangeField` 等拼成（`admin_*.rs`）。
+其余已编译组件产品里没有用到，包括 `context-menu`、`tree-view`、`sidebar-section`、`sidebar-footer`、`native-markdown`、`selectable-rich-text`、`image-viewer`、`gpu-view`、`settings-collapsible-card`、`appearance-section`。播放条是 `MediaTransportBar`（`player_view/bar*.rs`）；设置页缓存的三格容量、日志卡片和插件页的工作区面板没有对应组件，仍由 `Stack` 和 `Text` 拼成。
 
 ## 探针结论
 

@@ -24,6 +24,7 @@ mod downloader;
 pub(crate) mod icons;
 mod logs_state;
 mod logs_view;
+mod marks;
 mod office;
 mod plugin_card;
 mod plugins_state;

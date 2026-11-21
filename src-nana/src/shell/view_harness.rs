@@ -129,6 +129,14 @@ impl ShellHarness {
             .map(|node| node.id)
     }
 
+    /// 无障碍名正好是 `label` 的第一个节点读出的值，例如空状态的说明；没有这个节点或没有值时为 `None`。
+    pub fn spoken_value(&self, label: &str) -> Option<String> {
+        self.nodes()
+            .into_iter()
+            .find(|node| node.label.as_deref() == Some(label))
+            .and_then(|node| node.value.map(|value| value.to_string()))
+    }
+
     /// 无障碍名是 `label` 的输入框。
     pub fn input(&self, label: &str) -> StableNodeId {
         self.nodes()

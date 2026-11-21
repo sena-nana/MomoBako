@@ -1,17 +1,20 @@
 //! 任务弹层。首页的日志、拓展和动作面板是常驻路由，见 `route_admin.rs`。
 //!
-//! 任务弹层的面板：每个任务一块，来源加进度条（标签、细节、百分比）。面板挂在侧栏底部「任务」按钮的
+//! 任务弹层的面板：每个任务一块，来源加 NanaUI 的 `Progress` 进度条（下面是标签、细节、百分比）；
+//! 没有任务时是紧凑的 NanaUI `EmptyState`。面板挂在侧栏底部「任务」按钮的
 //! NanaUI `Popover` 里（`sidebar_view.rs`），开合、点外面、Escape 和焦点归还都由框架负责。面板常驻：
-//! 任务按键增删行，进度、标签和细节只改绑定的字段；进度条的填充宽度按 0.18s 过渡（动效时钟在
-//! `motion.rs`，逐帧的宽度经热信号写进来）。
+//! 任务按键增删行，进度、标签和细节只改绑定的字段；进度条的值按 0.18s 过渡（动效时钟在
+//! `motion.rs`，逐帧的值经热信号写进来）。不确定进度由 `Progress` 自己沿轨道扫。
 
-use nana_ui::runtime::view::{AnyView, IntoView, Signal, computed, each, fields, widget};
+use nana_ui::runtime::view::{
+    AnyView, IntoView, Signal, computed, each, empty_state, fields, progress, widget,
+};
 use nana_ui::runtime::{
     Activate, AlignSpec, Button, IconButton, LengthSpec, ScrollAxes, ScrollView, Stack,
 };
 use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
 
-use super::super::hot::{self, FillPercentField, OpacityField, TaskFills};
+use super::super::hot::{self, TaskFills};
 use super::super::{ShellMessage, ShellViewModel};
 use super::AdminMessage;
 use super::icons;
@@ -31,7 +34,7 @@ pub(crate) struct TaskRowView {
     pub cancellable: bool,
     /// 四舍五入后的百分比；不确定进度时为 `None`，不显示百分比。
     pub percent: Option<f64>,
-    /// 进度轨填充的百分比（不确定进度时也按当前值画）。
+    /// 进度条的值（百分比，不确定进度时不画）。
     pub fill: f32,
 }
 
@@ -74,7 +77,7 @@ fn task_row_views(model: &ShellViewModel) -> Vec<TaskRowView> {
         .collect()
 }
 
-/// 弹层开着时各行进度条的目标填充宽度（行键、百分比），交给动效时钟按 0.18s 过渡；关着时为空。
+/// 弹层开着时各行进度条的目标值（行键、百分比），交给动效时钟按 0.18s 过渡；关着时为空。
 pub(crate) fn task_fill_targets(model: &ShellViewModel) -> Vec<(String, f32)> {
     if !model.admin.popover_open {
         return Vec::new();
@@ -87,10 +90,6 @@ pub(crate) fn task_fill_targets(model: &ShellViewModel) -> Vec<(String, f32)> {
 
 /// 任务弹层的面板：标题行（「任务」和关闭）、空态和可滚动的任务列表。列表最高 300，任务多时自己滚动。
 pub(crate) fn task_panel(view: Signal<TaskPopoverView>) -> AnyView {
-    let pulse = Pulse {
-        signal: hot::current(|signals| signals.pulse),
-        rest: 1.0,
-    };
     let fills = hot::current(|signals| signals.task_fills);
     let header = widget(
         style::spread(8.0, AlignSpec::Center)
@@ -105,11 +104,10 @@ pub(crate) fn task_panel(view: Signal<TaskPopoverView>) -> AnyView {
             }),
     ))
     .into_any();
-    let empty = widget(pad(column(0.0), 10.0, 2.0, 4.0, 2.0))
+    let empty = empty_state("当前没有运行中的任务。")
+        .compact(true)
         .visible(move || view.with(|view| view.rows.is_empty()))
-        .children((
-            widget(label("当前没有运行中的任务。", 12.0, 400, Role::Faint)).key("admin-task-empty"),
-        ))
+        .key("admin-task-empty")
         .into_any();
     let scroll = ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
         layout.max_height = Some(LengthSpec::Px(300.0));
@@ -126,7 +124,7 @@ pub(crate) fn task_panel(view: Signal<TaskPopoverView>) -> AnyView {
     let list = widget(scroll)
         .visible(move || view.with(|view| !view.rows.is_empty()))
         .children((each(keys, Clone::clone, move |key: String| {
-            task_item(view, key, pulse, fills)
+            task_item(view, key, fills)
         })
         .gap(10.0)
         .key("admin-task-list"),))
@@ -181,24 +179,10 @@ fn close_button() -> IconButton {
     button
 }
 
-/// 不确定进度条填充的呼吸：挂载时取到的热信号，取不到（不经 `ShellView` 建树）时用这一刻的值。
-#[derive(Clone, Copy)]
-struct Pulse {
-    signal: Option<Signal<f32>>,
-    rest: f32,
-}
-
-impl Pulse {
-    fn opacity(&self) -> f32 {
-        self.signal.map_or(self.rest, |signal| signal.get())
-    }
-}
-
 /// 一个任务：`bg` 底、`border-soft` 边线、sm 圆角、内边距 9；来源加进度条。字段按键从投影里取。
 fn task_item(
     view: Signal<TaskPopoverView>,
     key: String,
-    pulse: Pulse,
     fills: Option<Signal<TaskFills>>,
 ) -> AnyView {
     let pick = {
@@ -232,7 +216,6 @@ fn task_item(
         progress_bar(
             view,
             &key,
-            pulse,
             fills,
             pick(|row| row.label.clone()),
             pick(|row| row.detail.clone()),
@@ -242,13 +225,12 @@ fn task_item(
     .into_any()
 }
 
-/// 进度条：6 高的药丸轨道，填充至少 18 宽；下面是标签、细节和百分比，间距 7。填充宽度按
-/// 0.18s ease 过渡，取动效时钟这一帧的值（`fills`；不经 `ShellView` 建树时没有，直接用目标宽度）。
-/// 不确定进度不写百分比，填充按 `progress-pulse` 呼吸（减少动态效果时不呼吸）。
+/// 进度条：NanaUI 的 `Progress`（6 高的轨道，满格 100）；下面是标签、细节和百分比，间距 7。值按
+/// 0.18s ease 过渡，取动效时钟这一帧的值（`fills`；不经 `ShellView` 建树时没有，直接用目标值）。
+/// 不确定进度不写百分比，进度条改成沿轨道扫的不确定样式（减少动态效果时由组件改成淡填充）。
 fn progress_bar(
     view: Signal<TaskPopoverView>,
     key: &str,
-    pulse: Pulse,
     fills: Option<Signal<TaskFills>>,
     task_label: impl Fn() -> String + Send + 'static,
     detail: impl Fn() -> String + Send + 'static,
@@ -262,9 +244,11 @@ fn progress_bar(
                 .find(|row| row.key == fill_id)
                 .map_or(0.0, |row| row.fill)
         });
-        fills
-            .and_then(|fills| fills.with(|fills| fills.get(&fill_id)))
-            .unwrap_or(target)
+        f64::from(
+            fills
+                .and_then(|fills| fills.with(|fills| fills.get(&fill_id)))
+                .unwrap_or(target),
+        )
     };
     let percent = move || {
         view.with(|view| {
@@ -274,39 +258,15 @@ fn progress_bar(
                 .and_then(|row| row.percent)
         })
     };
-    let breathing = {
+    let indeterminate = {
         let percent = percent.clone();
-        move || {
-            if percent().is_none() {
-                pulse.opacity()
-            } else {
-                1.0
-            }
-        }
+        move || percent().is_none()
     };
-    let track = widget(
-        style::rounded(Stack::row(0.0), None)
-            .surface(Role::Subtle)
-            .border(Role::BorderSoft, 1.0)
-            .with_layout(|layout| {
-                layout.width = Some(LengthSpec::Fill);
-                layout.height = Some(LengthSpec::Px(6.0));
-                layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
-                layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
-            }),
-    )
-    .children((widget(
-        style::rounded(Stack::row(0.0), None)
-            .surface(Role::Accent)
-            .with_layout(|layout| {
-                layout.min_width = Some(LengthSpec::Px(18.0));
-                layout.height = Some(LengthSpec::Fill);
-            }),
-    )
-    .prop::<f32, FillPercentField>(fill)
-    .prop::<f32, OpacityField>(breathing)
-    .key(format!("admin-task-fill-{key}")),))
-    .into_any();
+    let track = progress(100.0)
+        .value(fill)
+        .indeterminate(indeterminate)
+        .key(format!("admin-task-fill-{key}"))
+        .into_any();
     let meta = vec![
         widget(style::label_lh(String::new(), 12.0, 600, Role::Text, 1.3))
             .key(format!("admin-task-label-{key}"))

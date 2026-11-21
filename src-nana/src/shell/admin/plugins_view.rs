@@ -4,7 +4,8 @@
 //! 安装）、提示、筛选框、按分类分组的插件卡片，卡片里可展开插件设置。设置页和拓展页
 //! 共用，只换标题文案。删除确认是壳层浮层，见 [`delete_dialog`]。
 //!
-//! 面板只建一次，只读 [`PluginPanelSignals`]：计数、提示和按钮状态按字段绑定，加载中、空状态和
+//! 面板只建一次，只读 [`PluginPanelSignals`]：计数、提示和按钮状态按字段绑定，加载中（NanaUI 转圈）、
+//! 空状态（NanaUI `EmptyState`）和
 //! 分组三块按面板状态显隐；分组按分类、卡片按插件 id 做键（卡片在 `shell/admin/plugin_card.rs`）。
 //! 筛选框受控，组合输入中不被打断。
 
@@ -23,6 +24,7 @@ use super::super::{ShellMessage, ShellViewModel};
 use super::AdminMessage;
 use super::bind::{ActionDisabled, row_text};
 use super::icons;
+use super::marks;
 use super::plugins_state::{
     PanelState, PluginCardView, PluginGroupView, PluginGroupViewStoreFields, PluginPanelSignals,
 };
@@ -70,10 +72,11 @@ pub(crate) fn manager_panel(signals: PluginPanelSignals, copy: &'static PanelCop
         copy.title,
         copy.subline,
         vec![
-            style::stat(
+            marks::bound_tag(
                 move || head.with(|head| head.count.clone()),
                 "admin-plugin-count",
-            ),
+            )
+            .into_any(),
             widget(action("刷新", Some(icons::REFRESH_CW), Tone::Plain, false))
                 .prop::<bool, ActionDisabled>(managing)
                 .key("admin-plugin-refresh")
@@ -121,20 +124,19 @@ pub(crate) fn manager_panel(signals: PluginPanelSignals, copy: &'static PanelCop
     let state = signals.state;
     let body = vec![
         header,
-        style::state_notice(notice_text(true), true, "admin-plugin-error")
+        marks::notice(notice_text(true), true, "admin-plugin-error")
             .visible(shown(true))
             .into_any(),
-        style::state_notice(notice_text(false), false, "admin-plugin-message")
+        marks::notice(notice_text(false), false, "admin-plugin-message")
             .visible(shown(false))
             .into_any(),
         search_field(signals.keyword, copy.search_placeholder),
-        widget(label("正在加载插件信息", 14.0, 400, Role::Text))
+        marks::loading("正在加载插件信息", "admin-plugin-loading")
             .visible(move || state.with(|state| *state == PanelState::Loading))
-            .key("admin-plugin-loading")
             .into_any(),
-        style::dashed_empty(
-            copy.empty_title,
-            copy.empty_description,
+        marks::empty(
+            || copy.empty_title.to_string(),
+            || copy.empty_description.to_string(),
             "admin-plugin-empty",
         )
         .visible(move || state.with(|state| *state == PanelState::Empty))

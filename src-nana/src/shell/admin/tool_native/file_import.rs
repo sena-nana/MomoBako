@@ -13,8 +13,9 @@ use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, Stack};
 use super::super::super::workspace::WorkspacePanel;
 use super::super::ShellViewModel;
 use super::super::ToolFileImport;
+use super::super::marks;
 use super::super::support::TOOL_FILE_MANAGER;
-use super::{ActionDisabled, ImportView, action, import_buttons, import_message, style};
+use super::{ActionDisabled, ImportView, action, import_buttons, import_message};
 
 /// 从文件导入工具页打开选择器时记下种类。不在这一页时清掉上次没交回的等待。
 pub(crate) fn arm(model: &mut ShellViewModel, folder: bool) {
@@ -94,7 +95,7 @@ fn kind_of(folder: bool) -> ToolFileImport {
 /// 完成提示。没有提示时不占位。
 pub(super) fn notice(view: Signal<ImportView>) -> AnyView {
     let text = move || view.with(|view| view.notice.clone());
-    style::state_notice(text, false, "admin-tool-file-import-notice")
+    marks::notice(text, false, "admin-tool-file-import-notice")
         .visible(move || view.with(|view| !view.notice.is_empty()))
         .into_any()
 }

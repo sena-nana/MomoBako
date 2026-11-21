@@ -62,13 +62,12 @@ pub(crate) struct ExternalCard {
     pub message: String,
 }
 
-/// 键值表的一行：名称、值，末行没有分割线。没有编号，身份是内容加位置。
+/// 键值表的一行：名称和值。没有编号，身份是内容。
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct KvRow {
     pub key: String,
     pub name: String,
     pub value: String,
-    pub last: bool,
 }
 
 /// 缓存：当前资源库的缩略图文件数、其余缓存文件数和总占用三格，下面逐项列出各缓存目录。
@@ -103,7 +102,6 @@ impl CacheCard {
             .iter()
             .map(|entry| entry.bytes)
             .sum::<u64>();
-        let count = snapshot.entries.len();
         Self {
             metrics: [
                 thumbnails.to_string(),
@@ -113,12 +111,10 @@ impl CacheCard {
             entries: snapshot
                 .entries
                 .iter()
-                .enumerate()
-                .map(|(index, entry)| KvRow {
+                .map(|entry| KvRow {
                     key: format!("admin-cache-entry-{}", entry.kind.replace('/', "-")),
                     name: entry.label.clone(),
                     value: format!("{} 个文件 · {}", entry.files, human_bytes(entry.bytes)),
-                    last: index + 1 == count,
                 })
                 .collect(),
         }
@@ -221,7 +217,6 @@ impl SettingsView {
                         key: format!("admin-api-endpoint-{index}"),
                         name: format!("{} / {} {}", endpoint.group, endpoint.method, endpoint.path),
                         value: endpoint.summary.clone(),
-                        last: index + 1 == endpoints.len(),
                     })
                     .collect(),
             },

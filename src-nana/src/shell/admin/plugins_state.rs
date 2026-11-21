@@ -5,6 +5,7 @@
 //! [`PluginPanelSignals`] 建在主区块的常驻作用域里：分组和卡片放进 Store，按分类、插件 id 做键，
 //! 卡片里的文字和按钮状态各自绑定；筛选框的草稿走 `ModelField`。
 
+use nana_ui::runtime::StatusTone;
 use nana_ui::runtime::view::{Signal, Store, signal, store};
 
 use super::super::ShellViewModel;
@@ -13,7 +14,6 @@ use super::super::hot::ModelField;
 use super::downloader::DownloaderStatusView;
 use super::office::OfficeConvertView;
 use super::source_page::{SourceAuthView, SourceRepoRow};
-use super::style::PillTone;
 use super::support;
 use crate::backend::services::repository::PluginManifest;
 
@@ -25,14 +25,6 @@ pub(crate) enum PanelState {
     /// 筛选后没有插件。
     Empty,
     Groups,
-}
-
-/// 依赖、权限和执行记录小块的语气。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ChipTone {
-    Plain,
-    Muted,
-    Danger,
 }
 
 /// 页头右侧：插件数和刷新、安装能不能点。
@@ -59,7 +51,8 @@ pub(crate) struct PluginCardView {
     pub plugin_id: String,
     pub name: String,
     pub status: String,
-    pub tone: PillTone,
+    /// 状态徽章的色调。
+    pub tone: StatusTone,
     pub description: String,
     /// 「v版本」。
     pub version: String,
@@ -67,7 +60,8 @@ pub(crate) struct PluginCardView {
     pub notices: Vec<(String, bool)>,
     /// 分类、类型、来源、运行时、依赖和能力芯片。
     pub chips: Vec<String>,
-    pub dependencies: Vec<(String, ChipTone)>,
+    /// 依赖和它的状态徽章色调。
+    pub dependencies: Vec<(String, StatusTone)>,
     pub permissions: Vec<String>,
     pub hooks: Vec<String>,
     pub executions: Vec<ExecutionView>,
@@ -83,7 +77,7 @@ pub(crate) struct ExecutionView {
     /// 转义后的执行 id，重复的加序号。
     pub key: String,
     pub status: String,
-    pub tone: ChipTone,
+    pub tone: StatusTone,
     pub title: String,
     pub slot: String,
     pub message: String,
@@ -315,9 +309,9 @@ fn project_executions(model: &ShellViewModel, plugin_id: &str) -> Vec<ExecutionV
             key,
             status: support::hook_status_label(&record.status),
             tone: match record.status.as_str() {
-                "failed" => ChipTone::Danger,
-                "blocked" => ChipTone::Muted,
-                _ => ChipTone::Plain,
+                "failed" => StatusTone::Danger,
+                "blocked" => StatusTone::Warning,
+                _ => StatusTone::Success,
             },
             title: record
                 .hook_label
@@ -330,24 +324,25 @@ fn project_executions(model: &ShellViewModel, plugin_id: &str) -> Vec<ExecutionV
         .collect()
 }
 
-/// 状态胶囊的语气：错误或不可用危险色，降级强调色淡底，未启用灰，其余强调色。
-fn status_tone(plugin: &PluginManifest) -> PillTone {
+/// 状态徽章的色调：错误或不可用危险色，降级警示色，未启用中性色，其余成功色。
+fn status_tone(plugin: &PluginManifest) -> StatusTone {
     if plugin.status == "unavailable" || plugin.status == "error" {
-        PillTone::Danger
+        StatusTone::Danger
     } else if plugin.degraded && plugin.enabled {
-        PillTone::Warning
+        StatusTone::Warning
     } else if !plugin.enabled || plugin.status == "disabled" {
-        PillTone::Ghost
+        StatusTone::Neutral
     } else {
-        PillTone::Accent
+        StatusTone::Success
     }
 }
 
-fn dependency_tone(status: &str) -> ChipTone {
+/// 依赖徽章的色调：缺失、不可用或出错危险色，被禁用中性色，其余成功色。
+fn dependency_tone(status: &str) -> StatusTone {
     match status {
-        "missing" | "unavailable" | "error" => ChipTone::Danger,
-        "disabled" => ChipTone::Muted,
-        _ => ChipTone::Plain,
+        "missing" | "unavailable" | "error" => StatusTone::Danger,
+        "disabled" => StatusTone::Neutral,
+        _ => StatusTone::Success,
     }
 }
 
