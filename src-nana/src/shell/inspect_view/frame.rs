@@ -25,6 +25,7 @@ use super::super::inspect_metadata_view::{self, MetadataSignals};
 use super::super::player_view::icons;
 use super::super::{ShellMessage, ShellViewModel};
 use super::body::{self, PreviewSnapshot};
+use crate::theme_map::disabled_paint;
 
 mod facts;
 
@@ -674,7 +675,8 @@ fn action_button(label: &str, icon: Icon, icon_size: f32, height: f32) -> Button
         .icon(icon)
         .icon_size(icon_size)
         .icon_gap(6.0);
-    button.style.interaction.disabled = disabled_paint(SemanticColorRole::Surface);
+    button.style.interaction.disabled =
+        disabled_paint(SemanticColorRole::Text, SemanticColorRole::Surface);
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
     layout.height = Some(LengthSpec::Px(height));
     layout.min_height = Some(LengthSpec::Px(height));
@@ -686,18 +688,6 @@ fn action_button(label: &str, icon: Icon, icon_size: f32, height: f32) -> Button
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
     button
-}
-
-/// 停用的透明按钮：正文色按停用不透明度混进所在底色，不铺底、不加边。
-pub(super) fn disabled_paint(surface: SemanticColorRole) -> nana_ui::runtime::SemanticPaint {
-    nana_ui::runtime::SemanticPaint {
-        foreground_mix: Some(nana_ui_core::SemanticColorMix::new(
-            SemanticColorRole::Text,
-            surface,
-            crate::theme_map::DISABLED_OPACITY,
-        )),
-        ..Default::default()
-    }
 }
 
 /// 页头按钮的文字、图标、图标尺寸和高度。

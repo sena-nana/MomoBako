@@ -126,7 +126,8 @@ fn page_button(label: &str, disabled: bool) -> Button {
     let mut button = Button::new(label)
         .kind(nana_ui::ButtonKind::Ghost)
         .disabled(disabled);
-    button.style.interaction.disabled = super::frame::disabled_paint(SemanticColorRole::Background);
+    button.style.interaction.disabled =
+        crate::theme_map::disabled_paint(SemanticColorRole::Text, SemanticColorRole::Background);
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
     layout.height = Some(LengthSpec::Px(32.0));
     layout.min_height = Some(LengthSpec::Px(32.0));
