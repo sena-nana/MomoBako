@@ -194,19 +194,19 @@ fn context_menu_closes_outside_and_a_clicked_group_stays_open() {
     let (x, y) = labeled_center(&window, "缩略图");
     let messages = click(&mut window, x, y);
     assert!(
-        messages.iter().all(|message| matches!(
-            message,
-            ShellMessage::Files(FilesMessage::MenuBranchChanged { inside: true, .. })
-        )),
-        "点分组只展开它的子菜单：{} 条消息",
+        matches!(
+            messages.as_slice(),
+            [ShellMessage::Files(FilesMessage::ToggleMenuGroup(group))] if group == "thumbnail"
+        ),
+        "点分组只展开它的子项：{} 条消息",
         messages.len()
     );
     for message in messages {
         model.reduce(message);
     }
-    assert_eq!(model.files.menu_branch.open(), Some("thumbnail"));
+    assert_eq!(model.files.menu_group.as_deref(), Some("thumbnail"));
     let mut window = laid_out(&model);
-    assert!(has_label(&window, "刷新缩略图"), "子菜单展开");
+    assert!(has_label(&window, "刷新缩略图"), "子项展开");
 
     let messages = click(&mut window, 1150.0, 120.0);
     assert!(
@@ -220,7 +220,7 @@ fn context_menu_closes_outside_and_a_clicked_group_stays_open() {
     for message in messages {
         model.reduce(message);
     }
-    assert!(model.files.entry_menu.is_none() && model.files.menu_branch.open().is_none());
+    assert!(model.files.entry_menu.is_none() && model.files.menu_group.is_none());
 }
 
 #[test]
@@ -278,19 +278,19 @@ fn permanent_delete_in_the_trash_menu_needs_a_second_click() {
         matches!(
             second.as_slice(),
             [
-                ShellMessage::Files(FilesMessage::CloseEntryMenu),
-                ShellMessage::Files(FilesMessage::DeleteSelected)
+                ShellMessage::Files(FilesMessage::DeleteSelected),
+                ShellMessage::Files(FilesMessage::CloseEntryMenu)
             ]
         ),
-        "第二次关菜单并删除：{} 条消息",
+        "第二次删除，框架随之收起菜单：{} 条消息",
         second.len()
     );
 }
 
-/// 回收站「彻底删除」第一次换成确认句：菜单按这句撑开，开在窗口右边时往左让，右边仍留 4px。
-/// 再点确认句才彻底删除。
+/// 回收站「彻底删除」第一次换成确认句：菜单从一开始就按所有可能露出的文案定宽，确认句放得下、
+/// 菜单不跳；开在窗口右边时框架把它收进窗口。再点确认句才彻底删除。
 #[test]
-fn trash_delete_confirm_widens_the_menu_to_the_vue_label() {
+fn trash_delete_confirm_fits_the_menu_kept_inside_the_window() {
     let mut model = scene("live-menu");
     model.workspace.panel = WorkspacePanel::Trash;
     model.files.entry_menu.as_mut().expect("场景里有右键菜单").x = 1100.0;
@@ -298,9 +298,10 @@ fn trash_delete_confirm_widens_the_menu_to_the_vue_label() {
     let before = menu_bounds(&window);
     assert!(has_label(&window, "彻底删除"));
     assert!(
-        before.x + before.width <= 1200.0 - 4.0 + 1.0,
-        "菜单一开始就夹在窗口内：{before:?}"
+        before.x >= 0.0 && before.x + before.width <= 1200.0 + 0.5,
+        "靠右开的菜单收在窗口内：{before:?}"
     );
+    assert!(before.x < 1100.0, "落点右边放不下时向左收：{before:?}");
 
     let (x, y) = labeled_center(&window, "彻底删除");
     let first = click(&mut window, x, y);
@@ -320,17 +321,14 @@ fn trash_delete_confirm_widens_the_menu_to_the_vue_label() {
     );
     assert!(!has_label(&window, "彻底删除"), "确认句换掉短标签");
     let after = menu_bounds(&window);
-    assert!(
-        after.width > before.width + 8.0,
-        "确认句比「彻底删除」长，菜单要撑开：{before:?} -> {after:?}"
+    assert_eq!(
+        after.width, before.width,
+        "确认句一开始就算进宽度，菜单不跳"
     );
+    let label = labeled_bounds(&window, "确认彻底删除？再点一次");
     assert!(
-        after.x + 1.0 < before.x,
-        "变宽以后靠右的菜单要往左让：{before:?} -> {after:?}"
-    );
-    assert!(
-        after.x >= 4.0 - 1.0 && after.x + after.width <= 1200.0 - 4.0 + 1.0,
-        "右边仍留 4px：{after:?}"
+        label.x + label.width <= after.x + after.width + 0.5,
+        "确认句放得下：{label:?} {after:?}"
     );
 
     let (x, y) = labeled_center(&window, "确认彻底删除？再点一次");
@@ -339,8 +337,8 @@ fn trash_delete_confirm_widens_the_menu_to_the_vue_label() {
         matches!(
             second.as_slice(),
             [
-                ShellMessage::Files(FilesMessage::CloseEntryMenu),
-                ShellMessage::Files(FilesMessage::DeleteSelected)
+                ShellMessage::Files(FilesMessage::DeleteSelected),
+                ShellMessage::Files(FilesMessage::CloseEntryMenu)
             ]
         ),
         "第二次点确认句才删除：{} 条消息",

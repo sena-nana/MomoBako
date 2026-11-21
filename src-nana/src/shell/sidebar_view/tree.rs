@@ -4,8 +4,8 @@
 //! 然后是 24px 高的行卡片（文件夹图标、名称、右侧计数），子级每层缩进 20px，行距 3px。
 //! 深度大于 1 的行在缩进处画 `--border` 竖线；
 //! 有子级时三角背后的底色盖住当前这一层的线。当前目录的卡片是 `--bg-active` 灰底。
-//! 文件夹行右键打开「打开 / 新建子文件夹 / 重命名 / 删除」菜单，
-//! 菜单键和 Shift+F10 也打开它、焦点落在首项（和文件右键菜单同一份实现，`context_menu.rs`）；
+//! 文件夹行右键打开「打开 / 新建子文件夹 / 重命名 / 删除」菜单，菜单键和 Shift+F10 也打开它
+//! （和文件右键菜单同一份实现，`context_menu.rs`）；
 //! 智能文件夹行右侧常驻新建子级、编辑和删除三个小按钮。
 //!
 //! 两棵树按显示顺序展开成一列行，放在按键对照的 Store 里，用带键的 `each` 建：展开一个目录只插入
@@ -34,7 +34,6 @@ use super::super::input::{HostDragPhase, InputMessage, accept_file_drops};
 
 use super::super::context_menu::{MenuAction, MenuChrome, MenuEntry, MenuView, context_menu};
 use super::super::field_bind::GlyphIcon;
-use super::super::menu_focus::{MenuEdge, MenuSurface, focus_menu};
 use super::super::player_view::key_part;
 use super::super::sidebar::GapMessage;
 use super::super::view_part_overlay::session::Projected;
@@ -191,9 +190,6 @@ fn folder_row(item: FolderItem) -> AnyView {
                 y: event.y,
             },
         )));
-        if let Some(edge) = MenuEdge::of_press(event) {
-            cx.dispatch_program_all(focus_menu(MenuSurface::Folder, edge));
-        }
     });
     tree_row(
         row.depth,
@@ -487,7 +483,7 @@ fn smart_row(item: SmartItem, state: Signal<SmartGroup>) -> AnyView {
 const FOLDER_MENU: MenuChrome = MenuChrome {
     prefix: "folder",
     close: || ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::CloseFolderMenu)),
-    branch: None,
+    toggle: None,
     arm: None,
 };
 
@@ -526,7 +522,7 @@ impl FolderMenuView {
 }
 
 /// 文件夹行右键菜单，和文件右键菜单是同一份实现（`context_menu.rs`）。常驻：同一行同一落点的菜单
-/// 打开期间只重建变了的那几行（处理中切换禁用），换一行或换落点时浮层块换块。
+/// 打开期间处理中切换禁用只改绑定的字段，换一行或换落点时浮层块换块。
 pub fn folder_menu(model: &ShellViewModel) -> Option<AnyView> {
     let menu = model.sidebar.folder_menu.clone()?;
     let view = signal(FolderMenuView::project(model)?);

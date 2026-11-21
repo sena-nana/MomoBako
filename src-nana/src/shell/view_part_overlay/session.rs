@@ -4,6 +4,7 @@
 //! 建的时候把会话交给 [`register`]，浮层块挂这块内容时用 [`collect`] 收下：之后每次整体同步调
 //! [`OverlaySession::write`] 写投影；放进浮层层以后调 [`OverlaySession::show`]，要换下时调
 //! [`OverlaySession::hide`]，还要放退场的块留在浮层层里，[`OverlaySession::settled`] 说放完了再卸。
+//! `show` 和 `hide` 拿着 `AppContext`：右键菜单这类要经宿主激活、收起的浮层在这里做。
 //! 视图函数的签名因此不变，壳层其余模块不必知道浮层怎么同步。
 
 use std::cell::RefCell;
@@ -19,12 +20,13 @@ pub(crate) trait OverlaySession {
     fn write(&mut self, _model: &ShellViewModel) {}
 
     /// 这块浮层在浮层层里，ViewModel 要它开着：对话框声明打开。新块放进浮层层后调一次，之后每帧
-    /// 收尾时再调，宿主自己关掉它（停放、被顶替）以后照 ViewModel 再打开。只写信号，没变不触发绑定。
-    fn show(&mut self) {}
+    /// 收尾时再调，宿主自己关掉它（停放、被顶替）以后照 ViewModel 再打开。对话框只写信号，没变不触发
+    /// 绑定；右键菜单第一次调时经宿主激活。
+    fn show(&mut self, _context: &mut AppContext) {}
 
-    /// 这块浮层要换下：对话框声明关上，开始放退场。返回真时浮层块把这块留在浮层层里，等
-    /// [`Self::settled`] 说放完了再卸；返回假时随这次换块卸掉。
-    fn hide(&mut self) -> bool {
+    /// 这块浮层要换下：对话框声明关上，开始放退场；右键菜单经宿主收起、把焦点还回去。返回真时浮层块
+    /// 把这块留在浮层层里，等 [`Self::settled`] 说放完了再卸；返回假时随这次换块卸掉。
+    fn hide(&mut self, _context: &mut AppContext) -> bool {
         false
     }
 

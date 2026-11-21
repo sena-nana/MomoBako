@@ -5,6 +5,7 @@
 //! [`ShellMessage::FocusMenu`]：归约确认菜单真的开着才记下这次请求，视图整体同步完以后照着聚焦
 //! （`menu_focus_view.rs`）。ArrowDown 聚焦首项、ArrowUp 聚焦末项，菜单键和 Shift+F10 由应用挑，取首项；
 //! 指针打开的菜单不动焦点。菜单项都在 [`MENU_KEYS`] 方向键焦点组里，上下键在项之间走、首尾相接。
+//! 文件和文件夹的右键菜单是 NanaUI 的 `AnchoredActionMenu`，打开时由框架把焦点放进首项，不走这里。
 
 use nana_ui::runtime::{RovingEdge, RovingFocusGroup, SecondaryPress};
 
@@ -19,10 +20,6 @@ pub(crate) const MENU_KEYS: RovingFocusGroup = RovingFocusGroup::vertical().wrap
 pub(crate) enum MenuSurface {
     /// 侧栏仓库头打开的切换弹层。
     RepositorySwitcher,
-    /// 文件条目的右键菜单。
-    Entry,
-    /// 侧栏文件夹行的右键菜单。
-    Folder,
 }
 
 impl MenuSurface {
@@ -30,8 +27,6 @@ impl MenuSurface {
     pub(crate) fn group_key(self) -> &'static str {
         match self {
             Self::RepositorySwitcher => "repository-switcher-popover",
-            Self::Entry => "file-context-menu",
-            Self::Folder => "folder-context-menu",
         }
     }
 
@@ -39,8 +34,6 @@ impl MenuSurface {
     pub(crate) fn is_open(self, model: &ShellViewModel) -> bool {
         match self {
             Self::RepositorySwitcher => model.sidebar.popover == PopoverMode::Switcher,
-            Self::Entry => model.files.entry_menu.is_some(),
-            Self::Folder => model.sidebar.folder_menu.is_some(),
         }
     }
 }

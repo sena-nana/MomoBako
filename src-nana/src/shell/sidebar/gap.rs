@@ -245,8 +245,8 @@ pub enum EscapeLayer {
     /// 来源下载的「选择目标资源库」。
     DownloadTarget,
     RepositoryPopover,
-    FolderMenu,
-    /// 文件页的浮层：右键菜单 → 导出对话框 → 硬链接确认 → 文件对话框，文件操作进行中不关。
+    /// 文件页的浮层：导出对话框 → 硬链接确认 → 文件对话框，文件操作进行中不关。右键菜单开着时
+    /// Escape 由框架交给菜单，不在这里。
     Files(super::super::files::FilesLayer),
 }
 
@@ -269,8 +269,6 @@ pub fn escape_layer(model: &super::super::ShellViewModel) -> Option<EscapeLayer>
         EscapeLayer::DownloadTarget
     } else if sidebar.popover != super::PopoverMode::Closed {
         EscapeLayer::RepositoryPopover
-    } else if sidebar.folder_menu.is_some() {
-        EscapeLayer::FolderMenu
     } else {
         EscapeLayer::Files(model.files.escape_layer()?)
     };
@@ -287,7 +285,6 @@ pub fn dismiss_top(model: &mut super::super::ShellViewModel) -> bool {
         EscapeLayer::CloseConfirm => {
             model.input.answer_close(false);
         }
-        EscapeLayer::FolderMenu => model.sidebar.folder_menu = None,
         EscapeLayer::FolderDelete => model.sidebar.close_folder_delete(mutating),
         EscapeLayer::FolderDialog => model.sidebar.close_folder_dialog(mutating),
         EscapeLayer::SmartDelete => model.sidebar.close_smart_delete(),

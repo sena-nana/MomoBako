@@ -5,7 +5,7 @@
 //! 归约结束时由壳层交给槽位（`repo_operation.rs`）。换仓库时清掉上一个仓库的文件表面也在这里。
 
 use super::super::repo_operation::{OperationPatch, OperationStart};
-use super::{FileContext, FileDialog, FilesState, MenuBranch};
+use super::{FileContext, FileDialog, FilesState};
 
 /// 文件变更在任务弹层里的进度行：开始时的种类、阶段和百分比，以及协议完成以后那一步。
 #[derive(Clone, Debug, PartialEq)]
@@ -159,9 +159,7 @@ impl FilesState {
         self.folder_tree_reread = None;
         self.dialog = FileDialog::Closed;
         self.pending = None;
-        self.entry_menu = None;
-        self.menu_branch = MenuBranch::default();
-        self.menu_pending = None;
+        self.close_entry_menu();
         self.select_only = None;
         self.click_load = None;
         self.rename_path = None;

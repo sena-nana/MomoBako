@@ -269,11 +269,11 @@ impl Presence {
 }
 
 impl OverlaySession for Presence {
-    fn show(&mut self) {
+    fn show(&mut self, _: &mut AppContext) {
         self.open.try_set_if_changed(true);
     }
 
-    fn hide(&mut self) -> bool {
+    fn hide(&mut self, _: &mut AppContext) -> bool {
         self.open.try_set_if_changed(false);
         true
     }

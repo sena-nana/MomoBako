@@ -108,7 +108,7 @@ fn escape_closes_popovers() {
     harness.assert_same_as_fresh_mount();
 }
 
-/// 文件右键菜单和文件夹右键菜单：Escape 关掉菜单，别的状态不动。
+/// 文件右键菜单和文件夹右键菜单：Escape 由框架交给开着的菜单，关掉它，别的状态不动。
 #[test]
 fn escape_closes_context_menus() {
     let mut harness = ShellHarness::mount(scene("live-menu"));

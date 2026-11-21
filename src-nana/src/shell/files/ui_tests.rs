@@ -13,9 +13,7 @@ use crate::shell::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel, Work
 
 use super::super::files_view::previewing;
 use super::super::inspect::InspectMessage;
-use super::{
-    BranchSource, FileContext, FileDialog, FileRow, FilesEffect, FilesMessage, FilesState,
-};
+use super::{FileContext, FileDialog, FileRow, FilesEffect, FilesMessage, FilesState};
 
 fn row(path: &str, kind: &str, extension: Option<&str>) -> FileRow {
     FileRow::from_entry(&FileBrowserEntry {
@@ -204,45 +202,17 @@ fn context_menu_selects_like_a_click_and_confirms_permanent_delete_twice() {
         [FilesEffect::LoadAsset { .. }]
     ));
 
-    let branch = |branch: &str, source, inside| FilesMessage::MenuBranchChanged {
-        branch: branch.into(),
-        source,
-        inside,
-    };
-    state.reduce(
-        &writable(),
-        branch("thumbnail", BranchSource::Pointer, true),
-    );
+    let toggle = |group: &str| FilesMessage::ToggleMenuGroup(group.into());
+    state.reduce(&writable(), toggle("thumbnail"));
+    assert_eq!(state.menu_group.as_deref(), Some("thumbnail"), "点分组展开");
+    state.reduce(&writable(), toggle("playlist-membership"));
     assert_eq!(
-        state.menu_branch.open(),
-        Some("thumbnail"),
-        "指针进来就展开"
-    );
-    state.reduce(&writable(), branch("thumbnail", BranchSource::Focus, true));
-    state.reduce(
-        &writable(),
-        branch("playlist-membership", BranchSource::Pointer, true),
-    );
-    state.reduce(
-        &writable(),
-        branch("thumbnail", BranchSource::Pointer, false),
-    );
-    assert_eq!(
-        state.menu_branch.open(),
+        state.menu_group.as_deref(),
         Some("playlist-membership"),
-        "先进下一个分组、后离开上一个，展开指针所在的那个"
+        "点另一个分组换成展开它，同一时刻只展开一个"
     );
-    state.reduce(
-        &writable(),
-        branch("playlist-membership", BranchSource::Pointer, false),
-    );
-    assert_eq!(
-        state.menu_branch.open(),
-        Some("thumbnail"),
-        "指针离开以后，焦点还在的分组照 :focus-within 留着"
-    );
-    state.reduce(&writable(), branch("thumbnail", BranchSource::Focus, false));
-    assert_eq!(state.menu_branch.open(), None);
+    state.reduce(&writable(), toggle("playlist-membership"));
+    assert_eq!(state.menu_group, None, "再点一次收起");
 
     state.reduce(&writable(), FilesMessage::ArmMenuConfirm("delete".into()));
     assert_eq!(
@@ -251,29 +221,18 @@ fn context_menu_selects_like_a_click_and_confirms_permanent_delete_twice() {
         "第一次只进入待确认"
     );
     assert!(state.entry_menu.is_some(), "待确认时菜单不关");
-    state.reduce(
-        &writable(),
-        branch("thumbnail", BranchSource::Pointer, true),
-    );
+    state.reduce(&writable(), toggle("thumbnail"));
     state.reduce(&writable(), FilesMessage::CloseEntryMenu);
     assert!(
-        state.entry_menu.is_none()
-            && state.menu_pending.is_none()
-            && state.menu_branch.open().is_none()
+        state.entry_menu.is_none() && state.menu_pending.is_none() && state.menu_group.is_none()
     );
-    state.reduce(
-        &writable(),
-        branch("thumbnail", BranchSource::Pointer, true),
-    );
-    assert_eq!(
-        state.menu_branch.open(),
-        None,
-        "菜单关掉以后才到的进出不再记"
-    );
+    state.reduce(&writable(), toggle("thumbnail"));
+    assert_eq!(state.menu_group, None, "菜单关掉以后才到的点击不再记");
 }
 
+/// 右键菜单和导入菜单的 Escape 都由 NanaUI 交给菜单自己，文件页的全局 Escape 只关对话框。
 #[test]
-fn escape_closes_menus_before_dialogs_and_keeps_busy_dialogs() {
+fn escape_leaves_menus_to_the_framework_and_keeps_busy_dialogs() {
     let mut state = listed();
     state.reduce(&writable(), FilesMessage::ActivateRow("cover.png".into()));
     state.reduce(
@@ -285,12 +244,10 @@ fn escape_closes_menus_before_dialogs_and_keeps_busy_dialogs() {
         },
     );
     state.import_open = true;
-    assert!(state.dismiss_overlay());
-    assert!(
-        state.entry_menu.is_none() && state.import_open,
-        "先关右键菜单；导入菜单的 Escape 由 NanaUI 的 ActionMenu 自己处理"
-    );
-    assert!(!state.dismiss_overlay(), "没有浮层时交给壳层");
+    assert!(state.escape_layer().is_none(), "菜单不在全局 Escape 里");
+    assert!(!state.dismiss_overlay(), "没有对话框时交给壳层");
+    assert!(state.entry_menu.is_some() && state.import_open);
+    state.reduce(&writable(), FilesMessage::CloseEntryMenu);
 
     state.reduce(&writable(), FilesMessage::OpenDialog(FileDialog::Copy));
     assert_eq!(state.dialog, FileDialog::Copy);

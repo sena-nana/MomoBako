@@ -9,9 +9,7 @@ use serde_json::Value;
 
 use crate::backend::services::repository::AssetDetail;
 
-use super::{
-    EntryMenu, FileContext, FileDialog, FileRow, FilesEffect, FilesState, MenuBranch, SelectionMode,
-};
+use super::{EntryMenu, FileContext, FileDialog, FileRow, FilesEffect, FilesState, SelectionMode};
 
 impl FilesState {
     /// 仓库动作的 `selectedCount` 只数多选路径，不含单独的主选。
@@ -153,13 +151,20 @@ impl FilesState {
         if !self.selected.iter().any(|item| item == path) {
             self.activate_row(ctx, path, SelectionMode::Replace);
         }
-        self.menu_branch = MenuBranch::default();
+        self.menu_group = None;
         self.menu_pending = None;
         self.entry_menu = Some(EntryMenu {
             path: path.to_string(),
             x,
             y,
         });
+    }
+
+    /// 关掉右键菜单，连同展开的分组和等第二次确认的项。
+    pub(in crate::shell) fn close_entry_menu(&mut self) {
+        self.entry_menu = None;
+        self.menu_group = None;
+        self.menu_pending = None;
     }
 
     /// 单击选中的是文件时记下它：素材详情回来后仍留在列表，不切到预览页。

@@ -1,7 +1,7 @@
 //! 文件右键菜单。
 //!
-//! 外观、子菜单、键盘和常驻都是共用的右键菜单（`context_menu.rs`），这里只给条目：
-//! 「加入播放列表」「缩略图」是分组，回收站里的「彻底删除」要点两次。
+//! 菜单本身、分组的展开、键盘和常驻都是共用的右键菜单（`context_menu.rs`），这里只给条目：
+//! 「加入播放列表」「缩略图」是分组，点了在下面展开子项；回收站里的「彻底删除」要点两次。
 //! 来源插件的条目动作不能用时禁用，紧跟着一行弱色小字写原因（原因不放进
 //! 点两次才出现的确认文字：禁用的按钮点不了，那样原因永远显示不出来）。
 
@@ -15,24 +15,18 @@ use super::super::admin::AdminMessage;
 use super::super::admin::source_target::{self, RepositoryDownload};
 use super::super::context_menu::{MenuAction, MenuChrome, MenuEntry, MenuView, context_menu};
 use super::super::entry_actions::{self, FilePluginAction, FilePluginDispatch, SourceContext};
-use super::super::files::{BranchSource, FileContext, FileDialog, FileRow, FilesMessage};
+use super::super::files::{FileContext, FileDialog, FileRow, FilesMessage};
 use super::super::input::InputMessage;
 use super::super::view_part_overlay::session::Projected;
 use super::super::workspace::WorkspacePanel;
 use super::super::{ShellMessage, ShellViewModel};
 use super::style;
 
-/// 文件右键菜单的键前缀和消息：分组的进出、要点两次的项都归文件状态管。
+/// 文件右键菜单的键前缀和消息：展开的分组、要点两次的项都归文件状态管。
 const CHROME: MenuChrome = MenuChrome {
     prefix: "file",
     close: || ShellMessage::Files(FilesMessage::CloseEntryMenu),
-    branch: Some(|branch, source: BranchSource, inside| {
-        ShellMessage::Files(FilesMessage::MenuBranchChanged {
-            branch,
-            source,
-            inside,
-        })
-    }),
+    toggle: Some(|group| ShellMessage::Files(FilesMessage::ToggleMenuGroup(group))),
     arm: Some(|id| ShellMessage::Files(FilesMessage::ArmMenuConfirm(id))),
 };
 
@@ -66,10 +60,7 @@ impl EntryMenuView {
         for entry in &mut entries {
             entry.pending = entry.confirm_label.is_some() && pending == Some(entry.id.as_str());
         }
-        Some(MenuView::new(
-            entries,
-            model.files.menu_branch.open().map(str::to_string),
-        ))
+        Some(MenuView::new(entries, model.files.menu_group.clone()))
     }
 }
 
@@ -320,7 +311,7 @@ fn plugin_entry(action: &FilePluginAction, repository_id: Option<String>) -> Men
         .message(message)
 }
 
-/// 「缩略图」子菜单：选文件、从剪贴板、取消自定义（只有自定义过才可点）、刷新。
+/// 「缩略图」分组的子项：选文件、从剪贴板、取消自定义（只有自定义过才可点）、刷新。
 fn thumbnail_entries(row: &FileRow, repo_id: Option<String>) -> Vec<MenuEntry> {
     let path = row.path.clone();
     let kind = row.kind.clone();

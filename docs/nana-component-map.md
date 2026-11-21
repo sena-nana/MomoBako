@@ -23,7 +23,8 @@
 | 组件 | 用在哪里 |
 | --- | --- |
 | `app-shell`、`app-title-bar`、`workspace` | 骨架、标题栏和工作区（`view_host.rs`、`title_bar.rs`、`render.rs`） |
-| `sidebar-frame`、`list-item` | 侧栏外框和侧栏、弹层、对话框里的行（`sidebar_view.rs`、`src-nana/src/shell/sidebar_view/tree.rs`、`src-nana/src/shell/sidebar_view/popover.rs`），以及文件和文件夹两种右键菜单的项（自绘，`context_menu.rs`） |
+| `sidebar-frame`、`list-item` | 侧栏外框和侧栏、弹层、对话框里的行（`sidebar_view.rs`、`src-nana/src/shell/sidebar_view/tree.rs`、`src-nana/src/shell/sidebar_view/popover.rs`） |
+| `action-menu`、`action-menu-item`、`anchored-action-menu` | 文件页「导入」菜单（`src-nana/src/shell/files_view/header.rs`）；文件和文件夹两种右键菜单是挂在自己 `overlay-host` 下的 `anchored-action-menu`（`context_menu.rs`） |
 | `dialog`、`confirm-dialog`、`overlay-host` | 全部对话框（`src-nana/src/shell/view_part_overlay/dialog.rs`） |
 | `button`、`icon-button`、`text-input`、`textarea`、`checkbox`、`range-field`、`select` | 各页控件；`textarea` 的类型是 `TextArea` |
 | `reorder-list` | 播放集条目（`src-nana/src/shell/player_view/playlist.rs`） |

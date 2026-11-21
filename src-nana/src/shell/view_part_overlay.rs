@@ -12,8 +12,9 @@
 //! 下，靠 `open` 开合，焦点和无障碍交给框架，关闭手势只发关闭消息。换块时旧的一块经会话写
 //! `open = false`，留在浮层层里放退场，放完（宿主清掉激活）以后由 [`OverlayPart::sweep`] 卸掉；
 //! 新的一块同时放进来、写 `open = true`。旧块先写、新块后写，刷新时先关旧的再开新的，新对话框
-//! 记下的「打开前的焦点」是旧对话框还回去的那一个。弹层和菜单没有退场，换下就卸。每种浮层的
-//! 入口函数在 [`overlay_branch`] 里登记。
+//! 记下的「打开前的焦点」是旧对话框还回去的那一个。弹层和菜单没有退场，换下就卸。右键菜单是 NanaUI
+//! `AnchoredActionMenu`，也挂在自己的 `OverlayHost` 下：放进浮层层以后经会话激活，换下时经宿主收起
+//! 再卸，浮层层随即不再挡住页面。每种浮层的入口函数在 [`overlay_branch`] 里登记。
 
 use nana_ui::runtime::view::{AnyView, IntoView, NodeRef, widget};
 use nana_ui::runtime::{
@@ -37,10 +38,9 @@ use session::OverlaySession;
 /// 所以排在最后。
 ///
 /// Escape 先关显示着的那一层：显示着的对话框已经激活，运行时把 Escape 交给它、发它自己的关闭
-/// 请求，全局 Escape 不再发；显示着的是弹层或菜单时走全局 Escape（`escape_layer`），那里弹层和
-/// 菜单的先后和这里一样，都排在文件页的导出和文件对话框前面，等着的对话框不会先被关掉。菜单能用
-/// 键盘打开以后，焦点可以从开着的菜单走回页面、再打开仓库弹层，两层同时开着时 Escape 先关显示着的
-/// 仓库弹层。
+/// 请求，全局 Escape 不再发；显示着的右键菜单同样已经激活，Escape 由框架交给它。显示着的是弹层时
+/// 走全局 Escape（`escape_layer`），那里弹层的先后和这里一样，排在文件页的导出和文件对话框前面，
+/// 等着的对话框不会先被关掉。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum OverlayKey {
     /// 关闭确认。
@@ -221,10 +221,10 @@ struct Block {
 
 impl Block {
     /// 要换下：告诉每个会话，有会话要放退场时返回真。每个会话都要通知到。
-    fn hide(&mut self) -> bool {
+    fn hide(&mut self, context: &mut AppContext) -> bool {
         self.sessions
             .iter_mut()
-            .fold(false, |waits, session| session.hide() || waits)
+            .fold(false, |waits, session| session.hide(context) || waits)
     }
 
     fn settled(&self, context: &AppContext) -> bool {
@@ -249,7 +249,7 @@ impl OverlayPart {
         self.drop_settled(context);
         if let Some(current) = &mut self.current {
             for session in &mut current.sessions {
-                session.show();
+                session.show(context);
             }
         }
     }
@@ -375,7 +375,7 @@ impl ShellPart for OverlayPart {
         }
         let mut retired = None;
         if let Some(mut old) = self.current.take() {
-            if old.hide() {
+            if old.hide(cx.document.context_mut()) {
                 self.leaving.push(old);
             } else {
                 retired = Some(old.view);
@@ -386,7 +386,7 @@ impl ShellPart for OverlayPart {
         let placed = self.place(cx.document.context_mut());
         if let Some(current) = &mut self.current {
             for session in &mut current.sessions {
-                session.show();
+                session.show(cx.document.context_mut());
             }
         }
         placed?;

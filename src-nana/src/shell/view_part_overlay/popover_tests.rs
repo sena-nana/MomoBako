@@ -1,12 +1,12 @@
-//! 弹层和右键菜单常驻的回归：打开期间无关更新不换节点；任务进度、仓库列表、子菜单展开和
+//! 弹层和右键菜单常驻的回归：打开期间无关更新不换节点；任务进度、仓库列表、分组展开和
 //! 文件服务忙这些相关变化只改绑定的字段或变了的那一行；点外面只发一条关闭消息。浮层层常驻在
-//! AppShell 的 overlay 槽位里，有块时挡点击、空了放开，增删块不用重新装配；右键菜单不靠显式层级。
+//! AppShell 的 overlay 槽位里，有块时挡点击、空了放开，增删块不用重新装配。
 
-use nana_ui::runtime::{AppShell, Entity, PositionSpec, StableNodeId, component_descriptors};
+use nana_ui::runtime::{AppShell, Entity, StableNodeId, component_descriptors};
 
 use super::OverlayKey;
 use crate::backend::services::repository::TaskProgressSnapshot;
-use crate::shell::files::{BranchSource, FileDialog, FilesMessage};
+use crate::shell::files::{FileDialog, FilesMessage};
 use crate::shell::player::PlayerMessage;
 use crate::shell::view_harness::ShellHarness;
 use crate::shell::workspace::WorkspaceRepository;
@@ -450,7 +450,7 @@ fn repository_switcher_adds_rows_without_rebuilding_the_rest() {
 }
 
 #[test]
-fn entry_menu_opens_its_submenu_without_rebuilding_rows() {
+fn entry_menu_expands_a_group_without_rebuilding_rows() {
     let mut harness = ShellHarness::mount(scene("live-menu"));
     assert_eq!(OverlayKey::of(&harness.model), Some(OverlayKey::EntryMenu));
     let root = harness.content_roots().0.expect("右键菜单在浮层里");
@@ -465,20 +465,18 @@ fn entry_menu_opens_its_submenu_without_rebuilding_rows() {
             .keyed(key)
             .unwrap_or_else(|| panic!("菜单缺少 {key}"))
     });
-    assert!(harness.find("刷新缩略图").is_none(), "子菜单一开始收着");
+    assert!(harness.find("刷新缩略图").is_none(), "分组一开始收着");
 
-    harness.apply(ShellMessage::Files(FilesMessage::MenuBranchChanged {
-        branch: "thumbnail".into(),
-        source: BranchSource::Pointer,
-        inside: true,
-    }));
+    harness.apply(ShellMessage::Files(FilesMessage::ToggleMenuGroup(
+        "thumbnail".into(),
+    )));
     harness.flush();
     assert_eq!(
         harness.content_roots().0,
         Some(root),
-        "展开子菜单不该重挂菜单"
+        "展开分组不该重挂菜单"
     );
-    assert!(harness.find("刷新缩略图").is_some(), "子菜单没有展开");
+    assert!(harness.find("刷新缩略图").is_some(), "分组没有展开");
     for (key, id) in [
         "file-menu-preview",
         "file-menu-rename",
@@ -488,7 +486,7 @@ fn entry_menu_opens_its_submenu_without_rebuilding_rows() {
     .iter()
     .zip(rows)
     {
-        assert_eq!(harness.keyed(key), Some(id), "展开子菜单重建了 {key}");
+        assert_eq!(harness.keyed(key), Some(id), "展开分组重建了 {key}");
     }
     harness.assert_same_as_fresh_mount();
 
@@ -507,34 +505,11 @@ fn entry_menu_opens_its_submenu_without_rebuilding_rows() {
     ));
 }
 
-/// 右键菜单这一层相对浮层层绝对定位，不再靠固定定位加显式层级压过壳层浮层根：菜单层、透明底和
-/// 菜单都不写层级，点菜单项照样发它的消息，点菜单外只关菜单。
+/// 点菜单项发它自己的消息，框架随之收起菜单，只多一条关闭消息。
 #[test]
-fn entry_menu_takes_clicks_without_a_z_index() {
+fn entry_menu_items_take_their_own_clicks() {
     let mut harness = ShellHarness::mount(scene("live-menu"));
     harness.take_messages();
-    // 菜单层是浮层块的根：脱离树挂出的根不在键表里，按根找。
-    let layer = harness.content_roots().0.expect("右键菜单在浮层里");
-    let parts = [
-        ("菜单层", Some(layer)),
-        ("透明底", harness.keyed("file-context-backdrop")),
-        ("菜单", harness.keyed("file-context-menu")),
-    ];
-    for (name, id) in parts {
-        let id = id.unwrap_or_else(|| panic!("缺少{name}"));
-        let style = harness
-            .document()
-            .context()
-            .world()
-            .node_style(id)
-            .unwrap_or_else(|| panic!("{name}没有样式"));
-        assert_eq!(style.layout.z_index, None, "{name}不该再写层级");
-        assert_ne!(
-            style.layout.position,
-            PositionSpec::Fixed,
-            "{name}不该再固定定位"
-        );
-    }
     let rename = harness.keyed("file-menu-rename").expect("重命名");
     let (x, y) = harness.center(rename);
     let messages = harness.click_messages(x, y);
@@ -542,21 +517,16 @@ fn entry_menu_takes_clicks_without_a_z_index() {
         matches!(
             messages.as_slice(),
             [
-                ShellMessage::Files(FilesMessage::CloseEntryMenu),
-                ShellMessage::Files(FilesMessage::OpenDialog(FileDialog::Rename))
+                ShellMessage::Files(FilesMessage::OpenDialog(FileDialog::Rename)),
+                ShellMessage::Files(FilesMessage::CloseEntryMenu)
             ]
         ),
-        "点菜单项应该关菜单并打开重命名：{} 条消息",
+        "点菜单项应该打开重命名并关菜单：{} 条消息",
         messages.len()
     );
-    let messages = harness.click_messages(1100.0, 760.0);
-    assert!(
-        matches!(
-            messages.as_slice(),
-            [ShellMessage::Files(FilesMessage::CloseEntryMenu)]
-        ),
-        "点菜单外只关菜单"
-    );
+    harness.settle(messages);
+    assert_eq!(OverlayKey::of(&harness.model), Some(OverlayKey::FileDialog));
+    assert!(harness.keyed("file-context-menu").is_none(), "菜单换下");
 }
 
 #[test]

@@ -11,7 +11,7 @@ use nana_ui::runtime::{
     Gradient, LayoutBox, LengthSpec, PaintContext, Painter, RadiusTier, SemanticColorRole, Stack,
     Text, TextHorizontalAlignment,
 };
-use nana_ui_core::{BoxShadowSpec, Icon, ThemeAppearance};
+use nana_ui_core::{Icon, ThemeAppearance};
 
 /// 正文行高 1.55。
 const LINE_BODY: f32 = 1.55;
@@ -133,24 +133,6 @@ pub(crate) fn bottom_rule(stack: Stack) -> Stack {
         .border_sides
         .bottom_width = Some(1.0);
     stack.style(style)
-}
-
-/// CSS `box-shadow` 的一层，颜色是固定的 RGBA。
-pub(crate) fn shadow(offset_y: f32, blur: f32, spread: f32, alpha: f32) -> BoxShadowSpec {
-    BoxShadowSpec {
-        paint_color: None,
-        offset_x: 0.0,
-        offset_y,
-        blur_radius: blur,
-        spread_radius: spread,
-        color: [0.0, 0.0, 0.0, alpha],
-        inset: false,
-    }
-}
-
-/// 给容器挂上一组阴影。
-pub(crate) fn with_shadows(stack: Stack, shadows: Vec<BoxShadowSpec>) -> Stack {
-    stack.with_layout(move |layout| layout.paint.box_shadows = shadows)
 }
 
 /// 固定宽高，不随父级伸缩。

@@ -1,5 +1,6 @@
 //! 键盘打开的菜单：菜单按钮上的方向键、文件卡片和文件夹行上的菜单键打开菜单，焦点落在首项或末项，
-//! 上下键在本层的项之间走、首尾相接；Escape 关掉菜单以后焦点回到打开它的控件。指针打开的菜单不动焦点。
+//! 上下键在本层的项之间走、首尾相接；Escape 关掉菜单以后焦点回到打开它的控件。文件和文件夹的右键菜单
+//! 是 NanaUI 的 `AnchoredActionMenu`，焦点落在首项、Tab 留在菜单里都由框架负责。
 
 use nana_ui::InputModifiers;
 use nana_ui::runtime::{RovingEdge, SecondaryPress, StableNodeId};
@@ -165,7 +166,7 @@ fn the_menu_key_on_a_card_opens_its_menu_onto_the_first_item() {
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
     assert_eq!(
         press_on(&mut harness, "cover.png", "ContextMenu"),
-        ["open-entry", "focus-menu"]
+        ["open-entry"]
     );
     assert!(
         harness.model.files.entry_menu.is_some(),
@@ -178,16 +179,11 @@ fn the_menu_key_on_a_card_opens_its_menu_onto_the_first_item() {
     press(&mut harness, "ArrowUp");
     assert_eq!(focused(&harness).as_deref(), Some("缩略图"), "分组也是一项");
     assert_eq!(
-        harness.model.files.menu_branch.open(),
-        Some("thumbnail"),
-        "焦点进到分组就展开子菜单"
+        harness.model.files.menu_group, None,
+        "焦点走到分组上不展开，点了才展开"
     );
     press(&mut harness, "ArrowUp");
-    assert_eq!(
-        focused(&harness).as_deref(),
-        Some("复制到…"),
-        "上下键不走进子菜单"
-    );
+    assert_eq!(focused(&harness).as_deref(), Some("复制到…"));
     harness.press_escape();
     assert!(harness.model.files.entry_menu.is_none());
     assert_eq!(
@@ -211,7 +207,7 @@ fn the_menu_key_on_a_folder_row_drives_the_folder_menu() {
     );
     assert_eq!(
         press_on(&mut harness, "assets", "ContextMenu"),
-        ["open-folder", "focus-menu"]
+        ["open-folder"]
     );
     assert!(
         harness
@@ -244,7 +240,7 @@ fn the_menu_key_on_a_folder_row_drives_the_folder_menu() {
     };
     assert_eq!(
         press_with(&mut harness, "F10", shift),
-        ["open-folder", "focus-menu"],
+        ["open-folder"],
         "Shift+F10 也打开"
     );
     assert_eq!(focused(&harness).as_deref(), Some("打开"));
@@ -252,8 +248,8 @@ fn the_menu_key_on_a_folder_row_drives_the_folder_menu() {
     assert_eq!(focused(&harness).as_deref(), Some("新建子文件夹"));
     assert_eq!(
         press(&mut harness, "Enter"),
-        ["close-folder", "create-folder"],
-        "Enter 关掉菜单、执行这一项"
+        ["create-folder", "close-folder"],
+        "Enter 执行这一项，框架随之收起菜单"
     );
     assert!(harness.model.sidebar.folder_menu.is_none());
     assert!(
@@ -266,36 +262,24 @@ fn the_menu_key_on_a_folder_row_drives_the_folder_menu() {
     );
 }
 
-/// 键盘打开的菜单不困住焦点：焦点从文件夹菜单回到页面、在仓库头上打开切换列表时两层同时开着，
-/// 显示的是仓库弹层，Escape 也先关它，再关文件夹菜单。
+/// 右键菜单开着时焦点留在菜单里：Tab 在菜单的项之间转，不回到页面。
 #[test]
-fn escape_closes_the_shown_menu_first_when_two_are_open() {
+fn tab_stays_inside_an_open_folder_menu() {
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
     press_on(&mut harness, "assets", "ContextMenu");
+    let menu = harness.keyed("folder-context-menu").expect("文件夹菜单");
+    for _ in 0..6 {
+        press(&mut harness, "Tab");
+        let inside = harness.focused().is_some_and(|focused| {
+            harness
+                .document()
+                .context()
+                .world()
+                .is_descendant_or_self(focused, menu)
+        });
+        assert!(inside, "Tab 走出了菜单：{:?}", focused(&harness));
+    }
     assert!(harness.model.sidebar.folder_menu.is_some());
-    press_on(&mut harness, "资源库 · 默认资源库", "ArrowDown");
-    assert_eq!(harness.model.sidebar.popover, PopoverMode::Switcher);
-    assert!(
-        harness.model.sidebar.folder_menu.is_some(),
-        "文件夹菜单还开着，排在仓库弹层后面"
-    );
-    assert!(
-        harness.keyed("folder-context-menu").is_none(),
-        "同时只显示一层"
-    );
-    harness.press_escape();
-    assert_eq!(
-        harness.model.sidebar.popover,
-        PopoverMode::Closed,
-        "Escape 先关显示着的仓库弹层"
-    );
-    assert!(harness.model.sidebar.folder_menu.is_some());
-    assert!(
-        harness.keyed("folder-context-menu").is_some(),
-        "仓库弹层关掉后文件夹菜单露出来"
-    );
-    harness.press_escape();
-    assert!(harness.model.sidebar.folder_menu.is_none());
 }
 
 #[test]

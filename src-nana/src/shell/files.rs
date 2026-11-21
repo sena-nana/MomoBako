@@ -28,7 +28,6 @@ mod display;
 mod ensure;
 mod export;
 mod hardlink;
-mod menu_branch;
 mod mutation;
 mod operation;
 mod reduce;
@@ -46,8 +45,6 @@ pub use display::{DisplayMode, display_mode_path};
 pub use ensure::EnsuredThumbnail;
 pub use hardlink::HardlinkPrompt;
 pub(crate) use hardlink::hardlink_label;
-pub use menu_branch::BranchSource;
-pub(crate) use menu_branch::MenuBranch;
 pub(super) use operation::{FileOperation, ReadProgress};
 pub use reduce::FilesLayer;
 pub(super) use reduce::reduce_message;
@@ -451,12 +448,8 @@ pub enum FilesMessage {
         y: f32,
     },
     CloseEntryMenu,
-    /// 指针或键盘焦点进出了右键菜单里的分组（含它的子菜单），子菜单跟着展开或收起。
-    MenuBranchChanged {
-        branch: String,
-        source: BranchSource,
-        inside: bool,
-    },
+    /// 点了右键菜单里的分组：展开它的子项，已经展开的收起。
+    ToggleMenuGroup(String),
     /// 需要二次确认的菜单项第一次被点：只变成待确认，菜单不关。
     ArmMenuConfirm(String),
     /// 列表区内容宽度变了。瀑布流按新宽度重新分列。
@@ -647,8 +640,8 @@ pub struct FilesState {
     pub(super) select_only: Option<String>,
     /// 单击发起、还没回来的素材读取。回来时保持「只选中」；别处发起的读取回来就进入预览。
     pub(super) click_load: Option<String>,
-    /// 右键菜单里指针和焦点所在的分组（「缩略图」「加入播放列表」），决定展开哪个子菜单。
-    pub(super) menu_branch: MenuBranch,
+    /// 右键菜单里展开着的分组（「缩略图」「加入播放列表」）。
+    pub(super) menu_group: Option<String>,
     /// 右键菜单里等第二次点击确认的那一项（回收站的「彻底删除」）。
     pub(super) menu_pending: Option<String>,
     /// 列表区内容的实际宽度，瀑布流按它定列数。还没有布局回报时为 `None`。

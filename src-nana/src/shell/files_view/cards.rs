@@ -24,7 +24,6 @@ use nana_ui::runtime::{
 use nana_ui_core::{Icon, LengthAtom, SemanticColorMix};
 
 use super::super::files::{DisplayMode, FileRow, FilesMessage, hardlink_label};
-use super::super::menu_focus::{MenuEdge, MenuSurface, focus_menu};
 use super::bind::StyleField;
 use super::file_message;
 use super::style::{self, PreviewPainter, Tone};
@@ -357,9 +356,6 @@ pub(super) fn card(cell: &CardCell, mode: DisplayMode, cards: Cards) -> AnyView 
                 x: event.x,
                 y: event.y,
             }));
-            if let Some(edge) = MenuEdge::of_press(event) {
-                cx.dispatch_program_all(focus_menu(MenuSurface::Entry, edge));
-            }
         })
         .into_any();
     let mut frame = Stack::column(0.0)

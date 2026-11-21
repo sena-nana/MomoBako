@@ -8,14 +8,11 @@ use super::super::input;
 use super::super::inspect::InspectMessage;
 use super::super::workspace::{WorkspaceEffect, WorkspacePanel};
 use super::super::{ShellMessage, ShellViewModel};
-use super::{
-    FileContext, FileDialog, FilesEffect, FilesMessage, FilesState, MenuBranch, SelectionMode,
-};
+use super::{FileContext, FileDialog, FilesEffect, FilesMessage, FilesState, SelectionMode};
 
 /// 文件页里 Escape 能关掉的一层。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FilesLayer {
-    EntryMenu,
     Export,
     Hardlink,
     Dialog,
@@ -33,19 +30,14 @@ impl FilesState {
             }
             FilesMessage::OpenRow(path) => self.open_row_message(ctx, &path),
             FilesMessage::OpenEntryMenu { path, x, y } => self.open_entry_menu(ctx, &path, x, y),
-            FilesMessage::CloseEntryMenu => {
-                self.entry_menu = None;
-                self.menu_branch = MenuBranch::default();
-                self.menu_pending = None;
-            }
+            FilesMessage::CloseEntryMenu => self.close_entry_menu(),
             FilesMessage::ArmMenuConfirm(item) => self.menu_pending = Some(item),
-            FilesMessage::MenuBranchChanged {
-                branch,
-                source,
-                inside,
-            } if self.entry_menu.is_some() => self.menu_branch.note(source, branch, inside),
-            // 菜单关掉以后才到的进出（节点拆掉时的离开）不再记。
-            FilesMessage::MenuBranchChanged { .. } => {}
+            FilesMessage::ToggleMenuGroup(group) if self.entry_menu.is_some() => {
+                self.menu_group =
+                    (self.menu_group.as_deref() != Some(group.as_str())).then_some(group);
+            }
+            // 菜单关掉以后才到的点击不再记。
+            FilesMessage::ToggleMenuGroup(_) => {}
             FilesMessage::ListResized(width) => self.note_list_width(width),
             FilesMessage::ExitPreview => {
                 eprintln!("Nana 预览返回要由壳层按正在看的文件收起");
@@ -166,12 +158,11 @@ impl FilesState {
         }
     }
 
-    /// Escape 现在能关掉文件页的哪一层：右键菜单、导出对话框、硬链接确认、文件对话框。
-    /// 导出中、变更进行中的对话框和处理中的硬链接确认（含确认以后等候选重读）不关，没有可关的为 `None`。
+    /// Escape 现在能关掉文件页的哪一层：导出对话框、硬链接确认、文件对话框（右键菜单开着时 Escape 由
+    /// 框架交给菜单）。导出中、变更进行中的对话框和处理中的硬链接确认（含确认以后等候选重读）不关，
+    /// 没有可关的为 `None`。
     pub(crate) fn escape_layer(&self) -> Option<FilesLayer> {
-        if self.entry_menu.is_some() {
-            Some(FilesLayer::EntryMenu)
-        } else if self.export.open && !self.export.busy {
+        if self.export.open && !self.export.busy {
             Some(FilesLayer::Export)
         } else if self.dialog == FileDialog::Hardlink {
             (!self.hardlink_busy()).then_some(FilesLayer::Hardlink)
@@ -206,12 +197,6 @@ impl FilesState {
     /// Escape 关掉文件页最上面的一层，顺序见 [`Self::escape_layer`]。没有可关的返回 false，交给壳层继续处理。
     pub(crate) fn dismiss_overlay(&mut self) -> bool {
         match self.escape_layer() {
-            Some(FilesLayer::EntryMenu) => {
-                self.entry_menu = None;
-                self.menu_branch = MenuBranch::default();
-                self.menu_pending = None;
-                true
-            }
             Some(FilesLayer::Export) => {
                 self.close_export();
                 true

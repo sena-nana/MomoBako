@@ -2,7 +2,7 @@
 //!
 //! 一是输入框的键路径在打字时不变（壳层重挂后按键路径找回焦点），用户文本拼进键也不会让挂载失败，
 //! 滚动区按显示的内容取键（换目录、换选中项回顶，同一内容重挂保持位置）；
-//! 二是浮层的指针行为：点在导入菜单、右键菜单外面就收起，点右键菜单的分组只展开子菜单，回收站的「彻底删除」要点两次，
+//! 二是浮层的指针行为：点在导入菜单、右键菜单外面就收起，点右键菜单的分组只在下面展开子项，回收站的「彻底删除」要点两次，
 //! 点对话框遮罩等于取消，点卡片里面不取消；
 //! 三是元数据保存冲突：冲突说明紧挨注释、草稿保留，点「采用服务器版本」换成服务器内容；
 //! 四是预览页只有预览框架贴在页底的那一条播放条，页底不再多出间距；
@@ -105,6 +105,20 @@ fn labeled_center(window: &ApplicationWindow, label: &str) -> (f32, f32) {
         node.bounds.x + node.bounds.width / 2.0,
         node.bounds.y + node.bounds.height / 2.0,
     )
+}
+
+/// 无障碍名为 `label` 的节点的布局盒。
+fn labeled_bounds(window: &ApplicationWindow, label: &str) -> nana_ui::runtime::LayoutBox {
+    let document = window.document.document();
+    window
+        .document
+        .context()
+        .world()
+        .project_accessibility_in_viewport(document)
+        .into_iter()
+        .find(|node| node.label.as_deref() == Some(label))
+        .unwrap_or_else(|| panic!("没有 {label}"))
+        .bounds
 }
 
 fn has_label(window: &ApplicationWindow, label: &str) -> bool {
