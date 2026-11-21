@@ -1,11 +1,9 @@
-//! 键盘打开的菜单：菜单按钮上的方向键、文件卡片和文件夹行上的菜单键打开菜单，焦点落在首项或末项，
-//! 上下键在本层的项之间走、首尾相接；Escape 关掉菜单以后焦点回到打开它的控件。文件和文件夹的右键菜单
-//! 是 NanaUI 的 `AnchoredActionMenu`，焦点落在首项、Tab 留在菜单里都由框架负责。
+//! 键盘打开的菜单：文件卡片和文件夹行上的菜单键打开右键菜单（NanaUI `AnchoredActionMenu`），焦点落在首项、
+//! Tab 留在菜单里，上下键在项之间走、首尾相接；Escape 关掉菜单以后焦点回到打开它的控件。仓库头和「导入」是
+//! NanaUI 原生的弹层和菜单：Enter 打开，收起后框架把焦点还给触发器。
 
 use nana_ui::InputModifiers;
-use nana_ui::runtime::{RovingEdge, SecondaryPress, StableNodeId};
 
-use super::{MenuEdge, MenuFocusRequest, MenuSurface, request};
 use crate::shell::sidebar::{PopoverMode, backend_options};
 use crate::shell::view_harness::ShellHarness;
 use crate::shell::{FilesMessage, GapMessage, ShellMessage, ShellViewModel, SidebarMessage};
@@ -30,7 +28,6 @@ fn kind(message: &ShellMessage) -> &'static str {
         ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::OpenFolderCreate(_))) => {
             "create-folder"
         }
-        ShellMessage::FocusMenu(_) => "focus-menu",
         ShellMessage::Files(FilesMessage::ImportMenuToggled(true)) => "import-opened",
         _ => "other",
     }
@@ -66,28 +63,43 @@ fn focused(harness: &ShellHarness) -> Option<String> {
     harness.focused_label()
 }
 
+/// 仓库头是 NanaUI 的 `Popover`：Enter 打开切换列表，焦点留在仓库头；Tab 进到列表，上下键在项之间走、
+/// 首尾相接；Escape 收起后焦点回到仓库头。
 #[test]
-fn arrows_on_the_repository_header_open_the_switcher_onto_either_end() {
+fn enter_on_the_repository_header_opens_the_native_popover() {
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
     assert_eq!(
-        press_on(&mut harness, "资源库 · 默认资源库", "ArrowDown"),
-        ["open-switcher", "focus-menu"]
+        press_on(&mut harness, "资源库 · 默认资源库", "Enter"),
+        ["open-switcher"]
     );
     assert_eq!(
         harness.model.sidebar.popover,
         PopoverMode::Switcher,
-        "ArrowDown 打开切换弹层"
+        "Enter 打开切换弹层"
     );
     assert_eq!(
         focused(&harness).as_deref(),
+        Some("资源库 · 默认资源库"),
+        "打开时焦点留在仓库头"
+    );
+    press(&mut harness, "Tab");
+    assert_eq!(
+        focused(&harness).as_deref(),
         Some("切换资源库 默认资源库"),
-        "ArrowDown 聚焦首项"
+        "Tab 进到列表的首项"
     );
     press(&mut harness, "ArrowDown");
     assert_eq!(
         focused(&harness).as_deref(),
         Some("添加资源库"),
         "上下键在项之间走"
+    );
+    press(&mut harness, "ArrowDown");
+    press(&mut harness, "ArrowDown");
+    assert_eq!(
+        focused(&harness).as_deref(),
+        Some("切换资源库 默认资源库"),
+        "越过末项回到首项"
     );
     harness.press_escape();
     assert_eq!(harness.model.sidebar.popover, PopoverMode::Closed);
@@ -96,25 +108,13 @@ fn arrows_on_the_repository_header_open_the_switcher_onto_either_end() {
         Some("资源库 · 默认资源库"),
         "关掉以后焦点回到仓库头"
     );
-
-    press_on(&mut harness, "资源库 · 默认资源库", "ArrowUp");
-    assert_eq!(
-        focused(&harness).as_deref(),
-        Some("删除当前资源库"),
-        "ArrowUp 聚焦末项"
-    );
-    press(&mut harness, "ArrowDown");
-    assert_eq!(
-        focused(&harness).as_deref(),
-        Some("切换资源库 默认资源库"),
-        "越过末项回到首项"
-    );
 }
 
 #[test]
 fn the_repository_popover_keeps_keyboard_focus_through_its_pages() {
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
-    press_on(&mut harness, "资源库 · 默认资源库", "ArrowDown");
+    press_on(&mut harness, "资源库 · 默认资源库", "Enter");
+    press(&mut harness, "Tab");
     press(&mut harness, "ArrowDown");
     assert_eq!(focused(&harness).as_deref(), Some("添加资源库"));
     press(&mut harness, "Enter");
@@ -280,58 +280,4 @@ fn tab_stays_inside_an_open_folder_menu() {
         assert!(inside, "Tab 走出了菜单：{:?}", focused(&harness));
     }
     assert!(harness.model.sidebar.folder_menu.is_some());
-}
-
-#[test]
-fn only_the_keyboard_asks_for_menu_focus() {
-    let press = |keyboard, focus| SecondaryPress {
-        target: StableNodeId::new(1).expect("编号"),
-        x: 0.0,
-        y: 0.0,
-        keyboard,
-        focus,
-    };
-    assert_eq!(
-        MenuEdge::of_press(&press(false, None)),
-        None,
-        "右键不动焦点"
-    );
-    assert_eq!(
-        MenuEdge::of_press(&press(true, None)),
-        Some(MenuEdge::First),
-        "菜单键和 Shift+F10 聚焦首项"
-    );
-    assert_eq!(
-        MenuEdge::of_press(&press(true, Some(RovingEdge::Start))),
-        Some(MenuEdge::First)
-    );
-    assert_eq!(
-        MenuEdge::of_press(&press(true, Some(RovingEdge::End))),
-        Some(MenuEdge::Last)
-    );
-}
-
-#[test]
-fn a_request_for_a_closed_menu_is_dropped() {
-    let mut model = scene("live-files-plain");
-    request(
-        &mut model,
-        MenuFocusRequest {
-            surface: MenuSurface::RepositorySwitcher,
-            edge: MenuEdge::First,
-        },
-    );
-    assert_eq!(model.menu_focus.latest(), None, "切换弹层没开，不记请求");
-    model.reduce(ShellMessage::Sidebar(
-        SidebarMessage::OpenRepositorySwitcher,
-    ));
-    assert!(MenuSurface::RepositorySwitcher.is_open(&model));
-    model.reduce(ShellMessage::FocusMenu(MenuFocusRequest {
-        surface: MenuSurface::RepositorySwitcher,
-        edge: MenuEdge::Last,
-    }));
-    assert_eq!(
-        model.menu_focus.latest().map(|(_, request)| request.edge),
-        Some(MenuEdge::Last)
-    );
 }

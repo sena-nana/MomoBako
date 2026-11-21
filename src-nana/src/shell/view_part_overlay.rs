@@ -15,6 +15,9 @@
 //! 记下的「打开前的焦点」是旧对话框还回去的那一个。弹层和菜单没有退场，换下就卸。右键菜单是 NanaUI
 //! `AnchoredActionMenu`，也挂在自己的 `OverlayHost` 下：放进浮层层以后经会话激活，换下时经宿主收起
 //! 再卸，浮层层随即不再挡住页面。每种浮层的入口函数在 [`overlay_branch`] 里登记。
+//!
+//! 仓库弹层是例外：它是侧栏仓库头上的 NanaUI `Popover`，各页的块不进浮层层，放进弹层面板里的
+//! 那一格（[`OverlaySignals::popover_slot`]），浮层层这时空着、不挡点击。换页、会话和焦点归还照常。
 
 use nana_ui::runtime::view::{AnyView, IntoView, NodeRef, widget};
 use nana_ui::runtime::{
@@ -38,9 +41,8 @@ use session::OverlaySession;
 /// 所以排在最后。
 ///
 /// Escape 先关显示着的那一层：显示着的对话框已经激活，运行时把 Escape 交给它、发它自己的关闭
-/// 请求，全局 Escape 不再发；显示着的右键菜单同样已经激活，Escape 由框架交给它。显示着的是弹层时
-/// 走全局 Escape（`escape_layer`），那里弹层的先后和这里一样，排在文件页的导出和文件对话框前面，
-/// 等着的对话框不会先被关掉。
+/// 请求，全局 Escape 不再发；显示着的右键菜单同样已经激活，Escape 由框架交给它；显示着的是仓库弹层时
+/// NanaUI 的 `Popover` 自己收下 Escape（提交中不收，全局 Escape 停在它这一层）。等着的对话框不会先被关掉。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum OverlayKey {
     /// 关闭确认。
@@ -232,9 +234,19 @@ impl Block {
     }
 }
 
+/// 浮层块用到的两个节点引用，在骨架的挂载闭包里建。
+#[derive(Clone, Copy)]
+pub(crate) struct OverlaySignals {
+    /// 浮层层，骨架挂好后指向 AppShell 的 overlay 槽位。
+    pub layer: NodeRef,
+    /// 仓库弹层面板里的一格，和侧栏共用（`SidebarSignals::popover_slot`）；侧栏建好后才指向节点。
+    pub popover_slot: NodeRef,
+}
+
 /// 浮层块。
 pub(crate) struct OverlayPart {
     layer: NodeRef,
+    popover_slot: NodeRef,
     identity: Option<OverlayIdentity>,
     /// 现在显示的这块。
     current: Option<Block>,
@@ -285,35 +297,54 @@ impl OverlayPart {
         self.layer.get_untracked()
     }
 
-    /// 浮层层的子节点排成：还在放退场的块在前，现在这块在最后、画在最上面。省掉的子节点（换下就卸的
-    /// 弹层）由 `reconcile_children` 停放，随后卸掉。
+    /// 浮层层的子节点排成：还在放退场的块在前，现在这块在最后、画在最上面。现在这块是仓库弹层的页时
+    /// 它放进弹层面板里的那一格，不进浮层层。省掉的子节点（换下就卸的弹层）由 `reconcile_children`
+    /// 停放，随后卸掉。侧栏还没建（主区独占）时那一格不在，仓库弹层的页停放着，记日志。
     fn place(&self, context: &mut AppContext) -> Result<(), FrameworkError> {
         let Some(layer) = self.layer.get_untracked() else {
             eprintln!("Nana 浮层层还没有挂上，浮层块放不进去");
             return Err(FrameworkError::InvalidInput);
         };
-        let children = self
-            .leaving
-            .iter()
-            .chain(&self.current)
-            .flat_map(|block| block.view.roots().iter().copied())
-            .collect::<Vec<_>>();
-        context.reconcile_children(layer, &children).map(|_| ())
+        let roots = |block: &Block| block.view.roots().to_vec();
+        let in_popover = self
+            .identity
+            .as_ref()
+            .is_some_and(|identity| identity.key == OverlayKey::RepositoryPopover);
+        let current = self.current.iter().flat_map(roots).collect::<Vec<_>>();
+        let mut children = self.leaving.iter().flat_map(roots).collect::<Vec<_>>();
+        let popover = if in_popover {
+            current
+        } else {
+            children.extend(current);
+            Vec::new()
+        };
+        context.reconcile_children(layer, &children)?;
+        match self.popover_slot.get_untracked() {
+            Some(slot) => context.reconcile_children(slot, &popover).map(|_| ()),
+            None if !popover.is_empty() => {
+                eprintln!("Nana 侧栏还没有建，仓库弹层的页放不进仓库头的弹层");
+                Ok(())
+            }
+            None => Ok(()),
+        }
     }
 }
 
 impl ShellPart for OverlayPart {
     const ID: PartId = PartId::Overlay;
-    /// 浮层层的节点引用，在骨架的挂载闭包里建，骨架挂好后指向 AppShell 的 overlay 槽位。
-    type Signals = NodeRef;
+    type Signals = OverlaySignals;
 
     fn signals(_: &ShellViewModel) -> Self::Signals {
-        nana_ui::runtime::view::node_ref()
+        OverlaySignals {
+            layer: nana_ui::runtime::view::node_ref(),
+            popover_slot: nana_ui::runtime::view::node_ref(),
+        }
     }
 
-    fn new(layer: Self::Signals) -> Self {
+    fn new(signals: Self::Signals) -> Self {
         Self {
-            layer,
+            layer: signals.layer,
+            popover_slot: signals.popover_slot,
             identity: None,
             current: None,
             leaving: Vec::new(),

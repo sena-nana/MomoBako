@@ -4,10 +4,6 @@
 //! 内容重挂后进行中的轨道还在，按已经走过的时间取样，不会从 0 重新开始。减少动效时全部立刻停在终点。
 //! 对话框的开合动效由 NanaUI 的对话框框架自己播，这里没有对话框的轨道。
 
-/// 面板透明度：`opacity 0.14s ease`。
-pub const PANEL_OPACITY_MS: u64 = 140;
-/// 面板上移。同一条规则里的 `transform 0.16s ease`，距离 4px。
-pub const PANEL_RISE_MS: u64 = 160;
 /// 启动条和任务弹层进度条的宽度：`transition: width 0.18s ease`。
 pub const PROGRESS_WIDTH_MS: u64 = 180;
 /// 不确定进度呼吸。`progress-pulse 1.15s ease-in-out`。
@@ -27,7 +23,6 @@ pub const FOLDER_HOVER_MS: u64 = 450;
 /// 虚拟列表缩略图空闲预取。
 pub const PREFETCH_IDLE_MS: u64 = 420;
 
-const PANEL_SHIFT: f32 = -4.0;
 const FOOTER_REST: f32 = 0.44;
 const PULSE_LOW: f32 = 0.42;
 /// 准备卡色条 `translateX(-120%)`，百分比相对色条自己的宽度。
@@ -62,7 +57,6 @@ enum EasingKind {
 pub struct MotionState {
     now_ms: u64,
     reduced: bool,
-    panel: Option<Track>,
     startup: Option<Track>,
     /// 任务弹层每一行进度条的填充宽度，按行键，见 [`MotionState::set_task_fills`]。
     task_fills: Vec<(String, Track)>,
@@ -73,7 +67,6 @@ pub struct MotionState {
     tools: Option<Track>,
     footer: Option<Track>,
     sidebar: Option<Track>,
-    panel_wants_open: bool,
     tools_hover: bool,
     footer_hover: bool,
     spinner_on: bool,
@@ -88,7 +81,6 @@ impl Default for MotionState {
         Self {
             now_ms: 0,
             reduced: false,
-            panel: None,
             startup: None,
             task_fills: Vec::new(),
             pulse: None,
@@ -97,7 +89,6 @@ impl Default for MotionState {
             tools: None,
             footer: None,
             sidebar: None,
-            panel_wants_open: false,
             tools_hover: false,
             footer_hover: false,
             spinner_on: false,
@@ -107,14 +98,6 @@ impl Default for MotionState {
             sidebar_expanded_width: crate::theme_map::SIDEBAR_DEFAULT_PX,
         }
     }
-}
-
-/// 面板当前画面。
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PanelFrame {
-    pub opacity: f32,
-    pub shift: f32,
-    pub visible: bool,
 }
 
 impl MotionState {
@@ -129,7 +112,6 @@ impl MotionState {
     /// 把时钟拨到绝对毫秒。进行中的轨道保持原来的起点。
     pub fn advance(&mut self, now_ms: u64) {
         self.now_ms = now_ms;
-        self.drop_finished();
     }
 
     pub fn set_reduced(&mut self, reduced: bool) {
@@ -150,7 +132,6 @@ impl MotionState {
         }
         sweep
             || [
-                &self.panel,
                 &self.startup,
                 &self.pulse,
                 &self.spinner,
@@ -168,37 +149,6 @@ impl MotionState {
                 .task_fills
                 .iter()
                 .any(|(_, track)| !track.finished(self.now_ms))
-    }
-
-    /// 开关有变化时返回 true，调用方据此把界面标成待重建。
-    pub fn set_panel_open(&mut self, open: bool) -> bool {
-        if open == self.panel_wants_open && self.panel.is_some() {
-            return false;
-        }
-        let changed = open != self.panel_wants_open;
-        self.panel_wants_open = open;
-        self.panel = Some(if self.reduced {
-            settled_scalar(open)
-        } else if open {
-            track(
-                self.now_ms,
-                0.0,
-                1.0,
-                PANEL_RISE_MS,
-                EasingKind::Ease,
-                false,
-            )
-        } else {
-            track(
-                self.now_ms,
-                1.0,
-                0.0,
-                PANEL_RISE_MS,
-                EasingKind::Ease,
-                false,
-            )
-        });
-        changed
     }
 
     pub fn set_startup_percent(&mut self, percent: f32) {
@@ -392,24 +342,6 @@ impl MotionState {
         });
     }
 
-    pub fn panel_frame(&self) -> PanelFrame {
-        let progress = self
-            .panel
-            .as_ref()
-            .map(|track| track.value(self.now_ms))
-            .unwrap_or(0.0);
-        let opacity = if self.reduced {
-            if self.panel_wants_open { 1.0 } else { 0.0 }
-        } else {
-            scalar_at(self.panel.as_ref(), self.now_ms, PANEL_OPACITY_MS)
-        };
-        PanelFrame {
-            opacity,
-            shift: PANEL_SHIFT * (1.0 - progress),
-            visible: self.panel_wants_open || progress > 0.01,
-        }
-    }
-
     pub fn startup_percent(&self) -> f32 {
         self.startup
             .as_ref()
@@ -506,9 +438,6 @@ impl MotionState {
     }
 
     fn snap_all(&mut self) {
-        if let Some(track) = &mut self.panel {
-            *track = settled_scalar(self.panel_wants_open);
-        }
         if let Some(track) = &mut self.startup {
             *track = track_done(track.to);
         }
@@ -531,20 +460,6 @@ impl MotionState {
             });
         }
     }
-
-    fn drop_finished(&mut self) {
-        if self
-            .panel
-            .as_ref()
-            .is_some_and(|track| track.finished(self.now_ms) && !self.panel_wants_open)
-        {
-            self.panel = None;
-        }
-    }
-}
-
-fn settled_scalar(open: bool) -> Track {
-    track_done(if open { 1.0 } else { 0.0 })
 }
 
 fn track_done(value: f32) -> Track {
@@ -574,21 +489,6 @@ fn track(
         easing,
         looping,
     }
-}
-
-fn scalar_at(track: Option<&Track>, now_ms: u64, duration_ms: u64) -> f32 {
-    let Some(track) = track else {
-        return 0.0;
-    };
-    let elapsed = now_ms.saturating_sub(track.started_ms);
-    let span = duration_ms.max(1);
-    let linear = (elapsed as f32 / span as f32).clamp(0.0, 1.0);
-    let eased = if track.to < track.from {
-        1.0 - apply_easing(EasingKind::Ease, 1.0 - linear)
-    } else {
-        apply_easing(EasingKind::Ease, linear)
-    };
-    eased.clamp(0.0, 1.0)
 }
 
 impl Track {
@@ -739,7 +639,6 @@ mod tests {
     #[test]
     fn reduced_motion_snaps_every_painted_track() {
         let mut motion = MotionState::default();
-        motion.set_panel_open(true);
         motion.set_startup_percent(40.0);
         motion.set_task_fills(&[("task".into(), 10.0)]);
         motion.set_task_fills(&[("task".into(), 32.0)]);
@@ -750,8 +649,6 @@ mod tests {
         motion.set_sidebar_collapsed(true, 276.0);
         motion.advance(40);
         motion.set_reduced(true);
-        assert_eq!(motion.panel_frame().opacity, 1.0);
-        assert_eq!(motion.panel_frame().shift, 0.0);
         assert_eq!(motion.startup_percent(), 40.0);
         assert_eq!(motion.task_fills(), vec![("task".to_string(), 32.0)]);
         assert_eq!(motion.spinner_degrees(), 0.0);
@@ -763,15 +660,8 @@ mod tests {
     }
 
     #[test]
-    fn panel_progress_spinner_and_sidebar_use_the_vue_durations() {
+    fn progress_spinner_and_sidebar_use_the_vue_durations() {
         let mut motion = MotionState::default();
-        motion.set_panel_open(true);
-        assert_eq!(motion.panel_frame().opacity, 0.0);
-        assert_eq!(motion.panel_frame().shift, PANEL_SHIFT);
-        motion.advance(PANEL_OPACITY_MS);
-        assert_eq!(motion.panel_frame().opacity, 1.0);
-        motion.advance(PANEL_RISE_MS);
-        assert_eq!(motion.panel_frame().shift, 0.0);
         motion.set_startup_percent(50.0);
         assert_eq!(motion.startup_percent(), 0.0);
         motion.advance(motion.now_ms() + PROGRESS_WIDTH_MS);

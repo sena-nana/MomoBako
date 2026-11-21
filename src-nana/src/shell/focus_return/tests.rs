@@ -196,7 +196,8 @@ fn with_form_backend() -> ShellViewModel {
 fn the_backend_form_takes_focus_and_gives_it_back_to_the_repository_header() {
     let mut harness = ShellHarness::mount(with_form_backend());
     let header = harness.node(HEADER);
-    press_on(&mut harness, HEADER, "ArrowDown");
+    press_on(&mut harness, HEADER, "Enter");
+    harness.press_key("Tab");
     harness.press_key("ArrowDown");
     assert_eq!(harness.focused_label().as_deref(), Some("添加资源库"));
     harness.press_key("Enter");
@@ -224,7 +225,9 @@ fn the_backend_form_takes_focus_and_gives_it_back_to_the_repository_header() {
 
     let mut harness = ShellHarness::mount(with_form_backend());
     let header = harness.node(HEADER);
+    // 弹层的展开动效放完，点得到面板下半截（换页后更高的那几项）。
     harness.click_label(HEADER);
+    harness.finish_motion();
     harness.click_label("添加资源库");
     harness.click_label(FORM_BACKEND);
     assert_eq!(harness.model.sidebar.popover, PopoverMode::BackendForm);

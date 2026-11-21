@@ -91,7 +91,7 @@ pub(crate) struct Regions {
     pub primary: Option<StableNodeId>,
     /// 浮层层：浮层块都是它的子节点。
     pub layer: Option<StableNodeId>,
-    /// 浮层层里现在显示的这一块。
+    /// 现在显示的这一块：在浮层层里，仓库弹层的页在侧栏仓库头的弹层里。
     pub overlay: Option<StableNodeId>,
 }
 
@@ -99,23 +99,21 @@ pub(crate) struct Regions {
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct Before {
     focused: Option<StableNodeId>,
-    /// 焦点在浮层层里：菜单、弹层或对话框里的控件。
+    /// 焦点在浮层里：浮层层里菜单、弹层或对话框的控件，或者现在显示的这一块里的控件（仓库弹层的页
+    /// 挂在侧栏仓库头的弹层里，不在浮层层）。
     in_overlay: bool,
 }
 
 impl Before {
-    pub(crate) fn capture(
-        context: &AppContext,
-        document: DocumentId,
-        layer: Option<StableNodeId>,
-    ) -> Self {
+    pub(crate) fn capture(context: &AppContext, document: DocumentId, regions: Regions) -> Self {
         let world = context.world();
         let Some(focused) = world.focused(document) else {
             return Self::default();
         };
         Self {
             focused: Some(focused),
-            in_overlay: within(world, focused, layer),
+            in_overlay: within(world, focused, regions.layer)
+                || within(world, focused, regions.overlay),
         }
     }
 

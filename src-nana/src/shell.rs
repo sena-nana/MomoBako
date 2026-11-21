@@ -59,10 +59,8 @@ pub(crate) mod inspect_lyrics;
 mod listening_progress;
 pub(crate) use inspect::support::is_video_extension;
 mod context_menu;
-mod dismiss_layer;
 mod focus_return;
 mod menu_focus;
-mod menu_focus_view;
 pub(crate) mod repo_operation;
 pub(crate) mod tree_sync;
 mod workspace;
@@ -209,8 +207,6 @@ pub enum ShellMessage {
     SilentWorkspace(workspace_refresh::SilentMessage),
     /// 刷新文件夹树时的同步和重读结果。具体分支在 `tree_sync::reduce_message` 里归约。
     TreeSync(tree_sync::TreeSyncMessage),
-    /// 键盘打开的菜单：焦点放进菜单的首项或末项，见 `menu_focus.rs`。
-    FocusMenu(menu_focus::MenuFocusRequest),
     /// 一次访问记录（`record_entry_access`）的结果：成功时是后端写下的访问时间，见 `library.rs`。
     EntryAccessRecorded {
         repo_id: String,
@@ -316,8 +312,6 @@ pub struct ShellViewModel {
     pub tree_sync: tree_sync::TreeSyncState,
     /// 任务弹层的「仓库操作」行，见 `repo_operation.rs`。
     pub operation: repo_operation::RepositoryOperation,
-    /// 键盘打开菜单时要把焦点放进哪个菜单，见 `menu_focus.rs`。
-    pub(crate) menu_focus: menu_focus::MenuFocus,
     /// 右键菜单打开时记下的滚动偏移。同一份菜单下偏移变了就关掉，见 `context_menu.rs`。
     pub(crate) context_menu_scroll: Option<context_menu::MenuScrollSnapshot>,
     /// 上次见到的窗口逻辑像素尺寸。变了才关右键菜单，见 `context_menu.rs`。
@@ -372,7 +366,6 @@ impl Default for ShellViewModel {
             status: status::StatusState::default(),
             tree_sync: tree_sync::TreeSyncState::default(),
             operation: repo_operation::RepositoryOperation::default(),
-            menu_focus: menu_focus::MenuFocus::default(),
             context_menu_scroll: None,
             context_menu_window: None,
             viewport_width: DEFAULT_VIEWPORT_PX,
@@ -531,7 +524,6 @@ impl ShellViewModel {
     }
 
     fn follow_motion(&mut self) {
-        let panel_open = self.sidebar.popover != sidebar::PopoverMode::Closed;
         let startup = f32::from(self.workspace.startup.percent);
         let spinner = self.sidebar.tree_loading
             || self.sidebar.submitting
@@ -539,9 +531,6 @@ impl ShellViewModel {
             || self.files.mutating
             || self.tree_sync.running()
             || status::busy(self);
-        if self.motion.set_panel_open(panel_open) {
-            self.surface_dirty = true;
-        }
         self.motion.set_startup_percent(startup);
         self.follow_task_fills();
         self.motion.set_spinner(spinner);
@@ -807,7 +796,6 @@ impl ShellViewModel {
             ShellMessage::SilentWorkspace(_) => {}
             ShellMessage::TreeSync(_) => {}
             ShellMessage::Asmr(_) => {}
-            ShellMessage::FocusMenu(request) => menu_focus::request(self, request),
             ShellMessage::EntryAccessRecorded {
                 repo_id,
                 path,

@@ -7,7 +7,8 @@
 //! 的行，顺序变了再排。
 
 use crate::shell::admin::TaskPopoverView;
-use nana_ui::runtime::view::{Signal, Store, signal, store};
+use crate::shell::sidebar_view::RepositoryPopoverView;
+use nana_ui::runtime::view::{NodeRef, Signal, Store, node_ref, signal, store};
 
 use super::super::row_sync::sync_rows;
 use super::super::sidebar::{SidebarFolder, SidebarSmartFolder};
@@ -31,6 +32,8 @@ pub(crate) struct SidebarView {
     pub footer: FooterView,
     /// 「任务」弹层：开没开着和各行。
     pub tasks: TaskPopoverView,
+    /// 仓库弹层：开没开着、提交中和面板宽。
+    pub repository: RepositoryPopoverView,
 }
 
 /// 仓库头，以及文件夹分组在不在。
@@ -282,6 +285,7 @@ impl SidebarView {
                 tasks: model.task_rows().len(),
             },
             tasks: TaskPopoverView::project(model),
+            repository: RepositoryPopoverView::project(model),
         }
     }
 }
@@ -434,6 +438,9 @@ pub(crate) struct SidebarSignals {
     pub smart_rows: Store<Vec<SmartRow>>,
     pub footer: Signal<FooterView>,
     pub tasks: Signal<TaskPopoverView>,
+    pub repository: Signal<RepositoryPopoverView>,
+    /// 仓库弹层面板里的那一格：浮层块把仓库弹层当前这一页挂进去（`view_part_overlay.rs`）。
+    pub popover_slot: NodeRef,
 }
 
 impl SidebarSignals {
@@ -452,6 +459,8 @@ impl SidebarSignals {
             smart_rows: store(view.smart_rows),
             footer: signal(view.footer),
             tasks: signal(view.tasks),
+            repository: signal(view.repository),
+            popover_slot: node_ref(),
         }
     }
 
@@ -478,6 +487,9 @@ impl SidebarSignals {
         sync_rows(self.smart_rows, smart_key, view.smart_rows);
         self.footer.try_set_if_changed(view.footer);
         self.tasks.try_set_if_changed(view.tasks);
+        // 仓库弹层每次同步都重申（`set` 总会通知）：框架自己开合了而 ViewModel 没跟（提交中点了仓库头），
+        // `open` 照 ViewModel 写回去；和弹层现在一样时绑定的 `differs` 拦下，不重投影。
+        self.repository.set(view.repository);
     }
 }
 

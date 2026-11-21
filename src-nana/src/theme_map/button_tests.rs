@@ -80,11 +80,6 @@ const ALLOWED_LITERALS: &[(&str, &str, &str)] = &[
         "播放队列弹层投影，shell.css `.workspace-player__queue`",
     ),
     (
-        "sidebar_view/popover.rs",
-        "[0.0, 0.0, 0.0, 0.62]",
-        "侧栏弹层投影，shell.css `.task-popover`、`.repository-add-popover`",
-    ),
-    (
         "admin/source_page.rs",
         "[1.0, 1.0, 1.0, 1.0]",
         "扫码登录二维码图片的白底，`.source-auth-settings__qr` 的 `background: white`",

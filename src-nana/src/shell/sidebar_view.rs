@@ -13,26 +13,25 @@ use std::sync::Arc;
 
 use nana_ui::icons_tabler::{
     ARCHIVE, BOOKMARK, CLIPBOARD_LIST, CLOCK_HOUR_3, FILE, LIST_TREE, LOADER_2, LOGS, PLAYER_PLAY,
-    PLUS, PUZZLE, REFRESH, SELECTOR, SETTINGS, TAG, TRASH,
+    PLUS, PUZZLE, REFRESH, SETTINGS, TAG, TRASH,
 };
 use nana_ui::runtime::view::{
     AnyView, El, IntoView, Item, Signal, Store, StoreList, StorePath, each, fields, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, IconButton, LengthSpec, ListItem, RadiusTier, SecondaryPress,
-    SemanticColorRole, SidebarFrame, Stack,
+    Activate, AlignSpec, IconButton, LengthSpec, ListItem, RadiusTier, SemanticColorRole,
+    SidebarFrame, Stack,
 };
 use nana_ui::{ButtonKind, ControlSize, Icon};
 
 use super::SidebarMessage;
 use super::hot::{HotSignals, SpinField};
-use super::menu_focus::{MenuEdge, MenuSurface, focus_menu};
 use super::player_view::key_part;
 use super::sidebar::ShortcutId;
 use super::status::StatusLine;
 use super::view_part_sidebar::project::{
-    FooterView, HeadView, NavView, PlaylistGroup, PlaylistRow, PlaylistRowStoreFields, QuickRow,
-    QuickTarget, SidebarSignals, playlist_key,
+    FooterView, NavView, PlaylistGroup, PlaylistRow, PlaylistRowStoreFields, QuickRow, QuickTarget,
+    SidebarSignals, playlist_key,
 };
 use super::{ShellMessage, WorkspacePanel};
 
@@ -45,6 +44,7 @@ pub use dialogs::{
     folder_delete_dialog, folder_dialog, playlist_create_dialog, repository_delete_dialog,
     smart_delete_dialog, smart_folder_dialog,
 };
+pub(crate) use popover::RepositoryPopoverView;
 pub use popover::repository_popover;
 pub use tree::folder_menu;
 pub(crate) use tree::folder_row_key;
@@ -85,49 +85,16 @@ pub fn sidebar_frame() -> SidebarFrame {
 /// 打布局补丁，带绑定的根节点重投影会把补丁冲掉。
 pub(crate) fn sidebar(signals: SidebarSignals, hot: HotSignals) -> AnyView {
     widget(sidebar_frame())
-        .top(sidebar_switcher(signals.head))
+        .top(sidebar_switcher(&signals))
         .body(sidebar_sections(signals, hot.spinner))
         .footer(sidebar_footer(signals.footer, signals.tasks, hot.footer))
         .into_any()
 }
 
-/// 仓库头的无障碍名：「资源库 · 仓库名」。只读「资源库」的话读屏听不到当前是哪个库，
-/// 所以把仓库名一起读出来。
-fn switcher_label(name: &str) -> String {
-    format!("资源库 · {name}")
-}
-
-/// 仓库头：当前仓库名加上下箭头，点开切换弹层。
-///
-/// 它是弹出菜单的按钮：焦点在它上面时 ArrowDown / ArrowUp（还有菜单键）
-/// 打开弹层，焦点落在切换列表的首项或末项。
-fn sidebar_switcher(head: Signal<HeadView>) -> AnyView {
-    let name = head.with_untracked(|head| head.name.clone());
-    let mut style = parts::row_style(28.0, 8.0, 8.0, 6.0, parts::ActiveTone::Accent, false);
-    Arc::make_mut(&mut style.layout).font_weight = Some(600);
-    let content = widget(Stack::fill_row(6.0).align(AlignSpec::Center)).children((
-        widget(parts::fill_text(name.clone(), 13.0, 600))
-            .prop::<String, fields::text::value>(move || head.with(|head| head.name.clone())),
-        widget(parts::inherit_icon(SELECTOR, 13.0)),
-    ));
-    let switcher = widget(
-        ListItem::new(switcher_label(&name))
-            .has_popup(true)
-            .style(style),
-    )
-    .prop::<String, fields::list_item::label>(move || head.with(|head| switcher_label(&head.name)))
-    .content(content)
-    .key("repository-switcher")
-    .on_cx(|_, _: &Activate, cx| {
-        cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenRepositorySwitcher));
-    })
-    .on_cx(|_, event: &SecondaryPress, cx| {
-        let Some(edge) = MenuEdge::of_press(event) else {
-            return;
-        };
-        cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenRepositorySwitcher));
-        cx.dispatch_program_all(focus_menu(MenuSurface::RepositorySwitcher, edge));
-    });
+/// 仓库头那一块：仓库头（打开仓库弹层的触发器，见 [`popover::repository_switcher`]），下面一条分隔线。
+fn sidebar_switcher(signals: &SidebarSignals) -> AnyView {
+    let switcher =
+        popover::repository_switcher(signals.head, signals.repository, signals.popover_slot);
     let top = Stack::column(0.0).with_layout(|layout| {
         layout.padding_bottom = Some(LengthSpec::Px(8.0));
         layout.border_sides.bottom_width = Some(1.0);

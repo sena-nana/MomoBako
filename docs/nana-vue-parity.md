@@ -142,7 +142,7 @@ Vue 前端、Tauri 外壳和插件前端已经删掉（见 [迁移边界](./nana
 
 ### 交互
 - 右键菜单的分组（「加入播放列表」「缩略图」）：Vue 照 `.ctx-menu__slot:hover` / `:focus-within` 在分组右边弹出子菜单。Nana 的右键菜单是 NanaUI 的 `AnchoredActionMenu`，没有层叠的子菜单：分组是点了不收起的一项，点它（或焦点在上面按 Enter）在下面缩进展开子项，再点一次收起，同一时刻只展开一个；指针悬停、焦点进出都不展开，方向键照常走进展开的子项。
-- 键盘打开菜单（`menu_focus.rs`）：仓库头和文件页的「导入」是菜单按钮（`has_popup`，仓库头照 Vue 的 `aria-haspopup="menu"`），焦点在上面时 ArrowDown 打开菜单、焦点落在首项，ArrowUp 落在末项；文件卡片和侧栏文件夹行上的菜单键和 Shift+F10 打开右键菜单。切换列表、添加菜单和导入菜单各是一个方向键焦点组，上下键在本层的项之间走、首尾相接，Enter 执行。两种右键菜单由 NanaUI 管键盘：右键和菜单键打开的都把焦点放进首项，上下键、Home、End 在项之间走、首尾相接，Enter 执行，Tab 留在菜单里。菜单关掉以后焦点去哪见下面的「焦点归还」。Vue 的这些菜单没有方向键，也不把焦点放进菜单。
+- 键盘打开菜单：仓库头是 NanaUI `Popover` 的触发器、文件页的「导入」是 NanaUI `ActionMenu`，Enter 打开，收起后框架把焦点还给触发器（仓库头打开后 Tab 进到切换列表，「导入」打开后方向键直接走到条目）；文件卡片和侧栏文件夹行上的菜单键和 Shift+F10 打开右键菜单（NanaUI `AnchoredActionMenu`），焦点落在首项。切换列表、添加菜单、导入菜单和两种右键菜单里，上下键在项之间走、首尾相接，Enter 执行。菜单关掉以后焦点去哪见下面的「焦点归还」。Vue 的这些菜单没有方向键，也不把焦点放进菜单。
 - 文件夹行的右键菜单和文件右键菜单是同一份实现（`context_menu.rs`，NanaUI `AnchoredActionMenu`），外观用 NanaUI 的菜单配方，键盘操作也一样；Vue 里两处也是同一个 `ContextMenuHost`。原来文件夹菜单是 NanaUI 的 `ContextMenu`，没经 `OverlayHost` 打开，方向键和 Enter 走不到它，菜单键也不开。Vue 的文件夹菜单只能右键打开。
 - 右键菜单开着时焦点留在菜单里：Tab 不走回页面，方向键不落到下面的控件，Escape 由框架交给菜单。菜单按落点放，放不下时翻到另一边、收进窗口，也由框架负责。
 - 所有对话框都响应 Escape、点外面和关闭位（处理中都不关）。Vue 手写的 `.modal-overlay` 对话框（删除资源库、文件夹、智能文件夹、播放集等）都不响应 Escape，只有删除插件用的 Lilia `ConfirmDialog` 响应；这里一致响应。

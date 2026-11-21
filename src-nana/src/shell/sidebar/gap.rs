@@ -244,6 +244,8 @@ pub enum EscapeLayer {
     PlaylistDialog,
     /// 来源下载的「选择目标资源库」。
     DownloadTarget,
+    /// 提交中的仓库弹层。仓库弹层平时由 NanaUI 的 `Popover` 自己收 Escape；提交中它不收，Escape 停在
+    /// 这一层（不关它），不越过它去关后面藏着的层。
     RepositoryPopover,
     /// 文件页的浮层：导出对话框 → 硬链接确认 → 文件对话框，文件操作进行中不关。右键菜单开着时
     /// Escape 由框架交给菜单，不在这里。
@@ -267,7 +269,7 @@ pub fn escape_layer(model: &super::super::ShellViewModel) -> Option<EscapeLayer>
         EscapeLayer::PlaylistDialog
     } else if model.admin.download_target.is_some() {
         EscapeLayer::DownloadTarget
-    } else if sidebar.popover != super::PopoverMode::Closed {
+    } else if sidebar.popover != super::PopoverMode::Closed && sidebar.submitting {
         EscapeLayer::RepositoryPopover
     } else {
         EscapeLayer::Files(model.files.escape_layer()?)
@@ -293,9 +295,7 @@ pub fn dismiss_top(model: &mut super::super::ShellViewModel) -> bool {
         }
         EscapeLayer::PlaylistDialog => model.close_playlist_dialog(),
         EscapeLayer::DownloadTarget => super::super::admin::source_target::cancel(model),
-        EscapeLayer::RepositoryPopover => {
-            model.sidebar.close_popover();
-        }
+        EscapeLayer::RepositoryPopover => {}
         EscapeLayer::Files(_) => return model.files.dismiss_overlay(),
     }
     true

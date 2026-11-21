@@ -15,33 +15,13 @@ use std::time::Duration;
 use nana_ui::runtime::view::{FieldWrite, PropSource, Signal, StyledComponent, signal};
 use nana_ui::runtime::{IconGlyph, LengthSpec, Stack, Workspace};
 use nana_ui::{RegionId, WorkspaceMutation};
-use nana_ui_core::PaintTransform;
 
 use super::ShellViewModel;
-use super::motion::{MotionState, shift_scale, spin_transform};
-
-/// 弹层外框的透明度和变换：淡入上移。
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct LayerPaint {
-    pub opacity: f32,
-    pub transform: PaintTransform,
-}
-
-impl LayerPaint {
-    /// 弹层：透明度和 4px 上移。
-    pub(crate) fn panel(motion: &MotionState) -> Self {
-        let frame = motion.panel_frame();
-        Self {
-            opacity: frame.opacity,
-            transform: shift_scale(frame.shift, 1.0),
-        }
-    }
-}
+use super::motion::spin_transform;
 
 /// 动效时钟这一刻在界面上的样子。
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct MotionFrame {
-    pub panel: LayerPaint,
     /// 启动进度条填充的百分比。
     pub startup_percent: f32,
     /// 忙指示旋转角，单位度。
@@ -61,7 +41,6 @@ impl MotionFrame {
     pub(crate) fn project(model: &ShellViewModel) -> Self {
         let motion = &model.motion;
         Self {
-            panel: LayerPaint::panel(motion),
             startup_percent: motion.startup_percent(),
             spinner_degrees: motion.spinner_degrees(),
             footer_opacity: motion.footer_opacity(),
@@ -142,7 +121,6 @@ impl TitleBarView {
 /// 热投影的信号。句柄是 `Copy` 的 id，值在骨架的挂载作用域里，骨架卸载时一起回收。
 #[derive(Clone, Copy)]
 pub(crate) struct HotSignals {
-    pub panel: Signal<LayerPaint>,
     pub startup: Signal<f32>,
     pub spinner: Signal<f32>,
     pub footer: Signal<f32>,
@@ -166,7 +144,6 @@ impl HotSignals {
         selection_box: super::files_selection_box::SelectionBox,
     ) -> Self {
         Self {
-            panel: signal(motion.panel),
             startup: signal(motion.startup_percent),
             spinner: signal(motion.spinner_degrees),
             footer: signal(motion.footer_opacity),
@@ -182,7 +159,7 @@ impl HotSignals {
 
     /// 骨架还在：信号所在的作用域没有被回收。
     pub(crate) fn alive(&self) -> bool {
-        self.panel.defined_at().is_some()
+        self.startup.defined_at().is_some()
     }
 
     /// 写入这一帧的投影，只写变了的。信号可能已经随文档回收，回收了就不写。
@@ -193,7 +170,6 @@ impl HotSignals {
         playback: &PlaybackView,
         selection_box: super::files_selection_box::SelectionBox,
     ) {
-        self.panel.try_set_if_changed(motion.panel);
         self.startup.try_set_if_changed(motion.startup_percent);
         self.spinner.try_set_if_changed(motion.spinner_degrees);
         self.footer.try_set_if_changed(motion.footer_opacity);
@@ -321,25 +297,6 @@ pub(crate) fn prop<T: Clone + 'static>(
     match CURRENT.with(Cell::get) {
         Some(signals) => PropSource::Signal(pick(&signals)),
         None => PropSource::Const(fallback),
-    }
-}
-
-/// `Stack` 的透明度和变换，弹层外框用。
-pub(crate) struct LayerPaintField;
-
-impl FieldWrite<Stack, LayerPaint> for LayerPaintField {
-    const FIELD: &'static str = "Stack.style.layout.opacity+transform";
-
-    fn write(target: &mut Stack, value: LayerPaint) {
-        let layout = Arc::make_mut(&mut <Stack as StyledComponent>::node_style_mut(target).layout);
-        layout.opacity = Some(value.opacity);
-        layout.transforms.transform = Some(value.transform);
-    }
-
-    fn differs(target: &Stack, value: &LayerPaint) -> bool {
-        let layout = &<Stack as StyledComponent>::node_style(target).layout;
-        layout.opacity != Some(value.opacity)
-            || layout.transforms.transform != Some(value.transform)
     }
 }
 

@@ -11,7 +11,7 @@
 //!
 //! 数据流：`ShellMessage → reduce → 服务副作用 → ShellView::sync`。同步先写热信号和标题栏字段，
 //! 再让每一块写自己的信号、按需重挂，最后处理焦点：浮层开合时按统一的规则交还焦点
-//! （`focus_return.rs`），再把焦点放进键盘打开的菜单（`menu_focus_view.rs`）。
+//! （`focus_return.rs`）；键盘打开的菜单由 NanaUI 把焦点放进去。
 //! 焦点在某块里、输入法还有预编辑时，这块的重挂延后，`prepare`
 //! 每帧经 [`ShellView::retry_deferred`] 检查，组合结束后补挂；`prepare` 每帧还经
 //! [`ShellView::settle_overlays`] 卸掉放完退场的对话框。每帧画完以后（`presented`）经
@@ -34,9 +34,8 @@ use super::focus_return::{Before, FocusReturn, Regions};
 use super::hot::{
     self, HotSignals, ModelField, MotionFrame, PlaybackView, TaskFills, TitleBarView, TitleSignals,
 };
-use super::menu_focus_view::MenuFocusView;
 use super::view_part::{BodyMode, PartCx, PartId, ShellPart, Swap, body_mode};
-use super::view_part_overlay::OverlayPart;
+use super::view_part_overlay::{OverlayPart, OverlaySignals};
 use super::view_part_primary::PrimaryPart;
 use super::view_part_sidebar::SidebarPart;
 
@@ -73,8 +72,6 @@ pub(crate) struct ShellView {
     overlay: OverlayPart,
     /// 等输入法组合结束才重挂的块。
     deferred: Vec<PartId>,
-    /// 键盘打开的菜单：焦点放进去。
-    menu_focus: MenuFocusView,
     /// 浮层关掉以后把焦点还回去。
     focus_return: FocusReturn,
     /// 最近一次整体同步时 ViewModel 的版本。
@@ -115,11 +112,13 @@ impl ShellView {
                 let hot = HotSignals::new(motion, fills.clone(), &playback, selection_box);
                 let title = TitleSignals::new(&title_view);
                 let query = ModelField::new(&title_view.query);
-                let parts = (
-                    SidebarPart::signals(model),
-                    PrimaryPart::signals(model),
-                    OverlayPart::signals(model),
-                );
+                let sidebar = SidebarPart::signals(model);
+                // 仓库弹层的页由浮层块挂进侧栏仓库头的弹层里，两边共用那一格。
+                let overlay = OverlaySignals {
+                    popover_slot: sidebar.popover_slot,
+                    ..OverlayPart::signals(model)
+                };
+                let parts = (sidebar, PrimaryPart::signals(model), overlay);
                 let shell = entity_ref::<AppShell>();
                 let workspace = entity_ref::<Workspace>();
                 let marker = node_ref();
@@ -135,7 +134,7 @@ impl ShellView {
                             query.signal(),
                             &title_view.query,
                         ))
-                        .overlay(super::view_part_overlay::layer(parts.2))
+                        .overlay(super::view_part_overlay::layer(parts.2.layer))
                         .entity_ref(shell),
                 );
                 made = Some((hot, title, query, parts));
@@ -158,7 +157,6 @@ impl ShellView {
             primary: PrimaryPart::new(primary),
             overlay: OverlayPart::new(overlay),
             deferred: Vec::new(),
-            menu_focus: MenuFocusView::new(model),
             focus_return: FocusReturn::default(),
             revision: model.revision,
             thumbnails_scanned: None,
@@ -244,7 +242,7 @@ impl ShellView {
             return Err(FrameworkError::MissingView(self.shell.stable_id()));
         }
         let document_id = document.document();
-        let before = Before::capture(document.context(), document_id, self.overlay.layer_id());
+        let before = Before::capture(document.context(), document_id, self.regions());
         self.write_signals(document, model)?;
         let mode = body_mode(model);
         let mut swap = Swap::default();
@@ -291,8 +289,6 @@ impl ShellView {
         self.settle(document, mode, swap, error)?;
         self.overlay.sweep(document.context_mut());
         self.return_focus(document, model, before);
-        self.menu_focus
-            .sync(document.context_mut(), document_id, model);
         self.revision = model.revision;
         Ok(())
     }
@@ -419,11 +415,7 @@ impl ShellView {
         if self.deferred.is_empty() || !self.alive() {
             return Ok(());
         }
-        let before = Before::capture(
-            document.context(),
-            document.document(),
-            self.overlay.layer_id(),
-        );
+        let before = Before::capture(document.context(), document.document(), self.regions());
         let mut swap = Swap::default();
         let mut error = None;
         {

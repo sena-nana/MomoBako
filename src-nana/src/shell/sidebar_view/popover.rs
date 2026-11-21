@@ -1,169 +1,200 @@
-//! 仓库切换弹层：切换列表、添加菜单和后端表单。
+//! 仓库弹层：切换列表、添加菜单和后端表单。
 //!
-//! 位置：左边和仓库头按钮对齐，顶边在按钮下方 6px；
-//! 切换列表和按钮同宽，添加菜单按右键菜单的最小宽 180px，表单 320px，左右夹在视口里。
-//! 弹层下面铺一层透明的点击层，点弹层外面关闭；提交中归约不关。
-//! 切换列表和添加菜单是菜单：项在方向键焦点组里，键盘从仓库头打开时焦点落在首项或末项（`menu_focus.rs`）。
+//! 弹层是 NanaUI 的 `Popover`，触发器就是侧栏的仓库头（当前仓库名加上下箭头，[`repository_switcher`]）。
+//! 开合、点外面和 Escape 收起、收起后焦点回到仓库头、放不下时翻面和收进窗口都交给框架；框架开合时发的
+//! `PopoverToggled` 换成打开切换列表或关闭弹层的消息写回 ViewModel，ViewModel 的开合经 `open` 写回弹层，
+//! 提交中点外面和 Escape 不收起。面板左边对齐仓库头、在它下面 6px；切换列表和仓库头同宽，添加菜单按
+//! 右键菜单的最小宽 180px，表单 320px。外框（底色、描边、圆角）由框架画，各页只留自己的内边距。
+//! 切换列表和添加菜单是菜单：项在方向键焦点组里，上下键在项之间走、首尾相接。
 //!
-//! 弹层常驻：三页（切换、添加、表单）各是一块，换页时浮层块按身份换块；同一页打开期间位置、
-//! 列表、禁用和错误都经信号原地改，列表行按内容做键，变了的那一行才重建；表单输入框受控。
+//! 面板里只有一格，三页（切换、添加、表单）各是一块浮层块（`view_part_overlay.rs`），挂进这一格；
+//! 换页时浮层块按身份换块。同一页打开期间列表、禁用和错误都经信号原地改，列表行按内容做键，变了的
+//! 那一行才重建；表单输入框受控。
 
-use crate::shell::dismiss_layer::{DismissCover, dismiss_layer};
 use std::sync::Arc;
 
-use nana_ui::icons_tabler::{CHECK, PLUS, TRASH, X};
+use nana_ui::icons_tabler::{CHECK, PLUS, SELECTOR, TRASH, X};
 use nana_ui::runtime::view::{
-    AnyView, FieldWrite, IntoProp, IntoView, Signal, computed, each, fields, signal, widget,
+    AnyView, FieldWrite, IntoProp, IntoView, NodeRef, Signal, computed, each, fields, signal,
+    widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, IconButton, LengthSpec, ListItem, RadiusTier, SemanticColorRole, Stack,
+    Activate, AlignSpec, IconButton, LengthSpec, ListItem, Popover, PopoverAlignment,
+    PopoverToggled, RadiusTier, SemanticColorRole, Stack,
 };
 use nana_ui::{ButtonKind, ControlSize, Icon};
 
-use super::super::hot::{self, LayerPaint, LayerPaintField};
 use super::super::menu_focus::MENU_KEYS;
 use super::super::sidebar::{BackendOption, GapMessage, PopoverMode, backend_options};
+use super::super::view_part_overlay::OverlayKey;
 use super::super::view_part_overlay::dialog::{DimmedDisabled, action, text_field, wrapping_text};
 use super::super::view_part_overlay::session::{Draft, Projected};
+use super::super::view_part_sidebar::project::HeadView;
 use super::super::{ShellMessage, ShellViewModel, SidebarMessage};
-use super::parts::{self, ActiveTone};
+use super::parts::{self, ActiveTone, PopoverOpen};
 use super::sidebar_message;
 
-/// 标题栏高度加侧栏上内边距：仓库头按钮的顶边。
-const ANCHOR_TOP: f32 = 36.0 + 10.0;
-/// 仓库头按钮高度。
-const ANCHOR_HEIGHT: f32 = 28.0;
-/// 侧栏左内边距加仓库头左内边距：仓库头按钮的左边。
-const ANCHOR_LEFT: f32 = 8.0 + 2.0;
-/// 弹层顶边在按钮下方的间距。
+/// 侧栏和仓库头的左右内边距合起来：切换列表比侧栏窄这么多，和仓库头同宽。
+const SWITCHER_INSET: f32 = 2.0 * (8.0 + 2.0);
+/// 面板顶边在仓库头下方的间距。
 const ANCHOR_GAP: f32 = 6.0;
-/// 视口边距。
-const VIEWPORT_MARGIN: f32 = 8.0;
 const ADD_MENU_WIDTH: f32 = 180.0;
 const FORM_WIDTH: f32 = 320.0;
 
-/// 弹层外框放在哪：左、上和宽。窗口缩放或侧栏变宽时原地挪。
+/// 仓库弹层随 ViewModel 变的部分。
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct Placement {
-    pub left: f32,
-    pub top: f32,
+pub(crate) struct RepositoryPopoverView {
+    /// 显示着：ViewModel 开着弹层，而且前面没有排着别的浮层（`OverlayKey` 的先后）。
+    pub open: bool,
+    /// 提交中：点外面和 Escape 不收起。
+    pub submitting: bool,
+    /// 面板宽：切换列表和仓库头同宽，添加菜单 180，表单 320。关着时按切换列表算。
     pub width: f32,
 }
 
-impl Placement {
-    pub(crate) fn project(model: &ShellViewModel) -> Option<Self> {
+impl RepositoryPopoverView {
+    pub(crate) fn project(model: &ShellViewModel) -> Self {
         let width = match model.sidebar.popover {
-            PopoverMode::Closed => return None,
-            PopoverMode::Switcher => (model.workspace.sidebar_width - 2.0 * ANCHOR_LEFT).max(0.0),
+            PopoverMode::Closed | PopoverMode::Switcher => {
+                (model.workspace.sidebar_width - SWITCHER_INSET).max(0.0)
+            }
             PopoverMode::AddMenu => ADD_MENU_WIDTH,
             PopoverMode::BackendForm => FORM_WIDTH,
         };
-        let max_left = (model.viewport_width - width - VIEWPORT_MARGIN).max(VIEWPORT_MARGIN);
-        Some(Self {
-            left: ANCHOR_LEFT.clamp(VIEWPORT_MARGIN, max_left),
-            top: ANCHOR_TOP + ANCHOR_HEIGHT + ANCHOR_GAP,
+        Self {
+            open: OverlayKey::of(model) == Some(OverlayKey::RepositoryPopover),
+            submitting: model.sidebar.submitting,
             width,
-        })
+        }
     }
 }
 
-/// 打开的仓库弹层。关闭时返回 `None`。
-pub fn repository_popover(model: &ShellViewModel) -> Option<AnyView> {
-    let placement = signal(Placement::project(model)?);
-    Projected::register(placement, Placement::project);
-    let panel = match model.sidebar.popover {
-        PopoverMode::Switcher => switcher(model),
-        PopoverMode::AddMenu => add_menu(model),
-        PopoverMode::BackendForm => backend_form(model),
-        PopoverMode::Closed => return None,
-    };
-    // 淡入和上移逐帧走，绑在热信号上，开合动效不重挂弹层。
-    let paint = hot::prop(|signals| signals.panel, LayerPaint::panel(&model.motion));
-    let positioned = widget(
-        Stack::column(0.0)
-            .with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Absolute),
-    )
-    .prop::<Placement, PlacementField>(placement)
-    .prop::<LayerPaint, LayerPaintField>(paint)
-    .children((panel,))
-    .into_any();
-    Some(
-        widget(
-            Stack::fill_column(0.0)
-                .with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative),
-        )
-        .children((popover_dismiss(), positioned))
-        .key("repository-popover-layer")
-        .into_any(),
-    )
+/// 仓库头的无障碍名：「资源库 · 仓库名」。只读「资源库」的话读屏听不到当前是哪个库，
+/// 所以把仓库名一起读出来。
+fn switcher_label(name: &str) -> String {
+    format!("资源库 · {name}")
 }
 
-/// 弹层外框的位置和宽度。
-struct PlacementField;
-
-impl FieldWrite<Stack, Placement> for PlacementField {
-    const FIELD: &'static str = "Stack.style.layout.offset+width";
-
-    fn write(target: &mut Stack, value: Placement) {
-        let layout = Arc::make_mut(
-            &mut <Stack as nana_ui::runtime::view::StyledComponent>::node_style_mut(target).layout,
-        );
-        layout.offset_left = Some(LengthSpec::Px(value.left));
-        layout.offset_top = Some(LengthSpec::Px(value.top));
-        layout.width = Some(LengthSpec::Px(value.width));
-    }
-
-    fn differs(target: &Stack, value: &Placement) -> bool {
-        let layout = &<Stack as nana_ui::runtime::view::StyledComponent>::node_style(target).layout;
-        layout.offset_left != Some(LengthSpec::Px(value.left))
-            || layout.offset_top != Some(LengthSpec::Px(value.top))
-            || layout.width != Some(LengthSpec::Px(value.width))
-    }
-}
-
-/// 弹层外的透明点击层。提交中归约不关。
-fn popover_dismiss() -> AnyView {
-    dismiss_layer("关闭资源库弹层", DismissCover::Container)
-        .key("repository-popover-dismiss")
-        .on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program_all(sidebar_message(SidebarMessage::CloseRepositoryPopover))
+/// 仓库头：NanaUI `Popover` 的触发器，画成侧栏的一行（当前仓库名加上下箭头），点一下或 Enter 打开弹层。
+/// 面板里只有一格 `slot`，浮层块把当前这一页挂进去。框架打开时发打开切换列表，收起时发关闭弹层；
+/// ViewModel 没跟（提交中）时，`open` 在下一次同步照 ViewModel 写回（`SidebarSignals::write`）。
+pub(crate) fn repository_switcher(
+    head: Signal<HeadView>,
+    popover: Signal<RepositoryPopoverView>,
+    slot: NodeRef,
+) -> AnyView {
+    let name = head.with_untracked(|head| head.name.clone());
+    let width = popover.with_untracked(|view| view.width);
+    let mut style = parts::row_style(28.0, 8.0, 8.0, 6.0, ActiveTone::Accent, false);
+    Arc::make_mut(&mut style.layout).font_weight = Some(600);
+    let trigger = widget(Stack::fill_row(6.0).align(AlignSpec::Center))
+        .children((
+            widget(parts::fill_text(name.clone(), 13.0, 600))
+                .prop::<String, fields::text::value>(move || head.with(|head| head.name.clone())),
+            widget(parts::inherit_icon(SELECTOR, 13.0)),
+        ))
+        .key("repository-switcher-trigger");
+    let anchor = Popover::new()
+        .trigger(switcher_label(&name))
+        .bare_trigger(true)
+        .trigger_style(style)
+        .alignment(PopoverAlignment::Start)
+        .gap(ANCHOR_GAP)
+        .padding(0.0)
+        .width(width);
+    let slot = widget(Stack::column(0.0).width(LengthSpec::Fill))
+        .node_ref(slot)
+        .key("repository-popover-slot");
+    widget(anchor)
+        .prop::<String, SwitcherLabel>(move || head.with(|head| switcher_label(&head.name)))
+        .prop::<bool, PopoverOpen>(move || popover.with(|view| view.open))
+        .prop::<f32, PanelWidth>(move || popover.with(|view| view.width))
+        .prop::<bool, Dismissable>(move || popover.with(|view| !view.submitting))
+        .trigger(trigger)
+        .children((slot,))
+        .key("repository-switcher")
+        .on_cx(|_, toggled: &PopoverToggled, cx| {
+            cx.dispatch_program_all(sidebar_message(if toggled.open {
+                SidebarMessage::OpenRepositorySwitcher
+            } else {
+                SidebarMessage::CloseRepositoryPopover
+            }));
         })
         .into_any()
 }
 
-/// 弹层外框：`--bg-elev` 底、`--border-strong` 描边、`--radius-md`、投影。`menu` 为真时（切换列表、添加菜单）
+/// 仓库头的无障碍名，换仓库时跟着改。
+struct SwitcherLabel;
+
+impl FieldWrite<Popover, String> for SwitcherLabel {
+    const FIELD: &'static str = "Popover.trigger";
+
+    fn write(target: &mut Popover, label: String) {
+        target.trigger = label.into();
+    }
+
+    fn differs(target: &Popover, label: &String) -> bool {
+        target.trigger.as_ref() != label.as_str()
+    }
+}
+
+/// 面板宽，换页时跟着改。框架给面板定了最小宽，这里照它夹。
+struct PanelWidth;
+
+impl FieldWrite<Popover, f32> for PanelWidth {
+    const FIELD: &'static str = "Popover.width";
+
+    fn write(target: &mut Popover, width: f32) {
+        target.width = Popover::new().width(width).width;
+    }
+
+    fn differs(target: &Popover, width: &f32) -> bool {
+        target.width != Popover::new().width(*width).width
+    }
+}
+
+/// 点外面和 Escape 收不收起：提交中都不收。
+struct Dismissable;
+
+impl FieldWrite<Popover, bool> for Dismissable {
+    const FIELD: &'static str = "Popover.close_on_escape+close_on_outside";
+
+    fn write(target: &mut Popover, dismissable: bool) {
+        target.close_on_escape = dismissable;
+        target.close_on_outside = dismissable;
+    }
+
+    fn differs(target: &Popover, dismissable: &bool) -> bool {
+        target.close_on_escape != *dismissable || target.close_on_outside != *dismissable
+    }
+}
+
+/// 打开的仓库弹层当前这一页。关闭时返回 `None`。
+pub fn repository_popover(model: &ShellViewModel) -> Option<AnyView> {
+    match model.sidebar.popover {
+        PopoverMode::Switcher => Some(switcher(model)),
+        PopoverMode::AddMenu => Some(add_menu(model)),
+        PopoverMode::BackendForm => Some(backend_form(model)),
+        PopoverMode::Closed => None,
+    }
+}
+
+/// 一页：竖排、撑满面板宽，`padding` 是这一页自己的内边距。`menu` 为真时（切换列表、添加菜单）
 /// 里面的项是一个方向键焦点组，上下键在项之间走。
-fn surface(
+fn page(
     padding: f32,
     gap: f32,
     children: Vec<AnyView>,
     label_key: &'static str,
     menu: bool,
 ) -> AnyView {
-    let surface = widget(
-        Stack::column(gap)
-            .padding(padding)
-            .surface(SemanticColorRole::Surface)
-            .border(SemanticColorRole::BorderStrong, 1.0)
-            .radius(RadiusTier::Md)
-            .with_layout(|layout| {
-                layout.paint.box_shadows = vec![nana_ui_core::BoxShadowSpec {
-                    paint_color: None,
-                    offset_x: 0.0,
-                    offset_y: 12.0,
-                    blur_radius: 32.0,
-                    spread_radius: -12.0,
-                    color: [0.0, 0.0, 0.0, 0.62],
-                    inset: false,
-                }];
-            }),
-    )
-    .children(children)
-    .key(label_key);
+    let page = widget(Stack::column(gap).padding(padding).width(LengthSpec::Fill))
+        .children(children)
+        .key(label_key);
     if menu {
-        surface.roving_focus(MENU_KEYS).into_any()
+        page.roving_focus(MENU_KEYS).into_any()
     } else {
-        surface.into_any()
+        page.into_any()
     }
 }
 
@@ -247,7 +278,7 @@ fn switcher(model: &ShellViewModel) -> AnyView {
             ),
         ))
         .into_any();
-    surface(
+    page(
         6.0,
         6.0,
         vec![
@@ -384,7 +415,7 @@ fn add_menu(model: &ShellViewModel) -> AnyView {
             "没有可用的资源库来源插件。",
             "repository-backend-empty",
         ),));
-    surface(
+    page(
         4.0,
         1.0,
         vec![
@@ -619,7 +650,7 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
             || sidebar_message(SidebarMessage::Gap(GapMessage::SubmitBackend)),
         ),
     ));
-    surface(
+    page(
         10.0,
         10.0,
         vec![

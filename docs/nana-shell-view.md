@@ -165,12 +165,12 @@
 
 ## 浮层：常驻和统一的对话框
 
-浮层块（`view_part_overlay.rs`）按 `OverlayIdentity` 换块：身份是 `OverlayKey`（哪一种浮层）加上它结构上的变化（文件对话框的种类、仓库弹层的页、右键菜单的目标和落点）。身份不变时浮层常驻，同一时刻最多显示一块。
+浮层块（`view_part_overlay.rs`）按 `OverlayIdentity` 换块：身份是 `OverlayKey`（哪一种浮层）加上它结构上的变化（文件对话框的种类、仓库弹层的页、右键菜单的目标和落点）。身份不变时浮层常驻，同一时刻最多显示一块。仓库弹层的页不进浮层层：仓库头是 NanaUI 的 `Popover`，面板里只有一格（`OverlaySignals::popover_slot`，和 `SidebarSignals::popover_slot` 共用），浮层块把仓库弹层当前这一页放进这一格，浮层层这时空着、不挡点击；`Popover` 的 `open` 绑 `OverlayKey::of` 是不是仓库弹层，框架开合发的 `PopoverToggled` 换成 `OpenRepositorySwitcher` / `CloseRepositoryPopover`，侧栏每次同步都重申 `open`，提交中框架自己开合了也照 ViewModel 写回。
 
 **浮层层。** 骨架挂载时把一个空容器（`view_part_overlay::layer`，键 `shell-overlay`）直接交给 AppShell 的 `.overlay(..)`，之后一直在。浮层块把各块挂成脱离树的内容，再用 `reconcile_children` 放进浮层层：还在放退场的块在前，现在这块在最后；换下就卸的块被省掉、停放，随这次换块卸掉。AppShell 盯着浮层层的子节点：有没隐藏的子节点时挡住下面的点击，空了就放开，增删子节点不重新装配，`place_shell` 只管 body。
 
-- 浮层层上不放绑定（AppShell 的布局补丁只在它投影时写）。各块的根不是槽位根，可以带绑定：任务弹层的淡入和上移直接绑在弹层根上。
-- 各块自己铺满浮层层：对话框的外层绝对定位铺满，弹层是撑满的一列。右键菜单这一块是一个 `OverlayHost`，下面是 NanaUI 的 `AnchoredActionMenu`，菜单按落点定位、收进窗口由框架负责。
+- 浮层层上不放绑定（AppShell 的布局补丁只在它投影时写）。各块的根不是槽位根，可以带绑定。
+- 各块自己铺满浮层层：对话框的外层绝对定位铺满。右键菜单这一块是一个 `OverlayHost`，下面是 NanaUI 的 `AnchoredActionMenu`，菜单按落点定位、收进窗口由框架负责。仓库弹层的各页不在浮层层里，放进侧栏仓库头上 NanaUI `Popover` 面板里的那一格。
 - 块里自己画的定位相对浮层层（它铺满窗口），用绝对定位，不用固定定位：固定定位的节点按自己的层级参与整窗排序，不写层级就排在浮层层（层级 1）下面，点击被浮层层吞掉；绝对定位的节点留在浮层层里，按先后叠放，不用写层级。
 
 **会话。** 浮层视图的签名不变（`fn(&ShellViewModel) -> Option<AnyView>`），建的时候把同步要用的东西交给 `session::register`，浮层块挂这一块时用 `session::collect` 收下：
@@ -205,7 +205,7 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 - 宿主自己关掉对话框（被同一宿主上别的浮层顶替、所在的块被停放）时发 `DialogToggled { open: false }`，`.model` 把开合信号写回假。不同步回 ViewModel：这不是用户的意思，开合只听归约。这块还是现在显示的块（ViewModel 还要它开着）时，下一帧 `sweep` 调 `show()` 再写真，放回树上以后重新打开，不发消息。只用 `.open(信号)` 不听回写的话，信号一直是真，再写真不算变化，就打不开了。
 - 字段、按钮、底栏、错误行用框架里的 `text_field` / `text_area_field` / `select_field` / `two_columns` / `action` / `footer` / `error_line` / `busy_note`，照 Vue `.dialog-field` 和 `.dialog-card__actions`。
 
-**先后和 Escape。** `OverlayKey` 的顺序就是同时打开时谁显示：关闭确认最先；其后是原来浮层槽位里的对话框、弹层和菜单；文件页的导出和文件对话框原来画在主区、压在浮层槽位下面，排在最后。Escape 先关显示着的那一层：显示着的对话框已经打开，由运行时拿到 Escape、发自己的关闭请求（`prevent_default` 为真，全局 Escape 不再发）；在放退场的对话框已经关上，运行时不再把 Escape 交给它；显示着的右键菜单也已经激活，Escape 由框架交给它，不进 `escape_layer`。显示着的是弹层时走全局 Escape，`escape_layer` 里弹层排在文件页的导出和文件对话框前面，等着的对话框不会先被关掉。
+**先后和 Escape。** `OverlayKey` 的顺序就是同时打开时谁显示：关闭确认最先；其后是原来浮层槽位里的对话框、弹层和菜单；文件页的导出和文件对话框原来画在主区、压在浮层槽位下面，排在最后。Escape 先关显示着的那一层：显示着的对话框已经打开，由运行时拿到 Escape、发自己的关闭请求（`prevent_default` 为真，全局 Escape 不再发）；在放退场的对话框已经关上，运行时不再把 Escape 交给它；显示着的右键菜单也已经激活，Escape 由框架交给它，不进 `escape_layer`；显示着的是仓库弹层时由 NanaUI 的 `Popover` 收下 Escape（提交中它不收，`escape_layer` 停在提交中的仓库弹层这一层，不越过它去关别的层）。等着的对话框不会先被关掉。
 
 **焦点归还。** `focus_return.rs` 照 WAI-ARIA 对话框给所有浮层定一条规则：关掉以后回到打开它的控件。它跟着浮层块显示的那一层（`OverlayPart::identity`）和页面里的「导入」菜单走：
 - 一层打开时记下打开它的控件：右键菜单是它所属的条目或文件夹行；别的层是这次同步开始前焦点所在的页面控件（`Before`，换块会卸掉旧块，事后查不到焦点原来在哪）。从刚关掉的上一层里打开的（弹层换页、菜单项打开对话框、排在后面的对话框接着显示）接着用上一层记下的控件。菜单项打开对话框时，框架选中这一项就收起菜单、把焦点还到打开菜单前的位置，对话框随后打开，记下的就是这个控件。

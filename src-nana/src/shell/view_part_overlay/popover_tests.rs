@@ -2,12 +2,13 @@
 //! 文件服务忙这些相关变化只改绑定的字段或变了的那一行；点外面只发一条关闭消息。浮层层常驻在
 //! AppShell 的 overlay 槽位里，有块时挡点击、空了放开，增删块不用重新装配。
 
-use nana_ui::runtime::{AppShell, Entity, StableNodeId, component_descriptors};
+use nana_ui::runtime::{AppShell, Entity, Popover, StableNodeId, component_descriptors};
 
 use super::OverlayKey;
 use crate::backend::services::repository::TaskProgressSnapshot;
 use crate::shell::files::{FileDialog, FilesMessage};
 use crate::shell::player::PlayerMessage;
+use crate::shell::sidebar::PopoverMode;
 use crate::shell::view_harness::ShellHarness;
 use crate::shell::workspace::WorkspaceRepository;
 use crate::shell::{
@@ -128,6 +129,28 @@ fn the_overlay_layer_follows_its_blocks_without_reassembly() {
     );
     harness.apply(ShellMessage::Admin(AdminMessage::CloseTaskPopover));
     harness.flush();
+
+    harness.apply(ShellMessage::Sidebar(
+        SidebarMessage::OpenRepositorySwitcher,
+    ));
+    harness.flush();
+    let page = harness.content_roots().0.expect("仓库弹层的页");
+    let slot = harness
+        .keyed("repository-popover-slot")
+        .expect("仓库头弹层里的一格");
+    assert!(
+        blocks(&harness).is_empty() && !layer_takes_pointer(&harness),
+        "仓库弹层是挂在仓库头上的 NanaUI Popover，页放进它面板里的一格，不进浮层层"
+    );
+    assert_eq!(
+        harness.document().context().world().parent_id(page),
+        Some(slot)
+    );
+    harness.apply(ShellMessage::Sidebar(
+        SidebarMessage::CloseRepositoryPopover,
+    ));
+    harness.flush();
+    assert!(harness.content_roots().0.is_none());
 
     harness.apply(ShellMessage::Sidebar(SidebarMessage::Gap(
         GapMessage::OpenFolderMenu {
@@ -396,7 +419,7 @@ fn a_climbing_repository_operation_transitions_its_width() {
 #[test]
 fn repository_switcher_adds_rows_without_rebuilding_the_rest() {
     let mut harness = ShellHarness::mount(scene("repo-switcher"));
-    let root = harness.content_roots().0.expect("仓库弹层在浮层里");
+    let root = harness.content_roots().0.expect("仓库弹层的页");
     let row = harness
         .keyed("repository-switch-acceptance-repo")
         .expect("当前仓库这一行");
@@ -447,6 +470,54 @@ fn repository_switcher_adds_rows_without_rebuilding_the_rest() {
         messages[0],
         ShellMessage::Sidebar(SidebarMessage::CloseRepositoryPopover)
     ));
+}
+
+/// 仓库头上的 NanaUI `Popover` 现在开没开着。
+fn repository_popover_open(harness: &ShellHarness) -> bool {
+    let anchor = harness.keyed("repository-switcher").expect("仓库头");
+    harness
+        .document()
+        .context()
+        .read(Entity::<Popover>::from_stable_id(anchor), |popover| {
+            popover.open
+        })
+        .expect("仓库头是 Popover")
+}
+
+/// 提交中仓库弹层关不掉：点外面和 Escape 都不收起，Escape 也不越过它去关别的层；点仓库头时框架先收起了
+/// 弹层，ViewModel 不跟，下一次同步照 ViewModel 开回来。弹层关着时提交中点仓库头，框架打开了也照
+/// ViewModel 收回去。
+#[test]
+fn a_submitting_repository_popover_follows_the_view_model() {
+    let mut model = scene("repo-switcher");
+    model.sidebar.submitting = true;
+    let mut harness = ShellHarness::mount(model);
+    assert!(repository_popover_open(&harness));
+
+    let messages = harness.click_messages(1000.0, 600.0);
+    harness.settle(messages);
+    assert_eq!(harness.model.sidebar.popover, PopoverMode::Switcher);
+    assert!(repository_popover_open(&harness), "点外面不收起");
+    assert!(harness.press_escape(), "Escape 停在提交中的仓库弹层");
+    assert_eq!(harness.model.sidebar.popover, PopoverMode::Switcher);
+    assert!(repository_popover_open(&harness), "Escape 不收起");
+
+    harness.click_label("资源库 · 默认资源库");
+    assert_eq!(harness.model.sidebar.popover, PopoverMode::Switcher);
+    assert!(
+        repository_popover_open(&harness),
+        "点仓库头收起了，照 ViewModel 开回来"
+    );
+
+    harness.model.sidebar.popover = PopoverMode::Closed;
+    changed(&mut harness);
+    assert!(!repository_popover_open(&harness));
+    harness.click_label("资源库 · 默认资源库");
+    assert_eq!(harness.model.sidebar.popover, PopoverMode::Closed);
+    assert!(
+        !repository_popover_open(&harness),
+        "提交中打不开切换列表，框架打开的弹层收回去"
+    );
 }
 
 #[test]
