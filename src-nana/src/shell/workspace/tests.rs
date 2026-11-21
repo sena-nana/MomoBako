@@ -182,7 +182,7 @@ fn switching_repository_stops_playback_once_previous_id_exists() {
 }
 
 #[test]
-fn sidebar_storage_matches_vue_ranges_and_keys() {
+fn sidebar_storage_keeps_its_ranges_and_keys() {
     let mut state = WorkspaceState::default();
     state.set_sidebar_width(10.0);
     assert_eq!(state.sidebar_width, SIDEBAR_MIN_PX);

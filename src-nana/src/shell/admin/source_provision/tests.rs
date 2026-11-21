@@ -203,7 +203,7 @@ fn poll(model: &mut ShellViewModel, result: Value) {
 ///
 /// 标题是「选择{插件名}缓存目录」。名称空白或找不到插件时退回「选择缓存目录」。调用在途时不弹。
 #[test]
-fn source_cache_dialog_uses_the_vue_plugin_name() {
+fn source_cache_dialog_uses_the_plugin_name() {
     let mut named = model();
     named.admin.plugins[0].name = "网易云音乐".into();
     open_session(&mut named, None);

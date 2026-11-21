@@ -235,7 +235,7 @@ fn downloading_to_another_repository_asks_for_the_target_first() {
             .take_effects()
             .iter()
             .any(|effect| matches!(effect, WorkspaceEffect::RefreshRepositories { .. })),
-        "照 Vue context.refreshRepo() 刷新当前资源库"
+        "照 context.refreshRepo() 刷新当前资源库"
     );
 }
 

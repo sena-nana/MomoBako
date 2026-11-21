@@ -209,7 +209,7 @@ fn browses(model: &mut ShellViewModel) -> Vec<(String, bool)> {
 
 /// 同步进度的初值和百分比：一共 3 步，1/3、2/3、3/3 四舍五入。
 #[test]
-fn progress_percent_rounds_like_vue() {
+fn progress_percent_rounds_to_whole_numbers() {
     let mut progress = SyncProgress::default();
     assert_eq!(
         (
@@ -502,7 +502,7 @@ fn stale_results_and_switched_repositories_are_dropped() {
     assert_eq!(
         progress(&model),
         (SyncPhase::Idle, String::new(), 0, 3, 0),
-        "进度回到 Vue 的初值"
+        "进度回到初值"
     );
     assert!(model.operation.shown().is_none());
     assert!(model.tree_sync.take_effects().is_empty());

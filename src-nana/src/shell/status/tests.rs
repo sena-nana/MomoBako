@@ -382,7 +382,7 @@ fn background_refreshes_keep_the_failure() {
 }
 
 #[test]
-fn starts_follow_the_vue_guards() {
+fn starts_follow_their_guards() {
     use crate::shell::input::InputMessage;
     let starts = |message| super::starts_operation(&ShellMessage::Input(message));
     assert!(!starts(InputMessage::OpenEntry {

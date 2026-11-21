@@ -198,7 +198,7 @@ fn alias_locations_follow_the_list_entry_not_the_latest_directory_page() {
 /// 能开的地址点「打开链接」交给系统，点「复制链接」写入剪贴板。
 /// `javascript:` 打不开，按钮停用，点下去不发打开。
 #[test]
-fn source_link_buttons_show_vue_titles_and_open_or_copy() {
+fn source_link_buttons_show_titles_and_open_or_copy() {
     let https = source_link_model("https://example.com/cover");
     let mut harness = ShellHarness::mount_at(https, 1200.0, 2000.0);
     let open = harness.node("打开链接");

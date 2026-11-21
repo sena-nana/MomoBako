@@ -34,7 +34,7 @@ fn gap(model: &mut ShellViewModel, message: GapMessage) {
 }
 
 #[test]
-fn folder_dialogs_use_the_vue_copy_and_escape_closes_the_top_one() {
+fn folder_dialogs_use_their_copy_and_escape_closes_the_top_one() {
     let mut model = shell();
     gap(&mut model, GapMessage::OpenFolderCreate("photos".into()));
     let dialog = &model.sidebar.folder_dialog;
@@ -229,7 +229,7 @@ fn hover_opens_after_450ms_and_folders_follow_the_missing_lock() {
 }
 
 #[test]
-fn smart_edit_delete_and_playlist_play_match_vue() {
+fn smart_edit_delete_and_playlist_play_from_the_sidebar() {
     let mut model = shell();
     model.sidebar.apply_smart_folders(
         "repo",

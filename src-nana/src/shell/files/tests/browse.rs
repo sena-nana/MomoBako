@@ -321,7 +321,7 @@ fn shift_range_follows_the_folders_then_files_on_screen() {
 /// Ctrl 点选切换选择，右侧详情跟着主选中项：拿掉别的项时主选中项和
 /// 详情都不动；拿掉主选中项时由剩下的第一项接替，详情跟过去并读它的素材；全拿掉时不跟。
 #[test]
-fn toggling_rows_keeps_or_hands_over_the_primary_like_vue() {
+fn toggling_rows_keeps_or_hands_over_the_primary() {
     let mut state = FilesState::default();
     let ctx = writable();
     state.rows = ["a.png", "b.png", "c.png"]

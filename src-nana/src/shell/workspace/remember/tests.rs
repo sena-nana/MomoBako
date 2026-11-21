@@ -138,7 +138,7 @@ fn a_remembered_repository_that_is_gone_falls_back_to_the_first() {
     });
     assert!(
         !persists(&model.workspace.take_effects()),
-        "同步完还不记，Vue 读完摘要才记"
+        "同步完还不记，读完摘要才记"
     );
     model.reduce(ShellMessage::RepositorySnapshotLoaded {
         generation,

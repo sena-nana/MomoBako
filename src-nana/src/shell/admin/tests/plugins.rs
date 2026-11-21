@@ -111,7 +111,7 @@ fn plugins_group_search_and_confirm_delete() {
 }
 
 #[test]
-fn plugin_labels_follow_the_vue_taxonomy() {
+fn plugin_labels_follow_the_taxonomy() {
     let mut manifest = plugin("user.one", "user", "", "webdav");
     assert_eq!(support::plugin_category(&manifest), "source");
     assert_eq!(support::category_label("library-kind"), "库类型");
@@ -343,7 +343,7 @@ fn plugin_settings_toggle_route_and_directory() {
 }
 
 #[test]
-fn enable_and_install_report_vue_messages() {
+fn enable_and_install_report_their_messages() {
     let mut model = ShellViewModel::default();
     load_bundle(
         &mut model,

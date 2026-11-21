@@ -93,7 +93,7 @@ fn known_repositories_are_selectable_and_other_plugins_do_not_request() {
 }
 
 #[test]
-fn status_rows_use_the_payload_and_missing_fields_use_vue_fallbacks() {
+fn status_rows_use_the_payload_and_missing_fields_use_fallbacks() {
     let mut model = ShellViewModel::default();
     open(&mut model);
     model.admin.take_effects();

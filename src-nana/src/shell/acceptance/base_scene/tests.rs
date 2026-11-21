@@ -75,7 +75,7 @@ fn assert_base(name: &str, model: &mut ShellViewModel) {
 
 /// 管理、搜索、播放集和任务类场景都从 `base()` 起步：全部 2、未分类 1、未标签 2，有 assets 目录，网格展示。
 #[test]
-fn listed_scenes_start_from_the_vue_base() {
+fn listed_scenes_start_from_the_base_scene() {
     let mut models = [
         ShellPage::Settings,
         ShellPage::SettingsError,
@@ -109,11 +109,7 @@ fn listed_scenes_start_from_the_vue_base() {
         models.push((name.to_string(), scene(name)));
     }
     for (name, mut model) in models {
-        assert_eq!(
-            counts(&model),
-            [2, 1, 2, 0, 0],
-            "{name} 的侧栏计数和 Vue 不一致"
-        );
+        assert_eq!(counts(&model), [2, 1, 2, 0, 0], "{name} 的侧栏计数不一致");
         assert_eq!(
             model.files.display_mode,
             DisplayMode::Grid,
@@ -149,7 +145,7 @@ fn tagged_fixtures_change_the_untagged_count() {
         assert_eq!(
             counts(&model),
             [2, 1, untagged, 0, 0],
-            "{name} 的侧栏计数和 Vue 不一致"
+            "{name} 的侧栏计数不一致"
         );
     }
 }

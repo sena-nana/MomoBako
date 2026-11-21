@@ -114,7 +114,7 @@ mod tests {
     /// `vh` 跟窗口高度走，不跟预览区，也不跟宽度。不宽于 820px 时这圈是 0。
     /// 高度还没量到时不给出 6 或 24。
     #[test]
-    fn audio_lyric_column_padding_follows_the_vue_vh() {
+    fn audio_lyric_column_padding_follows_the_viewport_height() {
         let spec = column_pad_spec();
         assert!(
             spec.resolve_with(None, None).is_none(),

@@ -186,7 +186,7 @@ mod tests {
     /// 宽舞台四边都是 `clamp(12px, 3vh, 30px)`，跟窗口高度走，不跟宽度。
     /// 窗口不宽于 820px 时不留这四边。高度还没量到时不给出像素。
     #[test]
-    fn audio_stage_padding_follows_the_vue_vh() {
+    fn audio_stage_padding_follows_the_viewport_height() {
         let spec = stage_pad_spec();
         assert!(
             spec.resolve_with(None, None).is_none(),

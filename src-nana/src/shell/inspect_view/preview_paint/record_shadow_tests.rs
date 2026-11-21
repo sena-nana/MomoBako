@@ -14,7 +14,7 @@ use nana_ui_core::{SemanticColorMix, SemanticColorRole, StyleModelRef, ThemeAppe
 /// 浅色和深色各跟自己的背景。没有图和有封面时都画，而且画在底色下面。
 /// 格子是 240×180 时圆的直径是 180，贴在左边留白 30，不是整块 240 宽的方阴影。
 #[test]
-fn audio_record_draws_the_vue_drop_shadow() {
+fn audio_record_draws_its_drop_shadow() {
     let harness = mount();
     let style = node_style(&harness, "inspect-audio-record");
     assert!(style.painter.is_some(), "唱片要自绘");
@@ -42,7 +42,7 @@ fn audio_record_draws_the_vue_drop_shadow() {
         );
         assert_eq!(
             shadow.color.to_srgb(),
-            vue_background(mode),
+            expected_background(mode),
             "{theme} 应是背景色的 78%"
         );
         assert_circle(&bounds, 30.0, 0.0, 180.0, theme);
@@ -88,7 +88,7 @@ fn audio_record_draws_the_vue_drop_shadow() {
 }
 
 /// 和 `color-mix(in srgb, var(--bg) 78%, transparent)` 同一条混合。比例写死，不跟着实现常量走。
-fn vue_background(mode: ThemeAppearance) -> [f32; 4] {
+fn expected_background(mode: ThemeAppearance) -> [f32; 4] {
     SemanticColorMix::alpha(SemanticColorRole::Background, 0.78)
         .resolve(StyleModelRef::new(mode))
         .as_rgba_array()

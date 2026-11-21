@@ -98,7 +98,7 @@ fn active_filter_bar_lists_groups_candidates_and_inputs() {
             "缺少输入框 {input}"
         );
     }
-    assert!(!has(&nodes, "加入筛选"), "Vue 没有「加入筛选」");
+    assert!(!has(&nodes, "加入筛选"), "没有「加入筛选」");
 }
 
 #[test]
@@ -253,7 +253,7 @@ fn session_nodes(session: &nana_ui_devtools::agent::RuntimeAgentSession) -> Vec<
 
 /// 没有资源库的搜索页：画出空状态的标题和说明，不画出仓库、命中或关键词结果。
 #[test]
-fn search_no_library_draws_the_vue_empty_copy() {
+fn search_no_library_draws_the_empty_copy() {
     let nodes = nodes("search-no-library");
     for label in [
         "搜索结果",

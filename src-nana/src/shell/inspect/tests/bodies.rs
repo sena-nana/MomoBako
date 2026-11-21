@@ -44,7 +44,7 @@ fn extension_dispatch_prefers_markdown_and_native_preview() {
 }
 
 #[test]
-fn text_over_the_vue_limit_shows_the_head_and_invalid_utf8_is_lossy() {
+fn text_over_the_limit_shows_the_head_and_invalid_utf8_is_lossy() {
     let limit = 768 * 1024;
     let whole = super::super::prepare_text(&vec![b'a'; limit]);
     assert_eq!((whole.text.len(), whole.truncated_at), (limit, None));

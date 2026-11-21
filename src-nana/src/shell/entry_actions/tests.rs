@@ -187,7 +187,7 @@ fn track_actions_carry_the_managed_cache_root_and_split_downloads_by_target() {
     };
     assert!(
         payload["managedCacheRoot"].is_null(),
-        "没有缓存目录时照 Vue 写 null"
+        "没有缓存目录时写 null"
     );
 }
 

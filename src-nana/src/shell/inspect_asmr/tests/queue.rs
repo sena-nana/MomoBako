@@ -53,7 +53,7 @@ fn work_queue_splits_the_title_from_the_status() {
     assert_eq!(items[0].title, "第二轨");
     assert_eq!(
         items[0].status, "unlistened",
-        "没有 listeningStatus 时用 Vue 的占位，不编中文"
+        "没有 listeningStatus 时用原值占位，不编中文"
     );
 
     let other = scene(&files, "work/02.mp3");

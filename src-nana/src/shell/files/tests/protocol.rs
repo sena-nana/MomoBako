@@ -229,7 +229,7 @@ fn protocol_reload_allows_category_and_refuses_smart_folder() {
 }
 
 #[test]
-fn thumbnail_prefetch_waits_for_the_vue_idle_gap() {
+fn thumbnail_prefetch_waits_for_the_idle_gap() {
     let mut state = FilesState::default();
     state.schedule_thumbnail_prefetch(true, 0);
     assert!(!state.poll_thumbnail_prefetch(419, &["a.png".into()]));

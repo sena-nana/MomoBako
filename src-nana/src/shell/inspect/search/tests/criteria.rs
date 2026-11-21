@@ -3,7 +3,7 @@
 use super::*;
 
 #[test]
-fn search_criteria_follow_the_vue_filter_rules() {
+fn search_criteria_follow_the_filter_rules() {
     let mut state = InspectState::default();
     state.results = vec![row("repo", "old", "old.png")];
     state.reduce(true, Some("repo"), InspectMessage::RunSearch);
@@ -325,7 +325,7 @@ fn clear_keeps_the_query_and_resets_every_input() {
 }
 
 #[test]
-fn advanced_inputs_parse_like_vue_and_apply_together() {
+fn advanced_inputs_parse_and_apply_together() {
     let mut state = InspectState::default();
     state.reduce(
         true,
@@ -482,7 +482,7 @@ fn shortcut_rewrites_metadata_and_sort_and_clears_the_excludes() {
 }
 
 #[test]
-fn active_filter_count_matches_vue() {
+fn active_filter_count_counts_each_active_filter() {
     let mut state = InspectState::default();
     assert_eq!(state.active_filter_count(), 0);
     state.filters.formats = vec!["png".into()];

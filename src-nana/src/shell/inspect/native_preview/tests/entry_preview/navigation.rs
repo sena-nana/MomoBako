@@ -486,7 +486,7 @@ fn archive_breadcrumb_root_is_the_archive_filename() {
 
 /// 空压缩包和空目录的工具条仍写「0 项」，列表里只有「空目录」。根上第一段是带扩展名的文件名。
 #[test]
-fn archive_empty_directory_shows_vue_zero_count() {
+fn archive_empty_directory_shows_a_zero_count() {
     let empty = opened_archive(&sample_zip(&[]), "empty.zip");
     let root = mount_archive(&empty);
     assert_eq!(
@@ -538,7 +538,7 @@ fn archive_empty_directory_shows_vue_zero_count() {
 
 /// 名单行首：目录写 DIR，扩展名前四位大写，没有扩展名写 FILE。大小和「目录」仍在行尾。
 #[test]
-fn archive_row_icons_use_vue_file_kind_label() {
+fn archive_row_icons_use_the_file_kind_label() {
     let zip = sample_zip(&[
         ("photos/", b""),
         ("notes.docx", b"hi"),

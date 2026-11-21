@@ -59,7 +59,7 @@ mod tests {
     /// 歌词行是 16px、1.72 行高、上下 7px，行距 4px。
     /// 短句停在单行盒子里；放不下一行的中文和没有空格的长串都折行，不省略成一行。
     #[test]
-    fn lyric_lines_wrap_at_the_vue_metrics() {
+    fn lyric_lines_wrap_at_their_metrics() {
         let mut model = scene();
         let chinese = "桃".repeat(80);
         let latin = "W".repeat(180);

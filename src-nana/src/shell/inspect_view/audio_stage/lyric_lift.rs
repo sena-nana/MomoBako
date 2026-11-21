@@ -86,7 +86,7 @@ mod tests {
     /// 当前行有 drop-shadow：偏移 (0, 8)、模糊 20、强调色 16% 透明度。
     /// 已经唱过、还没唱到、没有时间的行没有这层投影。浅色和深色各跟自己的强调色。
     #[test]
-    fn active_lyric_line_drops_the_vue_shadow() {
+    fn active_lyric_line_drops_its_shadow() {
         for (theme, mode) in [
             ("dark", ThemeAppearance::Dark),
             ("light", ThemeAppearance::Light),
@@ -100,7 +100,11 @@ mod tests {
                 (0.0, 8.0, 20.0),
                 "{theme} 的偏移和模糊"
             );
-            assert_eq!(shadow.color, vue_accent(mode), "{theme} 应是强调色的 16%");
+            assert_eq!(
+                shadow.color,
+                expected_accent(mode),
+                "{theme} 应是强调色的 16%"
+            );
             assert_eq!(
                 shadow.color,
                 accent_shadow(mode),
@@ -137,7 +141,7 @@ mod tests {
     }
 
     /// 和 `color-mix(in srgb, var(--accent) 16%, transparent)` 同一条混合。比例写死，不跟着实现常量走。
-    fn vue_accent(mode: ThemeAppearance) -> [f32; 4] {
+    fn expected_accent(mode: ThemeAppearance) -> [f32; 4] {
         SemanticColorMix::alpha(SemanticColorRole::Accent, 0.16)
             .resolve(StyleModelRef::new(mode))
             .as_rgba_array()

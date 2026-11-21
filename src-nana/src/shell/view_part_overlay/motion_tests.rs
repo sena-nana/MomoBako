@@ -64,7 +64,7 @@ fn a_closed_dialog_stays_in_the_layer_until_its_exit_has_played() {
         harness.frame();
         assert_eq!(blocks(&harness), block, "退场没放完不该卸");
     }
-    assert!(layer_takes_pointer(&harness), "放退场时和 Vue 一样挡着点击");
+    assert!(layer_takes_pointer(&harness), "放退场时挡着点击");
 
     harness.finish_motion();
     assert!(!harness.overlay_leaving());

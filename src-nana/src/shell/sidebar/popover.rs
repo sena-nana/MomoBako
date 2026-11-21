@@ -376,7 +376,7 @@ mod tests {
     }
 
     #[test]
-    fn backend_options_follow_vue_labels_and_routes() {
+    fn backend_options_follow_their_labels_and_routes() {
         let plugins = vec![
             plugin(
                 LOCAL_FILESYSTEM_PLUGIN_ID,

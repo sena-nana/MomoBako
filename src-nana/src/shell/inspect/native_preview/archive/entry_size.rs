@@ -50,7 +50,7 @@ mod tests {
     use super::format_archive_entry_size;
 
     #[test]
-    fn archive_entry_size_uses_vue_byte_units() {
+    fn archive_entry_size_uses_byte_units() {
         assert_eq!(format_archive_entry_size(0), "0 B");
         assert_eq!(format_archive_entry_size(1), "1 B");
         assert_eq!(format_archive_entry_size(6), "6 B");

@@ -80,7 +80,7 @@ mod tests {
     /// 第 4 层的 zip 仍按大小列出并能再进一层；第 5 层里的 zip/7z 行尾换成上限说明，点开不取字节。
     /// rar 仍写原来的大小，点开是不能内联，不套这句上限。
     #[test]
-    fn archive_nested_zip_stops_at_vue_depth_limit() {
+    fn archive_nested_zip_stops_at_the_depth_limit() {
         let shallow = "压缩包 / a.zip · 1 项\ne.zip · 12 B\nclip.rar · 4 B";
         assert_eq!(
             super::limit_layer_text(shallow.into(), 4),
@@ -189,10 +189,7 @@ mod tests {
         );
         let failed = mount_archive(&state);
         assert!(failed.find("无法预览内部文件").is_some());
-        assert!(
-            failed.find(&reason).is_some(),
-            "原因用 Vue 取包内预览时的那句"
-        );
+        assert!(failed.find(&reason).is_some(), "原因用取包内预览时的那句");
         assert!(
             failed.keyed("inspect-archive-list").is_some(),
             "失败后名单还在"

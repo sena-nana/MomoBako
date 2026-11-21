@@ -394,7 +394,7 @@ fn active_lyric_centers_in_the_viewport() {
         "没有时间的行不成当前行"
     );
     assert_centered(&harness);
-    assert_vue_pad(&harness);
+    assert_stage_pad(&harness);
     let middle = lyric_scroll(&harness);
     assert!(
         middle > super::LYRIC_LINE,
@@ -514,7 +514,7 @@ fn assert_centered(harness: &ShellHarness) {
 }
 
 /// 第一行的顶到滚动内容顶的距离是上留白 `inset - 1`。
-fn assert_vue_pad(harness: &ShellHarness) {
+fn assert_stage_pad(harness: &ShellHarness) {
     let scroll = harness
         .keyed("inspect-audio-lyric-scroll")
         .expect("歌词滚动");

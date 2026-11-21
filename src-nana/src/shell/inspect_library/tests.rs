@@ -57,7 +57,7 @@ fn non_asmr_entries_have_no_work_section() {
 
 /// 行的顺序和文案按元数据面板；数组连成「甲，乙」以后原样显示，数字字段解析不出时这行不画。
 #[test]
-fn work_rows_follow_vue_order_and_formats() {
+fn work_rows_follow_their_order_and_formats() {
     let custom = asmr(&[
         ("rjCode", "RJ01234567"),
         ("workTitle", "夜曲"),
@@ -134,7 +134,7 @@ fn archive_without_files_is_an_empty_directory() {
 }
 
 #[test]
-fn original_size_formats_like_vue_and_rejects_bad_numbers() {
+fn original_size_formats_bytes_and_rejects_bad_numbers() {
     assert_eq!(format_original_size(None), "未记录");
     assert_eq!(format_original_size(Some(1536.0)), "1.5 KB");
     assert_eq!(format_original_size(Some(500.0)), "500 B");

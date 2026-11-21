@@ -334,7 +334,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_fields_use_vue_fallbacks_and_failure_keeps_the_previous_status() {
+    fn missing_fields_use_fallbacks_and_failure_keeps_the_previous_status() {
         let mut model = ShellViewModel::default();
         open(&mut model, PLUGIN_ID);
         model.admin.take_effects();

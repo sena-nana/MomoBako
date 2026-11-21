@@ -38,7 +38,7 @@ fn smart_folder() -> DialogSize {
 
 /// 各对话框的期望：默认 520，导出 560，智能文件夹 720；处理文件夹、删除
 /// 智能文件夹、删除资源库和删除插件是危险口气；复制、硬链接、导出和删除插件标题前有图标。
-fn vue_look(name: &str) -> Look {
+fn expected_look(name: &str) -> Look {
     let plain = |size| Look {
         size,
         danger: false,
@@ -67,7 +67,7 @@ fn vue_look(name: &str) -> Look {
         },
         "smart-folder-dialog" => plain(smart_folder()),
         "folder-create-dialog" | "playlist-create-dialog" | "close-confirm" => plain(MODAL_CARD),
-        other => panic!("没写 {other} 在 Vue 里的样子"),
+        other => panic!("没写 {other} 的样子"),
     }
 }
 
@@ -107,12 +107,12 @@ fn title_icon(harness: &ShellHarness) -> Option<Icon> {
 }
 
 #[test]
-fn every_dialog_takes_its_vue_width_tone_and_title_icon() {
+fn every_dialog_takes_its_width_tone_and_title_icon() {
     for case in cases() {
         let harness = mounted(&case);
-        let look = vue_look(case.name);
+        let look = expected_look(case.name);
         let (size, danger) = size_and_tone(&harness);
-        assert_eq!(size, look.size, "{}：宽度不是 Vue 的宽度类", case.name);
+        assert_eq!(size, look.size, "{}：宽度不是该有的宽度类", case.name);
         assert_eq!(danger, look.danger, "{}：口气不对", case.name);
         assert_eq!(
             title_icon(&harness).map(Icon::as_ptr),

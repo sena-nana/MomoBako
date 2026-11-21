@@ -83,7 +83,7 @@ mod tests {
     /// 有时间的行在键盘焦点时画出下沿阴影：偏移 (0, 2)、不模糊、强调色 60%。
     /// 悬停、按下、禁用和没有焦点都不画。没有时间的行不是按钮，没有这层。浅色和深色各跟自己的强调色。
     #[test]
-    fn timed_lyric_keyboard_focus_draws_the_vue_underline() {
+    fn timed_lyric_keyboard_focus_draws_the_underline() {
         for (theme, mode) in [
             ("dark", ThemeAppearance::Dark),
             ("light", ThemeAppearance::Light),
@@ -147,7 +147,7 @@ mod tests {
                 );
                 assert_eq!(
                     shadow.color.to_srgb(),
-                    vue_accent(mode),
+                    expected_accent(mode),
                     "{theme} {key} 应是强调色的 60%"
                 );
                 assert!(
@@ -211,7 +211,7 @@ mod tests {
     }
 
     /// 和 `color-mix(in srgb, var(--accent) 60%, transparent)` 同一条混合。比例写死，不跟着实现常量走。
-    fn vue_accent(mode: ThemeAppearance) -> [f32; 4] {
+    fn expected_accent(mode: ThemeAppearance) -> [f32; 4] {
         SemanticColorMix::alpha(SemanticColorRole::Accent, 0.6)
             .resolve(StyleModelRef::new(mode))
             .as_rgba_array()

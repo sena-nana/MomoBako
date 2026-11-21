@@ -578,7 +578,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn draft_parses_every_vue_field_and_round_trips_through_edit() {
+    fn draft_parses_every_field_and_round_trips_through_edit() {
         let draft = SmartFolderDraft {
             name: "高评分".into(),
             query: " cover ".into(),

@@ -183,7 +183,7 @@ mod tests {
     /// 窄窗口上行是 `minmax(112px, 0.44fr)`，下行是 `minmax(0, 1fr)`。
     /// 还没量到容器时不给出像素。放不下最小像素时收到容器里，不编得比容器还宽。
     #[test]
-    fn audio_layout_uses_vue_minmax_tracks() {
+    fn audio_layout_uses_minmax_tracks() {
         for container in [0.0, -8.0, f32::NAN, f32::INFINITY] {
             assert!(
                 track_sizes(container, 24.0, true).is_none(),

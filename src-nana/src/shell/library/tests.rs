@@ -267,7 +267,7 @@ fn an_access_keeps_only_the_latest_fifty() {
 
 /// 修剪的先后：访问时间相同时修改时间早的先清；删掉的素材不记访问。
 #[test]
-fn pruning_follows_vue_ordering_and_skips_deleted_assets() {
+fn pruning_follows_listing_order_and_skips_deleted_assets() {
     let mut assets: Vec<AssetSummary> = (0..49)
         .map(|index| {
             asset(

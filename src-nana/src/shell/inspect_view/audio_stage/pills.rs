@@ -65,7 +65,7 @@ mod tests {
     /// 唱片中间的「音频」和标题下的胶囊各用自己那一层透明底。
     /// 没有专辑时不编第三枚；有封面时中间那枚收掉，标题下的底色不变。
     #[test]
-    fn audio_stage_pills_use_the_vue_fills() {
+    fn audio_stage_pills_use_their_fills() {
         let mut model = scene("preview-audio");
         let path = model.inspect.target_path.clone().expect("音频预览路径");
         let bare = show(&model);

@@ -96,7 +96,7 @@ fn entry(level: &'static str, message: &str, detail: &str) -> (&'static str, Str
 
 /// 一个就绪仓库的首屏启动：14 条日志一条不差，同步、摘要、首屏目录、设置和流程完成都带明细。
 #[test]
-fn a_launch_logs_every_vue_startup_entry_with_its_detail() {
+fn a_launch_logs_every_startup_entry_with_its_detail() {
     let mut model = ShellViewModel::default();
     model.workspace.last_active_repo_id = Some(REPO.into());
     let generation = model.workspace.prepare_initial_list();
@@ -366,6 +366,6 @@ fn a_failed_launch_logs_the_active_repository_once_the_summary_is_read() {
             "首屏启动流程失败。",
             "step: 2 · stepLabel: 加载失败 · error: 磁盘不可读 · activeRepoId: repo-a · targetRepoId: repo-a"
         ),
-        "Vue 的 activeRepoId 还是上一轮换上的仓库"
+        "activeRepoId 还是上一轮换上的仓库"
     );
 }

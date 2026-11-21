@@ -865,7 +865,7 @@ fn the_player_bar_stays_on_one_row_in_the_standard_files_page() {
     }
 }
 
-/// 播放条卡片改成媒体行加传输条以后，1200×800 文件列表的下沿（约 601，比一行的 Vue 卡片矮约 36）。
+/// 播放条卡片改成媒体行加传输条以后，1200×800 文件列表的下沿（约 601，比一行高的播放卡片矮约 36）。
 const LIST_BOTTOM: f32 = 595.0;
 
 /// 传输条的音量弹层触发器。
@@ -894,7 +894,7 @@ fn volume_trigger(harness: &ShellHarness) -> (f32, f32, f32, f32) {
 /// 文件列的状态框（「正在处理文件」）和侧栏的忙碌行（「正在同步仓库状态」）撑满所在的列：
 /// 两处都是纵向容器的子项，被拉满宽度。状态框左右各留 20，忙碌行占满侧栏内容宽。
 #[test]
-fn state_rows_fill_their_column_like_vue() {
+fn state_rows_fill_their_column() {
     let mut harness = ShellHarness::mount(scene("file-operation-progress"));
     settle(&mut harness);
     let browser = bounds(&harness, "file-browser-card");

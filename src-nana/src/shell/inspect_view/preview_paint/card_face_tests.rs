@@ -19,7 +19,7 @@ use nana_ui_core::{
 /// 浅色和深色各跟自己的背景色、强调色。800×240 不是正方形，圆仍按像素最远角。
 /// 没有面积时不编阴影，也不编浅光。
 #[test]
-fn audio_card_draws_the_vue_glow_and_shadow() {
+fn audio_card_draws_its_glow_and_shadow() {
     let harness = mount();
     let style = node_style(&harness, "inspect-audio-shell");
     assert!(style.painter.is_some(), "卡片要自绘浅光和落影");
@@ -60,7 +60,7 @@ fn audio_card_draws_the_vue_glow_and_shadow() {
         );
         assert_eq!(
             shadow.color.to_srgb(),
-            vue_background(mode),
+            expected_background(mode),
             "{theme} 应是背景色的 84%"
         );
         assert!(
@@ -76,7 +76,7 @@ fn audio_card_draws_the_vue_glow_and_shadow() {
                 .all(|radius| (*radius - shadow_radii[0]).abs() < 0.05 && *radius > 1.0),
             "{theme} 落影圆角：{shadow_radii:?}"
         );
-        let (inner, center, reach) = vue_glow(size);
+        let (inner, center, reach) = expected_glow(size);
         assert!(
             (glow.rect.x - inner.x).abs() < 0.05
                 && (glow.rect.y - inner.y).abs() < 0.05
@@ -111,7 +111,7 @@ fn audio_card_draws_the_vue_glow_and_shadow() {
         );
         assert_eq!(
             glow.stops[0].1,
-            vue_accent(mode),
+            expected_accent(mode),
             "{theme} 圆心应是强调色的 12%"
         );
         assert_eq!(
@@ -152,21 +152,21 @@ fn audio_card_draws_the_vue_glow_and_shadow() {
 }
 
 /// 和 `color-mix(in srgb, var(--bg) 84%, transparent)` 同一条混合。比例写死。
-fn vue_background(mode: ThemeAppearance) -> [f32; 4] {
+fn expected_background(mode: ThemeAppearance) -> [f32; 4] {
     SemanticColorMix::alpha(SemanticColorRole::Background, 0.84)
         .resolve(StyleModelRef::new(mode))
         .as_rgba_array()
 }
 
 /// 和 `color-mix(in srgb, var(--accent) 12%, transparent)` 同一条混合。比例写死。
-fn vue_accent(mode: ThemeAppearance) -> [f32; 4] {
+fn expected_accent(mode: ThemeAppearance) -> [f32; 4] {
     SemanticColorMix::alpha(SemanticColorRole::Accent, 0.12)
         .resolve(StyleModelRef::new(mode))
         .as_rgba_array()
 }
 
 /// 内边距盒、圆心（宽 28%、高 32%）、到最远角的像素半径。边框按 1px 从外框往里收。
-fn vue_glow(size: [f32; 2]) -> (LayoutBox, [f32; 2], f32) {
+fn expected_glow(size: [f32; 2]) -> (LayoutBox, [f32; 2], f32) {
     let origin = [1.0, 1.0];
     let inner = [size[0] - 2.0, size[1] - 2.0];
     let center = [origin[0] + inner[0] * 0.28, origin[1] + inner[1] * 0.32];

@@ -152,7 +152,7 @@ fn contribution(
 ) -> PlaylistPlayerContribution {
     PlaylistPlayerContribution {
         player_type_id: player_type_id.into(),
-        label: "Vue 播放器".into(),
+        label: "插件播放器".into(),
         file_class: class.into(),
         supported_extensions: extensions.iter().map(|item| (*item).to_string()).collect(),
         supports_seek: true,
@@ -236,7 +236,7 @@ mod wav;
 /// （拼音：视频 < 图片 < 音频），取第一项。宿主给的顺序不算数。
 #[cfg(windows)]
 #[test]
-fn playlist_players_follow_the_vue_name_order() {
+fn playlist_players_follow_the_name_order() {
     let mut model = shell(true);
     let player = |id: &str, label: &str| PlaylistPlayerContribution {
         label: label.into(),

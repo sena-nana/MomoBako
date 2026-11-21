@@ -140,7 +140,7 @@ fn video_previews_never_fall_into_the_audio_stage() {
     assert!(model.preview_token.is_none(), "离屏不挂纹理记号");
     assert!(
         has_label(&window, "没有可用于播放此媒体的插件"),
-        "播放条照 Vue 写没有播放插件"
+        "播放条写没有播放插件"
     );
     // 拨回片头仍是解码出的第一帧，再拨到后半段也不把纹理记号挂回去。
     place_playhead(&mut model, 0);
@@ -283,7 +283,7 @@ fn player_failures_written_back_replace_the_audio_stage() {
     );
     assert!(
         has_label(&window, "音频无法播放"),
-        "没有原因时没有写 Vue 的默认原因"
+        "没有原因时没有写默认原因"
     );
     assert!(
         !has_key(&window, "inspect-audio-stage"),

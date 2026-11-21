@@ -451,7 +451,7 @@ fn m4a_preview_takes_over_the_bar_without_the_audio_plugin() {
     assert_eq!(
         bar.subtitle(),
         "没有可用于播放此媒体的插件",
-        "和 Vue 一样写在播放条次行，没有条目时也写"
+        "写在播放条次行，没有条目时也写"
     );
 }
 

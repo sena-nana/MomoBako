@@ -300,7 +300,7 @@ fn escape_leaves_menus_to_the_framework_and_keeps_busy_dialogs() {
 }
 
 #[test]
-fn tag_group_follows_vue_default_until_toggled_for_that_file() {
+fn tag_group_follows_the_default_until_toggled_for_that_file() {
     let mut state = FilesState::default();
     assert!(
         !state.tags_expanded("cover.png", false),

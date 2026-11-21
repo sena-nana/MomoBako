@@ -3,7 +3,7 @@
 use super::*;
 
 #[test]
-fn box_selection_open_reveal_and_external_drag_follow_the_vue_guards() {
+fn box_selection_open_reveal_and_external_drag_follow_their_guards() {
     let mut model = ready("repo");
     model.files.set_drag_selection(
         vec!["a.png".into()],

@@ -25,7 +25,7 @@ fn with_theme(theme: &str) -> ApplicationSettings {
 
 /// 设置页插件卡片的运行时芯片：前端模块运行时写它自己的中文名，不写成「未知运行时」。
 #[test]
-fn vue_module_plugins_show_the_vue_runtime_chip() {
+fn vue_module_plugins_show_their_runtime_chip() {
     let mut harness = ShellHarness::mount(ShellViewModel::for_page(ShellPage::Settings));
     assert!(
         harness.find("Vue 模块").is_none(),

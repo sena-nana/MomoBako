@@ -437,7 +437,7 @@ fn quick_access_rows_follow_the_snapshot() {
 /// 播放集行的悬停提示：播放是「播放」，删除是「删除」。
 /// 读屏名仍是「播放播放集」「删除播放集」，点下去的动作不变。
 #[test]
-fn playlist_row_buttons_show_vue_play_and_delete_titles() {
+fn playlist_row_buttons_show_play_and_delete_titles() {
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
     harness.apply(sidebar(SidebarMessage::TogglePlaylists));
     harness.flush();

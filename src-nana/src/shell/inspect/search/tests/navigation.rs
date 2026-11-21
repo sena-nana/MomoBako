@@ -432,6 +432,6 @@ fn snapshots_feed_facets_and_switching_repository_resets_search() {
     assert!(!model.inspect.filter_bar_open);
     assert_eq!(
         model.inspect.search_ui.draft.exclude_query, "草稿",
-        "输入框草稿和 Vue 一样留着"
+        "输入框草稿留着"
     );
 }

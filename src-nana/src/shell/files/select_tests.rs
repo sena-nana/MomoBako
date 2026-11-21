@@ -150,7 +150,7 @@ fn modifier_clicks_extend_and_toggle_the_selection() {
 
 /// 从列表空白拖到 cover.png：没拖出容差不画选框；拖过以后选框盖住这段指针，松手选框消失、选择留下。
 #[test]
-fn box_drag_paints_the_vue_selection_rectangle() {
+fn box_drag_paints_the_selection_rectangle() {
     let mut harness = ShellHarness::mount(list_page());
     let start = empty_list_point(&harness, "cover.png");
     let end = center(&card(&harness, "cover.png"));

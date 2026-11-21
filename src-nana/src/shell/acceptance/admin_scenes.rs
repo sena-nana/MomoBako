@@ -860,7 +860,7 @@ mod no_library_scene_tests {
 
     /// 没有资源库的日志页：画出空标题和说明，不画出夹具里的四条日志，也不停在加载。
     #[test]
-    fn logs_no_library_draws_the_vue_empty_copy() {
+    fn logs_no_library_draws_the_empty_copy() {
         let mut model = logs_no_library_scene();
         assert_eq!(model.workspace.panel, WorkspacePanel::Logs);
         assert_eq!(model.workspace.main_region(), MainRegion::EmptyRepository);
@@ -934,7 +934,7 @@ mod no_library_scene_tests {
 
     /// 没有资源库的动作页：不读列表，空文案仍是「当前仓库没有导入动作。」。
     #[test]
-    fn actions_no_library_draws_the_vue_empty_copy() {
+    fn actions_no_library_draws_the_empty_copy() {
         let mut model = actions_no_library_scene();
         assert_eq!(model.workspace.panel, WorkspacePanel::Actions);
         assert_eq!(model.workspace.main_region(), MainRegion::EmptyRepository);

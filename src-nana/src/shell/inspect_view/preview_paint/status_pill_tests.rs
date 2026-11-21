@@ -18,7 +18,7 @@ const PILL_FILL: f32 = 0.84;
 /// 图片读取胶囊用 84% 底，带 132 宽的不定进度轨。
 /// 文本读取是同一层底，不画进度。图已经画出以后胶囊收掉。
 #[test]
-fn image_status_capsule_sweeps_on_the_vue_fill() {
+fn image_status_capsule_sweeps_on_its_fill() {
     let mut image = scene("preview-image");
     image.preview_pixels = None;
     image.preview_token = None;

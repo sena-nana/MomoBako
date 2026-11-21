@@ -3,7 +3,7 @@
 use super::*;
 
 #[test]
-fn aspect_clamps_to_the_vue_range_and_unknown_stays_square() {
+fn aspect_clamps_to_its_range_and_unknown_stays_square() {
     assert_eq!(content_aspect(0, 100), 1.0);
     assert_eq!(content_aspect(100, 0), 1.0);
     assert_eq!(content_aspect(800, 600), 800.0 / 600.0);

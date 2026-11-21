@@ -116,7 +116,7 @@ fn disabled_player_buttons_are_native_icon_buttons() {
         let expected = (label == "列表循环").then(|| label.to_string());
         assert_eq!(
             tooltip, expected,
-            "「{label}」的提示照 Vue：只有循环模式写了 title"
+            "「{label}」的提示：只有循环模式写了 title"
         );
     }
     let queue = harness.keyed("player-queue").expect("当前队列");

@@ -350,7 +350,7 @@ fn attach_folder_dialog_submits_a_chosen_path_and_ignores_cancel() {
                     && request.title.as_deref() == Some("选择 Eagle Library 目录")
                     && request.filters.is_empty()
         ),
-        "Eagle 添加资源库的标题照 Vue"
+        "Eagle 添加资源库的标题"
     );
 
     send(

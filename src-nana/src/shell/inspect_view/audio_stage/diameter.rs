@@ -115,7 +115,7 @@ mod tests {
     /// 单位是窗口的 `vw` / `vh`，不跟预览区的百分比走。宽或高还没量到时不给出直径，也不落成 140 或 230。
     /// 宽公式在 600×400 仍是 220；这个宽度已经不宽于 820，挂上窗口后走窄公式。
     #[test]
-    fn audio_record_diameter_follows_the_vue_clamp() {
+    fn audio_record_diameter_follows_its_clamp() {
         let wide = record_size(false);
         assert!(
             wide.resolve_with(None, None).is_none(),

@@ -122,7 +122,7 @@ fn model_hud_shows_the_mesh_bounding_box() {
 /// 有包围盒时，左下角尺寸标签的底是抬升表面 88%。
 /// 没有网格就不画这枚标签，也不编 `1.00 x 1.00 x 0.01`。文案仍是三轴尺寸。
 #[test]
-fn model_size_label_uses_the_vue_fill() {
+fn model_size_label_uses_its_fill() {
     let harness = ShellHarness::mount(previewing_model("models/tri.obj", "obj", TRIANGLE_OBJ));
     assert_eq!(
         chip_text(&harness, "inspect-model-hud-size"),
@@ -211,7 +211,7 @@ fn chip_text(harness: &ShellHarness, key: &str) -> String {
 /// Office 顶栏种类写 Word、Excel、PowerPoint。
 /// 还没有页数时第三项是条目大小，没有大小写「准备文档」。有页的 PDF 第三项仍是「N 页 PDF」。
 #[test]
-fn office_toolbar_uses_vue_kind_labels() {
+fn office_toolbar_uses_kind_labels() {
     for (extension, label) in [
         ("docx", "Word"),
         ("docm", "Word"),
@@ -283,7 +283,7 @@ fn office_toolbar_uses_vue_kind_labels() {
 /// 失败浮层铺遮罩：`color-mix(in srgb, var(--bg) 74%, transparent)`，铺满预览框。
 /// 能预览或还在读取时不画。标题和原因仍是原来的原文。
 #[test]
-fn failure_overlay_masks_with_the_vue_background() {
+fn failure_overlay_masks_with_the_page_background() {
     let failed = ShellHarness::mount(scene("preview-audio-failed"));
     assert!(failed.find("无法预览该音频").is_some(), "失败标题还在");
     assert!(failed.find("没有原生解码器").is_some(), "失败原因还在");

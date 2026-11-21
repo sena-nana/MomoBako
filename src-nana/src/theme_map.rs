@@ -355,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn corner_scale_follows_the_vue_radius_tokens() {
+    fn corner_scale_follows_the_radius_tokens() {
         let metrics = corner_metrics(8.0);
         assert_eq!(
             [

@@ -244,7 +244,7 @@ fn a_partly_failed_download_says_how_many_failed_and_where_to_look() {
     assert_eq!(
         (row.label.as_str(), row.detail.as_str()),
         ("加载资源库", "读取已注册资源库"),
-        "照 Vue context.refreshRepo() 刷新"
+        "照 context.refreshRepo() 刷新"
     );
     assert!(
         model

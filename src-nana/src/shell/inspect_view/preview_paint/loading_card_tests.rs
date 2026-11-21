@@ -15,7 +15,7 @@ use nana_ui_core::{
 
 /// 准备卡有落影，下面是铺满卡宽的 6px 不定进度轨。
 #[test]
-fn loading_card_sweeps_and_drops_the_vue_shadow() {
+fn loading_card_sweeps_and_drops_its_shadow() {
     let harness = ShellHarness::mount(scene("online-preview-preparing"));
     let card = node_style(&harness, "inspect-media-loading");
     assert!(card.painter.is_some(), "准备卡要自绘落影");
@@ -50,7 +50,7 @@ fn loading_card_sweeps_and_drops_the_vue_shadow() {
         );
         assert_eq!(
             shadow.color.to_srgb(),
-            vue_background(mode),
+            expected_background(mode),
             "{theme} 应是背景色的 70%"
         );
         assert!(
@@ -94,7 +94,7 @@ pub(super) fn sweep_track(harness: &ShellHarness, key: &str) -> Progress {
 }
 
 /// `color-mix(in srgb, var(--bg) 70%, transparent)`。
-fn vue_background(mode: ThemeAppearance) -> [f32; 4] {
+fn expected_background(mode: ThemeAppearance) -> [f32; 4] {
     SemanticColorMix::alpha(SemanticColorRole::Background, 0.7)
         .resolve(StyleModelRef::new(mode))
         .as_rgba_array()

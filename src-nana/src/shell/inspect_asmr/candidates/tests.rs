@@ -252,7 +252,7 @@ fn the_form_belongs_to_the_file() {
 
 /// 候选对象的三种写法（`fields`、`metadata`、平铺）都读得出；插件结果没有 `candidate` 时整个结果就是候选。
 #[test]
-fn candidate_shapes_follow_vue() {
+fn candidate_shapes_follow_the_protocol() {
     for raw in [
         json!({ "fields": { "circle": "社团" } }),
         json!({ "metadata": { "circle": "社团" } }),

@@ -48,7 +48,7 @@ fn copying_shows_the_operation_until_the_directory_is_reloaded() {
 
 /// 等待中的进度每 220 ms 往上爬：复制从 32% 起，下一拍 35%，再一拍过了 35 改加 3。
 #[test]
-fn waiting_operations_climb_like_vue() {
+fn waiting_operations_climb_step_by_step() {
     let mut model = files_page();
     files(&mut model, FilesMessage::ActivateRow("cover.png".into()));
     files(&mut model, FilesMessage::OpenDialog(FileDialog::Copy));
@@ -63,7 +63,7 @@ fn waiting_operations_climb_like_vue() {
 /// 侧栏的回收站快捷方式和快捷访问是非静默读取，任务弹层出「读取回收站」「读取目录」，读完走到
 /// 「整理目录条目」再完成；点文件夹是静默读取，不出这一行。
 #[test]
-fn sidebar_reads_report_like_vue() {
+fn sidebar_reads_report_their_progress() {
     use super::super::sidebar::{ShortcutId, SidebarMessage};
     // 宿主的准备帧：交出侧栏排下的目录读取，记下文件列在读，再提交。
     fn prepare(model: &mut ShellViewModel) {

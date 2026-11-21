@@ -330,7 +330,7 @@ mod tests {
     /// 深浅两套都装得上，装进文档以后对话框配方和遮罩是上面写定的值；遮罩以外的效果令牌
     /// 照同模式的内置主题。
     #[test]
-    fn both_themes_install_with_the_vue_dialog_recipe_and_scrim() {
+    fn both_themes_install_with_the_dialog_recipe_and_scrim() {
         for mode in [ThemeAppearance::Light, ThemeAppearance::Dark] {
             let mut shell = ShellViewModel::default();
             shell.settings.theme = if mode == ThemeAppearance::Light {
@@ -508,7 +508,7 @@ mod tests {
 
     /// 深浅两套都装上浮层滚动条的尺寸和配方；滚动条只重画，不改布局。
     #[test]
-    fn both_themes_install_the_vue_overlay_scrollbar() {
+    fn both_themes_install_the_overlay_scrollbar() {
         for mode in [ThemeAppearance::Light, ThemeAppearance::Dark] {
             let appearance = Appearance {
                 mode,
@@ -553,7 +553,7 @@ mod tests {
     /// 指针进到能滚的滚动区以后，淡入贴着右边的 4px `--border-strong` 滑块，没有轨道；滑块叠在内容上，
     /// 内容的宽度和没显示时一样。
     #[test]
-    fn hovered_scroll_areas_fade_in_the_vue_overlay_thumb() {
+    fn hovered_scroll_areas_fade_in_the_overlay_thumb() {
         use crate::shell::view_harness::ShellHarness;
         use crate::shell::{ShellPage, ShellViewModel};
         use nana_ui::runtime::ScrollbarBars;
