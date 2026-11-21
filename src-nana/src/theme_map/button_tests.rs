@@ -55,11 +55,6 @@ const ALLOWED_LITERALS: &[(&str, &str, &str)] = &[
         "PDF 页纸投影，`.office-preview__viewer--pdf canvas`",
     ),
     (
-        "player_view/bar.rs",
-        "[0.0, 0.0, 0.0, 0.45]",
-        "播放条卡片投影，shell.css `.workspace-player`",
-    ),
-    (
         "admin/source_page.rs",
         "[1.0, 1.0, 1.0, 1.0]",
         "扫码登录二维码图片的白底，`.source-auth-settings__qr` 的 `background: white`",

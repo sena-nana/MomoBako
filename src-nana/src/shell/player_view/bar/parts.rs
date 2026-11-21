@@ -10,29 +10,33 @@ use nana_ui::runtime::{
     TextHorizontalAlignment,
 };
 use nana_ui::{ControlSize, PopoverPlacement};
-use nana_ui_core::{TextWeight, TypeRole};
+use nana_ui_core::{SpacingStep, TextWeight, TypeRole};
 
 use super::super::super::ShellMessage;
-use super::super::super::admin::style::{FontSize, typeset};
+use super::super::super::admin::style::{LINE, disabled_opacity, lined, typeset};
 use super::super::super::player::{PlayerMessage, QueueItem};
 use super::{BarProps, display_title};
+use crate::theme_map::tiers;
 
 /// 队列面板宽。
 const QUEUE_WIDTH: f32 = 360.0;
 /// 队列条目滚动区的上限高度。
 const QUEUE_LIST_MAX_HEIGHT: f32 = 260.0;
 
-/// 单行文字：给定字号档（没有档位时写像素）、字重档、颜色和行高，超长省略。
+/// 单行文字：给定字号档、字重档、颜色和行高倍数（按字号档），超长省略。
 pub(super) fn line(
     label: impl Into<String>,
-    size: impl Into<FontSize>,
+    size: TypeRole,
     weight: TextWeight,
     role: SemanticColorRole,
-    line_height: f32,
+    ratio: f32,
 ) -> Text {
-    let mut text = typeset(Text::new(label.into()).color(role), size, weight)
-        .line_height(line_height)
-        .truncating();
+    let mut text = lined(
+        typeset(Text::new(label.into()).color(role), size, weight),
+        size,
+        ratio,
+    )
+    .truncating();
     let layout = std::sync::Arc::make_mut(&mut text.style.layout);
     layout.min_width = Some(LengthSpec::Px(0.0));
     layout.width = Some(LengthSpec::Fill);
@@ -67,18 +71,21 @@ pub(crate) fn dim_surface(
     }
 }
 
-/// 没有缩略图时的类型方块：bg 底、10px 圆角、11px 粗体弱色字居中。
+/// 没有缩略图时的类型方块：bg 底、lg 圆角、`Hint` 粗体弱色字居中，行高 1.55 倍。
 pub(super) fn type_cover(
     label: &str,
     size: f32,
     key: impl Into<String>,
     dim: Option<(SemanticColorRole, f32)>,
 ) -> AnyView {
-    let mut text = Text::new(label)
-        .color(SemanticColorRole::Muted)
-        .role(TypeRole::Hint)
-        .weight(TextWeight::Bold)
-        .line_height(17.05);
+    let mut text = lined(
+        Text::new(label)
+            .color(SemanticColorRole::Muted)
+            .role(TypeRole::Hint)
+            .weight(TextWeight::Bold),
+        TypeRole::Hint,
+        LINE,
+    );
     text.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
     let frame = Stack::column(0.0)
         .align(AlignSpec::Center)
@@ -157,7 +164,7 @@ fn is_remote(path: &str) -> bool {
 }
 
 /// 把已经解码的本地图按 `object-fit: cover` 铺进方块。圆角和类型方块一样，多出来的裁掉。
-/// 不可播放的队列条目按整行的 0.52 把这张图淡一次。`ignore_pointer` 时点击穿透到下面的按钮。
+/// 不可播放的队列条目按整行的停用档把这张图淡一次。`ignore_pointer` 时点击穿透到下面的按钮。
 fn cover_image(
     url: String,
     size: f32,
@@ -231,7 +238,8 @@ pub(super) fn settings_row(props: &BarProps, narrow: bool) -> AnyView {
         JustifySpec::End
     };
     widget(
-        Stack::bar(12.0)
+        Stack::bar(0.0)
+            .gap_step(SpacingStep::Xl)
             .justify(justify)
             .align(AlignSpec::Center)
             .wrap(narrow),
@@ -307,25 +315,28 @@ fn queue_body(props: &BarProps) -> AnyView {
         })
         .collect::<Vec<_>>();
     let head = widget(
-        Stack::bar(10.0)
+        Stack::bar(0.0)
+            .gap_step(SpacingStep::Lg)
             .justify(JustifySpec::SpaceBetween)
             .align(AlignSpec::Center),
     )
     .children((
-        widget(
+        widget(lined(
             Text::new("当前队列")
                 .color(SemanticColorRole::Text)
                 .role(TypeRole::Body)
-                .weight(TextWeight::Bold)
-                .line_height(20.15),
-        )
+                .weight(TextWeight::Bold),
+            TypeRole::Body,
+            LINE,
+        ))
         .key("player-queue-title"),
-        widget(
+        widget(lined(
             Text::new(format!("{} 项", props.queue.len()))
                 .color(SemanticColorRole::Muted)
-                .role(TypeRole::Meta)
-                .line_height(18.6),
-        )
+                .role(TypeRole::Meta),
+            TypeRole::Meta,
+            LINE,
+        ))
         .key("player-queue-count"),
     ))
     .into_any();
@@ -338,20 +349,24 @@ fn queue_body(props: &BarProps) -> AnyView {
     .children((widget(
         List::new()
             .label("队列条目")
-            .style(Stack::column(4.0).node_style()),
+            .style(Stack::column(0.0).gap_step(SpacingStep::Xs).node_style()),
     )
     .roving_focus(RovingFocusGroup::vertical())
     .children(rows),))
     .key(props.queue_key.clone())
     .into_any();
-    widget(Stack::column(8.0).width(LengthSpec::Fill))
-        .children((head, list))
-        .key("player-queue-popover")
-        .into_any()
+    widget(
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Md)
+            .width(LengthSpec::Fill),
+    )
+    .children((head, list))
+    .key("player-queue-popover")
+    .into_any()
 }
 
 /// 队列里的一项：NanaUI 的 `ListItem`，行首 40px 封面，内容是文件名和路径（不可播放时写原因）。
-/// 当前项是选中的行、标题用 accent；不可播放的项停用，字和封面按 0.52 在面板底色上淡化。
+/// 当前项是选中的行、标题用 accent；不可播放的项停用，字和封面按主题停用档在面板底色上淡化。
 fn queue_row(item: &QueueItem, media: &'static str, active: bool) -> AnyView {
     let ready = item.status == "ready";
     let title = display_title(&item.filename, &item.extension);
@@ -367,9 +382,10 @@ fn queue_row(item: &QueueItem, media: &'static str, active: bool) -> AnyView {
     } else {
         SemanticColorRole::Text
     };
-    let dim = (!ready).then_some((SemanticColorRole::Surface, 0.52));
+    let dim = (!ready).then_some((SemanticColorRole::Surface, disabled_opacity()));
     let meta = widget(
-        Stack::column(2.0)
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Xxs)
             .min_width(LengthSpec::Px(0.0))
             .grow(1.0)
             .shrink(1.0)
@@ -382,27 +398,28 @@ fn queue_row(item: &QueueItem, media: &'static str, active: bool) -> AnyView {
                 TypeRole::Section,
                 TextWeight::Bold,
                 title_role,
-                21.7,
+                LINE,
             ),
             dim,
         )),
         widget(dim_text(
             line(
                 detail,
-                11.667,
+                TypeRole::Meta,
                 TextWeight::Medium,
                 SemanticColorRole::Muted,
-                18.08,
+                LINE,
             ),
             dim,
         )),
     ));
     let mut row = ListItem::new(title)
         .auto_height(true)
-        .gap(10.0)
+        .gap(tiers::space_px(SpacingStep::Lg))
         .selected(active)
         .disabled(!ready);
     let layout = std::sync::Arc::make_mut(&mut row.style.layout);
+    tiers::gap(layout, SpacingStep::Lg);
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
     let id = item.id.clone();
@@ -740,7 +757,11 @@ mod tests {
         assert_side(harness, &key);
         let fade = opacity(harness, &key);
         if faded {
-            assert_eq!(fade, Some(0.52), "{id} 不可播放时应把这张图淡一次");
+            assert_eq!(
+                fade,
+                Some(crate::shell::admin::style::disabled_opacity()),
+                "{id} 不可播放时应按停用档把这张图淡一次"
+            );
         } else {
             assert_eq!(fade, None, "{id} 可播放的封面不应再淡");
         }

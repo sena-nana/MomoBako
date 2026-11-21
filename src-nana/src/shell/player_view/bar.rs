@@ -8,12 +8,15 @@
 
 use nana_ui::runtime::view::{AnyView, FieldWrite, IntoView, widget};
 use nana_ui::runtime::{
-    Activate, AlignSpec, IconButton, LengthSpec, ListItem, MediaTransportBar,
+    Activate, AlignSpec, ElevationRole, IconButton, LengthSpec, ListItem, MediaTransportBar,
     MediaTransportDensity, MediaTransportEvent, MediaTransportIcons, MediaTransportPlacement,
-    RadiusTier, SemanticColorRole, SizeChanged, Stack,
+    PaintContext, PaintPath, Painter, RadiusTier, SemanticColorRole, SizeChanged, Stack,
 };
 use nana_ui::{ControlSize, Icon};
-use nana_ui_core::{TextWeight, TypeRole};
+use nana_ui_core::{SpacingRole, SpacingStep, TextWeight, TypeRole};
+
+use super::super::admin::style::{Hairline, LINE};
+use crate::theme_map::tiers;
 
 use super::super::player::{PlaybackMode, PlayerMessage, QueueItem};
 use super::super::{ShellMessage, ShellViewModel, hot};
@@ -215,29 +218,18 @@ pub(crate) fn position_ms(current_ms: u64, duration_ms: u64) -> f64 {
 }
 
 /// 播放条。卡片里上面是媒体行，下面是 NanaUI 的 `MediaTransportBar`；窗口不宽于 1120px 时传输条
-/// 换成 `Stacked`，进度单独占一行，整张卡片是媒体、进度、按钮三行。卡片是 `--radius-2xl`，跟着主题变。
+/// 换成 `Stacked`，进度单独占一行，整张卡片是媒体、进度、按钮三行。卡片是 `--radius-2xl`、发丝边、
+/// 主题的 `Surface` 抬起投影，内边距左右 `Xxxl` 上下 `Xl`，都跟着主题变。
 pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
     let props = BarProps::from_model(model);
     let narrow = model.narrow_viewport();
-    let card = Stack::column(10.0)
+    let card = Stack::column(0.0)
+        .gap_step(SpacingStep::Lg)
+        .padding_step(SpacingStep::Xxxl, SpacingStep::Xl)
         .surface(SemanticColorRole::Surface)
-        .border(SemanticColorRole::BorderStrong, 1.0)
-        .radius(RadiusTier::Xxl)
-        .with_layout(|layout| {
-            layout.padding_top = Some(LengthSpec::Px(12.0));
-            layout.padding_right = Some(LengthSpec::Px(16.0));
-            layout.padding_bottom = Some(LengthSpec::Px(12.0));
-            layout.padding_left = Some(LengthSpec::Px(16.0));
-            layout.paint.box_shadows = vec![nana_ui_core::BoxShadowSpec {
-                paint_color: None,
-                offset_x: 0.0,
-                offset_y: 14.0,
-                blur_radius: 34.0,
-                spread_radius: -24.0,
-                color: [0.0, 0.0, 0.0, 0.45],
-                inset: false,
-            }];
-        });
+        .hairline(SemanticColorRole::BorderStrong)
+        .radius(CARD_RADIUS)
+        .painter(LiftedCard);
     widget(card)
         .children((media(&props), transport_bar(&props, narrow)))
         .key("player-card")
@@ -245,6 +237,27 @@ pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
             cx.dispatch_program_all(player_message(PlayerMessage::BarResized(event.width)))
         })
         .into_any()
+}
+
+/// 播放条卡片的圆角档。
+const CARD_RADIUS: RadiusTier = RadiusTier::Xxl;
+
+/// 播放条卡片的投影：先沿卡片的圆角画主题的 `Surface` 抬起投影，再画卡片自己的底和边。
+/// 投影颜色、偏移和模糊都按装上的主题解析，深浅主题各有一套。
+struct LiftedCard;
+
+impl Painter for LiftedCard {
+    fn paint(&self, cx: &mut PaintContext<'_>) {
+        let radius = cx.radius(CARD_RADIUS);
+        let mut outline = PaintPath::new();
+        outline.rounded_rect(cx.bounds(), [radius; 4]);
+        cx.shadow(&outline, ElevationRole::Surface);
+        cx.draw_default();
+    }
+
+    fn paint_key(&self) -> u64 {
+        0
+    }
 }
 
 /// 传输条：进度、「当前 / 总长」和音量弹层由 `MediaTransportBar` 自己画，前导槽放循环模式、上一首、
@@ -319,16 +332,17 @@ impl FieldWrite<MediaTransportBar, f64> for PositionMs {
 }
 
 /// 媒体行：NanaUI 的 `ListItem`，行首 58px 封面，内容是粗体标题和次行。点它打开当前条目的预览；
-/// 没有条目时整行停用，字和类型方块按 0.45 在卡片底色上淡化。
+/// 没有条目时整行停用，字和类型方块按主题停用档在卡片底色上淡化。
 fn media(props: &BarProps) -> AnyView {
     let title = props.title();
     let dim = (!props.has_item()).then_some((
         SemanticColorRole::Surface,
-        crate::theme_map::DISABLED_OPACITY,
+        super::super::admin::style::disabled_opacity(),
     ));
     // 两行字的宽度来自剩下的空间，不换行，超出时省略号收尾。
     let meta = widget(
-        Stack::column(3.0)
+        Stack::column(0.0)
+            .gap_step(SpacingRole::Copy)
             .min_width(LengthSpec::Px(0.0))
             .grow(1.0)
             .shrink(1.0)
@@ -341,7 +355,7 @@ fn media(props: &BarProps) -> AnyView {
                 TypeRole::Section,
                 TextWeight::Bold,
                 SemanticColorRole::Text,
-                21.7,
+                LINE,
             ),
             dim,
         ))
@@ -349,10 +363,10 @@ fn media(props: &BarProps) -> AnyView {
         widget(parts::dim_text(
             parts::line(
                 props.subtitle(),
-                11.667,
+                TypeRole::Meta,
                 TextWeight::Medium,
                 SemanticColorRole::Muted,
-                18.08,
+                LINE,
             ),
             dim,
         ))
@@ -360,9 +374,10 @@ fn media(props: &BarProps) -> AnyView {
     ));
     let mut row = ListItem::new(title)
         .auto_height(true)
-        .gap(12.0)
+        .gap(tiers::space_px(SpacingStep::Xl))
         .disabled(!props.has_item());
     let layout = std::sync::Arc::make_mut(&mut row.style.layout);
+    tiers::gap(layout, SpacingStep::Xl);
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
     widget(row)
@@ -410,7 +425,8 @@ fn transport(props: &BarProps) -> AnyView {
         (icons::PLAY, "播放")
     };
     widget(
-        Stack::row(4.0)
+        Stack::row(0.0)
+            .gap_step(SpacingStep::Xs)
             .grow(0.0)
             .shrink(0.0)
             .align(AlignSpec::Center),

@@ -32,14 +32,18 @@ use nana_ui::runtime::{
     Stack, Text, TextHorizontalAlignment,
 };
 use nana_ui::{ButtonKind, Icon};
-use nana_ui_core::{TextWeight, TypeRole};
+use nana_ui_core::{
+    ControlHeight, ControlPadding, ControlSize, SpacingStep, TextWeight, TypeRole, TypographyTokens,
+};
 
 use crate::backend::services::repository::PlaylistItem;
 
+use super::super::admin::style::{LINE, disabled_opacity, lined, typeset};
 use super::super::player::PlayerMessage;
 use super::super::row_sync::sync_rows;
 use super::super::{ShellMessage, ShellViewModel};
 use super::{icons, key_part, player_message, playlist_plugin_missing};
+use crate::theme_map::tiers::{self, Edge};
 
 /// 不能播放的条目整行的透明度。
 const UNREADY_OPACITY: f32 = 0.72;
@@ -245,8 +249,9 @@ pub(crate) fn view(signals: PlaylistPageSignals, player_bar: AnyView) -> AnyView
     )
     .visible(move || order.with(Vec::is_empty));
     let panel = widget(
-        Stack::column(16.0)
-            .padding(18.0)
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Xxxl)
+            .padding_step(SpacingStep::PageTight, SpacingStep::PageTight)
             .surface(SemanticColorRole::Surface)
             .radius(RadiusTier::Xxl),
     )
@@ -288,7 +293,7 @@ fn item_list(signals: PlaylistPageSignals) -> AnyView {
     let list = widget(
         ReorderList::new(reorder())
             .live_rows(true)
-            .spacing(10.0)
+            .spacing(tiers::space_px(SpacingStep::Lg))
             .label("播放集条目"),
     )
     .prop::<Vec<ReorderItem>, fields::reorder_list::items>(reorder)
@@ -324,14 +329,17 @@ fn item_list(signals: PlaylistPageSignals) -> AnyView {
         .into_any()
 }
 
-/// 眉题、22px 标题、13px 状态行；右上角是播放整张列表。
+/// 眉题、`Display` 标题、`Body` 状态行，行高都是字号的 1.55 倍；右上角是播放整张列表。
 fn header(head: Signal<PageHead>) -> AnyView {
     let initial = head.get_untracked();
-    let mut eyebrow = Text::new("播放集")
-        .color(SemanticColorRole::Faint)
-        .role(TypeRole::Hint)
-        .weight(TextWeight::Semibold)
-        .line_height(17.05);
+    let mut eyebrow = lined(
+        Text::new("播放集")
+            .color(SemanticColorRole::Faint)
+            .role(TypeRole::Hint)
+            .weight(TextWeight::Semibold),
+        TypeRole::Hint,
+        LINE,
+    );
     Arc::make_mut(&mut eyebrow.style.layout)
         .text_ext
         .letter_spacing = Some(0.4);
@@ -345,19 +353,25 @@ fn header(head: Signal<PageHead>) -> AnyView {
     .children((
         widget(eyebrow).key("playlist-page-eyebrow"),
         widget(spaced(
-            crate::theme_map::typed_text(Text::new(initial.name), 20.0, TextWeight::Bold)
-                .color(SemanticColorRole::Text)
-                .line_height(34.1),
-            4.0,
+            lined(
+                typeset(Text::new(initial.name), TypeRole::Display, TextWeight::Bold)
+                    .color(SemanticColorRole::Text),
+                TypeRole::Display,
+                LINE,
+            ),
+            SpacingStep::Xs,
         ))
         .prop::<String, fields::text::value>(move || head.with(|head| head.name.clone()))
         .key("playlist-page-title"),
         widget(spaced(
-            Text::new(initial.subline)
-                .color(SemanticColorRole::Muted)
-                .role(TypeRole::Body)
-                .line_height(20.15),
-            8.0,
+            lined(
+                Text::new(initial.subline)
+                    .color(SemanticColorRole::Muted)
+                    .role(TypeRole::Body),
+                TypeRole::Body,
+                LINE,
+            ),
+            SpacingStep::Md,
         ))
         .prop::<String, fields::text::value>(move || head.with(|head| head.subline.clone()))
         .key("playlist-page-status"),
@@ -380,24 +394,29 @@ fn header(head: Signal<PageHead>) -> AnyView {
     .on_cx(|_, _: &Activate, cx| {
         cx.dispatch_program_all(player_message(PlayerMessage::PlayListed { item_id: None }))
     });
-    widget(Stack::bar(16.0).align(AlignSpec::Start))
-        .children((
-            titles,
-            widget(
-                Stack::row(8.0)
-                    .align(AlignSpec::Center)
-                    .grow(0.0)
-                    .shrink(0.0),
-            )
-            .children((play,)),
-        ))
-        .key("playlist-page-header")
-        .into_any()
+    widget(
+        Stack::bar(0.0)
+            .gap_step(SpacingStep::Xxxl)
+            .align(AlignSpec::Start),
+    )
+    .children((
+        titles,
+        widget(
+            Stack::row(0.0)
+                .gap_step(SpacingStep::Md)
+                .align(AlignSpec::Center)
+                .grow(0.0)
+                .shrink(0.0),
+        )
+        .children((play,)),
+    ))
+    .key("playlist-page-header")
+    .into_any()
 }
 
-/// 文字上方留出 `margin`，标题和状态行用。
-fn spaced(mut text: Text, margin: f32) -> Text {
-    Arc::make_mut(&mut text.style.layout).margin_top = Some(LengthSpec::Px(margin));
+/// 文字上方留出一档间距，标题和状态行用。
+fn spaced(mut text: Text, margin: SpacingStep) -> Text {
+    tiers::margin(Arc::make_mut(&mut text.style.layout), &[Edge::Top], margin);
     text
 }
 
@@ -422,7 +441,8 @@ fn entry_row(item: EntryItem, head: Signal<PageHead>) -> AnyView {
         .visible(move || !ready())
         .key(format!("playlist-item-status-{}", key_part(&id)));
     let meta = widget(
-        Stack::column(4.0)
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Xs)
             .width(LengthSpec::Shrink)
             .min_width(LengthSpec::Px(0.0))
             .grow(1.0)
@@ -433,7 +453,8 @@ fn entry_row(item: EntryItem, head: Signal<PageHead>) -> AnyView {
     let remove_id = id.clone();
     let blocked = move || !ready() || !head.with(|head| head.has_player);
     let actions = widget(
-        Stack::row(8.0)
+        Stack::row(0.0)
+            .gap_step(SpacingStep::Md)
             .align(AlignSpec::Center)
             .grow(0.0)
             .shrink(0.0),
@@ -472,7 +493,8 @@ fn entry_row(item: EntryItem, head: Signal<PageHead>) -> AnyView {
         }),
     ));
     let clickable = widget(
-        Stack::row(12.0)
+        Stack::row(0.0)
+            .gap_step(SpacingStep::Xl)
             .align(AlignSpec::Center)
             .width(LengthSpec::Shrink)
             .min_width(LengthSpec::Px(0.0))
@@ -485,17 +507,13 @@ fn entry_row(item: EntryItem, head: Signal<PageHead>) -> AnyView {
         actions,
     ))
     .key(format!("playlist-item-body-{}", key_part(&id)));
-    let row = Stack::row(12.0)
+    let row = Stack::row(0.0)
+        .gap_step(SpacingStep::Xl)
         .align(AlignSpec::Center)
         .width(LengthSpec::Fill)
         .surface(SemanticColorRole::Background)
         .radius(RadiusTier::Xl)
-        .with_layout(|layout| {
-            layout.padding_top = Some(LengthSpec::Px(10.0));
-            layout.padding_bottom = Some(LengthSpec::Px(10.0));
-            layout.padding_left = Some(LengthSpec::Px(12.0));
-            layout.padding_right = Some(LengthSpec::Px(12.0));
-        });
+        .padding_step(SpacingStep::Xl, SpacingStep::Lg);
     widget(row)
         .prop::<bool, RowDim>(move || !ready())
         .children((drag_handle(&id, item, head), clickable))
@@ -663,21 +681,23 @@ fn item_title(item: EntryItem, id: &str, title: &str, head: Signal<PageHead>) ->
         .into_any()
 }
 
-/// 12px 次行，超长省略。
+/// `Meta` 次行，行高 1.55 倍，超长省略。
 fn meta_line(label: &str, role: SemanticColorRole) -> Text {
-    let mut text = Text::new(label)
-        .color(role)
-        .role(TypeRole::Meta)
-        .line_height(18.6)
-        .truncating();
+    let mut text = lined(
+        Text::new(label).color(role).role(TypeRole::Meta),
+        TypeRole::Meta,
+        LINE,
+    )
+    .truncating();
     let layout = Arc::make_mut(&mut text.style.layout);
     layout.min_width = Some(LengthSpec::Px(0.0));
     layout.width = Some(LengthSpec::Fill);
     text
 }
 
-/// 工具栏按钮：34px 高、14px 图标在字前、6px 间距。普通操作透明底，危险操作是红字，悬停铺淡红。
-/// 禁用时按整颗 0.45 不透明度处理：字色在 sRGB 里和按钮所在的底色 `base` 混。
+/// 工具栏按钮：中号控件定高（32）、左右是中号控件内边距（10）、14px（`Section` 字号）图标在字前、
+/// 图标间距取主题默认（`Sm`）。普通操作透明底，危险操作是红字，悬停铺淡红。
+/// 禁用时按主题停用档整颗淡化：字色在 sRGB 里和按钮所在的底色 `base` 混。
 fn toolbar_button(
     label: &str,
     icon: Icon,
@@ -688,16 +708,13 @@ fn toolbar_button(
     let mut button = Button::new(label)
         .kind(kind)
         .icon(icon)
-        .icon_size(14.0)
-        .icon_gap(6.0)
+        .icon_size(TypographyTokens::DEFAULT.size(TypeRole::Section))
         .disabled(disabled);
     button.style.interaction.disabled = SemanticPaint::default();
     button.style.interaction.base.foreground_mix = ToolbarLook::new(kind, base, disabled).mix;
+    button.style.control_height = Some(ControlHeight::Exact(ControlSize::Medium));
+    button.style.control_padding_x = Some(ControlPadding::Standard);
     let layout = Arc::make_mut(&mut button.style.layout);
-    layout.height = Some(LengthSpec::Px(34.0));
-    layout.min_height = Some(LengthSpec::Px(34.0));
-    layout.padding_left = Some(LengthSpec::Px(10.0));
-    layout.padding_right = Some(LengthSpec::Px(10.0));
     layout.width = Some(LengthSpec::Shrink);
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
@@ -713,7 +730,7 @@ fn empty_frame(
     widget(EmptyState::new(title).message(message)).key(format!("{key}-frame"))
 }
 
-/// 工具栏按钮的禁用和字色：禁用时字色是正文色（危险操作是危险色）按 0.45 和底色混出来的。
+/// 工具栏按钮的禁用和字色：禁用时字色是正文色（危险操作是危险色）按主题停用档和底色混出来的。
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ToolbarLook {
     disabled: bool,
@@ -729,9 +746,8 @@ impl ToolbarLook {
         };
         Self {
             disabled,
-            mix: disabled.then(|| {
-                nana_ui_core::SemanticColorMix::new(role, base, crate::theme_map::DISABLED_OPACITY)
-            }),
+            mix: disabled
+                .then(|| nana_ui_core::SemanticColorMix::new(role, base, disabled_opacity())),
         }
     }
 }
