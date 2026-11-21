@@ -3,16 +3,17 @@
 //! 两块都常驻：展开、菜单、导入框按 `.visible` 显隐；标签片、标签分组、已有标签和候选是带键的 `each`，
 //! 只有变了的那一片重建；输入框受控，处理器只发消息，要用到当前值时现读信号。
 
-use crate::shell::dismiss_layer::{DismissCover, dismiss_layer};
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{CHEVRON_DOWN, CHEVRON_RIGHT, PLUS};
 use nana_ui::runtime::view::fields::{self, HiddenWhenEmpty};
-use nana_ui::runtime::view::{AnyView, IntoView, computed, css, each, text, untrack, widget};
+use nana_ui::runtime::view::{
+    AnyView, FieldWrite, IntoView, computed, css, each, text, untrack, widget,
+};
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, IconGlyph, JustifySpec, LengthSpec, ListItem, NodeStyle,
-    PositionSpec, RadiusTier, Select, SelectChanged, SemanticColorRole, SettingsCard, Stack,
-    TextChanged, TextInput, TextSubmitted,
+    Activate, AlignSpec, Button, IconGlyph, JustifySpec, LengthSpec, ListItem, NodeStyle, Popover,
+    PopoverAlignment, PopoverToggled, Select, SelectChanged, SemanticColorRole, SettingsCard,
+    Stack, TextChanged, TextInput, TextSubmitted,
 };
 use nana_ui::{ButtonKind, ControlSize};
 use nana_ui_core::Icon;
@@ -107,22 +108,10 @@ pub(super) fn tags_row(signals: MetadataSignals) -> AnyView {
         .into_any()
 }
 
-/// 展开后的标签区：有标签时是标签片和一枚「+」，没有时是「添加标签」；菜单打开时接在后面。
+/// 展开后的标签区：标签片，末尾是打开标签菜单的触发器（没有标签时写「添加标签」，有标签时是一枚「+」）。
 fn tag_panel(signals: MetadataSignals) -> AnyView {
     let tags = signals.tags;
     let locked = signals.locked();
-    let empty = move || tags.with(|view| view.tags.is_empty());
-    let look = ButtonLook {
-        icon_size: 18.0,
-        gap: 8.0,
-        ..ButtonLook::TOOLBAR
-    };
-    let add_first =
-        widget(style::styled_button("添加标签", Some(PLUS), look).disabled(untrack(&locked)))
-            .visible(empty)
-            .prop::<bool, fields::button::disabled>(locked.clone())
-            .key("inspect-tag-menu")
-            .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(toggle_tag_menu()));
     let chips = computed(move || {
         tags.with(|view| {
             let mut chips = view
@@ -138,55 +127,16 @@ fn tag_panel(signals: MetadataSignals) -> AnyView {
             chips
         })
     });
-    let chip_locked = locked.clone();
-    let row = each(chips, TagChip::clone, move |chip| match chip {
-        TagChip::Tag { index, tag } => tag_chip(index, &tag, chip_locked.clone()),
-        TagChip::Add => round_button(PLUS, "inspect-tag-menu", chip_locked.clone()),
+    each(chips, TagChip::clone, move |chip| match chip {
+        TagChip::Tag { index, tag } => tag_chip(index, &tag, locked.clone()),
+        TagChip::Add => tag_menu(signals),
     })
     .horizontal(8.0)
     .css(css! { flex-wrap: wrap; row-gap: 8px; })
     .key("inspect-tags")
-    .visible(move || !empty());
-    let layer = widget(
-        Stack::column(10.0)
-            .width(LengthSpec::Fill)
-            .min_width(LengthSpec::Px(0.0))
-            .with_layout(|layout| {
-                layout.position = PositionSpec::Relative;
-                layout.z_index = Some(31);
-            }),
-    )
-    .children((add_first, row, tag_menu(signals)))
-    .key("inspect-tag-menu-layer");
-    widget(
-        Stack::column(0.0)
-            .width(LengthSpec::Fill)
-            .min_width(LengthSpec::Px(0.0)),
-    )
     .visible(move || tags.with(|view| view.expanded))
-    .children((tag_menu_closer(signals), layer))
-    .key("inspect-tag-panel")
     .into_any()
 }
-
-/// 菜单打开时铺满窗口。点在菜单和「+」外面就关掉，按下指针时就关。
-/// 菜单层的 z 序更高，点菜单本身不会打到这一层。
-fn tag_menu_closer(signals: MetadataSignals) -> AnyView {
-    let tags = signals.tags;
-    dismiss_layer("关闭标签菜单", DismissCover::Window { z_index: 30 })
-        .visible(move || tags.with(|view| view.menu_open))
-        .key("inspect-tag-menu-closer")
-        .on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::CloseTagMenu))
-        })
-        .into_any()
-}
-
-/// 打开或关上标签菜单。
-fn toggle_tag_menu() -> ShellMessage {
-    ShellMessage::Files(FilesMessage::ToggleTagMenu)
-}
-
 /// 标签片：30 高的药丸，浅底，标签文字和一枚「×」。键带序号，重复标签也不撞键。
 fn tag_chip(
     index: usize,
@@ -228,32 +178,10 @@ fn tag_chip(
     .into_any()
 }
 
-/// 30 方的圆按钮，弱化色，悬停时 `--bg-active` 底。点了开关标签菜单。
-fn round_button(
-    icon: Icon,
-    key: &str,
-    locked: impl Fn() -> bool + Send + Clone + 'static,
-) -> AnyView {
-    let look = ButtonLook {
-        height: 30.0,
-        padding_x: 6.0,
-        foreground: SemanticColorRole::Muted,
-        hover: Some(SemanticColorRole::Active),
-        icon_size: 18.0,
-        ..ButtonLook::TOOLBAR
-    };
-    let mut button = style::styled_button("", Some(icon), look).disabled(untrack(&locked));
-    Arc::make_mut(&mut button.style.layout).width = Some(LengthSpec::Px(30.0));
-    let rounded = button.style.clone().radius_px(999.0);
-    widget(button.style(rounded))
-        .prop::<bool, fields::button::disabled>(locked)
-        .key(key.to_string())
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(toggle_tag_menu()))
-        .into_any()
-}
-
-/// 标签菜单：新建标签输入和「添加“…”」，下面是已有标签。没有标签时铺在「添加标签」下面，
-/// 有标签时浮在「+」右下方；这里都按铺开的版式画在标签区里。
+/// 标签菜单：NanaUI 的 `Popover`，触发器是标签片末尾的「+」（没有标签时写「添加标签」）。面板里是新建标签
+/// 输入和「添加“…”」，下面是标签分组和已有标签；点外面、Escape 和再点触发器收起，焦点回到触发器，都由
+/// 框架负责。框架开合时发 [`PopoverToggled`]，换成 `TagMenuToggled` 写回 ViewModel；ViewModel 不让开
+/// （没有素材、虚拟素材、保存中）时 `open` 写回假，面板随即收起。
 fn tag_menu(signals: MetadataSignals) -> AnyView {
     let tags = signals.tags;
     let draft = signals.tag_draft;
@@ -346,18 +274,72 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
                     )));
                 }),
         ));
-    widget(
-        Stack::column(10.0)
-            .width(LengthSpec::Fill)
-            .padding(12.0)
-            .surface(SemanticColorRole::Surface)
-            .border(SemanticColorRole::BorderSoft, 1.0)
-            .radius(RadiusTier::Xl),
-    )
-    .visible(move || tags.with(|view| view.menu_open))
-    .children((draft_group, create, grouped, existing))
-    .key("inspect-tag-menu-panel")
-    .into_any()
+    let body = widget(Stack::column(10.0).width(LengthSpec::Fill))
+        .children((draft_group, create, grouped, existing))
+        .key("inspect-tag-menu-panel");
+    let empty = move || tags.with(|view| view.tags.is_empty());
+    let trigger = widget(Stack::row(6.0).align(AlignSpec::Center))
+        .children((
+            widget(
+                IconGlyph::new(PLUS)
+                    .size(18.0)
+                    .role(SemanticColorRole::Muted),
+            )
+            .key("inspect-tag-menu-icon"),
+            widget(style::text("添加标签", 14.0, 500, SemanticColorRole::Text, 21.7).nowrap(true))
+                .visible(empty)
+                .key("inspect-tag-menu-text"),
+        ))
+        .key("inspect-tag-menu-trigger");
+    let popover = Popover::new()
+        .trigger("添加标签")
+        .bare_trigger(true)
+        .alignment(PopoverAlignment::Start)
+        .width(320.0)
+        .trigger_style(tag_trigger_style());
+    widget(popover)
+        .prop::<bool, TagMenuOpen>(move || tags.with(|view| view.menu_open))
+        .trigger(trigger)
+        .children((body,))
+        .key("inspect-tag-menu")
+        .on_cx(|_, toggled: &PopoverToggled, cx| {
+            cx.dispatch_program_all(ShellMessage::Files(FilesMessage::TagMenuToggled(
+                toggled.open,
+            )))
+        })
+        .into_any()
+}
+
+/// 触发器：30 高的药丸，弱化色，悬停 `--bg-active` 底。
+fn tag_trigger_style() -> NodeStyle {
+    let look = ButtonLook {
+        height: 30.0,
+        padding_x: 6.0,
+        foreground: SemanticColorRole::Muted,
+        hover: Some(SemanticColorRole::Active),
+        icon_size: 18.0,
+        ..ButtonLook::TOOLBAR
+    };
+    let mut style = style::styled_button("", Some(PLUS), look)
+        .style
+        .radius_px(999.0);
+    Arc::make_mut(&mut style.layout).min_width = Some(LengthSpec::Px(30.0));
+    style
+}
+
+/// 标签菜单开没开着。
+struct TagMenuOpen;
+
+impl FieldWrite<Popover, bool> for TagMenuOpen {
+    const FIELD: &'static str = "Popover.open";
+
+    fn write(target: &mut Popover, open: bool) {
+        target.open = open;
+    }
+
+    fn differs(target: &Popover, open: &bool) -> bool {
+        target.open != *open
+    }
 }
 
 /// 一个仓库标签分组：11px 半粗的分组名，下面是可加的标签片，行距 5。

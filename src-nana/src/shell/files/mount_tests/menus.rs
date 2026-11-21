@@ -80,10 +80,10 @@ fn slashes_in_tags_and_repeated_palette_colors_still_mount() {
     );
 }
 
-/// 标签菜单铺在元数据的标签区里，不按坐标夹进写死的 1280×800：960×600 的窗口里打开，菜单整块落在
-/// 右侧详情卡片里，也在窗口里面；窄到详情卡片叠到列表下面（800 宽）时同样落在卡片里。
+/// 标签菜单是 NanaUI 的 `Popover`，挂在「+」上，放不下就翻面再收进窗口：960×600 和窄到详情卡片叠到
+/// 列表下面（800 宽）时，面板都整块在窗口里。
 #[test]
-fn tag_menu_stays_inside_the_detail_card_in_other_window_sizes() {
+fn tag_menu_stays_inside_the_window_in_other_window_sizes() {
     for (width, height) in [(960.0, 600.0), (800.0, 600.0)] {
         let mut model = scene("files-selected-metadata");
         model.reduce(ShellMessage::Files(FilesMessage::ToggleTagMenu));
@@ -104,17 +104,15 @@ fn tag_menu_stays_inside_the_detail_card_in_other_window_sizes() {
                 .unwrap_or_else(|| panic!("{key} 没有布局盒"))
         };
         let panel = layout("inspect-tag-menu-panel");
-        let card = layout("file-detail");
         assert!(
             panel.width > 0.0 && panel.height > 0.0,
             "{width}×{height} 菜单要排出来：{panel:?}"
         );
         assert!(
-            panel.x >= card.x - 0.5 && panel.x + panel.width <= card.x + card.width + 0.5,
-            "{width}×{height} 菜单横向落在详情卡片里：{panel:?} / {card:?}"
-        );
-        assert!(
-            panel.x >= 0.0 && panel.x + panel.width <= width + 0.5,
+            panel.x >= 0.0
+                && panel.x + panel.width <= width + 0.5
+                && panel.y >= 0.0
+                && panel.y + panel.height <= height + 0.5,
             "{width}×{height} 菜单不出窗口：{panel:?}"
         );
     }
@@ -143,7 +141,7 @@ fn clicking_outside_the_import_menu_closes_it_anywhere_in_the_window() {
     }
 }
 
-/// 标签候选铺在元数据卡里。点卡片外面关掉，不新增标签。
+/// 点标签菜单外面，框架收起菜单、发 `PopoverToggled`，不新增标签。
 #[test]
 fn tag_menu_closes_when_clicking_outside() {
     let mut model = scene("files-selected-metadata");
@@ -153,9 +151,10 @@ fn tag_menu_closes_when_clicking_outside() {
     let mut window = laid_out(&model);
     let messages = click(&mut window, 120.0, 420.0);
     assert!(
-        messages
-            .iter()
-            .any(|message| matches!(message, ShellMessage::Inspect(InspectMessage::CloseTagMenu))),
+        messages.iter().any(|message| matches!(
+            message,
+            ShellMessage::Files(FilesMessage::TagMenuToggled(false))
+        )),
         "点外面应关掉标签菜单，实际 {} 条消息",
         messages.len()
     );

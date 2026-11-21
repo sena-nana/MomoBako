@@ -468,6 +468,8 @@ pub enum FilesMessage {
     },
     /// 打开或关上标签菜单。
     ToggleTagMenu,
+    /// 标签菜单开了或关了（框架发的 `PopoverToggled`）。
+    TagMenuToggled(bool),
     /// 标签菜单里新建标签的输入。
     SetTagDraft(String),
     /// 复制一段文字到系统剪贴板。

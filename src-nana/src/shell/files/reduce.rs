@@ -53,7 +53,9 @@ impl FilesState {
             FilesMessage::ToggleTags { path, expanded } => self.tags_open = Some((path, !expanded)),
             FilesMessage::SetTagDraft(value) => self.tag_draft = value,
             // 这两条要改检视草稿，在 `reduce_message` 里转成检视消息。
-            FilesMessage::ToggleTagMenu | FilesMessage::SubmitTagDraft(_) => {}
+            FilesMessage::ToggleTagMenu
+            | FilesMessage::TagMenuToggled(_)
+            | FilesMessage::SubmitTagDraft(_) => {}
             FilesMessage::CopyText(text) => {
                 if text.is_empty() {
                     eprintln!("Nana 没有可复制的文字");
@@ -301,6 +303,18 @@ pub(in crate::shell) fn reduce_message(
                 InspectMessage::CloseTagMenu
             } else {
                 InspectMessage::OpenTagMenu
+            };
+            return Some(ShellMessage::Inspect(next));
+        }
+        FilesMessage::TagMenuToggled(open) => {
+            if *open == model.inspect.tag_menu_open() {
+                return None;
+            }
+            model.files.tag_draft.clear();
+            let next = if *open {
+                InspectMessage::OpenTagMenu
+            } else {
+                InspectMessage::CloseTagMenu
             };
             return Some(ShellMessage::Inspect(next));
         }
