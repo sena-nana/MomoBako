@@ -194,7 +194,7 @@ impl ShellView {
         }
         view.place(document.context_mut(), mode)?;
         swap.finish(document);
-        view.focus_return = FocusReturn::new(model, view.overlay.identity());
+        view.focus_return = FocusReturn::new(view.overlay.identity());
         error.map_or(Ok(view), Err)
     }
 
@@ -318,7 +318,7 @@ impl ShellView {
         let document_id = document.document();
         let before = document.context().world().focused(document_id);
         self.focus_return
-            .settle(document.context_mut(), document_id, model, regions);
+            .settle(document.context_mut(), document_id, regions);
         let lyric = if super::files_view::previewing(model) && !model.inspect.lyrics.is_empty() {
             super::inspect_view::follow_active_lyric(document, &mut self.lyric_follow)
         } else {

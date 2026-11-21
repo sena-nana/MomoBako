@@ -215,10 +215,10 @@ impl FilesState {
         self.target_draft = target.to_string();
     }
 
-    /// 展开或收起导入菜单。收起时 Eagle 的复制和剪切一起收起。
-    pub(in crate::shell) fn toggle_import_menu(&mut self) {
-        self.import_open = !self.import_open;
-        if !self.import_open {
+    /// 导入菜单开了或关了。关上时 Eagle 的复制和剪切一起收起。
+    pub(in crate::shell) fn set_import_menu(&mut self, open: bool) {
+        self.import_open = open;
+        if !open {
             self.eagle_open = false;
         }
     }

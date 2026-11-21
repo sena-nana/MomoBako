@@ -21,7 +21,6 @@ fn scene(name: &str) -> ShellViewModel {
 fn kind(message: &ShellMessage) -> &'static str {
     match message {
         ShellMessage::Sidebar(SidebarMessage::OpenRepositorySwitcher) => "open-switcher",
-        ShellMessage::Files(FilesMessage::OpenImportMenu) => "open-import",
         ShellMessage::Files(FilesMessage::OpenEntryMenu { .. }) => "open-entry",
         ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::OpenFolderMenu { .. })) => {
             "open-folder"
@@ -31,6 +30,7 @@ fn kind(message: &ShellMessage) -> &'static str {
             "create-folder"
         }
         ShellMessage::FocusMenu(_) => "focus-menu",
+        ShellMessage::Files(FilesMessage::ImportMenuToggled(true)) => "import-opened",
         _ => "other",
     }
 }
@@ -137,21 +137,19 @@ fn the_repository_popover_keeps_keyboard_focus_through_its_pages() {
     );
 }
 
+/// 「导入」是 NanaUI 的 `ActionMenu`：Enter 打开，方向键在条目间走、首尾相接，Escape 收起后焦点回到「导入」。
 #[test]
-fn arrows_on_import_open_the_menu_without_toggling_it_shut() {
+fn enter_on_import_opens_the_native_menu_and_arrows_walk_it() {
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
-    assert_eq!(
-        press_on(&mut harness, "导入", "ArrowDown"),
-        ["open-import", "focus-menu"]
-    );
-    assert!(harness.model.files.import_open, "ArrowDown 打开导入菜单");
+    assert_eq!(press_on(&mut harness, "导入", "Enter"), ["import-opened"]);
+    assert!(harness.model.files.import_open, "Enter 打开导入菜单");
+    press(&mut harness, "ArrowDown");
     assert_eq!(focused(&harness).as_deref(), Some("从文件夹导入"));
-    press_on(&mut harness, "导入", "ArrowUp");
-    assert!(harness.model.files.import_open, "菜单开着时再按不收起");
+    press(&mut harness, "ArrowUp");
     assert_eq!(
         focused(&harness).as_deref(),
         Some("从 Eagle 导入"),
-        "Eagle 的两项藏着，末项是「从 Eagle 导入」"
+        "Eagle 的两项藏着，往上越过首项落在「从 Eagle 导入」"
     );
     harness.press_escape();
     assert!(!harness.model.files.import_open);
@@ -335,22 +333,21 @@ fn a_request_for_a_closed_menu_is_dropped() {
     request(
         &mut model,
         MenuFocusRequest {
-            surface: MenuSurface::Import,
+            surface: MenuSurface::RepositorySwitcher,
             edge: MenuEdge::First,
         },
     );
-    assert_eq!(model.menu_focus.latest(), None, "导入菜单没开，不记请求");
-    model.reduce(ShellMessage::Files(FilesMessage::OpenImportMenu));
+    assert_eq!(model.menu_focus.latest(), None, "切换弹层没开，不记请求");
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::OpenRepositorySwitcher,
+    ));
+    assert!(MenuSurface::RepositorySwitcher.is_open(&model));
     model.reduce(ShellMessage::FocusMenu(MenuFocusRequest {
-        surface: MenuSurface::Import,
+        surface: MenuSurface::RepositorySwitcher,
         edge: MenuEdge::Last,
     }));
     assert_eq!(
         model.menu_focus.latest().map(|(_, request)| request.edge),
         Some(MenuEdge::Last)
     );
-    model.reduce(ShellMessage::Sidebar(
-        SidebarMessage::OpenRepositorySwitcher,
-    ));
-    assert!(MenuSurface::RepositorySwitcher.is_open(&model));
 }

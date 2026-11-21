@@ -131,7 +131,7 @@ fn clicking_outside_the_import_menu_closes_it_anywhere_in_the_window() {
         assert!(
             matches!(
                 messages.as_slice(),
-                [ShellMessage::Files(FilesMessage::ToggleImportMenu)]
+                [ShellMessage::Files(FilesMessage::ImportMenuToggled(false))]
             ),
             "点 ({x}, {y}) 应只收起导入菜单：{} 条消息",
             messages.len()
@@ -178,11 +178,12 @@ fn import_menu_items_still_take_their_own_clicks() {
     assert!(
         matches!(
             messages.as_slice(),
-            [ShellMessage::Files(FilesMessage::OpenDialog(
-                FileDialog::Import
-            ))]
+            [
+                ShellMessage::Files(FilesMessage::OpenDialog(FileDialog::Import)),
+                ShellMessage::Files(FilesMessage::ImportMenuToggled(false)),
+            ]
         ),
-        "菜单项在收起层上面：{} 条消息",
+        "点菜单项打开对话框，菜单随之收起：{} 条消息",
         messages.len()
     );
 }

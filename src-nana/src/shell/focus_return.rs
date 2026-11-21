@@ -1,5 +1,5 @@
 //! 浮层关掉以后把焦点还回去，照 WAI-ARIA 对话框的做法：回到打开它的控件；那个控件已经不在了，
-//! 就回到它所在区域里合理的控件。对话框、弹层、右键菜单和文件页的「导入」菜单都按这一条走。
+//! 就回到它所在区域里合理的控件。对话框、弹层和右键菜单都按这一条走；「导入」这类 NanaUI 原生菜单自己把焦点还给触发器。
 //!
 //! 规则：
 //! - 一层打开时记下「打开它的控件」：右键菜单是它所属的文件条目或文件夹行（右键不挪焦点，菜单键时
@@ -7,7 +7,7 @@
 //!   （菜单项打开对话框、弹层换页、排在后面的对话框接着显示）时，接着用上一层记下的控件：菜单项和
 //!   上一页随上一层收起，不能当归还目标。焦点那一刻不在页面上、也没有上一层时，用这一层所属区域的
 //!   落脚点（见 [`Home`]）。
-//! - 一层关掉、没有别的层接手，而焦点没了（随浮层卸掉、留在藏起来的菜单里，或者框架没有能还的目标）
+//! - 一层关掉、没有别的层接手，而焦点没了（随浮层卸掉，或者框架没有能还的目标）
 //!   时，焦点回到打开它的控件；它不在了或者不能聚焦，就从它原来的上层往外找第一层还在的容器，取里面
 //!   选中的项（当前文件夹、选中的文件条目），没有就取第一个能聚焦的控件，最远找到它所在区域的根（侧栏、
 //!   主区）。整个区域都不在（换仓库时侧栏收起）时等它回来再还，期间焦点被放到别处就作罢。对话框关上
@@ -27,7 +27,6 @@ use nana_ui::runtime::{
 };
 
 use super::ShellViewModel;
-use super::menu_focus::MenuSurface;
 use super::view_part_overlay::{OverlayIdentity, OverlayKey};
 
 /// 会临时拿走焦点、关掉以后要把焦点还回去的一层。
@@ -35,8 +34,6 @@ use super::view_part_overlay::{OverlayIdentity, OverlayKey};
 pub(crate) enum Surface {
     /// 浮层块：对话框、弹层和右键菜单。身份里的结构变了（换页、换目标）算换了一层。
     Overlay(OverlayIdentity),
-    /// 文件页工具条「导入」的菜单，在页面里开合，不在浮层层里。
-    ImportMenu,
 }
 
 impl Surface {
@@ -47,18 +44,13 @@ impl Surface {
 
     /// 同一种：浮层的种类相同（弹层换页、文件对话框换了一种）。
     fn same_kind(&self, other: &Surface) -> bool {
-        match (self, other) {
-            (Self::Overlay(a), Self::Overlay(b)) => a.key == b.key,
-            (Self::ImportMenu, Self::ImportMenu) => true,
-            _ => false,
-        }
+        let (Self::Overlay(a), Self::Overlay(b)) = (self, other);
+        a.key == b.key
     }
 
     /// 没有打开它的控件时，焦点落在哪个区域。
     fn home(&self) -> Home {
-        let Self::Overlay(identity) = self else {
-            return Home::Files;
-        };
+        let Self::Overlay(identity) = self;
         match identity.key {
             OverlayKey::CloseConfirm => Home::None,
             OverlayKey::EntryMenu
@@ -109,8 +101,6 @@ pub(crate) struct Before {
     focused: Option<StableNodeId>,
     /// 焦点在浮层层里：菜单、弹层或对话框里的控件。
     in_overlay: bool,
-    /// 焦点在「导入」菜单的项上。
-    in_import_menu: bool,
 }
 
 impl Before {
@@ -126,16 +116,13 @@ impl Before {
         Self {
             focused: Some(focused),
             in_overlay: within(world, focused, layer),
-            in_import_menu: in_import_menu(context, focused),
         }
     }
 
     /// 焦点在这一层里：关掉以后焦点随它没了。
     fn inside(&self, surface: &Surface) -> bool {
-        match surface {
-            Surface::Overlay(_) => self.in_overlay,
-            Surface::ImportMenu => self.in_import_menu,
-        }
+        let Surface::Overlay(_) = surface;
+        self.in_overlay
     }
 }
 
@@ -172,8 +159,8 @@ pub(crate) struct FocusReturn {
 
 impl FocusReturn {
     /// 新挂的视图：挂载时已经开着的层没有记下的控件，关掉时按所属区域找落脚点。
-    pub(crate) fn new(model: &ShellViewModel, shown: Option<&OverlayIdentity>) -> Self {
-        let open = surfaces(model, shown)
+    pub(crate) fn new(shown: Option<&OverlayIdentity>) -> Self {
+        let open = surfaces(shown)
             .into_iter()
             .map(|surface| Layer {
                 origin: Origin::home(&surface),
@@ -197,7 +184,7 @@ impl FocusReturn {
         before: Before,
         regions: Regions,
     ) {
-        let now = surfaces(model, shown);
+        let now = surfaces(shown);
         let (mut closed, kept): (Vec<Layer>, Vec<Layer>) = std::mem::take(&mut self.open)
             .into_iter()
             .partition(|layer| !now.contains(&layer.surface));
@@ -220,7 +207,7 @@ impl FocusReturn {
                 (Some(origin), _) => origin,
                 (None, Some(index)) => closed.remove(index).origin,
                 (None, None) => {
-                    self.origin_for(context, model, &surface, before.focused, &closed, regions)
+                    self.origin_for(context, &surface, before.focused, &closed, regions)
                 }
             };
             self.watching = None;
@@ -231,7 +218,6 @@ impl FocusReturn {
             let origin = self.enter(
                 context,
                 document,
-                model,
                 &surface,
                 origin,
                 handed.is_some(),
@@ -246,7 +232,7 @@ impl FocusReturn {
                 self.stalled = false;
             }
         }
-        self.settle(context, document, model, regions);
+        self.settle(context, document, regions);
     }
 
     /// 每帧收尾和整体同步收尾时调：关掉的层还没还上焦点、焦点又没了，就还到打开它的控件或它那一片里
@@ -255,11 +241,10 @@ impl FocusReturn {
         &mut self,
         context: &mut AppContext,
         document: DocumentId,
-        model: &ShellViewModel,
         regions: Regions,
     ) {
         if let Some(origin) = self.pending.take() {
-            match focus_state(context, document, model, regions) {
+            match focus_state(context, document, regions) {
                 FocusState::Held => self.pending = Some(origin),
                 // 框架关上对话框时已经还到了打开它的控件，或者焦点被放到了别处。
                 FocusState::Placed(focused) if origin.opener == Some(focused) => {
@@ -336,15 +321,12 @@ impl FocusReturn {
     fn origin_for(
         &self,
         context: &AppContext,
-        model: &ShellViewModel,
         surface: &Surface,
         before: Option<StableNodeId>,
         closed: &[Layer],
         regions: Regions,
     ) -> Origin {
-        if let Some(focused) =
-            before.filter(|focused| page_control(context, model, *focused, regions))
-        {
+        if let Some(focused) = before.filter(|focused| page_control(context, *focused, regions)) {
             return Origin::of(context.world(), focused, regions);
         }
         if let Some(pending) = &self.pending {
@@ -364,13 +346,12 @@ impl FocusReturn {
         &mut self,
         context: &mut AppContext,
         document: DocumentId,
-        model: &ShellViewModel,
         surface: &Surface,
         origin: Origin,
         handed: bool,
         regions: Regions,
     ) -> Origin {
-        if focus_state(context, document, model, regions) != FocusState::Lost {
+        if focus_state(context, document, regions) != FocusState::Lost {
             return origin;
         }
         if handed && !surface.modal() && follow(context, document, regions.overlay) {
@@ -393,23 +374,17 @@ impl FocusReturn {
     }
 }
 
-/// 现在开着的层：浮层块显示的那一层和开着的「导入」菜单。
-fn surfaces(model: &ShellViewModel, shown: Option<&OverlayIdentity>) -> Vec<Surface> {
-    let mut surfaces = Vec::new();
-    if let Some(identity) = shown {
-        surfaces.push(Surface::Overlay(identity.clone()));
-    }
-    if MenuSurface::Import.is_open(model) {
-        surfaces.push(Surface::ImportMenu);
-    }
-    surfaces
+/// 现在开着的层：浮层块显示的那一层。
+fn surfaces(shown: Option<&OverlayIdentity>) -> Vec<Surface> {
+    shown
+        .map(|identity| Surface::Overlay(identity.clone()))
+        .into_iter()
+        .collect()
 }
 
 /// 右键菜单所属的控件（文件条目、文件夹行）的键。
 fn context_anchor(surface: &Surface, model: &ShellViewModel) -> Option<String> {
-    let Surface::Overlay(identity) = surface else {
-        return None;
-    };
+    let Surface::Overlay(identity) = surface;
     match identity.key {
         OverlayKey::EntryMenu => super::files_view::entry_menu_card_key(model),
         OverlayKey::FolderMenu => model
@@ -428,21 +403,14 @@ enum FocusState {
     Placed(StableNodeId),
     /// 在换下来、还没关上的对话框里：等框架关上它。
     Held,
-    /// 没有焦点，或者焦点所在的控件已经卸掉、藏起来，或者留在关掉的「导入」菜单里。
+    /// 没有焦点，或者焦点所在的控件已经卸掉、藏起来。
     Lost,
 }
 
-fn focus_state(
-    context: &AppContext,
-    document: DocumentId,
-    model: &ShellViewModel,
-    regions: Regions,
-) -> FocusState {
+fn focus_state(context: &AppContext, document: DocumentId, regions: Regions) -> FocusState {
     let world = context.world();
     match world.focused(document) {
-        Some(focused)
-            if live(world, focused) && !in_closed_import_menu(context, model, focused) =>
-        {
+        Some(focused) if live(world, focused) => {
             if within(world, focused, regions.layer) && !within(world, focused, regions.overlay) {
                 FocusState::Held
             } else {
@@ -479,34 +447,10 @@ fn modal_open(context: &AppContext, layer: Option<StableNodeId>) -> bool {
     false
 }
 
-/// 焦点在「导入」菜单的项上，而菜单已经关了（藏起来的绑定要到刷新才生效）。
-fn in_closed_import_menu(
-    context: &AppContext,
-    model: &ShellViewModel,
-    focused: StableNodeId,
-) -> bool {
-    !MenuSurface::Import.is_open(model) && in_import_menu(context, focused)
-}
-
-/// `focused` 是「导入」菜单里的控件。
-fn in_import_menu(context: &AppContext, focused: StableNodeId) -> bool {
-    let menu = MenuSurface::Import.group_key();
-    context
-        .assembly_path(focused)
-        .is_some_and(|path| path.split('/').any(|segment| segment == menu))
-}
-
-/// 页面上的控件：挂着、看得见，不在浮层层里，也不在关掉的「导入」菜单里。
-fn page_control(
-    context: &AppContext,
-    model: &ShellViewModel,
-    id: StableNodeId,
-    regions: Regions,
-) -> bool {
+/// 页面上的控件：挂着、看得见，不在浮层层里。
+fn page_control(context: &AppContext, id: StableNodeId, regions: Regions) -> bool {
     let world = context.world();
-    live(world, id)
-        && !within(world, id, regions.layer)
-        && !in_closed_import_menu(context, model, id)
+    live(world, id) && !within(world, id, regions.layer)
 }
 
 /// 把焦点还到 `origin`：打开它的控件还在、能聚焦就回到它，否则在它的上层里、最后在所属区域里找。

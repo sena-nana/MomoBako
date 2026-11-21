@@ -16,7 +16,6 @@ use super::{
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FilesLayer {
     EntryMenu,
-    ImportMenu,
     Export,
     Hardlink,
     Dialog,
@@ -77,8 +76,7 @@ impl FilesState {
             FilesMessage::OpenEagle(mode) => {
                 self.open_eagle(ctx, &mode);
             }
-            FilesMessage::ToggleImportMenu => self.toggle_import_menu(),
-            FilesMessage::OpenImportMenu => self.import_open = true,
+            FilesMessage::ImportMenuToggled(open) => self.set_import_menu(open),
             FilesMessage::ToggleEagleImport => self.toggle_eagle_menu(),
             FilesMessage::SetCreateName(value) => self.create_name = value,
             FilesMessage::SubmitCreateFile => {
@@ -166,13 +164,11 @@ impl FilesState {
         }
     }
 
-    /// Escape 现在能关掉文件页的哪一层：右键菜单、导入菜单、导出对话框、硬链接确认、文件对话框。
+    /// Escape 现在能关掉文件页的哪一层：右键菜单、导出对话框、硬链接确认、文件对话框。
     /// 导出中、变更进行中的对话框和处理中的硬链接确认（含确认以后等候选重读）不关，没有可关的为 `None`。
     pub(crate) fn escape_layer(&self) -> Option<FilesLayer> {
         if self.entry_menu.is_some() {
             Some(FilesLayer::EntryMenu)
-        } else if self.import_open {
-            Some(FilesLayer::ImportMenu)
         } else if self.export.open && !self.export.busy {
             Some(FilesLayer::Export)
         } else if self.dialog == FileDialog::Hardlink {
@@ -212,11 +208,6 @@ impl FilesState {
                 self.entry_menu = None;
                 self.menu_branch = MenuBranch::default();
                 self.menu_pending = None;
-                true
-            }
-            Some(FilesLayer::ImportMenu) => {
-                self.import_open = false;
-                self.eagle_open = false;
                 true
             }
             Some(FilesLayer::Export) => {

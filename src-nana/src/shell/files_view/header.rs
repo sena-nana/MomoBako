@@ -1,32 +1,32 @@
 //! 文件卡片头部。
 //!
 //! 左边是眉题和面包屑药丸，右边是工具条：展示方式选择框、新建空文件输入、建文件和导入。
-//! 导入菜单是锚在「导入」按钮下方、右对齐的浮层，Eagle 的复制 / 剪切导入在菜单里展开；菜单项在方向键
-//! 焦点组里，键盘从「导入」打开时焦点落在首项或末项（`menu_focus.rs`）。
+//! 导入菜单是 NanaUI 的 `ActionMenu`，挂在「导入」下方、右对齐，Eagle 的复制 / 剪切导入在菜单里展开；
+//! 开合、键盘和焦点都由框架负责。
 //! 左列按内容宽度排、不被工具条挤窄；工具条在剩余宽度里换行并右对齐。
 //!
 //! 常驻：头部只建一次。眉题、说明、展示方式和各按钮能不能点按字段绑定；面包屑是带键的 `each`，
 //! 每一级按「路径 + 文字」认；只在某种面板出现的工具用 `.visible`（不占布局，不多一个间距）。
 //! 新建文件名的输入框受控（`.model` 加 [`DraftField`]），处理器只发消息。
 
-use crate::shell::dismiss_layer::{DismissCover, dismiss_layer};
 use std::sync::Arc;
 
-use nana_ui::icons_tabler::{FILE, FOLDER_OPEN, PLUS, ROTATE, TRASH};
+use nana_ui::icons_tabler::{CORNER_DOWN_RIGHT, FILE, FOLDER_OPEN, PLUS, ROTATE, TRASH};
 use nana_ui::runtime::view::fields::{self, HiddenWhenEmpty};
-use nana_ui::runtime::view::{AnyView, IntoView, Signal, css, each, signal, widget};
+use nana_ui::runtime::view::{
+    AnyView, El, FieldWrite, IntoView, Signal, css, each, signal, widget,
+};
 use nana_ui::runtime::{
-    Activate, AlignSpec, JustifySpec, LengthSpec, NodeStyle, PositionSpec, RadiusTier,
-    SecondaryPress, Select, SelectChanged, SelectOption, SemanticColorRole, Stack, TextChanged,
-    TextInput,
+    ActionMenu, ActionMenuItem, Activate, AlignSpec, JustifySpec, LengthSpec, NodeStyle,
+    PopoverAlignment, PopoverToggled, RadiusTier, Select, SelectChanged, SelectOption,
+    SemanticColorRole, Stack, TextChanged, TextInput,
 };
 
 use super::super::files::{DisplayMode, FileContext, FileDialog, FilesMessage};
-use super::super::menu_focus::{MENU_KEYS, MenuEdge, MenuSurface, focus_menu};
 use super::super::sidebar::SidebarMessage;
 use super::super::workspace::{LibraryCategory, WorkspacePanel};
 use super::super::{ShellMessage, ShellViewModel};
-use super::bind::{DraftField, StyleField};
+use super::bind::DraftField;
 use super::file_message;
 use super::style::{self, ButtonLook};
 
@@ -552,172 +552,131 @@ fn field_box(min_width: f32, height: f32) -> Stack {
         .radius(RadiusTier::Lg)
 }
 
-/// 「导入」和它的菜单。菜单相对这一格绝对定位：按钮下方 8px、右边对齐；开着时才露出菜单和收起层。
-///
-/// 「导入」是菜单按钮：点击开合菜单；焦点在它上面时 ArrowDown / ArrowUp（还有菜单键）打开菜单，
-/// 焦点落在首项或末项。
+/// 「导入」和它的菜单：NanaUI `ActionMenu`。菜单挂在触发器下方、右边对齐，开合、点外面和 Escape 收起、
+/// 方向键在条目间走、关上后焦点回到触发器都由框架负责；框架开合时发 [`PopoverToggled`]，这里换成
+/// `ImportMenuToggled` 写回 ViewModel，ViewModel 关掉菜单（提交了导入、变更开始）时再经 `open` 写回菜单。
+/// 「从 Eagle 导入」点了不收起菜单，只展开下面的复制导入和剪切导入。
 fn import_anchor(tools: Signal<Tools>) -> AnyView {
-    let button = widget(
-        style::styled_button("导入", Some(FOLDER_OPEN), ButtonLook::TOOLBAR).has_popup(true),
-    )
-    .prop::<bool, fields::button::disabled>(move || tools.with(|tools| !tools.create().can_import))
-    .key("file-import")
-    .on_cx(|_, _: &Activate, cx| {
-        cx.dispatch_program_all(file_message(FilesMessage::ToggleImportMenu))
-    })
-    .on_cx(|_, event: &SecondaryPress, cx| {
-        let Some(edge) = MenuEdge::of_press(event) else {
-            return;
-        };
-        cx.dispatch_program_all(file_message(FilesMessage::OpenImportMenu));
-        cx.dispatch_program_all(focus_menu(MenuSurface::Import, edge));
-    })
-    .into_any();
-    widget(
-        Stack::row(0.0)
-            .grow(0.0)
-            .shrink(0.0)
-            .with_layout(|layout| layout.position = PositionSpec::Relative),
-    )
-    .visible(move || tools.with(|tools| tools.create.is_some()))
-    .children((button, outside_closer(tools), import_menu(tools)))
-    .key("file-import-anchor")
-    .into_any()
-}
-
-/// 菜单打开时铺满窗口的透明层：点在菜单外就收起。
-fn outside_closer(tools: Signal<Tools>) -> AnyView {
-    dismiss_layer("收起导入菜单", DismissCover::Window { z_index: 19 })
-        .visible(move || tools.with(Tools::menu_open))
-        .key("file-import-closer")
-        .on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program_all(file_message(FilesMessage::ToggleImportMenu))
-        })
+    let mut menu = ActionMenu::new()
+        .trigger("导入")
+        .bare_trigger(true)
+        .width(184.0)
+        .trigger_style(import_trigger_style());
+    menu.popover.alignment = PopoverAlignment::End;
+    let menu = widget(menu)
+        .prop::<bool, fields::action_menu::open>(move || tools.with(Tools::menu_open))
+        .prop::<bool, ImportDisabled>(move || tools.with(|tools| !tools.create().can_import))
+        .trigger(import_trigger())
+        .children((
+            menu_item(
+                ActionMenuItem::new("从文件夹导入"),
+                "file-import-folder",
+                tools,
+                FilesMessage::OpenDialog(FileDialog::Import),
+            ),
+            menu_item(
+                ActionMenuItem::new("从 ZIP 导入"),
+                "file-import-zip",
+                tools,
+                FilesMessage::OpenDialog(FileDialog::ImportArchive),
+            ),
+            menu_item(
+                ActionMenuItem::new("从 Eagle 导入").keep_open(true),
+                "file-import-eagle",
+                tools,
+                FilesMessage::ToggleEagleImport,
+            ),
+            eagle_item(tools, "复制导入", "file-import-eagle-copy", "copy"),
+            eagle_item(tools, "剪切导入", "file-import-eagle-move", "move"),
+        ))
+        .key("file-import")
+        .on_cx(|_, toggled: &PopoverToggled, cx| {
+            cx.dispatch_program_all(file_message(FilesMessage::ImportMenuToggled(toggled.open)))
+        });
+    widget(Stack::row(0.0).grow(0.0).shrink(0.0))
+        .visible(move || tools.with(|tools| tools.create.is_some()))
+        .children((menu,))
+        .key("file-import-anchor")
         .into_any()
 }
 
-/// 导入菜单：至少 184 宽，内边距 8，项间距 6，圆角 12，主题浮层底和投影。
-///
-/// 底色按设计意图用浮层色，不用固定的深底，浅色主题下字也看得清。
-fn import_menu(tools: Signal<Tools>) -> AnyView {
-    let rows = (
-        menu_item(
-            "从文件夹导入",
-            "file-import-folder",
-            tools,
-            FilesMessage::OpenDialog(FileDialog::Import),
-        ),
-        menu_item(
-            "从 ZIP 导入",
-            "file-import-zip",
-            tools,
-            FilesMessage::OpenDialog(FileDialog::ImportArchive),
-        ),
-        menu_item(
-            "从 Eagle 导入",
-            "file-import-eagle",
-            tools,
-            FilesMessage::ToggleEagleImport,
-        ),
-        widget(
-            Stack::column(6.0).with_layout(|layout| layout.padding_top = Some(LengthSpec::Px(2.0))),
-        )
-        .visible(move || tools.with(|tools| tools.create().eagle_open))
+/// 「导入」触发器上画的内容：文件夹图标加文字，和工具条上别的按钮同一个样子。
+fn import_trigger() -> AnyView {
+    widget(Stack::row(ButtonLook::TOOLBAR.gap).align(AlignSpec::Center))
         .children((
-            menu_item(
-                "复制导入",
-                "file-import-eagle-copy",
-                tools,
-                FilesMessage::OpenEagle("copy".into()),
+            widget(
+                nana_ui::runtime::IconGlyph::new(FOLDER_OPEN)
+                    .size(ButtonLook::TOOLBAR.icon_size)
+                    .role(SemanticColorRole::Text),
             ),
-            menu_item(
-                "剪切导入",
-                "file-import-eagle-move",
-                tools,
-                FilesMessage::OpenEagle("move".into()),
+            widget(
+                style::text(
+                    "导入",
+                    ButtonLook::TOOLBAR.font_size,
+                    ButtonLook::TOOLBAR.weight,
+                    SemanticColorRole::Text,
+                    21.7,
+                )
+                .nowrap(true),
             ),
         ))
-        .key("file-import-eagle-actions"),
-    );
-    let surface = Stack::column(6.0)
-        .width(LengthSpec::Shrink)
-        .min_width(LengthSpec::Px(184.0))
-        .padding(8.0)
-        .surface(SemanticColorRole::Surface)
-        .border(SemanticColorRole::BorderSoft, 1.0)
-        .radius(RadiusTier::Xl)
-        .with_layout(|layout| {
-            layout.position = PositionSpec::Absolute;
-            layout.offset_top = Some(LengthSpec::Px(34.0 + 8.0));
-            layout.offset_right = Some(LengthSpec::Px(0.0));
-            layout.z_index = Some(20);
-        });
-    widget(style::with_shadows(
-        surface,
-        vec![style::shadow(16.0, 32.0, 0.0, 0.24)],
-    ))
-    .visible(move || tools.with(Tools::menu_open))
-    .children(rows)
-    .key("file-import-menu")
-    .roving_focus(MENU_KEYS)
-    .into_any()
+        .key("file-import-trigger")
+        .into_any()
 }
 
-/// 导入菜单项：撑满菜单宽，内边距上下 10、左右 12，文字靠左，圆角 10，悬停 `--bg-hover`。
-/// 变更进行中时禁用并淡到 55%；点下时按当时的状态再判断一次，禁用时不发消息。
-///
-/// 高度按自己的内边距算：10 + 21.7 行高 + 10，不压成 32 高，文字不溢出。
+/// 触发器的尺寸和圆角照工具条按钮：高 34、左右 10、`Sm` 圆角，悬停 `--bg-hover`。
+fn import_trigger_style() -> NodeStyle {
+    style::styled_button("导入", Some(FOLDER_OPEN), ButtonLook::TOOLBAR).style
+}
+
+/// 菜单能不能打开：当前视图不能导入时禁用触发器。
+struct ImportDisabled;
+
+impl FieldWrite<ActionMenu, bool> for ImportDisabled {
+    const FIELD: &'static str = "ActionMenu.disabled";
+
+    fn write(target: &mut ActionMenu, disabled: bool) {
+        *target = std::mem::take(target).disabled(disabled);
+    }
+
+    fn differs(target: &ActionMenu, disabled: &bool) -> bool {
+        target.disabled != *disabled
+    }
+}
+
+/// 导入菜单的一项。变更进行中时禁用；点下时按当时的状态再判断一次，禁用时不发消息。
+/// `item` 带着文字、图标和点了收不收起菜单。
 fn menu_item(
-    label: &'static str,
+    item: ActionMenuItem,
     key: &'static str,
     tools: Signal<Tools>,
     message: FilesMessage,
-) -> AnyView {
-    const LINE: f32 = 21.7;
-    let enabled = move || tools.with(|tools| !tools.create().mutating);
-    let initial = tools.with_untracked(|tools| !tools.create().mutating);
-    widget(
-        nana_ui::runtime::ListItem::new(label)
-            .disabled(!initial)
-            .style(menu_item_style(initial)),
-    )
-    .prop::<bool, fields::list_item::disabled>(move || !enabled())
-    .prop::<NodeStyle, StyleField>(move || menu_item_style(enabled()))
-    .content(widget(
-        style::text(label, 14.0, 500, SemanticColorRole::Text, LINE).nowrap(true),
-    ))
-    .key(key)
-    .on_cx(move |_, _: &Activate, cx| {
-        if tools.with_untracked(|tools| !tools.create().mutating) {
-            cx.dispatch_program_all(file_message(message.clone()));
-        }
-    })
-    .into_any()
+) -> El<ActionMenuItem> {
+    widget(item)
+        .prop::<bool, fields::action_menu_item::disabled>(move || {
+            tools.with(|tools| tools.create().mutating)
+        })
+        .key(key)
+        .on_cx(move |_, _: &Activate, cx| {
+            if tools.with_untracked(|tools| !tools.create().mutating) {
+                cx.dispatch_program_all(file_message(message.clone()));
+            }
+        })
 }
 
-fn menu_item_style(enabled: bool) -> NodeStyle {
-    const PADDING_Y: f32 = 10.0;
-    const LINE: f32 = 21.7;
-    let mut style = NodeStyle::default();
-    style.radius = Some(RadiusTier::Lg);
-    style.foreground = Some(SemanticColorRole::Text);
-    style.interaction.hovered = nana_ui::runtime::SemanticPaint {
-        background: Some(SemanticColorRole::Hover),
-        ..Default::default()
-    };
-    style.interaction.pressed = style.interaction.hovered;
-    style.interaction.disabled = nana_ui::runtime::SemanticPaint::default();
-    let layout = Arc::make_mut(&mut style.layout);
-    layout.direction = Some(nana_ui_core::FlexDirection::Row);
-    layout.align_items = AlignSpec::Center;
-    layout.width = Some(LengthSpec::Fill);
-    layout.min_width = Some(LengthSpec::Px(0.0));
-    layout.height = Some(LengthSpec::Px(PADDING_Y * 2.0 + LINE));
-    layout.min_height = Some(LengthSpec::Px(PADDING_Y * 2.0 + LINE));
-    layout.padding_top = Some(LengthSpec::Px(PADDING_Y));
-    layout.padding_bottom = Some(LengthSpec::Px(PADDING_Y));
-    layout.padding_left = Some(LengthSpec::Px(12.0));
-    layout.padding_right = Some(LengthSpec::Px(12.0));
-    layout.opacity = (!enabled).then_some(0.55);
-    style
+/// Eagle 的复制导入或剪切导入：「从 Eagle 导入」展开时才出现，前面的拐角图标表示它们属于上一项。
+fn eagle_item(
+    tools: Signal<Tools>,
+    label: &'static str,
+    key: &'static str,
+    mode: &'static str,
+) -> AnyView {
+    menu_item(
+        ActionMenuItem::new(label).leading(CORNER_DOWN_RIGHT),
+        key,
+        tools,
+        FilesMessage::OpenEagle(mode.into()),
+    )
+    .visible(move || tools.with(|tools| tools.create().eagle_open))
+    .into_any()
 }

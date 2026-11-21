@@ -560,8 +560,8 @@ fn incremental_files_route_matches_a_fresh_mount_step_by_step() {
         Step::Message(ShellMessage::Files(FilesMessage::SetDisplayMode(
             DisplayMode::Masonry,
         ))),
-        Step::Message(ShellMessage::Files(FilesMessage::ToggleImportMenu)),
-        Step::Message(ShellMessage::Files(FilesMessage::ToggleImportMenu)),
+        Step::Message(ShellMessage::Files(FilesMessage::ImportMenuToggled(true))),
+        Step::Message(ShellMessage::Files(FilesMessage::ImportMenuToggled(false))),
         Step::Message(ShellMessage::Inspect(InspectMessage::ToggleFilterBar)),
         Step::Message(ShellMessage::Inspect(InspectMessage::ToggleFilterBar)),
         Step::Edit(|model| {

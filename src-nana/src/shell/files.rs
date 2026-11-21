@@ -480,9 +480,8 @@ pub enum FilesMessage {
     LoadMore,
     OpenDialog(FileDialog),
     OpenEagle(String),
-    ToggleImportMenu,
-    /// 键盘从「导入」打开菜单：只开不关，已经开着时不动。
-    OpenImportMenu,
+    /// 导入菜单开了或关了（框架发的 `PopoverToggled`）。
+    ImportMenuToggled(bool),
     ToggleEagleImport,
     SetCreateName(String),
     SubmitCreateFile,

@@ -8,9 +8,7 @@
 
 use nana_ui::runtime::{RovingEdge, RovingFocusGroup, SecondaryPress};
 
-use super::files::FileContext;
 use super::sidebar::PopoverMode;
-use super::view_part_primary::RouteKey;
 use super::{ShellMessage, ShellViewModel};
 
 /// 菜单项所在的方向键焦点组：竖排，越过两端回到另一端（WAI-ARIA 菜单）。
@@ -21,8 +19,6 @@ pub(crate) const MENU_KEYS: RovingFocusGroup = RovingFocusGroup::vertical().wrap
 pub(crate) enum MenuSurface {
     /// 侧栏仓库头打开的切换弹层。
     RepositorySwitcher,
-    /// 文件页工具条「导入」的菜单。
-    Import,
     /// 文件条目的右键菜单。
     Entry,
     /// 侧栏文件夹行的右键菜单。
@@ -34,7 +30,6 @@ impl MenuSurface {
     pub(crate) fn group_key(self) -> &'static str {
         match self {
             Self::RepositorySwitcher => "repository-switcher-popover",
-            Self::Import => "file-import-menu",
             Self::Entry => "file-context-menu",
             Self::Folder => "folder-context-menu",
         }
@@ -44,15 +39,6 @@ impl MenuSurface {
     pub(crate) fn is_open(self, model: &ShellViewModel) -> bool {
         match self {
             Self::RepositorySwitcher => model.sidebar.popover == PopoverMode::Switcher,
-            Self::Import => {
-                let ctx = FileContext::from_model(model);
-                RouteKey::of(model) == RouteKey::Files
-                    && !super::files_view::previewing(model)
-                    && !ctx.trash
-                    && !ctx.is_virtual()
-                    && model.files.import_open
-                    && model.files.can_import(&ctx)
-            }
             Self::Entry => model.files.entry_menu.is_some(),
             Self::Folder => model.sidebar.folder_menu.is_some(),
         }

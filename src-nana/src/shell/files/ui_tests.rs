@@ -288,10 +288,8 @@ fn escape_closes_menus_before_dialogs_and_keeps_busy_dialogs() {
     assert!(state.dismiss_overlay());
     assert!(
         state.entry_menu.is_none() && state.import_open,
-        "先关右键菜单"
+        "先关右键菜单；导入菜单的 Escape 由 NanaUI 的 ActionMenu 自己处理"
     );
-    assert!(state.dismiss_overlay());
-    assert!(!state.import_open);
     assert!(!state.dismiss_overlay(), "没有浮层时交给壳层");
 
     state.reduce(&writable(), FilesMessage::OpenDialog(FileDialog::Copy));

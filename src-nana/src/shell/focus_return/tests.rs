@@ -159,7 +159,8 @@ fn an_import_dialog_returns_focus_to_the_import_button() {
         "指针：关掉以后回到「导入」"
     );
 
-    press_on(&mut harness, "导入", "ArrowDown");
+    press_on(&mut harness, "导入", "Enter");
+    harness.press_key("ArrowDown");
     assert_eq!(harness.focused_label().as_deref(), Some("从文件夹导入"));
     harness.press_key("Enter");
     harness.finish_motion();
