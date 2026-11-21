@@ -12,7 +12,8 @@ use std::path::Path;
 
 use nana_ui::runtime::{NodeKind, NodeStyle};
 use nana_ui_core::{
-    LayoutStyle, LengthSpec, LineHeightSpec, SemanticColorRole as Role, ShapeRole, ThemeExpr,
+    ControlSize, LayoutStyle, LengthSpec, LineHeightSpec, SemanticColorRole as Role, ShapeRole,
+    SquareSize, ThemeExpr,
 };
 
 use crate::shell::view_harness::ShellHarness;
@@ -155,6 +156,7 @@ struct NanaDefault {
     values: &'static [f32],
     shape: Option<ShapeRole>,
     border: Option<Role>,
+    unkeyed: bool,
     #[allow(dead_code)]
     source: &'static str,
 }
@@ -172,6 +174,7 @@ impl NanaDefault {
             values,
             shape: None,
             border: None,
+            unkeyed: false,
             source,
         }
     }
@@ -186,8 +189,15 @@ impl NanaDefault {
         self
     }
 
+    /// 只收没有装配路径的节点：NanaUI 在组件里自己搭的，壳层没给它们起键。
+    const fn unkeyed(mut self) -> Self {
+        self.unkeyed = true;
+        self
+    }
+
     fn covers(&self, node: &Node<'_>, style: &NodeStyle, field: &Field) -> bool {
         (node.kind == self.node || node.tag == self.node)
+            && (!self.unkeyed || node.path.is_empty())
             && self.fields.contains(&field.name)
             && self.values.contains(&field.value)
             && self.shape.is_none_or(|shape| style.shape == Some(shape))
@@ -199,6 +209,7 @@ impl NanaDefault {
 struct Node<'a> {
     kind: &'a str,
     tag: &'a str,
+    path: &'a str,
 }
 
 const PADDING_X: &[&str] = &["padding_left", "padding_right"];
@@ -371,6 +382,7 @@ fn authored_layout_numbers_follow_theme_tiers() {
             let node = Node {
                 kind: &kind,
                 tag: &tag,
+                path: &path,
             };
             for field in fields {
                 let allowed = NANA_DEFAULTS
@@ -483,5 +495,145 @@ fn shell_sources_do_not_write_numeric_layout_metrics() {
         "{} 处数值间距、圆角或边框宽度写进了样式：\n{}",
         found.len(),
         found.join("\n")
+    );
+}
+
+/// 控件类组件：尺寸该从控件档、图标按钮档取的节点。
+const CONTROL_KINDS: &[&str] = &[
+    "nana.button",
+    "nana.icon-button",
+    "nana.text-input",
+    "nana.textarea",
+    "nana.select",
+    "nana.list-item",
+    "nana.sidebar-row",
+    "nana.chip",
+    "nana.action-menu",
+    "nana.action-menu-item",
+    "nana.popover",
+    "nana.switch",
+    "nana.checkbox",
+    "nana.segmented",
+    "nana.range-field",
+    "nana.path-field",
+];
+
+/// NanaUI 组件自己写的控件尺寸，写法同 [`NANA_DEFAULTS`]。
+const NANA_CONTROL_SIZES: &[NanaDefault] = &[
+    NanaDefault::new(
+        "nana.icon-button",
+        &["width", "height"],
+        &[28.0],
+        "shell.rs:2331 标题栏窗口按钮的盒子按 nana-ui-core geometry.rs 的 `WINDOW_CONTROL_WIDTH` 28 排",
+    )
+    .unkeyed(),
+    NanaDefault::new(
+        "nana.range-field",
+        &["min_height"],
+        &[28.0],
+        "view_components.rs:7909 RangeField 把控件档、行盒和滑块里最高的一个按装上的度量算成像素写进最小高",
+    ),
+];
+
+/// 控件档在 MomoBako 度量下的像素：小、中、大号控件高和图标按钮边长。
+fn control_tiers() -> [f32; 4] {
+    let metrics = crate::theme_map::CONTROL_METRICS;
+    [
+        SquareSize::Control(ControlSize::Small).resolve(metrics),
+        SquareSize::Control(ControlSize::Medium).resolve(metrics),
+        SquareSize::Control(ControlSize::Large).resolve(metrics),
+        SquareSize::IconButton.resolve(metrics),
+    ]
+}
+
+/// 控件上写了等于某个控件档的宽、高、最小宽高的数值，却没挂档位：该挂 `ThemeToken::Control`、
+/// `control_height` 或 `square`。不在档上的尺寸（24、26、30 这类）照写，不查。
+fn unbacked_control_sizes(style: &NodeStyle, tiers: &[f32]) -> Vec<Field> {
+    let layout: &LayoutStyle = &style.layout;
+    let theme = &layout.theme;
+    let height = style.control_height.is_some();
+    let square = style.square.is_some();
+    [
+        ("width", layout.width, theme.width.is_some()),
+        ("height", layout.height, theme.height.is_some() || height),
+        (
+            "min_width",
+            layout.min_width,
+            theme.min_width.is_some() || square,
+        ),
+        (
+            "min_height",
+            layout.min_height,
+            theme.min_height.is_some() || height || square,
+        ),
+    ]
+    .into_iter()
+    .filter_map(|(name, spec, backed)| {
+        let value = px(spec)?;
+        (!backed && tiers.contains(&value)).then_some(Field {
+            name,
+            value,
+            backed,
+        })
+    })
+    .collect()
+}
+
+/// 每个验收场景里，控件的宽高等于控件档或图标按钮档时都挂着档位，装上的主题换度量时跟着变。
+#[test]
+fn control_sizes_on_tiers_follow_the_metrics() {
+    let tiers = control_tiers();
+    let mut loose = BTreeMap::<String, String>::new();
+    for (scene, model) in crate::shell::acceptance_gap_models() {
+        let harness = ShellHarness::mount(model);
+        let document = harness.document();
+        let context = document.context();
+        let world = context.world();
+        for id in world.document_order(document.document()) {
+            let Some(style) = world.node_style(id) else {
+                continue;
+            };
+            let kind = world
+                .component_type(id)
+                .map(|kind| kind.as_str().to_owned())
+                .unwrap_or_default();
+            if !CONTROL_KINDS.contains(&kind.as_str()) {
+                continue;
+            }
+            let tag = match world.node(id).map(|node| node.kind) {
+                Some(NodeKind::Element { tag }) => tag,
+                _ => String::new(),
+            };
+            let path = context.assembly_path(id).unwrap_or_default();
+            let node = Node {
+                kind: &kind,
+                tag: &tag,
+                path: &path,
+            };
+            for field in unbacked_control_sizes(&style, &tiers) {
+                if NANA_CONTROL_SIZES
+                    .iter()
+                    .any(|default| default.covers(&node, &style, &field))
+                {
+                    continue;
+                }
+                loose
+                    .entry(format!(
+                        "{path} [{kind} {tag}]: {} 写 {} 没挂控件档",
+                        field.name, field.value
+                    ))
+                    .or_insert_with(|| scene.to_string());
+            }
+        }
+    }
+    let report: Vec<_> = loose
+        .iter()
+        .map(|(line, scene)| format!("{line}（场景 {scene}）"))
+        .collect();
+    assert!(
+        report.is_empty(),
+        "{} 处控件尺寸等于控件档却写死了数值：\n{}",
+        report.len(),
+        report.join("\n")
     );
 }
