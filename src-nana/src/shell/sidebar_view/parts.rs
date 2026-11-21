@@ -12,7 +12,8 @@ use std::sync::Arc;
 use nana_ui::runtime::view::{AnyView, El, FieldWrite, IntoProp, IntoView, Signal, fields, widget};
 use nana_ui::runtime::{
     Activate, AlignSpec, Button, IconButton, IconGlyph, InteractionStyle, LengthSpec, ListItem,
-    NodeStyle, RadiusTier, SemanticColorRole, SemanticPaint, Stack, Text, ViewContext,
+    NodeStyle, Popover, PopoverAlignment, PopoverPlacement, PopoverToggled, RadiusTier,
+    SemanticColorRole, SemanticPaint, Stack, Text, ViewContext,
 };
 use nana_ui::{ControlSize, Icon};
 
@@ -434,6 +435,81 @@ pub(crate) fn footer_button(
         .key(key)
         .on_cx(move |_, _: &Activate, cx| on_activate(cx))
         .into_any()
+}
+
+/// 「任务」入口：外观和别的底部入口一样，是 NanaUI `Popover` 的触发器，面板是任务列表
+/// （`admin::task_panel`）。开合、点外面、Escape 和焦点归还交给框架；框架开合时发的 `PopoverToggled`
+/// 由 `on_toggle` 写回 ViewModel，ViewModel 关上（点了面板里的关闭）时经 `open` 写回弹层。
+pub(crate) fn footer_popover(
+    icon: Icon,
+    label: &'static str,
+    key: &'static str,
+    look: impl Fn() -> FooterLook + Copy + Send + 'static,
+    open: impl Fn() -> bool + Send + 'static,
+    panel: AnyView,
+    on_toggle: impl Fn(bool, &mut ViewContext<Popover>) + Send + 'static,
+) -> AnyView {
+    let mut popover = Popover::new()
+        .trigger_icon(icon, label)
+        .compact_trigger(true)
+        .placement(PopoverPlacement::Top)
+        .alignment(PopoverAlignment::Start)
+        .width(340.0)
+        .trigger_icon_size(14.0);
+    popover.trigger_style = Some(footer_trigger_style(look()));
+    widget(popover)
+        .prop::<FooterLook, FooterTrigger>(look)
+        .prop::<bool, PopoverOpen>(open)
+        .children((panel,))
+        .key(key)
+        .on_cx(move |_, toggled: &PopoverToggled, cx| on_toggle(toggled.open, cx))
+        .into_any()
+}
+
+/// 底部入口当触发器时的样子：26 见方、`Sm` 圆角，颜色和别的入口一样按状态换。
+fn footer_trigger_style(look: FooterLook) -> NodeStyle {
+    let mut style = icon_button_style(
+        FOOTER_BUTTON_EDGE,
+        RadiusTier::Sm,
+        SemanticColorRole::Muted,
+        None,
+    );
+    let (foreground, background, hover) = footer_paint(look);
+    style.foreground = Some(foreground);
+    style.background = background;
+    style.interaction.hovered = hover;
+    style.interaction.pressed = hover;
+    style
+}
+
+/// 「任务」触发器按状态换颜色。
+pub(crate) struct FooterTrigger;
+
+impl FieldWrite<Popover, FooterLook> for FooterTrigger {
+    const FIELD: &'static str = "Popover.trigger_style";
+
+    fn write(target: &mut Popover, look: FooterLook) {
+        target.trigger_style = Some(footer_trigger_style(look));
+    }
+
+    fn differs(target: &Popover, look: &FooterLook) -> bool {
+        target.trigger_style.as_ref() != Some(&footer_trigger_style(*look))
+    }
+}
+
+/// 弹层开没开着。
+pub(crate) struct PopoverOpen;
+
+impl FieldWrite<Popover, bool> for PopoverOpen {
+    const FIELD: &'static str = "Popover.open";
+
+    fn write(target: &mut Popover, open: bool) {
+        target.open = open;
+    }
+
+    fn differs(target: &Popover, open: &bool) -> bool {
+        target.open != *open
+    }
 }
 
 /// 底部入口的前景、底色和悬停按下的样子。当前入口悬停也保持强调色底：

@@ -338,6 +338,7 @@ fn reduce_admin(model: &mut ShellViewModel, message: AdminMessage) {
         AdminMessage::LogsCleared(result) => note_logs_cleared(model, result),
         AdminMessage::ToggleTaskPopover => model.admin.popover_open = !model.admin.popover_open,
         AdminMessage::CloseTaskPopover => model.admin.popover_open = false,
+        AdminMessage::TaskPopoverToggled(open) => model.admin.popover_open = open,
         AdminMessage::CancelTask(task_id) => cancel_task(model, &task_id),
         AdminMessage::SelectAction(action_id) => {
             model.admin.active_action_id = Some(action_id);

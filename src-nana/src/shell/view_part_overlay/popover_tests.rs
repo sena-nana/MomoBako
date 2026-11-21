@@ -122,12 +122,12 @@ fn the_overlay_layer_follows_its_blocks_without_reassembly() {
 
     harness.apply(ShellMessage::Admin(AdminMessage::ToggleTaskPopover));
     harness.flush();
-    assert_eq!(blocks(&harness).len(), 1);
-    assert!(layer_takes_pointer(&harness), "弹层开着时浮层层挡点击");
+    assert!(
+        blocks(&harness).is_empty() && !layer_takes_pointer(&harness),
+        "任务弹层是挂在「任务」上的 NanaUI Popover，不进浮层层"
+    );
     harness.apply(ShellMessage::Admin(AdminMessage::CloseTaskPopover));
     harness.flush();
-    assert!(blocks(&harness).is_empty(), "弹层没有退场，换下就卸");
-    assert!(!layer_takes_pointer(&harness));
 
     harness.apply(ShellMessage::Sidebar(SidebarMessage::Gap(
         GapMessage::OpenFolderMenu {
@@ -177,14 +177,14 @@ fn task_popover_patches_progress_in_place_and_closes_from_outside() {
     harness.apply(ShellMessage::Admin(AdminMessage::ToggleTaskPopover));
     harness.apply(ShellMessage::TaskProgressLoaded(vec![task("task-1", 40.0)]));
     harness.flush();
-    let root = harness.content_roots().0.expect("任务弹层在浮层里");
+    let root = harness.keyed("admin-task-popover").expect("任务弹层的面板");
     let row = harness.keyed("admin-task-task-1").expect("任务行");
     assert_eq!(text(&harness, "admin-task-percent-task-1"), "40%");
 
     harness.apply(ShellMessage::TaskProgressLoaded(vec![task("task-1", 65.0)]));
     harness.flush();
     assert_eq!(
-        harness.content_roots().0,
+        harness.keyed("admin-task-popover"),
         Some(root),
         "进度推进不该重挂弹层"
     );
@@ -221,14 +221,13 @@ fn task_popover_patches_progress_in_place_and_closes_from_outside() {
     assert_eq!(messages.len(), 1, "点弹层外面应该只发一条消息");
     assert!(matches!(
         messages[0],
-        ShellMessage::Admin(AdminMessage::CloseTaskPopover)
+        ShellMessage::Admin(AdminMessage::TaskPopoverToggled(false))
     ));
     for message in messages {
         harness.apply(message);
     }
     harness.flush();
     assert!(!harness.model.admin.popover_open);
-    assert!(harness.content_roots().0.is_none());
 }
 
 /// 任务弹层里进度条填充的透明度。

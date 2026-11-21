@@ -1,32 +1,21 @@
 //! 任务弹层。首页的日志、拓展和动作面板是常驻路由，见 `route_admin.rs`。
 //!
-//! 任务弹层：340 宽，贴在侧栏底部任务按钮上方；每个任务一块，
-//! 来源加进度条（标签、细节、百分比）。任务弹层常驻：任务按键增删行，进度、标签和细节只改
-//! 绑定的字段；进度条的填充宽度按 0.18s 过渡（动效时钟在 `motion.rs`，逐帧的
-//! 宽度经热信号写进来）；在弹层外面按下就关闭。
+//! 任务弹层的面板：每个任务一块，来源加进度条（标签、细节、百分比）。面板挂在侧栏底部「任务」按钮的
+//! NanaUI `Popover` 里（`sidebar_view.rs`），开合、点外面、Escape 和焦点归还都由框架负责。面板常驻：
+//! 任务按键增删行，进度、标签和细节只改绑定的字段；进度条的填充宽度按 0.18s 过渡（动效时钟在
+//! `motion.rs`，逐帧的宽度经热信号写进来）。
 
-use crate::shell::dismiss_layer::{DismissCover, dismiss_layer};
-use std::sync::Arc;
-
-use nana_ui::runtime::view::{
-    AnyView, FieldWrite, IntoView, Signal, StyledComponent, computed, each, fields, signal, widget,
-};
+use nana_ui::runtime::view::{AnyView, IntoView, Signal, computed, each, fields, widget};
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, IconButton, JustifySpec, LengthSpec, ScrollAxes, ScrollView, Stack,
+    Activate, AlignSpec, Button, IconButton, LengthSpec, ScrollAxes, ScrollView, Stack,
 };
 use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
 
 use super::super::hot::{self, FillPercentField, OpacityField, TaskFills};
-use super::super::view_part_overlay::session::Projected;
 use super::super::{ShellMessage, ShellViewModel};
 use super::AdminMessage;
 use super::icons;
 use super::style::{self, column, label, pad, row};
-
-/// 定位弹层用的高度估计：`min(360, max(180, 96 + 任务数 × 70))`。
-fn estimated_height(count: usize) -> f32 {
-    (96.0 + count as f32 * 70.0).clamp(180.0, 360.0)
-}
 
 /// 任务弹层的一行。
 #[derive(Clone, Debug, PartialEq)]
@@ -46,25 +35,22 @@ pub(crate) struct TaskRowView {
     pub fill: f32,
 }
 
-/// 任务弹层要显示的东西。
-#[derive(Clone, Debug, PartialEq)]
+/// 任务弹层要显示的东西：开没开着，开着时的各行（关着时不投影行，进度变化不打扰侧栏）。
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct TaskPopoverView {
+    pub open: bool,
     pub rows: Vec<TaskRowView>,
-    /// 弹层底边到窗口底边的高度：估计高度加 8，再加按钮离底边的 36。
-    pub anchor: f32,
 }
 
 impl TaskPopoverView {
-    pub(crate) fn project(model: &ShellViewModel) -> Option<Self> {
+    pub(crate) fn project(model: &ShellViewModel) -> Self {
         if !model.admin.popover_open {
-            return None;
+            return Self::default();
         }
-        let rows = task_row_views(model);
-        // 侧栏底部按钮离窗口底边 36（按钮高 26、下边距 10）。
-        Some(Self {
-            anchor: estimated_height(rows.len()) + 8.0 + 36.0,
-            rows,
-        })
+        Self {
+            open: true,
+            rows: task_row_views(model),
+        }
     }
 }
 
@@ -99,13 +85,11 @@ pub(crate) fn task_fill_targets(model: &ShellViewModel) -> Vec<(String, f32)> {
         .collect()
 }
 
-/// 任务弹层。左边对齐任务按钮（x=64），顶边在按钮上方「估计高度 + 8」处。
-pub(crate) fn task_popover(model: &ShellViewModel) -> Option<AnyView> {
-    let view = signal(TaskPopoverView::project(model)?);
-    Projected::register(view, TaskPopoverView::project);
+/// 任务弹层的面板：标题行（「任务」和关闭）、空态和可滚动的任务列表。列表最高 300，任务多时自己滚动。
+pub(crate) fn task_panel(view: Signal<TaskPopoverView>) -> AnyView {
     let pulse = Pulse {
         signal: hot::current(|signals| signals.pulse),
-        rest: model.motion.pulse_opacity(),
+        rest: 1.0,
     };
     let fills = hot::current(|signals| signals.task_fills);
     let header = widget(
@@ -127,10 +111,8 @@ pub(crate) fn task_popover(model: &ShellViewModel) -> Option<AnyView> {
             widget(label("当前没有运行中的任务。", 12.0, 400, Role::Faint)).key("admin-task-empty"),
         ))
         .into_any();
-    // 弹层最高 360，任务多时列表自己滚动。
     let scroll = ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
-        layout.flex_grow = Some(1.0);
-        layout.flex_shrink = Some(1.0);
+        layout.max_height = Some(LengthSpec::Px(300.0));
         layout.min_height = Some(LengthSpec::Px(0.0));
     });
     let keys = computed(move || {
@@ -150,65 +132,10 @@ pub(crate) fn task_popover(model: &ShellViewModel) -> Option<AnyView> {
         .key("admin-task-list"),))
         .key("admin-task-list-scroll")
         .into_any();
-    let popover = pad(column(10.0), 10.0, 10.0, 10.0, 10.0)
-        .surface(Role::Surface)
-        .border(Role::BorderStrong, 1.0)
-        .radius(RadiusTier::Md)
-        .with_layout(|layout| {
-            layout.width = Some(LengthSpec::Px(340.0));
-            layout.max_height = Some(LengthSpec::Px(360.0));
-            layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
-        });
-    let anchored = Stack::column(0.0)
-        .align(AlignSpec::Start)
-        .with_layout(move |layout| {
-            layout.padding_left = Some(LengthSpec::Px(64.0));
-            layout.overflow_y = nana_ui_core::OverflowSpec::Visible;
-        });
-    Some(
-        widget(
-            Stack::fill_column(0.0)
-                .justify(JustifySpec::End)
-                .align(AlignSpec::Start)
-                .with_layout(|layout| {
-                    layout.position = nana_ui_core::PositionSpec::Relative;
-                }),
-        )
-        .children((
-            task_dismiss(),
-            widget(anchored)
-                .prop::<f32, AnchorHeight>(move || view.with(|view| view.anchor))
-                .children((widget(popover)
-                    .children((header, empty, list))
-                    .key("admin-task-popover"),)),
-        ))
-        .into_any(),
-    )
-}
-
-/// 弹层外的透明点击层：在弹层外面按下就关闭。
-fn task_dismiss() -> AnyView {
-    dismiss_layer("关闭任务弹层", DismissCover::Container)
-        .key("admin-task-dismiss")
-        .on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::CloseTaskPopover))
-        })
+    widget(column(10.0).width(LengthSpec::Fill))
+        .children((header, empty, list))
+        .key("admin-task-popover")
         .into_any()
-}
-
-/// 弹层锚点那一层的高度：任务数变了，弹层顶边跟着估计高度挪。
-struct AnchorHeight;
-
-impl FieldWrite<Stack, f32> for AnchorHeight {
-    const FIELD: &'static str = "Stack.style.layout.height";
-
-    fn write(target: &mut Stack, height: f32) {
-        Arc::make_mut(&mut target.node_style_mut().layout).height = Some(LengthSpec::Px(height));
-    }
-
-    fn differs(target: &Stack, height: &f32) -> bool {
-        target.node_style().layout.height != Some(LengthSpec::Px(*height))
-    }
 }
 
 /// 取消排队或运行中的后台任务。仓库操作行和已经在取消的任务不显示。

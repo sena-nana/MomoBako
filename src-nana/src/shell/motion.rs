@@ -4,10 +4,6 @@
 //! 内容重挂后进行中的轨道还在，按已经走过的时间取样，不会从 0 重新开始。减少动效时全部立刻停在终点。
 //! 对话框的开合动效由 NanaUI 的对话框框架自己播，这里没有对话框的轨道。
 
-use nana_ui::runtime::view::{AnyView, IntoView, widget};
-
-use super::hot::{LayerPaint, LayerPaintField};
-
 /// 面板透明度：`opacity 0.14s ease`。
 pub const PANEL_OPACITY_MS: u64 = 140;
 /// 面板上移。同一条规则里的 `transform 0.16s ease`，距离 4px。
@@ -620,18 +616,6 @@ impl Track {
     fn finished(&self, now_ms: u64) -> bool {
         !self.looping && now_ms.saturating_sub(self.started_ms) >= self.duration_ms
     }
-}
-
-/// 弹层透明度和 4px 上移。逐帧的值绑在热信号上，开合动效不重挂浮层。对话框的开合动效由
-/// NanaUI 照主题配方播。
-///
-/// 弹层撑满浮层层（AppShell 的 overlay 槽位是浮层层，不是这一块），透明度和变换直接绑在这一层上。
-pub fn paint_panel(view: impl IntoView, motion: &MotionState) -> AnyView {
-    let paint = super::hot::prop(|signals| signals.panel, LayerPaint::panel(motion));
-    widget(nana_ui::runtime::Stack::fill_column(0.0))
-        .prop::<LayerPaint, LayerPaintField>(paint)
-        .children((view.into_any(),))
-        .into_any()
 }
 
 /// 把平移动效写成绘制矩阵。`shift_y` 向下为正，缩放绕控件中心。

@@ -397,19 +397,18 @@ fn task_popover_merges_repository_operation_and_closes() {
         ),
         ("task-1", "任务", "scanning")
     );
-    // 弹层外的点击层和关闭按钮发 `CloseTaskPopover`；Escape 走全局那一条，关最上面一层。
+    // 面板里的关闭按钮发 `CloseTaskPopover`；框架开合（点外面、Escape、点触发器）发 `TaskPopoverToggled`。
     send(&mut model, AdminMessage::ToggleTaskPopover);
     assert!(model.admin.popover_open);
     send(&mut model, AdminMessage::CloseTaskPopover);
     assert!(!model.admin.popover_open);
-    send(&mut model, AdminMessage::ToggleTaskPopover);
+    send(&mut model, AdminMessage::TaskPopoverToggled(true));
+    assert!(model.admin.popover_open);
     assert!(
-        crate::shell::escape_layer(&model).is_some(),
-        "任务弹层是 Escape 能关的一层"
+        crate::shell::escape_layer(&model).is_none(),
+        "任务弹层的 Escape 由 NanaUI 的 Popover 处理，不进全局 Escape"
     );
-    model.reduce(ShellMessage::Sidebar(crate::shell::SidebarMessage::Gap(
-        crate::shell::GapMessage::Escape,
-    )));
+    send(&mut model, AdminMessage::TaskPopoverToggled(false));
     assert!(!model.admin.popover_open);
     model.operation.cancel(operation);
     model.task_progress.clear();

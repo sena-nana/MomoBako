@@ -246,7 +246,6 @@ pub enum EscapeLayer {
     DownloadTarget,
     RepositoryPopover,
     FolderMenu,
-    TaskPopover,
     /// 文件页的浮层：右键菜单 → 导出对话框 → 硬链接确认 → 文件对话框，文件操作进行中不关。
     Files(super::super::files::FilesLayer),
 }
@@ -272,8 +271,6 @@ pub fn escape_layer(model: &super::super::ShellViewModel) -> Option<EscapeLayer>
         EscapeLayer::RepositoryPopover
     } else if sidebar.folder_menu.is_some() {
         EscapeLayer::FolderMenu
-    } else if model.admin.popover_open {
-        EscapeLayer::TaskPopover
     } else {
         EscapeLayer::Files(model.files.escape_layer()?)
     };
@@ -302,7 +299,6 @@ pub fn dismiss_top(model: &mut super::super::ShellViewModel) -> bool {
         EscapeLayer::RepositoryPopover => {
             model.sidebar.close_popover();
         }
-        EscapeLayer::TaskPopover => model.admin.popover_open = false,
         EscapeLayer::Files(_) => return model.files.dismiss_overlay(),
     }
     true

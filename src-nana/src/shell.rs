@@ -531,8 +531,7 @@ impl ShellViewModel {
     }
 
     fn follow_motion(&mut self) {
-        let panel_open =
-            self.sidebar.popover != sidebar::PopoverMode::Closed || self.admin.popover_open;
+        let panel_open = self.sidebar.popover != sidebar::PopoverMode::Closed;
         let startup = f32::from(self.workspace.startup.percent);
         let spinner = self.sidebar.tree_loading
             || self.sidebar.submitting

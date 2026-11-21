@@ -50,8 +50,8 @@ pub use tree::folder_menu;
 pub(crate) use tree::folder_row_key;
 
 use parts::{
-    FooterLook, NavLook, PlayBase, bound_hint, footer_button, group_header, group_title, nav_row,
-    tree_action, tree_action_titled,
+    FooterLook, NavLook, PlayBase, bound_hint, footer_button, footer_popover, group_header,
+    group_title, nav_row, tree_action, tree_action_titled,
 };
 
 /// 五个快捷方式，顺序也是 [`NavView::shortcuts`] 的顺序。
@@ -87,7 +87,7 @@ pub(crate) fn sidebar(signals: SidebarSignals, hot: HotSignals) -> AnyView {
     widget(sidebar_frame())
         .top(sidebar_switcher(signals.head))
         .body(sidebar_sections(signals, hot.spinner))
-        .footer(sidebar_footer(signals.footer, hot.footer))
+        .footer(sidebar_footer(signals.footer, signals.tasks, hot.footer))
         .into_any()
 }
 
@@ -640,7 +640,11 @@ pub(super) fn danger_tree_action_titled(
 
 /// 设置、拓展、任务和日志。当前入口 `--accent-soft` 底，其余平时 0.44 透明度，悬停底栏时为 1。
 /// 任务入口外面套一层定位用的行，有任务时右上角显示数量角标，没有时角标藏起来。
-fn sidebar_footer(footer: Signal<FooterView>, rest: Signal<f32>) -> AnyView {
+fn sidebar_footer(
+    footer: Signal<FooterView>,
+    tasks_view: Signal<super::admin::TaskPopoverView>,
+    rest: Signal<f32>,
+) -> AnyView {
     let look = move |active: fn(&FooterView) -> bool| {
         move || {
             footer.with(|footer| FooterLook {
@@ -659,12 +663,28 @@ fn sidebar_footer(footer: Signal<FooterView>, rest: Signal<f32>) -> AnyView {
         Stack::row(0.0)
             .with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative),
     )
+    .prop::<f32, super::hot::OpacityField>(move || {
+        let look = tasks();
+        if look.active || look.highlight {
+            1.0
+        } else {
+            rest.get()
+        }
+    })
     .children((
-        footer_button(CLIPBOARD_LIST, "任务", "footer-tasks", tasks, rest, |cx| {
-            cx.dispatch_program_all(ShellMessage::Admin(
-                super::admin::AdminMessage::ToggleTaskPopover,
-            ));
-        }),
+        footer_popover(
+            CLIPBOARD_LIST,
+            "任务",
+            "footer-tasks",
+            tasks,
+            move || tasks_view.with(|view| view.open),
+            super::admin::task_panel(tasks_view),
+            |open, cx| {
+                cx.dispatch_program_all(ShellMessage::Admin(
+                    super::admin::AdminMessage::TaskPopoverToggled(open),
+                ));
+            },
+        ),
         task_badge(footer),
     ));
     widget(Stack::row(2.0).align(AlignSpec::Center))

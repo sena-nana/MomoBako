@@ -6,6 +6,7 @@
 //! 绑定。同步时只写变了的信号；列表经 `row_sync::sync_rows` 只删掉没了的行、插入新行、整行改写内容变了
 //! 的行，顺序变了再排。
 
+use crate::shell::admin::TaskPopoverView;
 use nana_ui::runtime::view::{Signal, Store, signal, store};
 
 use super::super::row_sync::sync_rows;
@@ -28,6 +29,8 @@ pub(crate) struct SidebarView {
     pub smart: SmartGroup,
     pub smart_rows: Vec<SmartRow>,
     pub footer: FooterView,
+    /// 「任务」弹层：开没开着和各行。
+    pub tasks: TaskPopoverView,
 }
 
 /// 仓库头，以及文件夹分组在不在。
@@ -278,6 +281,7 @@ impl SidebarView {
                 tasks_open: model.admin.popover_open,
                 tasks: model.task_rows().len(),
             },
+            tasks: TaskPopoverView::project(model),
         }
     }
 }
@@ -429,6 +433,7 @@ pub(crate) struct SidebarSignals {
     pub smart: Signal<SmartGroup>,
     pub smart_rows: Store<Vec<SmartRow>>,
     pub footer: Signal<FooterView>,
+    pub tasks: Signal<TaskPopoverView>,
 }
 
 impl SidebarSignals {
@@ -446,6 +451,7 @@ impl SidebarSignals {
             smart: signal(view.smart),
             smart_rows: store(view.smart_rows),
             footer: signal(view.footer),
+            tasks: signal(view.tasks),
         }
     }
 
@@ -471,6 +477,7 @@ impl SidebarSignals {
         self.smart.try_set_if_changed(view.smart);
         sync_rows(self.smart_rows, smart_key, view.smart_rows);
         self.footer.try_set_if_changed(view.footer);
+        self.tasks.try_set_if_changed(view.tasks);
     }
 }
 

@@ -65,8 +65,6 @@ pub(crate) enum OverlayKey {
     RepositoryPopover,
     /// 文件夹行的右键菜单。
     FolderMenu,
-    /// 任务弹层。
-    TaskPopover,
     /// 文件条目的右键菜单。
     EntryMenu,
     /// 导出资源库。
@@ -101,8 +99,6 @@ impl OverlayKey {
             Self::RepositoryPopover
         } else if sidebar.folder_menu.is_some() {
             Self::FolderMenu
-        } else if model.admin.popover_open {
-            Self::TaskPopover
         } else if model.files.entry_menu.is_some() {
             Self::EntryMenu
         } else if model.files.export.open {
@@ -120,7 +116,7 @@ impl OverlayKey {
     pub(crate) fn modal(self) -> bool {
         !matches!(
             self,
-            Self::RepositoryPopover | Self::FolderMenu | Self::TaskPopover | Self::EntryMenu
+            Self::RepositoryPopover | Self::FolderMenu | Self::EntryMenu
         )
     }
 }
@@ -201,8 +197,6 @@ pub(crate) fn overlay_branch(key: OverlayKey, model: &ShellViewModel) -> Option<
         OverlayKey::SmartFolderDialog => super::sidebar_view::smart_folder_dialog(model),
         OverlayKey::RepositoryPopover => super::sidebar_view::repository_popover(model),
         OverlayKey::FolderMenu => super::sidebar_view::folder_menu(model),
-        OverlayKey::TaskPopover => super::admin::task_popover(model)
-            .map(|popover| super::motion::paint_panel(popover, &model.motion)),
         OverlayKey::EntryMenu => super::files_view::entry_menu(model),
         OverlayKey::ExportDialog => super::workspace_dialogs::export_dialog(model),
         OverlayKey::FileDialog => super::workspace_dialogs::file_dialog(model),

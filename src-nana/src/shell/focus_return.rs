@@ -65,8 +65,7 @@ impl Surface {
             | OverlayKey::FolderDialog
             | OverlayKey::SmartFolderDialog
             | OverlayKey::RepositoryPopover
-            | OverlayKey::FolderMenu
-            | OverlayKey::TaskPopover => Home::Sidebar,
+            | OverlayKey::FolderMenu => Home::Sidebar,
         }
     }
 }

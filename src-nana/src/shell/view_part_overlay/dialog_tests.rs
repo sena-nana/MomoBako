@@ -612,17 +612,20 @@ fn close_confirm_shows_on_every_page_above_other_dialogs() {
 #[test]
 fn file_dialogs_wait_behind_popovers_and_escape_follows_the_same_order() {
     let mut model = scene("copy-dialog");
-    model.reduce(ShellMessage::Admin(AdminMessage::ToggleTaskPopover));
-    assert_eq!(OverlayKey::of(&model), Some(OverlayKey::TaskPopover));
+    model.reduce(ShellMessage::Sidebar(
+        SidebarMessage::OpenRepositorySwitcher,
+    ));
+    assert_eq!(OverlayKey::of(&model), Some(OverlayKey::RepositoryPopover));
     let mut harness = ShellHarness::mount(model);
     assert!(
         harness.find("复制到文件夹").is_none(),
         "弹层开着时复制对话框排在后面"
     );
     assert!(harness.press_escape());
-    assert!(
-        !harness.model.admin.popover_open,
-        "Escape 先关显示着的任务弹层"
+    assert_eq!(
+        harness.model.sidebar.popover,
+        crate::shell::sidebar::PopoverMode::Closed,
+        "Escape 先关显示着的仓库弹层"
     );
     assert_eq!(OverlayKey::of(&harness.model), Some(OverlayKey::FileDialog));
     assert!(

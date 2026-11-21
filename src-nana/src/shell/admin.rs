@@ -59,7 +59,7 @@ pub(crate) use tool_native::{
     note_file_import_settled, note_import_settled as note_eagle_import_settled,
 };
 pub(crate) use tools::{ToolsSignals, extensions_page};
-pub(crate) use view::{task_fill_targets, task_popover};
+pub(crate) use view::{TaskPopoverView, task_fill_targets, task_panel};
 
 #[cfg(test)]
 mod settings_tests;
@@ -150,6 +150,8 @@ pub enum AdminMessage {
     ToggleTaskPopover,
     /// 弹层头部的关闭按钮和弹层外的点击层。Escape 走全局的 [`crate::shell::escape_layer`]。
     CloseTaskPopover,
+    /// 任务弹层开了或关了（框架发的 `PopoverToggled`）。
+    TaskPopoverToggled(bool),
     /// 取消一个排队或运行中的后台任务。仓库操作行和已经在取消的任务不发请求。
     CancelTask(String),
     SelectAction(String),
