@@ -88,7 +88,10 @@ impl BoardSignals {
         let ctx = FileContext::from_model(model);
         let rows = model.files.listed_rows(&ctx);
         let picked = picked_paths(&model.files);
-        let drop_folder = (model.input.internal_active || model.input.dragging_files)
+        // 条目拖动的放下目标由这里画；系统文件拖到目录卡片上时，悬停样子由 NanaUI 画在那张卡片上。
+        let drop_folder = model
+            .input
+            .internal_active
             .then(|| model.input.hover_folder.as_deref())
             .flatten();
         // ASMR 资源库插件开着时，ASMR 文件的卡片多一行摘要；它跟着元数据变，算进卡片指纹。

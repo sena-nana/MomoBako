@@ -365,6 +365,9 @@ pub(super) fn card(cell: &CardCell, mode: DisplayMode, cards: Cards) -> AnyView 
             cx.dispatch_program_all(file_message(super::grid::row_activation(&path)));
         })
         .on_cx(drag)
+        .on_cx(|_, event: &nana_ui::runtime::FileDropEvent, cx| {
+            cx.dispatch_program_all(file_message(FilesMessage::HostDrop(event.clone())));
+        })
         .on_cx(move |_, event: &SecondaryPress, cx| {
             cx.dispatch_program_all(file_message(FilesMessage::OpenEntryMenu {
                 path: menu_path.clone(),

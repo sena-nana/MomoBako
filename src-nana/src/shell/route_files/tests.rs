@@ -703,6 +703,22 @@ fn folder_imports_external_drop_into_the_directory() {
     let assets = card_center(&harness, "file-row-directory:assets");
     let cover = card_center(&harness, "file-row-file:cover.png");
 
+    // 悬停时 NanaUI 把拖放样子画在目录卡片上，不是整列；卡片自己的放下描边只给条目拖动用。
+    route_drag(&mut harness, &mut input, FileDragKind::Hover, assets);
+    assert_eq!(
+        harness.document().context().drop_hover().map(|(id, _)| id),
+        harness.keyed("file-row-directory:assets"),
+        "系统文件悬停在目录卡片上"
+    );
+    assert_eq!(harness.model.input.hover_folder.as_deref(), Some("assets"));
+    route_drag(&mut harness, &mut input, FileDragKind::Hover, cover);
+    assert_eq!(
+        harness.document().context().drop_hover().map(|(id, _)| id),
+        harness.keyed("file-column"),
+        "普通文件上悬停落回文件列"
+    );
+    assert_eq!(harness.model.input.hover_folder, None);
+
     drop_at(&mut harness, &mut input, assets);
     let into_folder = harness.model.files.take_effects();
     assert!(
@@ -746,19 +762,29 @@ fn folder_imports_external_drop_into_the_directory() {
 
     fn drop_at(harness: &mut ShellHarness, input: &mut HeadlessInput, point: (f32, f32)) {
         for kind in [FileDragKind::Hover, FileDragKind::Drop] {
-            let payload = InputPayload::FileDrag(FileDragInput {
-                kind,
-                paths: vec![PathBuf::from("D:\\other\\c.png")],
-                position: Some(point),
-                modifiers: InputModifiers::default(),
-            });
-            input
-                .route(harness.window.document.context_mut(), payload.clone())
-                .expect("拖放事件");
-            crate::shell::note_routed_input(&mut harness.model, &harness.window.document, &payload);
-            for message in harness.take_messages() {
-                harness.apply(message);
-            }
+            route_drag(harness, input, kind, point);
+        }
+    }
+
+    /// 和生产的 `input_event` 一样：先按坐标记悬停的文件夹，再路由，再归约视图发出的消息。
+    fn route_drag(
+        harness: &mut ShellHarness,
+        input: &mut HeadlessInput,
+        kind: FileDragKind,
+        point: (f32, f32),
+    ) {
+        let payload = InputPayload::FileDrag(FileDragInput {
+            kind,
+            paths: vec![PathBuf::from("D:\\other\\c.png")],
+            position: Some(point),
+            modifiers: InputModifiers::default(),
+        });
+        crate::shell::note_routed_input(&mut harness.model, &harness.window.document, &payload);
+        input
+            .route(harness.window.document.context_mut(), payload)
+            .expect("拖放事件");
+        for message in harness.take_messages() {
+            harness.apply(message);
         }
     }
 }

@@ -1,7 +1,7 @@
 //! 拖动要认得的节点：文件卡片、侧栏文件夹行和文件列表框。
 //!
 //! 目录卡片、侧栏文件夹行和列表框用 NanaUI 的 `set_drop_target` 登记成条目拖放目标
-//! （[`ENTRY_DROP`]），侧栏文件夹行同时接系统文件拖放；指针底下落在哪个目标由 `drop_target_at` 回答。框架只认节点，
+//! （[`ENTRY_DROP`]），目录卡片和侧栏文件夹行同时接系统文件拖放；指针底下落在哪个目标由 `drop_target_at` 回答。框架只认节点，
 //! 节点是哪个路径记在这里的登记表：挂上时写、作用域销毁时删。登记表按线程存，
 //! 同一线程里先后建过的文档可能复用节点编号，所以每条登记带着节点的组装路径，查的时候对一遍。
 
@@ -34,18 +34,16 @@ pub(crate) struct EntryNode {
 }
 
 impl EntryNode {
-    /// 这个节点接受的放下。普通文件卡片不是目标；侧栏文件夹行还接系统文件拖放（导入到这里，效果是复制），
-    /// 悬停样子由 NanaUI 画在这一行上。
+    /// 这个节点接受的放下。普通文件卡片不是目标；目录卡片和侧栏文件夹行还接系统文件拖放（导入到这里，
+    /// 效果是复制），悬停样子由 NanaUI 画在这张卡片或这一行上。
     fn accepts(&self) -> Option<DropAccepts> {
         let entry = DropKind::custom(ENTRY_DROP);
         match self.kind {
             EntryKind::Card { directory: false } => None,
-            EntryKind::Sidebar => {
+            EntryKind::Card { directory: true } | EntryKind::Sidebar => {
                 Some(DropAccepts::new([DropKind::Files, entry]).effect(DropEffect::Copy))
             }
-            EntryKind::Card { directory: true } | EntryKind::Browser => {
-                Some(DropAccepts::new([entry]).effect(DropEffect::Move))
-            }
+            EntryKind::Browser => Some(DropAccepts::new([entry]).effect(DropEffect::Move)),
         }
     }
 }

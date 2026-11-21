@@ -670,13 +670,13 @@ fn host_drag(
             model.input.dragging_files = true;
         }
         HostDragPhase::Leave => {
-            // 指针从文件列挪到侧栏文件夹上时，坐标已经把目标记在那一行，这里不能清掉。
+            // 悬停的文件夹按每次拖动的坐标记（`pointer_gesture::note_routed_input`），离开一个拖放目标
+            // 不清它：指针从文件列挪到目录卡片或侧栏文件夹上时，框架先报旧目标离开，这时坐标已经把新目标记上。
             if model.input.hover_on_sidebar {
                 model.input.external_active = true;
                 model.input.dragging_files = true;
             } else {
                 model.input.external_active = false;
-                model.input.hover_folder = None;
                 model.input.dragging_files = false;
             }
         }
