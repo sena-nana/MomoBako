@@ -426,6 +426,48 @@ fn active_lyric_centers_in_the_viewport() {
     assert!(duration > 17, "夹具要长过被点的那一行");
 }
 
+/// 歌词视口上下渐隐交给滚动区：顶上 12%、底下 14% 视口高的渐隐带写在滚动区样式上，
+/// 滚动区连同歌词合成一层淡出。行自己不写不透明度，也不铺色块盖住歌词。
+#[test]
+fn lyric_viewport_fades_at_its_edges() {
+    let band = super::lyric_edge_fade(400.0);
+    assert_eq!((band.top, band.bottom), (48.0, 56.0));
+    assert_eq!(
+        super::lyric_edge_fade(401.3),
+        band,
+        "带长按整像素取，亚像素抖动不改样式"
+    );
+
+    let mut model = scene("preview-audio");
+    let mut lines = (0..30)
+        .map(|index| format!("{}第{index}行", lrc_tag(index as u64)))
+        .collect::<Vec<_>>();
+    lines.push("没有时间".into());
+    model.inspect.lyrics = crate::shell::inspect_lyrics::parse_lrc(&lines.join("\n"));
+    place_playhead(&mut model, 15);
+    let harness = show(&model);
+    let scroll = harness
+        .keyed("inspect-audio-lyric-scroll")
+        .expect("歌词滚动");
+    let world = harness.document().context().world();
+    let height = world
+        .scroll_metrics(scroll)
+        .expect("视口尺寸")
+        .viewport_height;
+    let style = world.node_style(scroll).expect("滚动区样式");
+    assert_eq!(
+        style.layout.paint.scroll_edge_fade,
+        Some(super::lyric_edge_fade(height)),
+        "渐隐带跟着量出来的视口高度"
+    );
+    assert!(style.background.is_none(), "滚动区不铺底色盖住歌词");
+    for key in ["inspect-audio-lyric-active", "inspect-audio-lyric-0", "inspect-audio-lyric-30"] {
+        let id = harness.keyed(key).unwrap_or_else(|| panic!("没有 {key}"));
+        let line = world.node_style(id).expect("行样式");
+        assert_eq!(line.layout.opacity, None, "{key} 不另写不透明度");
+    }
+}
+
 /// 把预览会话的播放头拨到 `ms`。歌词当前行读的是这份会话。
 fn place_playhead(model: &mut ShellViewModel, ms: u64) {
     let mut session = model.inspect.media_session().cloned().expect("预览会话");
