@@ -19,7 +19,7 @@ use nana_ui::ButtonKind;
 use nana_ui::runtime::view::{AnyView, IntoView, widget};
 use nana_ui::runtime::{
     Activate, AlignSpec, Button, EmptyState, JustifySpec, LengthSpec, List, ListItem, RadiusTier,
-    ScrollAxes, ScrollView, SemanticColorRole, Stack, Text,
+    RovingFocusGroup, ScrollAxes, ScrollView, SemanticColorRole, Stack, Text, Toolbar,
 };
 use serde_json::Value;
 
@@ -416,6 +416,7 @@ fn playlist_view(playlist: &playlist::PlaylistPanel) -> AnyView {
 }
 
 /// 「加入作品」「随机」「清空」：间距 6、内边距 8×10、底边 border-soft。
+/// 是一条 NanaUI 工具栏，左右方向键在三个按钮之间走。
 fn playlist_actions(audio: bool, empty: bool) -> AnyView {
     let row = super::workbench::with_bottom_divider(
         Stack::row(6.0)
@@ -425,26 +426,32 @@ fn playlist_actions(audio: bool, empty: bool) -> AnyView {
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
     );
-    widget(row)
-        .key("inspect-asmr-playlist-actions")
-        .children((
-            widget(queue_action("加入作品", !audio))
-                .key("inspect-asmr-add-work")
-                .on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::AddWork));
-                }),
-            widget(queue_action("随机", !audio))
-                .key("inspect-asmr-random")
-                .on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::AddRandom));
-                }),
-            widget(queue_action("清空", empty))
-                .key("inspect-asmr-clear")
-                .on_cx(|_, _: &Activate, cx| {
-                    cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::ClearPlaylist));
-                }),
-        ))
-        .into_any()
+    widget(
+        Toolbar::new()
+            .chrome(false)
+            .label("播放列表操作")
+            .style(row.node_style()),
+    )
+    .roving_focus(RovingFocusGroup::horizontal())
+    .key("inspect-asmr-playlist-actions")
+    .children((
+        widget(queue_action("加入作品", !audio))
+            .key("inspect-asmr-add-work")
+            .on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::AddWork));
+            }),
+        widget(queue_action("随机", !audio))
+            .key("inspect-asmr-random")
+            .on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::AddRandom));
+            }),
+        widget(queue_action("清空", empty))
+            .key("inspect-asmr-clear")
+            .on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::ClearPlaylist));
+            }),
+    ))
+    .into_any()
 }
 
 /// 队列操作钮：至少 28px 高，左右 8、上下 4，12px 字，幽灵按钮样式。

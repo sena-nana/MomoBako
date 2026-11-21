@@ -13,8 +13,8 @@ use nana_ui::runtime::view::{
     AnyView, IntoView, NodeRef, Signal, dynamic, signal, untrack, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, LengthSpec, NodeStyle, RadiusTier, ScrollAxes, ScrollView,
-    SemanticColorRole, Stack, Text,
+    Activate, AlignSpec, Button, LengthSpec, NodeStyle, RadiusTier, RovingFocusGroup, ScrollAxes,
+    ScrollView, SemanticColorRole, Stack, Text, Toolbar,
 };
 use nana_ui::{ButtonKind, Icon};
 
@@ -301,12 +301,18 @@ fn header(head: Signal<HeadView>) -> AnyView {
             super::super::input::InputMessage::RevealEntry { absolute_path },
         ));
     });
+    // 「打开」「定位」是一条不画表面的 NanaUI 工具栏，左右方向键在两个按钮之间走。
+    let actions_row = Stack::row(8.0)
+        .align(AlignSpec::Center)
+        .grow(0.0)
+        .shrink(0.0);
     let actions = widget(
-        Stack::row(8.0)
-            .align(AlignSpec::Center)
-            .grow(0.0)
-            .shrink(0.0),
+        Toolbar::new()
+            .chrome(false)
+            .label("预览操作")
+            .style(actions_row.node_style()),
     )
+    .roving_focus(RovingFocusGroup::horizontal())
     .key("inspect-preview-actions")
     .children((open, reveal));
     let titles = widget(
