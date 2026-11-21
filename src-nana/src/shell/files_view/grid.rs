@@ -12,16 +12,16 @@ use std::cell::RefCell;
 use std::sync::Arc;
 use std::time::Instant;
 
-use nana_ui::icons_tabler::LOADER_2;
+use nana_ui::icons_tabler::{ALERT_CIRCLE, LOADER_2};
 use nana_ui::runtime::view::{
-    AnyView, IntoView, Signal, dynamic, fields, node_ref, signal, widget,
+    AnyView, IntoView, Signal, callout, dynamic, fields, node_ref, signal, widget,
 };
 use nana_ui::runtime::{
     Activate, AlignSpec, Divider, DocumentId, LengthSpec, RadiusTier, ScrollAxes, ScrollMetrics,
     ScrollView, SemanticColorRole, SizeChanged, Spinner, Stack, TextHorizontalAlignment, UiWorld,
     UserScroll,
 };
-use nana_ui_core::Icon;
+use nana_ui_core::{Icon, StatusTone};
 
 use super::super::field_bind::ButtonIcon;
 use super::super::files::{FileContext, FilesMessage};
@@ -252,40 +252,25 @@ pub(super) fn body(signals: ListSignals, hot: HotSignals) -> AnyView {
     .into_any()
 }
 
-/// 状态框：圆角小框，白底描边；出错时是浅红底红字。左右各留 20 的边距撑满列表宽，不随文字收窄。
+/// 状态框：圆角小框，白底描边。左右各留 20 的边距撑满列表宽，不随文字收窄。
+/// 出错时换成危险色调的 NanaUI 提示条，边距不变。
 fn state_box(label: String, error: bool, spinner: bool) -> AnyView {
-    let (fill, border, color) = if error {
-        (None, SemanticColorRole::Danger, SemanticColorRole::Danger)
-    } else {
-        (
-            Some(SemanticColorRole::Background),
-            SemanticColorRole::Border,
-            SemanticColorRole::Muted,
-        )
-    };
-    let mut frame = Stack::row(8.0)
-        .align(AlignSpec::Center)
-        .width(LengthSpec::Fill)
-        .padding_xy(12.0, 10.0)
-        .radius(RadiusTier::Xl)
-        .with_layout(|layout| {
-            layout.margin_top = Some(LengthSpec::Px(16.0));
-            layout.margin_left = Some(LengthSpec::Px(LIST_PADDING_X));
-            layout.margin_right = Some(LengthSpec::Px(LIST_PADDING_X));
-        });
-    let mut node_style = frame.node_style();
-    node_style.background = fill;
-    node_style.border = Some(border);
     if error {
-        node_style.interaction.base.background_mix = Some(nana_ui_core::SemanticColorMix::alpha(
-            SemanticColorRole::Danger,
-            0.1,
-        ));
-        node_style.interaction.base.border_mix = Some(nana_ui_core::SemanticColorMix::alpha(
-            SemanticColorRole::Danger,
-            0.36,
-        ));
+        return widget(state_margin(Stack::column(0.0).width(LengthSpec::Fill)))
+            .children((callout(ALERT_CIRCLE, StatusTone::Danger, label),))
+            .key("file-error")
+            .into_any();
     }
+    let mut frame = state_margin(
+        Stack::row(8.0)
+            .align(AlignSpec::Center)
+            .width(LengthSpec::Fill)
+            .padding_xy(12.0, 10.0)
+            .radius(RadiusTier::Xl),
+    );
+    let mut node_style = frame.node_style();
+    node_style.background = Some(SemanticColorRole::Background);
+    node_style.border = Some(SemanticColorRole::Border);
     Arc::make_mut(&mut node_style.layout).border_width = Some(1.0);
     frame = frame.style(node_style);
     // 读取中、处理中的转圈是 NanaUI 的 `Spinner`，旋转由框架的动画时间线驱动。文字照旧写在右边，
@@ -297,10 +282,20 @@ fn state_box(label: String, error: bool, spinner: bool) -> AnyView {
     widget(frame)
         .children((
             icon,
-            widget(style::text(label, 14.0, 400, color, 21.7)).key("file-state-text"),
+            widget(style::text(label, 14.0, 400, SemanticColorRole::Muted, 21.7))
+                .key("file-state-text"),
         ))
-        .key(if error { "file-error" } else { "file-state" })
+        .key("file-state")
         .into_any()
+}
+
+/// 状态框上方留 16，左右各留列表的内边距。
+fn state_margin(frame: Stack) -> Stack {
+    frame.with_layout(|layout| {
+        layout.margin_top = Some(LengthSpec::Px(16.0));
+        layout.margin_left = Some(LengthSpec::Px(LIST_PADDING_X));
+        layout.margin_right = Some(LengthSpec::Px(LIST_PADDING_X));
+    })
 }
 
 /// 分组列表。宽度按实际布局回报；还没回报时按窗口宽估算，保证首帧就是对的列数。

@@ -121,19 +121,12 @@ pub(super) fn page_nav(index: usize, total: usize) -> AnyView {
         .into_any()
 }
 
-/// 翻页按钮是基础按钮：32px 高、透明底、正文色。禁用时在页纸底色上淡化。
+/// 翻页按钮是基础按钮：32px 高、透明底、正文色。停用时在页纸底色上淡化。
 fn page_button(label: &str, disabled: bool) -> Button {
     let mut button = Button::new(label)
         .kind(nana_ui::ButtonKind::Ghost)
         .disabled(disabled);
-    button.style.interaction.disabled = nana_ui::runtime::SemanticPaint::default();
-    if disabled {
-        button.style.interaction.base.foreground_mix = Some(nana_ui_core::SemanticColorMix::new(
-            SemanticColorRole::Text,
-            SemanticColorRole::Background,
-            crate::theme_map::DISABLED_OPACITY,
-        ));
-    }
+    button.style.interaction.disabled = super::frame::disabled_paint(SemanticColorRole::Background);
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
     layout.height = Some(LengthSpec::Px(32.0));
     layout.min_height = Some(LengthSpec::Px(32.0));

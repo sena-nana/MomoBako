@@ -666,22 +666,15 @@ fn stats(
         .into_any()
 }
 
-/// 页头按钮：透明底、正文色，图标在字前，悬停铺 bg-hover。禁用时字和图标在面板底色上淡化。
-fn action_button(label: &str, icon: Icon, icon_size: f32, height: f32, disabled: bool) -> Button {
+/// 页头按钮：透明底、正文色，图标在字前，悬停铺 bg-hover。
+/// 停用色写在 `interaction.disabled` 里：字和图标在面板底色上按 sRGB 混淡，能不能点只换停用态。
+fn action_button(label: &str, icon: Icon, icon_size: f32, height: f32) -> Button {
     let mut button = Button::new(label)
         .kind(ButtonKind::Ghost)
         .icon(icon)
         .icon_size(icon_size)
-        .icon_gap(6.0)
-        .disabled(disabled);
-    button.style.interaction.disabled = nana_ui::runtime::SemanticPaint::default();
-    if disabled {
-        button.style.interaction.base.foreground_mix = Some(nana_ui_core::SemanticColorMix::new(
-            SemanticColorRole::Text,
-            SemanticColorRole::Surface,
-            crate::theme_map::DISABLED_OPACITY,
-        ));
-    }
+        .icon_gap(6.0);
+    button.style.interaction.disabled = disabled_paint(SemanticColorRole::Surface);
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
     layout.height = Some(LengthSpec::Px(height));
     layout.min_height = Some(LengthSpec::Px(height));
@@ -695,29 +688,31 @@ fn action_button(label: &str, icon: Icon, icon_size: f32, height: f32, disabled:
     button
 }
 
+/// 停用的透明按钮：正文色按停用不透明度混进所在底色，不铺底、不加边。
+pub(super) fn disabled_paint(surface: SemanticColorRole) -> nana_ui::runtime::SemanticPaint {
+    nana_ui::runtime::SemanticPaint {
+        foreground_mix: Some(nana_ui_core::SemanticColorMix::new(
+            SemanticColorRole::Text,
+            surface,
+            crate::theme_map::DISABLED_OPACITY,
+        )),
+        ..Default::default()
+    }
+}
+
 /// 页头按钮的文字、图标、图标尺寸和高度。
 type ActionLook = (&'static str, Icon, f32, f32);
 
-/// 页头按钮，能不能点按字段绑定：禁用态和淡化的样式一起变。
+/// 页头按钮，能不能点按字段绑定。
 fn action(
     look: ActionLook,
     key: &'static str,
     disabled: impl Fn() -> bool + Send + Clone + 'static,
 ) -> nana_ui::runtime::view::El<Button> {
     let (label, icon, icon_size, height) = look;
-    let style_disabled = disabled.clone();
-    widget(action_button(
-        label,
-        icon,
-        icon_size,
-        height,
-        untrack(&disabled),
-    ))
-    .prop::<bool, fields::button::disabled>(disabled)
-    .prop::<NodeStyle, StyleField>(move || {
-        action_button(label, icon, icon_size, height, style_disabled()).style
-    })
-    .key(key)
+    widget(action_button(label, icon, icon_size, height).disabled(untrack(&disabled)))
+        .prop::<bool, fields::button::disabled>(disabled)
+        .key(key)
 }
 
 /// 11px 半粗、弱色、字距 0.4 的眉题。

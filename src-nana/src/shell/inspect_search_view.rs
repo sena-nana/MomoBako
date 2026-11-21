@@ -10,10 +10,12 @@
 
 use std::sync::Arc;
 
+use nana_ui::icons_tabler::ALERT_CIRCLE;
 use nana_ui::runtime::view::{
-    AnyView, IntoView, Item, Signal, Store, StoreList, StorePath, computed, css, each, fields,
-    untrack, widget,
+    AnyView, IntoView, Item, Signal, Store, StoreList, StorePath, callout, computed, css, each,
+    fields, untrack, widget,
 };
+use nana_ui_core::StatusTone;
 use nana_ui::runtime::{
     Activate, AlignSpec, EmptyState, JustifySpec, LengthSpec, ListItem, RadiusTier,
     SemanticColorRole, Spinner, Stack,
@@ -152,31 +154,36 @@ fn searching_state(status: Signal<SearchStatus>) -> AnyView {
     .into_any()
 }
 
-/// 搜索失败。面板里用危险色写出真实错误，不让失败看起来像「没有结果」。
+/// 搜索失败。面板里用危险色调的 NanaUI 提示条写出真实错误，不让失败看起来像「没有结果」。
+/// 没有错误时文字为空，整条不占位。
 fn error_state(status: Signal<SearchStatus>) -> AnyView {
-    widget(state_box().border(SemanticColorRole::Danger, 1.0))
+    widget(state_margin(Stack::column(0.0).width(LengthSpec::Fill)))
         .visible(move || status.with(|status| !status.error.is_empty()))
-        .children((widgets::bound(
-            widgets::wrapping_label(String::new(), 14.0, 400, SemanticColorRole::Danger),
-            move || status.with(|status| status.error.clone()),
-        )
-        .key("search-workbench-error-text"),))
+        .children((callout(ALERT_CIRCLE, StatusTone::Danger, move || {
+            status.with(|status| status.error.clone())
+        }),))
         .key("search-workbench-error")
         .into_any()
 }
 
+/// 状态块上方留 16，左右各留 20。
+fn state_margin(frame: Stack) -> Stack {
+    frame.min_width(LengthSpec::Px(0.0)).with_layout(|layout| {
+        layout.margin_top = Some(LengthSpec::Px(16.0));
+        layout.margin_left = Some(LengthSpec::Px(20.0));
+        layout.margin_right = Some(LengthSpec::Px(20.0));
+    })
+}
+
+/// 搜索中提示框：圆角小框，横排转圈和文字。
 fn state_box() -> Stack {
-    Stack::row(8.0)
-        .align(AlignSpec::Center)
-        .padding_xy(12.0, 10.0)
-        .radius(RadiusTier::Xl)
-        .width(LengthSpec::Fill)
-        .min_width(LengthSpec::Px(0.0))
-        .with_layout(|layout| {
-            layout.margin_top = Some(LengthSpec::Px(16.0));
-            layout.margin_left = Some(LengthSpec::Px(20.0));
-            layout.margin_right = Some(LengthSpec::Px(20.0));
-        })
+    state_margin(
+        Stack::row(8.0)
+            .align(AlignSpec::Center)
+            .padding_xy(12.0, 10.0)
+            .radius(RadiusTier::Xl)
+            .width(LengthSpec::Fill),
+    )
 }
 
 /// 空状态：NanaUI 的 `EmptyState`，标题和说明按字段绑定（没有资源库 / 等待搜索条件 / 跑完没有命中）。
