@@ -3,12 +3,17 @@
 //! 只写数值的样式在装上的主题换刻度时不跟着变，在自带令牌的控件上还会被令牌盖掉。这里把每个验收场景挂起来，
 //! 逐个节点看作者写的样式：内外边距、间距、行高、圆角、边框宽度写了非零数值的，要么同一字段挂着
 //! `layout.theme` 的主题表达式，要么节点上有对应的档位意图（`gap_step`、`padding_step`、控件内边距档、
-//! 面板内边距档、`radius` / `corner_radii` / `shape`）。相对行高（字号的倍数）跟着字号档走，不算写死。
+//! 面板内边距档、`radius` / `corner_radii` / `shape`）。相对行高（字号的倍数）跟着字号走，不算写死。
+//! NanaUI 组件自己写的数值另列清单（[`NANA_DEFAULTS`]），每条注明 NanaUI 源码位置。
 //! 源码里也不许直接写这几样数值：辅助函数在 `theme_map/tiers.rs`。
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
-use nana_ui_core::{LayoutStyle, LengthSpec, LineHeightSpec, ThemeExpr};
+use nana_ui::runtime::{NodeKind, NodeStyle};
+use nana_ui_core::{
+    LayoutStyle, LengthSpec, LineHeightSpec, SemanticColorRole as Role, ShapeRole, ThemeExpr,
+};
 
 use crate::shell::view_harness::ShellHarness;
 
@@ -28,7 +33,7 @@ fn px(spec: Option<LengthSpec>) -> Option<f32> {
 }
 
 /// 作者样式里写了非零数值的间距、行高、圆角、边框宽度字段，各自有没有主题档位。
-fn authored_fields(style: &nana_ui::runtime::NodeStyle) -> Vec<Field> {
+fn authored_fields(style: &NodeStyle) -> Vec<Field> {
     let layout: &LayoutStyle = &style.layout;
     let theme = &layout.theme;
     let some = |expr: &Option<ThemeExpr>| expr.is_some();
@@ -141,61 +146,206 @@ fn authored_fields(style: &nana_ui::runtime::NodeStyle) -> Vec<Field> {
     fields
 }
 
-/// 允许写死数值的节点：组件类型（如 `nana.form-field`）或装配路径里的一段，加字段名，再加原因。
-/// 只收 NanaUI 组件内部、壳层管不到的样式。
-const ALLOWED: &[(&str, &str, &str)] = &[
-    (
-        "nana.form-field",
-        "padding_top",
-        "FormField 给标签留的位置是 NanaUI 按标签行高加间距算的",
-    ),
-    (
-        "nana.select",
-        "border_width",
-        "Select 的发丝边是 NanaUI 写的 HAIRLINE",
-    ),
-    (
+/// NanaUI 组件自己写的、壳层管不到的数值：组件类型（如 `nana.card`）或元素标签（如 `segmented-option`），
+/// 字段，允许的数值，再按需加形状、边色限定，最后是 NanaUI 源码里写这个数的地方（路径相对
+/// `crates/nana-ui-runtime/src`）。壳层自己写的样式一条都不收：调用方传进 NanaUI 构造函数的数也算壳层的。
+struct NanaDefault {
+    node: &'static str,
+    fields: &'static [&'static str],
+    values: &'static [f32],
+    shape: Option<ShapeRole>,
+    border: Option<Role>,
+    #[allow(dead_code)]
+    source: &'static str,
+}
+
+impl NanaDefault {
+    const fn new(
+        node: &'static str,
+        fields: &'static [&'static str],
+        values: &'static [f32],
+        source: &'static str,
+    ) -> Self {
+        Self {
+            node,
+            fields,
+            values,
+            shape: None,
+            border: None,
+            source,
+        }
+    }
+
+    const fn shape(mut self, shape: ShapeRole) -> Self {
+        self.shape = Some(shape);
+        self
+    }
+
+    const fn border(mut self, role: Role) -> Self {
+        self.border = Some(role);
+        self
+    }
+
+    fn covers(&self, node: &Node<'_>, style: &NodeStyle, field: &Field) -> bool {
+        (node.kind == self.node || node.tag == self.node)
+            && self.fields.contains(&field.name)
+            && self.values.contains(&field.value)
+            && self.shape.is_none_or(|shape| style.shape == Some(shape))
+            && self.border.is_none_or(|role| style.border == Some(role))
+    }
+}
+
+/// 一个节点的组件类型和元素标签。
+struct Node<'a> {
+    kind: &'a str,
+    tag: &'a str,
+}
+
+const PADDING_X: &[&str] = &["padding_left", "padding_right"];
+/// 侧栏外框内边距的主题表达式被工作区丢掉的说明。
+const SIDEBAR_FRAME: &str = "workspace.rs:725 `overlay_region_style` 只把侧栏外框内边距的数值带到区域节点上，主题表达式没带过去";
+
+const NANA_DEFAULTS: &[NanaDefault] = &[
+    NanaDefault::new(
+        "nana.stack",
+        &["border_width"],
+        &[1.0],
+        "view/marks.rs:188 `tag_frame()` 写 `.border(BorderSoft, 1.0)`",
+    )
+    .shape(ShapeRole::Tag)
+    .border(Role::BorderSoft),
+    NanaDefault::new(
+        "nana.card",
+        &["border_width"],
+        &[1.0],
+        "view_components.rs:2207 `Card::project` 给 `Outlined` 卡片写 1.0 的边",
+    )
+    .border(Role::Border),
+    NanaDefault::new(
+        "nana.card",
+        &["border_width"],
+        &[1.0],
+        "view_components.rs:2207 `Card::project` 给 `Selected` 卡片写 1.0 的边",
+    )
+    .border(Role::BorderSoft),
+    NanaDefault::new(
+        "nana.action-menu",
+        &["border_width"],
+        &[1.0],
+        "popover.rs:858 `trigger_button_style` 的触发钮发丝边写 `HAIRLINE`",
+    )
+    .shape(ShapeRole::Button),
+    NanaDefault::new(
         "nana.popover",
-        "border_width",
-        "Popover 面板的发丝边是 NanaUI 写的 HAIRLINE",
+        &["border_width"],
+        &[1.0],
+        "popover.rs:858 `trigger_button_style` 的触发钮发丝边写 `HAIRLINE`",
+    )
+    .shape(ShapeRole::Button),
+    NanaDefault::new(
+        "nana.select",
+        &["border_width"],
+        &[1.0],
+        "select.rs:418 Select 触发框的发丝边写 `HAIRLINE`",
+    )
+    .shape(ShapeRole::Select),
+    NanaDefault::new(
+        "nana.form-field",
+        &["padding_top"],
+        &[18.0, 20.0],
+        "form_surfaces.rs:130 FormField 按标签行高加间距算出给标签留的位置",
     ),
-    (
+    NanaDefault::new(
         "nana.path-field",
-        "gap",
-        "PathField 输入框和浏览按钮之间的间距是 NanaUI 写的",
+        &["gap"],
+        &[4.0],
+        "path_field.rs:102 输入框和浏览按钮之间写 4.0",
     ),
-    (
+    NanaDefault::new(
         "nana.chip",
-        "border_radius",
-        "Chip 的胶囊圆角是 NanaUI 写的",
+        &["border_radius"],
+        &[999.0],
+        "chip.rs:145 Chip 的胶囊圆角写 999.0",
     ),
-    (
+    NanaDefault::new(
         "nana.status-badge",
-        "border_radius",
-        "StatusBadge 的胶囊圆角是 NanaUI 写的",
+        &["border_radius"],
+        &[999.0],
+        "feedback.rs:217 StatusBadge 的胶囊圆角写 999.0",
     ),
-    (
-        "export-target/",
-        "border_radius",
-        "SegmentedControl 的选项圆角是 NanaUI 按轨道算的",
+    NanaDefault::new(
+        "nana.labeled-value",
+        &["gap"],
+        &[4.0, 8.0],
+        "feedback.rs:1093 LabeledValue 的标签和值之间写 4.0（紧凑）或 8.0",
     ),
-    (
-        "export-target/",
-        "padding_left",
-        "SegmentedControl 的选项内边距是 NanaUI 按轨道算的",
+    NanaDefault::new(
+        "segmented-option",
+        PADDING_X,
+        &[10.0, 12.0],
+        "selection.rs:1066 分段选项的左右内边距按装上的度量算成像素（控件内边距档加 Xxs）",
     ),
-    (
-        "export-target/",
-        "padding_right",
-        "SegmentedControl 的选项内边距是 NanaUI 按轨道算的",
+    NanaDefault::new(
+        "segmented-option",
+        &["border_radius"],
+        &[3.0],
+        "selection.rs:1035 分段选项的圆角按轨道圆角减去轨道内边距算成像素",
+    ),
+    NanaDefault::new(
+        "nana.list",
+        &["gap"],
+        &[1.0],
+        "workspace.rs:709 工作区轨道之间写 `REGION_SEPARATOR_PX` 1.0",
+    ),
+    NanaDefault::new(
+        "nana.sidebar-frame",
+        &["padding_top", "padding_bottom"],
+        &[10.0],
+        SIDEBAR_FRAME,
+    ),
+    NanaDefault::new(
+        "nana.sidebar-frame",
+        &["padding_left"],
+        &[8.0],
+        SIDEBAR_FRAME,
+    ),
+    NanaDefault::new(
+        "nana.sidebar-frame",
+        &["padding_right"],
+        &[7.0],
+        SIDEBAR_FRAME,
+    ),
+    NanaDefault::new(
+        "app-title-bar-leading",
+        &["padding_left"],
+        &[6.0],
+        "shell.rs:327 标题栏前导列的左内边距按 `edge_px()` 写像素",
+    ),
+    NanaDefault::new(
+        "app-title-bar-controls",
+        PADDING_X,
+        &[6.0],
+        "shell.rs:708 窗口按钮组左右写 `WINDOW_CONTROL_PADDING` 6.0",
+    ),
+    NanaDefault::new(
+        "app-title-bar-controls",
+        &["gap"],
+        &[2.0],
+        "shell.rs:695 窗口按钮之间写 `WINDOW_CONTROL_GAP` 2.0",
+    ),
+    NanaDefault::new(
+        "nana.reorder-list",
+        &["gap"],
+        &[10.0],
+        "reorder_list.rs:2183 ReorderList 只收像素间距（`spacing(f32)`）并照写进 `gap`，没有档位写法；\
+         播放集传的是 `tiers::space_px(SpacingStep::Lg)`",
     ),
 ];
 
-/// 每个验收场景里，写了非零间距、行高、圆角或边框宽度的节点都挂主题档位。
+/// 每个验收场景里，写了非零间距、行高、圆角或边框宽度的节点都挂主题档位。同一个节点、同一个字段只报一次。
 #[test]
-#[ignore = "三个区域的档位改动合并以前，别的区域还有写死数值；合并后去掉"]
 fn authored_layout_numbers_follow_theme_tiers() {
-    let mut loose = Vec::new();
+    let mut loose = BTreeMap::<String, String>::new();
     for (scene, model) in crate::shell::acceptance_gap_models() {
         let harness = ShellHarness::mount(model);
         let document = harness.document();
@@ -205,31 +355,47 @@ fn authored_layout_numbers_follow_theme_tiers() {
             let Some(style) = world.node_style(id) else {
                 continue;
             };
+            let fields = authored_fields(&style);
+            if fields.iter().all(|field| field.backed) {
+                continue;
+            }
             let path = context.assembly_path(id).unwrap_or_default();
             let kind = world
                 .component_type(id)
                 .map(|kind| kind.as_str().to_owned())
                 .unwrap_or_default();
-            for field in authored_fields(&style) {
-                let allowed = ALLOWED.iter().any(|(part, name, _)| {
-                    (kind == *part || path.contains(part)) && *name == field.name
-                });
+            let tag = match world.node(id).map(|node| node.kind) {
+                Some(NodeKind::Element { tag }) => tag,
+                _ => String::new(),
+            };
+            let node = Node {
+                kind: &kind,
+                tag: &tag,
+            };
+            for field in fields {
+                let allowed = NANA_DEFAULTS
+                    .iter()
+                    .any(|default| default.covers(&node, &style, &field));
                 if !field.backed && !allowed {
-                    loose.push(format!(
-                        "{scene} {path} [{kind}]: {} 写 {} 没挂主题档位",
-                        field.name, field.value
-                    ));
+                    loose
+                        .entry(format!(
+                            "{path} [{kind} {tag}]: {} 写 {} 没挂主题档位",
+                            field.name, field.value
+                        ))
+                        .or_insert_with(|| scene.to_string());
                 }
             }
         }
     }
-    loose.sort();
-    loose.dedup();
+    let report: Vec<_> = loose
+        .iter()
+        .map(|(line, scene)| format!("{line}（场景 {scene}）"))
+        .collect();
     assert!(
-        loose.is_empty(),
+        report.is_empty(),
         "{} 处间距、行高、圆角或边框宽度写死了数值：\n{}",
-        loose.len(),
-        loose.join("\n")
+        report.len(),
+        report.join("\n")
     );
 }
 
@@ -257,10 +423,9 @@ const NUMERIC_PATTERNS: &[&str] = &[
 ];
 
 /// 源码里不直接写数值间距、圆角、边框宽度：只有 `theme_map/tiers.rs` 把档位折成默认主题的数值。
-/// 写 0 不算；值本身是从档位折出来的（同一行用了 `tiers::`）也不算，那种写法旁边要另挂主题表达式，
-/// 有没有挂由上面挂场景的回归检查。
+/// 写 0 不算；往 `layout.theme` 里写主题表达式不算；值本身是从档位折出来的（同一行用了 `tiers::`）也不算，
+/// 那种写法旁边要另挂主题表达式，有没有挂由上面挂场景的回归检查。
 #[test]
-#[ignore = "三个区域的档位改动合并以前，别的区域还有写死数值；合并后去掉"]
 fn shell_sources_do_not_write_numeric_layout_metrics() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = vec![root.clone()];
@@ -294,9 +459,11 @@ fn shell_sources_do_not_write_numeric_layout_metrics() {
                 || code.contains("Px(0.0)")
                 || code.contains("(0.0, 0.0)");
             let derived = code.contains("tiers::");
+            let theme_expr = code.contains(".theme.");
             if !in_tests
                 && !zero
                 && !derived
+                && !theme_expr
                 && NUMERIC_PATTERNS
                     .iter()
                     .any(|pattern| code.contains(pattern))
