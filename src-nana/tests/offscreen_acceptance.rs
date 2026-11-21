@@ -596,8 +596,8 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
             "将该目录及其全部内容移入回收站，可在回收站中还原。",
             "取消",
         ],
-        // 图片幻灯片读不到文件：播放条写「图片无法播放」，停留时长照常可调。
-        "still-playback" => &["图片无法播放", "图片停留时长"],
+        // 图片幻灯片读不到文件：播放条写「图片无法播放」，停留时长（NanaUI `RangeField`「停留」）照常可调。
+        "still-playback" => &["图片无法播放", "停留"],
         // 音频预览解不开：预览框里写失败标题和原因，不再只画唱片。
         "preview-audio-failed" => &["无法预览该音频", "没有原生解码器"],
         // 刷新文件夹树时仓库还在同步：侧栏状态区写第一步和百分比。
@@ -641,7 +641,6 @@ fn scene_labels(scene_id: &str, page: &ShellPage) -> &'static [&'static str] {
             "0 个仓库",
             "0 条结果",
             "还没有可搜索的资源库",
-            "先在资源库页面添加一个仓库，再执行跨仓库搜索。",
         ],
         // 移动还没回来：文件列写「正在处理文件」，任务弹层的仓库操作行爬到上限。
         "file-operation-progress" => &["正在处理文件", "移动文件", "移动到目标文件夹", "88%"],
@@ -760,6 +759,8 @@ fn scene_values(scene_id: &str) -> &'static [&'static str] {
         "folder-rename-dialog" => &["assets"],
         // 日志空状态是 NanaUI 的 `EmptyState`：说明是它的读屏值。
         "logs-no-library" => &["宿主、插件和辅助进程产生的关键操作会在这里持续汇总。"],
+        // 搜索的空状态也是 `EmptyState`：说明是它的读屏值。
+        "search-no-library" => &["先在资源库页面添加一个仓库，再执行跨仓库搜索。"],
         _ => &[],
     }
 }
