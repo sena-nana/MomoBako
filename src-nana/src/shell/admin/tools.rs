@@ -10,7 +10,7 @@
 
 use nana_ui::runtime::view::{AnyView, IntoView, Signal, css, dynamic, signal, widget};
 use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, List, ListItem, Stack};
-use nana_ui_core::{GridTrack, RadiusTier, SemanticColorRole as Role};
+use nana_ui_core::{GridTrack, RadiusTier, SemanticColorRole as Role, TextWeight, TypeRole};
 
 use super::super::{ShellMessage, ShellViewModel};
 use super::api::view::PlaygroundSignals;
@@ -193,12 +193,17 @@ fn tool_tab(page: ToolTab, active: Signal<Option<String>>) -> AnyView {
             .min_width(LengthSpec::Px(0.0)),
     )
     .children((
-        widget(wrapping(label(page.label.clone(), 13.0, 700, Role::Text)))
-            .key(format!("admin-tool-{tid}")),
+        widget(wrapping(label(
+            page.label.clone(),
+            TypeRole::Body,
+            TextWeight::Bold,
+            Role::Text,
+        )))
+        .key(format!("admin-tool-{tid}")),
         widget(wrapping(style::label_lh(
             page.description.clone(),
-            12.0,
-            400,
+            TypeRole::Meta,
+            TextWeight::Regular,
             Role::Muted,
             1.35,
         )))
@@ -265,7 +270,7 @@ fn foreign_page(page: &ToolPageEntry) -> AnyView {
             .children((widget(style::label_lh(
                 page.label.clone(),
                 22.0,
-                700,
+                TextWeight::Bold,
                 Role::Text,
                 1.25,
             ))
@@ -280,8 +285,8 @@ fn foreign_page(page: &ToolPageEntry) -> AnyView {
             widget(pad(column(0.0), 8.0, 0.0, 0.0, 0.0))
                 .children((widget(wrapping(label(
                     page.description.clone(),
-                    13.0,
-                    400,
+                    TypeRole::Body,
+                    TextWeight::Regular,
                     Role::Muted,
                 ))),))
                 .into_any(),

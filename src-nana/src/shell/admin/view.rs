@@ -7,12 +7,13 @@
 //! `progress_fill.rs`，逐帧的值经热信号写进来）。不确定进度由 `Progress` 自己沿轨道扫。
 
 use nana_ui::runtime::view::{
-    AnyView, IntoView, Signal, computed, each, empty_state, fields, progress, widget,
+    AnyView, IntoView, Signal, computed, each, empty_state, fields, heading_row, heading_tools,
+    progress, widget,
 };
 use nana_ui::runtime::{
     Activate, AlignSpec, Button, IconButton, LengthSpec, ScrollAxes, ScrollView, Stack,
 };
-use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
+use nana_ui_core::{RadiusTier, SemanticColorRole as Role, TextWeight, TypeRole};
 
 use super::super::hot::{self, TaskFills};
 use super::super::{ShellMessage, ShellViewModel};
@@ -88,21 +89,17 @@ pub(crate) fn task_fill_targets(model: &ShellViewModel) -> Vec<(String, f32)> {
         .collect()
 }
 
-/// 任务弹层的面板：标题行（「任务」和关闭）、空态和可滚动的任务列表。列表最高 300，任务多时自己滚动。
+/// 任务弹层的面板：NanaUI 标题行（「任务」和标题工具里的关闭）、空态和可滚动的任务列表。列表最高 300，任务多时自己滚动。
 pub(crate) fn task_panel(view: Signal<TaskPopoverView>) -> AnyView {
     let fills = hot::current(|signals| signals.task_fills);
-    let header = widget(
-        style::spread(8.0, AlignSpec::Center)
-            .with_layout(|layout| layout.min_height = Some(LengthSpec::Px(24.0))),
-    )
-    .children((
-        widget(label("任务", 13.0, 700, Role::Text)).key("admin-task-title"),
-        widget(close_button())
+    let header = heading_row(
+        widget(label("任务", TypeRole::Body, TextWeight::Bold, Role::Text)).key("admin-task-title"),
+        heading_tools((widget(IconButton::tool(icons::X, "关闭任务"))
             .key("admin-task-close")
             .on_cx(|_, _: &Activate, cx| {
                 cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::CloseTaskPopover));
-            }),
-    ))
+            }),)),
+    )
     .into_any();
     let empty = empty_state("当前没有运行中的任务。")
         .compact(true)
@@ -167,18 +164,6 @@ fn cancel_button(view: Signal<TaskPopoverView>, key: &str) -> AnyView {
         .into_any()
 }
 
-/// 关闭按钮：22 见方、sm 圆角、弱色叉号 13。显式宽高优先于主题的方形尺寸。
-fn close_button() -> IconButton {
-    let mut button = IconButton::new(icons::X, "关闭任务");
-    let layout = std::sync::Arc::make_mut(&mut button.style.layout);
-    layout.width = Some(LengthSpec::Px(22.0));
-    layout.height = Some(LengthSpec::Px(22.0));
-    layout.min_width = Some(LengthSpec::Px(22.0));
-    layout.min_height = Some(LengthSpec::Px(22.0));
-    button.style.foreground = Some(Role::Faint);
-    button
-}
-
 /// 一个任务：`bg` 底、`border-soft` 边线、sm 圆角、内边距 9；来源加进度条。字段按键从投影里取。
 fn task_item(
     view: Signal<TaskPopoverView>,
@@ -208,9 +193,14 @@ fn task_item(
     )
     .children((
         widget(style::spread(8.0, AlignSpec::Center)).children((
-            widget(label(String::new(), 12.0, 600, Role::Faint))
-                .key(format!("admin-task-source-{key}"))
-                .prop::<String, fields::text::value>(pick(|row| row.source.clone())),
+            widget(label(
+                String::new(),
+                TypeRole::Meta,
+                TextWeight::Semibold,
+                Role::Faint,
+            ))
+            .key(format!("admin-task-source-{key}"))
+            .prop::<String, fields::text::value>(pick(|row| row.source.clone())),
             cancel_button(view, &key),
         )),
         progress_bar(
@@ -268,10 +258,16 @@ fn progress_bar(
         .key(format!("admin-task-fill-{key}"))
         .into_any();
     let meta = vec![
-        widget(style::label_lh(String::new(), 12.0, 600, Role::Text, 1.3))
-            .key(format!("admin-task-label-{key}"))
-            .prop::<String, fields::text::value>(task_label)
-            .into_any(),
+        widget(style::label_lh(
+            String::new(),
+            TypeRole::Meta,
+            TextWeight::Semibold,
+            Role::Text,
+            1.3,
+        ))
+        .key(format!("admin-task-label-{key}"))
+        .prop::<String, fields::text::value>(task_label)
+        .into_any(),
         widget(
             Stack::row(0.0)
                 .width(LengthSpec::Shrink)
@@ -279,24 +275,34 @@ fn progress_bar(
                 .shrink(1.0)
                 .min_width(LengthSpec::Px(0.0)),
         )
-        .children((
-            widget(style::label_lh(String::new(), 12.0, 400, Role::Faint, 1.3))
-                .key(format!("admin-task-detail-{key}"))
-                .prop::<String, fields::text::value>(detail),
+        .children((widget(style::label_lh(
+            String::new(),
+            TypeRole::Meta,
+            TextWeight::Regular,
+            Role::Faint,
+            1.3,
         ))
+        .key(format!("admin-task-detail-{key}"))
+        .prop::<String, fields::text::value>(detail),))
         .into_any(),
-        widget(style::label_lh(String::new(), 12.0, 400, Role::Muted, 1.3))
-            .key(format!("admin-task-percent-{key}"))
-            .prop::<String, fields::text::value>({
-                let percent = percent.clone();
-                move || {
-                    percent()
-                        .map(|percent| format!("{percent}%"))
-                        .unwrap_or_default()
-                }
-            })
-            .visible(move || percent().is_some())
-            .into_any(),
+        widget(style::label_lh(
+            String::new(),
+            TypeRole::Meta,
+            TextWeight::Regular,
+            Role::Muted,
+            1.3,
+        ))
+        .key(format!("admin-task-percent-{key}"))
+        .prop::<String, fields::text::value>({
+            let percent = percent.clone();
+            move || {
+                percent()
+                    .map(|percent| format!("{percent}%"))
+                    .unwrap_or_default()
+            }
+        })
+        .visible(move || percent().is_some())
+        .into_any(),
     ];
     widget(column(7.0))
         .children((

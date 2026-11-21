@@ -13,6 +13,7 @@ use nana_ui::runtime::{
     RadiusTier, SemanticColorRole, SizeChanged, Stack,
 };
 use nana_ui::{ControlSize, Icon};
+use nana_ui_core::{TextWeight, TypeRole};
 
 use super::super::player::{PlaybackMode, PlayerMessage, QueueItem};
 use super::super::{ShellMessage, ShellViewModel, hot};
@@ -335,7 +336,13 @@ fn media(props: &BarProps) -> AnyView {
     )
     .children((
         widget(parts::dim_text(
-            parts::line(title.clone(), 14.0, 700, SemanticColorRole::Text, 21.7),
+            parts::line(
+                title.clone(),
+                TypeRole::Section,
+                TextWeight::Bold,
+                SemanticColorRole::Text,
+                21.7,
+            ),
             dim,
         ))
         .key("player-title"),
@@ -343,7 +350,7 @@ fn media(props: &BarProps) -> AnyView {
             parts::line(
                 props.subtitle(),
                 11.667,
-                500,
+                TextWeight::Medium,
                 SemanticColorRole::Muted,
                 18.08,
             ),

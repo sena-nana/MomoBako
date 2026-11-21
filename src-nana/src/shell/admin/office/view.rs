@@ -36,7 +36,7 @@ pub(super) fn panel(view: &OfficeConvertView) -> AnyView {
     marks::status_card(body, "admin-office-card")
 }
 
-/// 页头：眉题、标题和刷新。读取中按钮写「刷新中」并禁用。
+/// 页头：眉题、标题和刷新。读取中按钮写「刷新中」、转圈并禁用。
 pub(super) fn head(loading: bool) -> AnyView {
     widget(style::spread(10.0, AlignSpec::Start))
         .children((
@@ -51,8 +51,8 @@ pub(super) fn head(loading: bool) -> AnyView {
                 widget(style::eyebrow_text("Office Convert")).key("admin-office-eyebrow"),
                 widget(pad(column(0.0), 2.0, 0.0, 0.0, 0.0)).children((widget(style::label_lh(
                     TITLE,
-                    14.0,
-                    700,
+                    TypeRole::Section,
+                    TextWeight::Bold,
                     Role::Text,
                     1.25,
                 ))
@@ -61,10 +61,11 @@ pub(super) fn head(loading: bool) -> AnyView {
             widget(action(
                 if loading { "刷新中" } else { "刷新" },
                 None,
-                Tone::Plain,
+                ButtonKind::Ghost,
                 loading,
             ))
             .prop::<bool, ActionDisabled>(loading)
+            .prop::<bool, fields::button::loading>(loading)
             .key("admin-office-refresh")
             .on_cx(move |_, _: &Activate, cx| {
                 cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::RefreshOfficeStatus));
@@ -85,10 +86,11 @@ pub(super) fn actions(view: &OfficeConvertView) -> AnyView {
                     "运行自检"
                 },
                 None,
-                Tone::Plain,
+                ButtonKind::Ghost,
                 view.self_checking,
             ))
             .prop::<bool, ActionDisabled>(view.self_checking)
+            .prop::<bool, fields::button::loading>(view.self_checking)
             .key("admin-office-self-check")
             .on_cx(move |_, _: &Activate, cx| {
                 cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::RunOfficeSelfCheck));
@@ -100,10 +102,11 @@ pub(super) fn actions(view: &OfficeConvertView) -> AnyView {
                     "关闭守护进程"
                 },
                 None,
-                Tone::Plain,
+                ButtonKind::Ghost,
                 shutdown_disabled,
             ))
             .prop::<bool, ActionDisabled>(shutdown_disabled)
+            .prop::<bool, fields::button::loading>(view.stopping)
             .key("admin-office-shutdown")
             .on_cx(move |_, _: &Activate, cx| {
                 cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ShutdownOfficeDaemon));
@@ -122,8 +125,8 @@ pub(super) fn cache_section(view: &OfficeConvertView) -> AnyView {
                 widget(style::eyebrow_text("Preview Cache")).key("admin-office-cache-eyebrow"),
                 widget(pad(column(0.0), 2.0, 0.0, 0.0, 0.0)).children((widget(style::label_lh(
                     CACHE_TITLE,
-                    14.0,
-                    700,
+                    TypeRole::Section,
+                    TextWeight::Bold,
                     Role::Text,
                     1.25,
                 ))
@@ -151,10 +154,11 @@ pub(super) fn clear_button(clearing: bool, disabled: bool) -> AnyView {
             "清理缓存"
         },
         None,
-        Tone::Plain,
+        ButtonKind::Ghost,
         disabled,
     ))
     .prop::<bool, ActionDisabled>(disabled)
+    .prop::<bool, fields::button::loading>(clearing)
     .key("admin-office-clear")
     .on_cx(move |_, _: &Activate, cx| {
         cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ClearOfficeCache));

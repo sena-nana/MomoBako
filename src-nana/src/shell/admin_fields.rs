@@ -1,7 +1,7 @@
 //! 插件设置表单。
 //!
-//! 每个字段一行三列网格，
-//! 左边粗体字段名和弱色说明，中间控件，右边「重置」。布尔字段是 NanaUI 的开关；选项字段是下拉框，
+//! 每个字段是一行 NanaUI 设置行（检查器排法）：
+//! 左列字段名和说明，控件从列边起头，行尾「重置」。布尔字段是 NanaUI 的开关；选项字段是下拉框，
 //! 第一项是空值；JSON 字段是等宽文本域，失焦提交；其余是单行输入，回车或失焦提交。
 //!
 //! 字段行按「字段键 + 控件类型」做键，只在展开设置的那张插件卡片里建一次；开关、选项、禁用和
@@ -11,18 +11,18 @@
 use std::sync::Arc;
 
 use nana_ui::runtime::view::{
-    AnyView, IntoView, Item, Store, StoreList, StorePath, fields, widget,
+    AnyView, IntoView, Item, Store, StoreList, StorePath, fields, settings_row, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, FocusWithinChanged, LengthSpec, Select, SelectChanged, SelectOption,
-    Stack, Switch, TextArea, TextChanged, TextInput, TextSubmitted, ToggleChanged,
+    Activate, FocusWithinChanged, LengthSpec, Select, SelectChanged, SelectOption, Switch,
+    TextArea, TextChanged, TextInput, TextSubmitted, ToggleChanged,
 };
-use nana_ui_core::{GridTrack, SemanticColorRole as Role, SwitchControlPosition};
+use nana_ui_core::{ButtonKind, SwitchControlPosition};
 use serde_json::Value;
 
 use super::admin::AdminMessage;
-use super::admin::bind::{ActionDisabled, row_draft, row_flag, row_text};
-use super::admin::style::{self, Tone, action, label};
+use super::admin::bind::{ActionDisabled, row_draft, row_flag};
+use super::admin::style::{self, action};
 use super::admin::support::{self, ConfigField};
 use super::{ShellMessage, ShellViewModel};
 use crate::backend::services::repository::PluginManifest;
@@ -130,7 +130,11 @@ pub(super) fn fields_form(plugin_id: &str, fields: Store<Vec<FieldRowView>>) -> 
         .into_any()
 }
 
-/// 一行字段。布尔字段的控件列不拉伸，其余字段中间列占满。行的身份建行时就定了。
+/// 字段名列宽：几行的控件在同一条竖线上起头。
+const LABEL_COLUMN: f32 = 220.0;
+
+/// 一行字段：NanaUI 设置行的检查器排法，左列是字段名和说明，控件从列边起头，「重置」在行尾。
+/// 布尔字段的开关按自身宽度放，其余控件占满。行的身份建行时就定了。
 fn field_row(item: FieldItem) -> AnyView {
     let row = item.get_untracked();
     let fkey = format!(
@@ -138,58 +142,8 @@ fn field_row(item: FieldItem) -> AnyView {
         style::key_part(&row.plugin_id),
         style::key_part(&row.field_key)
     );
-    // 不用 `style::capped`：中间列有 180 的下限，第一列权重过大时同一轮会把中间列冻在下限。
-    // 两列等权重，宽度够时第一列先停在 220，余下都给中间列。
-    let columns = if row.kind == FieldKind::Boolean {
-        vec![
-            GridTrack::MinMax {
-                min_px: 140.0,
-                fr: 1.0,
-                max_px: Some(220.0),
-            },
-            GridTrack::Auto,
-            GridTrack::Auto,
-        ]
-    } else {
-        vec![
-            GridTrack::MinMax {
-                min_px: 140.0,
-                fr: 1.0,
-                max_px: Some(220.0),
-            },
-            GridTrack::MinMax {
-                min_px: 180.0,
-                fr: 1.0,
-                max_px: None,
-            },
-            GridTrack::Auto,
-        ]
-    };
-    let grid =
-        Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(move |layout| {
-            layout.display = Some(nana_ui_core::DisplaySpec::Grid);
-            layout.grid.columns = Some(columns);
-            layout.gap = Some(LengthSpec::Px(10.0));
-            layout.width = Some(LengthSpec::Fill);
-            layout.align_items = AlignSpec::Center;
-        });
-    let caption = nana_ui::runtime::view::node_ref();
-    let name = widget(Stack::column(0.0).min_width(LengthSpec::Px(0.0))).children((
-        style::bound(
-            label(String::new(), 13.0, 600, Role::Text),
-            row_text(item, |row| &row.label),
-        )
-        .node_ref(caption)
-        .key(format!("admin-field-label-{fkey}")),
-        widget(style::pad(style::column(0.0), 3.0, 0.0, 0.0, 0.0))
-            .visible(row_flag(item, |row| !row.description.is_empty()))
-            .children((style::bound(
-                style::wrapping(style::label_lh(String::new(), 12.0, 400, Role::Muted, 1.4)),
-                row_text(item, |row| &row.description),
-            ),)),
-    ));
     let (reset_id, reset_key) = (row.plugin_id.clone(), row.field_key.clone());
-    let reset = widget(action("重置", None, Tone::Plain, false))
+    let reset = widget(action("重置", None, ButtonKind::Ghost, false))
         .prop::<bool, ActionDisabled>(row_flag(item, |row| row.disabled))
         .key(format!("admin-field-reset-{fkey}"))
         .on_cx(move |_, _: &Activate, cx| {
@@ -197,21 +151,26 @@ fn field_row(item: FieldItem) -> AnyView {
                 plugin_id: reset_id.clone(),
                 key: reset_key.clone(),
             }));
+        });
+    settings_row(move || {
+        item.try_with(|row| Arc::from(row.label.as_str()))
+            .unwrap_or_else(|| Arc::from(""))
+    })
+    .hint(move || {
+        item.try_with(|row| {
+            (!row.description.is_empty()).then(|| Arc::from(row.description.as_str()))
         })
-        .into_any();
-    widget(grid)
-        .children((name, control(item, &row, &fkey, caption), reset))
-        .key(format!("admin-field-{fkey}"))
-        .into_any()
+        .flatten()
+    })
+    .label_column(Some(LABEL_COLUMN))
+    .control(control(item, &row, &fkey))
+    .trailing(reset)
+    .key(format!("admin-field-{fkey}"))
+    .into_any()
 }
 
-/// 字段的控件。开关、下拉框和文本域没有自己的名字，用左边的字段名当读屏名称。
-fn control(
-    item: FieldItem,
-    row: &FieldRowView,
-    fkey: &str,
-    caption: nana_ui::runtime::view::NodeRef,
-) -> AnyView {
+/// 字段的控件。开关、下拉框和文本域没有自己的名字，设置行把字段名当它们的读屏名称。
+fn control(item: FieldItem, row: &FieldRowView, fkey: &str) -> AnyView {
     let id = row.plugin_id.clone();
     let key = row.field_key.clone();
     match row.kind {
@@ -222,7 +181,6 @@ fn control(
             widget(switch)
                 .checked(row_flag(item, |row| row.checked))
                 .disabled(row_flag(item, |row| row.disabled))
-                .labelled_by(caption)
                 .key(format!("admin-field-bool-{fkey}"))
                 .on_cx(move |_, event: &ToggleChanged, cx| {
                     cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ConfigInput {
@@ -253,7 +211,6 @@ fn control(
                     item.try_with(|row| Arc::from(row.selected.as_str()))
                 })
                 .prop::<bool, fields::select::disabled>(row_flag(item, |row| row.disabled))
-                .labelled_by(caption)
                 .key(format!("admin-field-select-{fkey}"))
                 .on_cx(move |_, event: &SelectChanged, cx| {
                     cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ConfigInput {
@@ -292,7 +249,6 @@ fn control(
                     )
                 })
                 .prop::<bool, fields::text_area::disabled>(row_flag(item, |row| row.disabled))
-                .labelled_by(caption)
                 .key(format!("admin-field-json-{fkey}"))
                 .on_cx(move |_, event: &TextChanged, cx| {
                     cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::JsonDraft {

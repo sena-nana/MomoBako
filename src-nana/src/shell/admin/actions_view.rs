@@ -7,16 +7,16 @@
 //! 面板只建一次，只读 [`ActionsSignals`]：动作行按动作 id 做键，选中态和文字是绑定；详情的文字、
 //! 执行按钮的图标和禁用是绑定，步骤列表内容变了整块换。执行按钮点下去时现读选中的动作。
 
-use nana_ui::runtime::view::{AnyView, IntoView, Signal, dynamic, each, signal, widget};
+use nana_ui::runtime::view::{AnyView, IntoView, Signal, dynamic, each, fields, signal, widget};
 use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, List, ListItem, Stack};
-use nana_ui_core::{RadiusTier, SemanticColorRole as Role};
+use nana_ui_core::{ButtonKind, RadiusTier, SemanticColorRole as Role, TextWeight, TypeRole};
 
 use super::super::{ShellMessage, ShellViewModel};
 use super::AdminMessage;
-use super::bind::{ActionDisabled, ButtonIcon};
+use super::bind::ActionDisabled;
 use super::icons;
 use super::marks;
-use super::style::{self, Tone, action, column, label, pad, wrapping};
+use super::style::{self, action, column, label, pad, wrapping};
 use super::support::{action_can_run, action_status_label};
 
 /// 面板主体显示哪一块。
@@ -185,8 +185,14 @@ pub(crate) fn actions_panel(signals: ActionsSignals) -> AnyView {
         .children((
             widget(column(0.0)).children((
                 widget(style::eyebrow_text("动作")).key("admin-actions-eyebrow"),
-                widget(style::label_lh("仓库动作", 18.0, 700, Role::Text, 1.25))
-                    .key("admin-actions-title"),
+                widget(style::label_lh(
+                    "仓库动作",
+                    TypeRole::Title,
+                    TextWeight::Bold,
+                    Role::Text,
+                    1.25,
+                ))
+                .key("admin-actions-title"),
             )),
             marks::bound_tag(count, "admin-actions-count"),
         ))
@@ -259,8 +265,18 @@ fn action_row(item: ActionRow, detail: Signal<Option<ActionDetail>>) -> AnyView 
             .min_width(LengthSpec::Px(0.0)),
     )
     .children((
-        widget(label(item.name.clone(), 13.0, 600, Role::Text)),
-        widget(wrapping(label(item.meta.clone(), 12.0, 400, Role::Muted))),
+        widget(label(
+            item.name.clone(),
+            TypeRole::Body,
+            TextWeight::Semibold,
+            Role::Text,
+        )),
+        widget(wrapping(label(
+            item.meta.clone(),
+            TypeRole::Meta,
+            TextWeight::Regular,
+            Role::Muted,
+        ))),
     ));
     let row = widget(ListItem::new(item.name.clone()).auto_height(true))
         .selected(move || {
@@ -297,31 +313,41 @@ fn action_detail(detail: Signal<Option<ActionDetail>>) -> AnyView {
     let head = widget(style::spread(12.0, AlignSpec::Center)).children((
         widget(column(4.0)).children((
             style::bound(
-                style::label_lh(String::new(), 18.0, 700, Role::Text, 1.25),
+                style::label_lh(
+                    String::new(),
+                    TypeRole::Title,
+                    TextWeight::Bold,
+                    Role::Text,
+                    1.25,
+                ),
                 detail_value(detail, |detail| detail.name.clone()),
             ),
             style::bound(
-                label(String::new(), 12.0, 400, Role::Muted),
+                label(
+                    String::new(),
+                    TypeRole::Meta,
+                    TextWeight::Regular,
+                    Role::Muted,
+                ),
                 detail_value(detail, |detail| detail.status.clone()),
             )
             .key("admin-action-detail"),
         )),
-        widget(action("执行", Some(icons::PLAY), Tone::Primary, false))
-            .prop::<Option<nana_ui_core::Icon>, ButtonIcon>(move || {
-                Some(if running() {
-                    icons::LOADER_CIRCLE
-                } else {
-                    icons::PLAY
-                })
-            })
-            .prop::<bool, ActionDisabled>(detail_value(detail, |detail| !detail.can_run))
-            .key("admin-action-run")
-            .on_cx(move |_, _: &Activate, cx| {
-                // 选中的动作随点选变，点下去时现读。
-                let action_id =
-                    detail.with_untracked(|detail| detail.as_ref().map(|detail| detail.id.clone()));
-                cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::RunAction(action_id)));
-            }),
+        widget(action(
+            "执行",
+            Some(icons::PLAY),
+            ButtonKind::Primary,
+            false,
+        ))
+        .prop::<bool, fields::button::loading>(running)
+        .prop::<bool, ActionDisabled>(detail_value(detail, |detail| !detail.can_run))
+        .key("admin-action-run")
+        .on_cx(move |_, _: &Activate, cx| {
+            // 选中的动作随点选变，点下去时现读。
+            let action_id =
+                detail.with_untracked(|detail| detail.as_ref().map(|detail| detail.id.clone()));
+            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::RunAction(action_id)));
+        }),
     ));
     let unsupported = widget(pad(column(0.0), 12.0, 0.0, 0.0, 0.0))
         .visible(detail_value(detail, |detail| detail.unsupported.is_some()))
@@ -357,13 +383,31 @@ fn step_view(step: &StepView) -> AnyView {
     let mut children = vec![
         widget(column(3.0).shrink(1.0))
             .children((
-                widget(label(step.label.clone(), 13.0, 600, Role::Text)),
-                widget(label(step.meta.clone(), 12.0, 400, Role::Muted)),
+                widget(label(
+                    step.label.clone(),
+                    TypeRole::Body,
+                    TextWeight::Semibold,
+                    Role::Text,
+                )),
+                widget(label(
+                    step.meta.clone(),
+                    TypeRole::Meta,
+                    TextWeight::Regular,
+                    Role::Muted,
+                )),
             ))
             .into_any(),
     ];
     if let Some(reason) = step.reason.clone() {
-        children.push(widget(style::align_end(label(reason, 12.0, 400, Role::Danger))).into_any());
+        children.push(
+            widget(style::align_end(label(
+                reason,
+                TypeRole::Meta,
+                TextWeight::Regular,
+                Role::Danger,
+            )))
+            .into_any(),
+        );
     }
     widget(
         pad(

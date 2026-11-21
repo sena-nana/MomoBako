@@ -32,6 +32,7 @@ use nana_ui::runtime::{
     Stack, Text, TextHorizontalAlignment,
 };
 use nana_ui::{ButtonKind, Icon};
+use nana_ui_core::{TextWeight, TypeRole};
 
 use crate::backend::services::repository::PlaylistItem;
 
@@ -328,8 +329,8 @@ fn header(head: Signal<PageHead>) -> AnyView {
     let initial = head.get_untracked();
     let mut eyebrow = Text::new("播放集")
         .color(SemanticColorRole::Faint)
-        .font_size(11.0)
-        .font_weight(600)
+        .role(TypeRole::Hint)
+        .weight(TextWeight::Semibold)
         .line_height(17.05);
     Arc::make_mut(&mut eyebrow.style.layout)
         .text_ext
@@ -347,7 +348,7 @@ fn header(head: Signal<PageHead>) -> AnyView {
             Text::new(initial.name)
                 .color(SemanticColorRole::Text)
                 .font_size(22.0)
-                .font_weight(700)
+                .weight(TextWeight::Bold)
                 .line_height(34.1),
             4.0,
         ))
@@ -356,7 +357,7 @@ fn header(head: Signal<PageHead>) -> AnyView {
         widget(spaced(
             Text::new(initial.subline)
                 .color(SemanticColorRole::Muted)
-                .font_size(13.0)
+                .role(TypeRole::Body)
                 .line_height(20.15),
             8.0,
         ))
@@ -670,7 +671,7 @@ fn item_title(item: EntryItem, id: &str, title: &str, head: Signal<PageHead>) ->
 fn meta_line(label: &str, role: SemanticColorRole) -> Text {
     let mut text = Text::new(label)
         .color(role)
-        .font_size(12.0)
+        .role(TypeRole::Meta)
         .line_height(18.6)
         .truncating();
     let layout = Arc::make_mut(&mut text.style.layout);

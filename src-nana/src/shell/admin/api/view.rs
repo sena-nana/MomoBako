@@ -13,17 +13,20 @@ use nana_ui::runtime::view::{
     AnyView, El, IntoView, NodeRef, Signal, fields, node_ref, signal, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, Checkbox, JustifySpec, LengthSpec, Select, SelectChanged, SelectOption,
-    Stack, TextArea, TextChanged, TextInput, ToggleChanged,
+    Activate, AlignSpec, Checkbox, FormField, JustifySpec, LengthSpec, Select, SelectChanged,
+    SelectOption, Stack, TextArea, TextChanged, TextInput, ToggleChanged,
 };
-use nana_ui_core::{GridTrack, RadiusTier, SemanticColorMix, SemanticColorRole as Role};
+use nana_ui_core::{
+    ButtonKind, GridTrack, RadiusTier, SemanticColorMix, SemanticColorRole as Role, TextWeight,
+    ThemeToken, TypeRole,
+};
 
 use super::super::super::hot::ModelField;
 use super::super::super::{ShellMessage, ShellViewModel};
 use super::super::AdminMessage;
 use super::super::bind::{ActionDisabled, ReadOnly};
 use super::super::marks;
-use super::super::style::{self, Tone, action, column, label, mono, pad, row, wrapping};
+use super::super::style::{self, action, column, label, mono, pad, row, wrapping};
 use super::{
     ApiMessage, can_send, endpoints, request_summary, selected_ref, target_text, token_preview,
     visible,
@@ -252,19 +255,24 @@ fn header(signals: PlaygroundSignals) -> AnyView {
         widget(pad(column(0.0), 4.0, 0.0, 0.0, 0.0)).children((widget(style::label_lh(
             "后端 API 调试",
             22.0,
-            700,
+            TextWeight::Bold,
             Role::Text,
             1.25,
         ))
         .key("admin-api-title"),)),
         widget(pad(column(0.0), 8.0, 0.0, 0.0, 0.0)).children((style::bound(
-            wrapping(mono(String::new(), 12.0, 400, Role::Muted)),
+            wrapping(mono(
+                String::new(),
+                TypeRole::Meta,
+                TextWeight::Regular,
+                Role::Muted,
+            )),
             move || head.with(|head| head.summary.clone()),
         )
         .key("admin-api-summary"),)),
     ));
     let actions = widget(row(12.0).wrap(true).align(AlignSpec::Start)).children((
-        widget(action("刷新契约", None, Tone::Plain, false))
+        widget(action("刷新契约", None, ButtonKind::Ghost, false))
             .prop::<bool, ActionDisabled>(move || head.with(|head| head.loading))
             .key("admin-api-refresh")
             .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(api(ApiMessage::Refresh))),
@@ -275,9 +283,9 @@ fn header(signals: PlaygroundSignals) -> AnyView {
         .into_any()
 }
 
-/// 发送按钮：发送中改文案，不能发送时禁用。
+/// 发送按钮：发送中改文案并转圈，不能发送时禁用。
 fn send_button(text: &'static str, head: Signal<PlaygroundHead>) -> El<nana_ui::runtime::Button> {
-    widget(action(text, None, Tone::Primary, false))
+    widget(action(text, None, ButtonKind::Primary, false))
         .prop::<String, fields::button::label>(move || {
             if head.with(|head| head.sending) {
                 "发送中"
@@ -287,6 +295,7 @@ fn send_button(text: &'static str, head: Signal<PlaygroundHead>) -> El<nana_ui::
             .to_string()
         })
         .prop::<bool, ActionDisabled>(move || head.with(|head| !head.can_send))
+        .prop::<bool, fields::button::loading>(move || head.with(|head| head.sending))
         .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(api(ApiMessage::Send)))
 }
 
@@ -305,10 +314,21 @@ fn meta(head: Signal<PlaygroundHead>) -> AnyView {
                     }),
             )
             .children((
-                widget(label(name, 12.0, 400, Role::Muted)),
-                style::bound(mono(String::new(), 12.0, 600, Role::Text), move || {
-                    head.with(|head| head.meta[index].clone())
-                })
+                widget(label(
+                    name,
+                    TypeRole::Meta,
+                    TextWeight::Regular,
+                    Role::Muted,
+                )),
+                style::bound(
+                    mono(
+                        String::new(),
+                        TypeRole::Meta,
+                        TextWeight::Semibold,
+                        Role::Text,
+                    ),
+                    move || head.with(|head| head.meta[index].clone()),
+                )
                 .key(format!("admin-api-meta-{index}")),
             ))
             .into_any()
@@ -355,14 +375,14 @@ fn frame(gap: f32) -> Stack {
         })
 }
 
-/// 字段：12/700 弱色标题在上，控件在下，间距 6。键随标题，输入框的键路径不随兄弟节点变化。
-/// 标题记进 `caption`，没有自己名字的下拉框用它当读屏名称。
+/// 字段：NanaUI 的 `FormField`，标签在上、控件在下。键随标题，输入框的键路径不随兄弟节点变化。
+/// 字段节点记进 `caption`，没有自己名字的下拉框用字段标签当读屏名称。
 fn field(title: &str, caption: NodeRef, control: AnyView) -> AnyView {
-    widget(column(6.0).min_width(LengthSpec::Px(0.0)))
-        .children((
-            widget(label(title, 12.0, 700, Role::Muted)).node_ref(caption),
-            control,
-        ))
+    let mut field = FormField::new(title);
+    Arc::make_mut(&mut field.style.layout).min_width = Some(LengthSpec::Px(0.0));
+    widget(field)
+        .node_ref(caption)
+        .control(control)
         .key(format!("admin-api-field-{title}"))
         .into_any()
 }
@@ -528,7 +548,13 @@ fn request_column(signals: PlaygroundSignals) -> AnyView {
         "admin-api-endpoint-row",
     );
     let summary = style::bound(
-        wrapping(style::label_lh(String::new(), 12.0, 400, Role::Muted, 1.5)),
+        wrapping(style::label_lh(
+            String::new(),
+            TypeRole::Meta,
+            TextWeight::Regular,
+            Role::Muted,
+            1.5,
+        )),
         move || request.with(|request| request.summary.clone()),
     )
     .visible(move || request.with(|request| !request.summary.is_empty()))
@@ -561,25 +587,24 @@ fn request_column(signals: PlaygroundSignals) -> AnyView {
             })
             .into_any(),
     );
-    // 勾选框 16 见方。勾选框没有自己的文字，用旁边那段说明当读屏名称。
-    let auth_caption = node_ref();
-    let checkbox = style::native_checkbox(Checkbox::new("", initial.include_auth), 16.0);
-    let auth = widget(row(8.0))
+    // 勾选框带自己的标签，标签就是读屏名称；字号、字重和弱色跟别的字段标题一致。
+    let mut checkbox = Checkbox::new("Authorization: Bearer token", initial.include_auth);
+    checkbox.style.control_height = None;
+    checkbox.style.foreground = Some(Role::Muted);
+    {
+        let layout = Arc::make_mut(&mut checkbox.style.layout);
+        layout.theme.font_size = Some(ThemeToken::Type(TypeRole::Meta).into());
+        layout.theme.font_weight = Some(ThemeToken::Weight(TextWeight::Bold).into());
+    }
+    let auth = widget(checkbox)
         .visible(is_http)
-        .children((
-            widget(checkbox)
-                .prop::<bool, fields::checkbox::checked>(move || {
-                    request.with(|request| request.include_auth)
-                })
-                .labelled_by(auth_caption)
-                .key("admin-api-auth")
-                .on_cx(|_, event: &ToggleChanged, cx| {
-                    cx.dispatch_program_all(api(ApiMessage::SetAuth(event.checked)))
-                }),
-            widget(label("Authorization: Bearer token", 12.0, 700, Role::Muted))
-                .node_ref(auth_caption),
-        ))
-        .key("admin-api-auth-row")
+        .prop::<bool, fields::checkbox::checked>(move || {
+            request.with(|request| request.include_auth)
+        })
+        .key("admin-api-auth")
+        .on_cx(|_, event: &ToggleChanged, cx| {
+            cx.dispatch_program_all(api(ApiMessage::SetAuth(event.checked)))
+        })
         .into_any();
     let http_read = move || request.with(|request| request.http_read);
     let body_value = signals.body.signal();
@@ -588,25 +613,29 @@ fn request_column(signals: PlaygroundSignals) -> AnyView {
         .placeholder("{ }")
         .disabled(initial.http_read);
     area.style = code_area_style(260.0);
-    let request_body = widget(
-        column(6.0)
-            .grow(1.0)
-            .with_layout(|layout| layout.min_height = Some(LengthSpec::Px(0.0))),
-    )
-    .children((
-        widget(label("Request JSON", 12.0, 700, Role::Muted)).node_ref(body_caption),
-        widget(area)
-            .model(body_value)
-            .prop::<bool, fields::text_area::disabled>(http_read)
-            .foreground(move || Some(if http_read() { Role::Muted } else { Role::Text }))
-            .labelled_by(body_caption)
-            .key("admin-api-request")
-            .on_cx(|_, event: &TextChanged, cx| {
-                cx.dispatch_program_all(api(ApiMessage::SetRequestText(event.value.to_string())))
-            }),
-    ))
-    .key("admin-api-request-field")
-    .into_any();
+    let mut body_field = FormField::new("Request JSON");
+    {
+        let layout = Arc::make_mut(&mut body_field.style.layout);
+        layout.flex_grow = Some(1.0);
+        layout.min_height = Some(LengthSpec::Px(0.0));
+    }
+    let request_body = widget(body_field)
+        .node_ref(body_caption)
+        .control(
+            widget(area)
+                .model(body_value)
+                .prop::<bool, fields::text_area::disabled>(http_read)
+                .foreground(move || Some(if http_read() { Role::Muted } else { Role::Text }))
+                .labelled_by(body_caption)
+                .key("admin-api-request")
+                .on_cx(|_, event: &TextChanged, cx| {
+                    cx.dispatch_program_all(api(ApiMessage::SetRequestText(
+                        event.value.to_string(),
+                    )))
+                }),
+        )
+        .key("admin-api-request-field")
+        .into_any();
     let head = signals.head;
     let actions = widget(
         row(12.0)
@@ -615,7 +644,7 @@ fn request_column(signals: PlaygroundSignals) -> AnyView {
             .justify(JustifySpec::End),
     )
     .children((
-        widget(action("复制请求", None, Tone::Plain, false))
+        widget(action("复制请求", None, ButtonKind::Ghost, false))
             .prop::<bool, ActionDisabled>(move || request.with(|request| !request.has_endpoint))
             .key("admin-api-copy")
             .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(api(ApiMessage::Copy))),
@@ -657,15 +686,27 @@ fn code_area_style(min_height: f32) -> nana_ui::runtime::NodeStyle {
 fn response_column(response: Signal<PlaygroundResponse>) -> AnyView {
     let head = widget(style::spread(12.0, AlignSpec::Center)).children((
         widget(row(8.0)).children((
-            widget(label("Response", 12.0, 700, Role::Muted)),
-            style::bound(mono(String::new(), 13.0, 700, Role::Text), move || {
-                response.with(|response| response.status.clone())
-            })
+            widget(label(
+                "Response",
+                TypeRole::Meta,
+                TextWeight::Bold,
+                Role::Muted,
+            )),
+            style::bound(
+                mono(String::new(), TypeRole::Body, TextWeight::Bold, Role::Text),
+                move || response.with(|response| response.status.clone()),
+            )
             .key("admin-api-status"),
         )),
-        style::bound(label(String::new(), 12.0, 400, Role::Muted), move || {
-            response.with(|response| response.duration.clone().unwrap_or_default())
-        })
+        style::bound(
+            label(
+                String::new(),
+                TypeRole::Meta,
+                TextWeight::Regular,
+                Role::Muted,
+            ),
+            move || response.with(|response| response.duration.clone().unwrap_or_default()),
+        )
         .visible(move || response.with(|response| response.duration.is_some()))
         .key("admin-api-duration"),
     ));
@@ -699,18 +740,21 @@ fn response_column(response: Signal<PlaygroundResponse>) -> AnyView {
             let layout = Arc::make_mut(&mut area.style.layout);
             layout.height = Some(LengthSpec::Fill);
         }
-        widget(column(6.0).with_layout(|layout| {
+        let mut field = FormField::new(title);
+        {
+            let layout = Arc::make_mut(&mut field.style.layout);
             layout.min_height = Some(LengthSpec::Px(0.0));
             layout.height = Some(LengthSpec::Fill);
-        }))
-        .children((
-            widget(label(title, 12.0, 700, Role::Muted)).node_ref(caption),
-            widget(area)
-                .prop::<String, fields::text_area::value>(move || response.with(pick))
-                .labelled_by(caption)
-                .key(key),
-        ))
-        .into_any()
+        }
+        widget(field)
+            .node_ref(caption)
+            .control(
+                widget(area)
+                    .prop::<String, fields::text_area::value>(move || response.with(pick))
+                    .labelled_by(caption)
+                    .key(key),
+            )
+            .into_any()
     };
     widget(frame(12.0).with_layout(|layout| layout.overflow_y = nana_ui_core::OverflowSpec::Hidden))
         .children((

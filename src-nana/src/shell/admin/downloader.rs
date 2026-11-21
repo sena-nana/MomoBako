@@ -5,15 +5,15 @@
 //! 下载目录和下载源。还没有结果时只写空说明，不编任务数、目录或下载源。aria2 状态里的
 //! `secret` 丢掉，不进状态也不进界面。
 
-use nana_ui::runtime::view::{AnyView, IntoView, Signal, widget};
+use nana_ui::runtime::view::{AnyView, IntoView, Signal, fields, widget};
 use nana_ui::runtime::{Activate, AlignSpec, LengthSpec};
-use nana_ui_core::SemanticColorRole as Role;
+use nana_ui_core::{ButtonKind, SemanticColorRole as Role, TextWeight, TypeRole};
 use serde_json::Value;
 
 use super::super::{ShellMessage, ShellViewModel};
 use super::bind::ActionDisabled;
 use super::marks;
-use super::style::{self, Tone, action, column, pad};
+use super::style::{self, action, column, pad};
 use super::{AdminEffect, AdminMessage, PluginCallOrigin};
 
 /// 下载服务插件。只有这一张设置页挂运行状态。
@@ -230,8 +230,8 @@ fn head(loading: bool) -> AnyView {
                 widget(style::eyebrow_text("Downloader")).key("admin-downloader-eyebrow"),
                 widget(pad(column(0.0), 2.0, 0.0, 0.0, 0.0)).children((widget(style::label_lh(
                     TITLE,
-                    14.0,
-                    700,
+                    TypeRole::Section,
+                    TextWeight::Bold,
                     Role::Text,
                     1.25,
                 ))
@@ -240,10 +240,11 @@ fn head(loading: bool) -> AnyView {
             widget(action(
                 if loading { "刷新中" } else { "刷新" },
                 None,
-                Tone::Plain,
+                ButtonKind::Ghost,
                 loading,
             ))
             .prop::<bool, ActionDisabled>(loading)
+            .prop::<bool, fields::button::loading>(loading)
             .key("admin-downloader-refresh")
             .on_cx(move |_, _: &Activate, cx| {
                 cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::RefreshDownloaderStatus));

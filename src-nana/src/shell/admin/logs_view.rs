@@ -24,7 +24,9 @@ use nana_ui::runtime::{
     Activate, AlignSpec, Button, JustifySpec, LengthSpec, ScrollAxes, ScrollView, Select,
     SelectChanged, SelectOption, Stack, StatusTone, TextChanged, TextInput,
 };
-use nana_ui_core::{RadiusTier, SemanticColorMix, SemanticColorRole as Role};
+use nana_ui_core::{
+    ButtonKind, RadiusTier, SemanticColorMix, SemanticColorRole as Role, TextWeight, TypeRole,
+};
 
 use super::super::ShellMessage;
 use super::AdminMessage;
@@ -32,7 +34,7 @@ use super::bind::{ActionDisabled, ButtonIcon, FollowEnd, row_flag, row_text};
 use super::icons;
 use super::logs_state::{LogRowView, LogsSignals, LogsToolbar};
 use super::marks;
-use super::style::{self, Tone, action, column, label, mono, pad, row, wrapping};
+use super::style::{self, action, column, label, mono, pad, row, wrapping};
 use super::support;
 
 const LEVELS: [&str; 4] = ["debug", "info", "warn", "error"];
@@ -177,45 +179,54 @@ fn toolbar(signals: LogsSignals) -> AnyView {
         "admin-log-repo",
     );
     let paused = move || toolbar.with(|toolbar| toolbar.paused);
-    let pause = widget(action("暂停追踪", Some(icons::PAUSE), Tone::Plain, false))
-        .prop::<String, fields::button::label>(move || {
-            if paused() {
-                "恢复追踪"
-            } else {
-                "暂停追踪"
-            }
-            .to_string()
-        })
-        .prop::<Option<nana_ui_core::Icon>, ButtonIcon>(move || {
-            Some(if paused() { icons::PLAY } else { icons::PAUSE })
-        })
-        .key("admin-log-pause")
-        .on_cx(move |_, _: &Activate, cx| {
-            // 追踪状态随归约变，点下去时现读。
-            let paused = toolbar.with_untracked(|toolbar| toolbar.paused);
-            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SetLogPaused(!paused)));
-        })
-        .into_any();
-    let reset = widget(action("重置筛选", Some(icons::ERASER), Tone::Plain, false))
-        .prop::<bool, ActionDisabled>(move || toolbar.with(|toolbar| toolbar.no_filters))
-        .key("admin-log-reset")
-        .on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ResetLogFilters))
-        })
-        .into_any();
+    let pause = widget(action(
+        "暂停追踪",
+        Some(icons::PAUSE),
+        ButtonKind::Ghost,
+        false,
+    ))
+    .prop::<String, fields::button::label>(move || {
+        if paused() {
+            "恢复追踪"
+        } else {
+            "暂停追踪"
+        }
+        .to_string()
+    })
+    .prop::<Option<nana_ui_core::Icon>, ButtonIcon>(move || {
+        Some(if paused() { icons::PLAY } else { icons::PAUSE })
+    })
+    .key("admin-log-pause")
+    .on_cx(move |_, _: &Activate, cx| {
+        // 追踪状态随归约变，点下去时现读。
+        let paused = toolbar.with_untracked(|toolbar| toolbar.paused);
+        cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::SetLogPaused(!paused)));
+    })
+    .into_any();
+    let reset = widget(action(
+        "重置筛选",
+        Some(icons::ERASER),
+        ButtonKind::Ghost,
+        false,
+    ))
+    .prop::<bool, ActionDisabled>(move || toolbar.with(|toolbar| toolbar.no_filters))
+    .key("admin-log-reset")
+    .on_cx(|_, _: &Activate, cx| {
+        cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::ResetLogFilters))
+    })
+    .into_any();
     let clearing = move || toolbar.with(|toolbar| toolbar.clearing);
-    let clear = widget(action("清空日志", Some(icons::TRASH2), Tone::Plain, false))
-        .prop::<bool, ActionDisabled>(move || toolbar.with(|toolbar| toolbar.clear_disabled))
-        .prop::<Option<nana_ui_core::Icon>, ButtonIcon>(move || {
-            Some(if clearing() {
-                icons::LOADER_CIRCLE
-            } else {
-                icons::TRASH2
-            })
-        })
-        .key("clear-logs")
-        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::ClearLogs))
-        .into_any();
+    let clear = widget(action(
+        "清空日志",
+        Some(icons::TRASH2),
+        ButtonKind::Ghost,
+        false,
+    ))
+    .prop::<bool, ActionDisabled>(move || toolbar.with(|toolbar| toolbar.clear_disabled))
+    .prop::<bool, fields::button::loading>(clearing)
+    .key("clear-logs")
+    .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::ClearLogs))
+    .into_any();
     widget(
         Stack::fill_row(10.0)
             .wrap(true)
@@ -284,7 +295,7 @@ fn select_field(
     let caption = node_ref();
     widget(frame)
         .children((
-            widget(label(title, 12.0, 700, Role::Muted)).node_ref(caption),
+            widget(label(title, TypeRole::Meta, TextWeight::Bold, Role::Muted)).node_ref(caption),
             widget(select)
                 .prop::<Vec<SelectOption>, fields::select::options>(move || {
                     toolbar.with(|toolbar| options(pick(toolbar).0))
@@ -345,7 +356,12 @@ fn filter_group(title: &str, chips: Vec<AnyView>) -> AnyView {
                 0.0,
                 0.0,
             ))
-            .children((widget(label(title, 12.0, 700, Role::Muted)),)),
+            .children((widget(label(
+                title,
+                TypeRole::Meta,
+                TextWeight::Bold,
+                Role::Muted,
+            )),)),
             widget(
                 Stack::row(8.0)
                     .wrap(true)
@@ -398,7 +414,12 @@ fn log_item(item: LogItem) -> AnyView {
         .children((
             widget(row(8.0).wrap(true).shrink(1.0)).children(badges),
             style::bound(
-                mono(String::new(), 12.0, 400, Role::Faint),
+                mono(
+                    String::new(),
+                    TypeRole::Meta,
+                    TextWeight::Regular,
+                    Role::Faint,
+                ),
                 row_text(item, |row| &row.time),
             )
             .key(format!("admin-log-time-{key}")),
@@ -414,12 +435,23 @@ fn log_item(item: LogItem) -> AnyView {
         .children((
             widget(column(6.0)).children((
                 style::bound(
-                    label(String::new(), 14.0, 700, Role::Text),
+                    label(
+                        String::new(),
+                        TypeRole::Section,
+                        TextWeight::Bold,
+                        Role::Text,
+                    ),
                     row_text(item, |row| &row.action),
                 )
                 .key(format!("admin-log-action-{key}")),
                 style::bound(
-                    wrapping(style::label_lh(String::new(), 14.0, 400, Role::Text, 1.6)),
+                    wrapping(style::label_lh(
+                        String::new(),
+                        TypeRole::Section,
+                        TextWeight::Regular,
+                        Role::Text,
+                        1.6,
+                    )),
                     row_text(item, |row| &row.message),
                 )
                 .key(format!("admin-log-message-{key}")),
@@ -462,7 +494,12 @@ fn meta_chip(item: LogItem, pick: fn(&LogRowView) -> &String, optional: bool) ->
     widget(tag_frame())
         .visible(move || !optional || item.try_with(|row| !pick(row).is_empty()).unwrap_or(false))
         .children((style::bound(
-            mono(String::new(), 11.0, 400, Role::Muted),
+            mono(
+                String::new(),
+                TypeRole::Hint,
+                TextWeight::Regular,
+                Role::Muted,
+            ),
             row_text(item, pick),
         ),))
         .into_any()
@@ -485,7 +522,13 @@ fn context_block(item: LogItem, id: &str) -> AnyView {
     )
     .visible(row_flag(item, |row| row.context_open))
     .children((style::bound(
-        wrapping(style::mono_lh(String::new(), 12.0, 400, Role::Text, 1.6)),
+        wrapping(style::mono_lh(
+            String::new(),
+            TypeRole::Meta,
+            TextWeight::Regular,
+            Role::Text,
+            1.6,
+        )),
         row_text(item, |row| &row.context),
     ),));
     widget(style::top_rule(pad(column(10.0), 10.0, 0.0, 0.0, 0.0)))
@@ -502,9 +545,9 @@ fn summary_style() -> nana_ui::runtime::NodeStyle {
         text_vertical_alignment: nana_ui::runtime::TextVerticalAlignment::Center,
         ..Default::default()
     };
+    node.type_role = Some(TypeRole::Meta);
+    node.type_weight = Some(TextWeight::Bold);
     let layout = Arc::make_mut(&mut node.layout);
-    layout.font_size = Some(12.0);
-    layout.font_weight = Some(700);
     layout.line_height = Some(nana_ui_core::LineHeightSpec::Relative(style::LINE));
     layout.width = Some(LengthSpec::Shrink);
     node
