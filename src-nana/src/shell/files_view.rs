@@ -166,7 +166,6 @@ pub(super) fn file_column(
             preview,
             metadata,
             slots.preview_bar,
-            hot.sweep,
         ),))
         .key("file-preview-page");
     widget(fill())

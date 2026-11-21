@@ -222,10 +222,9 @@ pub(super) fn preview_page(
     signals: PreviewSignals,
     metadata: MetadataSignals,
     bar: NodeRef,
-    sweep: Signal<f32>,
 ) -> AnyView {
     let main = dynamic(signals.main, move |key: &MainKey| {
-        main(key, signals, metadata, sweep)
+        main(key, signals, metadata)
     })
     .css(fill_container());
     widget(Stack::column(0.0).style(page_style()))
@@ -408,12 +407,7 @@ fn title_lines(head: Signal<HeadView>) -> (AnyView, AnyView, AnyView, AnyView) {
 
 /// 正文：左边预览框、色板和资源库面板，右边文件事实卡。单列时事实卡跟在下面，正文整体滚动。
 /// 不在预览时没有正文。
-fn main(
-    key: &MainKey,
-    signals: PreviewSignals,
-    metadata: MetadataSignals,
-    sweep: Signal<f32>,
-) -> AnyView {
+fn main(key: &MainKey, signals: PreviewSignals, metadata: MetadataSignals) -> AnyView {
     if !key.previewing {
         return ().into_any();
     }
@@ -434,7 +428,7 @@ fn main(
         });
     let content = widget(frame)
         .children((
-            preview_shell(signals, stacked, sweep),
+            preview_shell(signals, stacked),
             stats(signals, metadata, stacked, &key.scope),
         ))
         .key("inspect-preview-body")
@@ -455,7 +449,7 @@ fn main(
 }
 
 /// 预览框（铺满）、色板槽（至少 14px）和资源库扩展的预览面板，行距 10。
-fn preview_shell(signals: PreviewSignals, stacked: bool, sweep: Signal<f32>) -> AnyView {
+fn preview_shell(signals: PreviewSignals, stacked: bool) -> AnyView {
     let panels = signals.panels;
     let frame = if stacked {
         Stack::column(10.0).min_height(LengthSpec::Px(360.0))
@@ -472,7 +466,7 @@ fn preview_shell(signals: PreviewSignals, stacked: bool, sweep: Signal<f32>) -> 
             .min_height(LengthSpec::Px(0.0)),
     )
     .children((
-        preview_box(signals.content, sweep),
+        preview_box(signals.content),
         dynamic(signals.palette, |colors: &Vec<String>| palette_slot(colors)),
         dynamic(panels, |panels: &Option<AsmrPanels>| {
             panels
@@ -486,10 +480,10 @@ fn preview_shell(signals: PreviewSignals, stacked: bool, sweep: Signal<f32>) -> 
 }
 
 /// 预览框：bg 底、12px 圆角。插件预览在顶部多一圈 accent-soft 径向光晕。框常驻，里面的内容按身份换。
-fn preview_box(content: Signal<PreviewSnapshot>, sweep: Signal<f32>) -> AnyView {
+fn preview_box(content: Signal<PreviewSnapshot>) -> AnyView {
     let plugin = content.with_untracked(|snapshot| snapshot.content.plugin);
     let inner = dynamic(content, move |snapshot: &PreviewSnapshot| {
-        super::preview_paint::loading_sweep_scope(sweep, || body::content_view(&snapshot.content))
+        body::content_view(&snapshot.content)
     })
     .css(fill_container());
     widget(Stack::column(0.0).style(box_style(plugin)))

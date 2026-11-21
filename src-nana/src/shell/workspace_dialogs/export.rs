@@ -7,17 +7,20 @@
 
 use std::sync::Arc;
 
-use nana_ui::icons_tabler::{ARCHIVE, DOWNLOAD, GIT_BRANCH};
-use nana_ui::runtime::view::{AnyView, FieldWrite, IntoView, Signal, fields, signal, widget};
+use nana_ui::icons_tabler::{ALERT_TRIANGLE, ARCHIVE, DOWNLOAD, GIT_BRANCH};
+use nana_ui::runtime::view::{
+    AnyView, FieldWrite, IntoView, Signal, callout, fields, signal, widget,
+};
 use nana_ui::runtime::{
-    AlignSpec, BrowseRequested, Button, Checkbox, LengthSpec, PathField, RadiusTier,
-    SemanticColorRole, Stack, TextChanged, ToggleChanged,
+    BrowseRequested, Checkbox, LengthSpec, PathField, RadiusTier, SegmentedControl,
+    SegmentedOption, SegmentedOptionChosen, SemanticColorRole, Stack, StatusTone, TextChanged,
+    ToggleChanged,
 };
 use nana_ui::{ButtonKind, DialogSize};
 use nana_ui_core::Icon;
 
 use crate::shell::files::FilesMessage;
-use crate::shell::files_view::style::{self, ButtonLook};
+use crate::shell::files_view::style;
 use crate::shell::view_part_overlay::dialog::{
     Choices, DialogFrame, action, action_button, footer, select_field, text_field, two_columns,
     wrapping_text,
@@ -250,72 +253,28 @@ fn repository_box(view: Signal<ExportView>) -> AnyView {
     .into_any()
 }
 
-/// 压缩包和 Git 两段切换：白底描边，选中段是 `--bg-active` 底。
+/// 压缩包和 Git 两段切换：NanaUI 的 `SegmentedControl`。选中段跟着投影里的导出方式，导出中两段都禁用；
+/// 选中时发 `SetExportField { target }`，控件自己不存产品状态。
 fn segmented(view: Signal<ExportView>) -> AnyView {
-    let tab = |label: &'static str, icon: Icon, value: &'static str, archive: bool| {
-        widget(style::styled_button(label, Some(icon), segment_look(false)))
+    let option = |label: &'static str, icon: Icon, value: &'static str, archive: bool| {
+        widget(SegmentedOption::new(label).icon(icon))
+            .selected(move || view.with(|view| view.archive == archive))
+            .disabled(move || view.with(|view| view.busy))
             .key(format!("export-target-{value}"))
-            .prop::<bool, SegmentActive>(move || view.with(|view| view.archive == archive))
-            .prop::<bool, fields::button::disabled>(move || view.with(|view| view.busy))
-            .on_cx(move |_, _: &nana_ui::runtime::Activate, cx| {
+            .on_cx(move |_, _: &SegmentedOptionChosen, cx| {
                 cx.dispatch_program_all(file_message(FilesMessage::SetExportField {
                     field: "target".into(),
                     value: value.to_string(),
                 }));
             })
     };
-    widget(
-        Stack::row(2.0)
-            .align(AlignSpec::Center)
-            .padding(2.0)
-            .height(LengthSpec::Px(34.0))
-            .surface(SemanticColorRole::Background)
-            .border(SemanticColorRole::Border, 1.0)
-            .radius(RadiusTier::Md),
-    )
-    .children((
-        tab("压缩包", ARCHIVE, "archive", true),
-        tab("Git", GIT_BRANCH, "git", false),
-    ))
-    .key("export-target")
-    .into_any()
-}
-
-/// 分段按钮的样子：高 28、左右 12、13px；选中段正文色加 `--bg-active` 底，其余次要色透明。
-fn segment_look(active: bool) -> ButtonLook {
-    ButtonLook {
-        height: 28.0,
-        padding_x: 12.0,
-        font_size: 13.0,
-        foreground: if active {
-            SemanticColorRole::Text
-        } else {
-            SemanticColorRole::Muted
-        },
-        background: active.then_some(SemanticColorRole::Active),
-        hover: Some(if active {
-            SemanticColorRole::Active
-        } else {
-            SemanticColorRole::Hover
-        }),
-        icon_size: 13.0,
-        ..ButtonLook::TOOLBAR
-    }
-}
-
-/// 分段按钮选中与否：换按钮的样式。
-struct SegmentActive;
-
-impl FieldWrite<Button, bool> for SegmentActive {
-    const FIELD: &'static str = "Button.style(segment)";
-
-    fn write(target: &mut Button, active: bool) {
-        target.style = style::styled_button("", None, segment_look(active)).style;
-    }
-
-    fn differs(target: &Button, active: &bool) -> bool {
-        target.style != style::styled_button("", None, segment_look(*active)).style
-    }
+    widget(SegmentedControl::new().label("导出方式"))
+        .children((
+            option("压缩包", ARCHIVE, "archive", true),
+            option("Git", GIT_BRANCH, "git", false),
+        ))
+        .key("export-target")
+        .into_any()
 }
 
 /// 压缩包保存位置。导出协议必须带输出路径，
@@ -400,23 +359,10 @@ fn encrypt_toggle(view: Signal<ExportView>) -> AnyView {
         .into_any()
 }
 
-/// 浅红底的错误说明（`repository-add-popover__error`），没有错误时不占位。
+/// 导出失败的说明：危险色调的 NanaUI 提示条，没有错误时文字为空，整条不占位。
 fn error_note(view: Signal<ExportView>) -> AnyView {
-    let frame = Stack::column(0.0)
-        .width(LengthSpec::Fill)
-        .padding_xy(10.0, 8.0)
-        .radius(RadiusTier::Sm);
-    let tinted = frame
-        .node_style()
-        .surface_mix(nana_ui_core::SemanticColorMix::alpha(
-            SemanticColorRole::Danger,
-            0.1,
-        ));
-    widget(frame.style(tinted))
-        .visible(move || view.with(|view| !view.error.is_empty()))
-        .children((widget(wrapping_text(12.0, 18.6, SemanticColorRole::Danger))
-            .key("export-error")
-            .prop::<String, fields::text::value>(move || view.with(|view| view.error.clone())),))
-        .key("export-error-box")
-        .into_any()
+    callout(ALERT_TRIANGLE, StatusTone::Danger, move || {
+        view.with(|view| view.error.clone())
+    })
+    .into_any()
 }

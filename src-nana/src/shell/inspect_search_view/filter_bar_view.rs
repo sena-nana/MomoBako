@@ -29,7 +29,7 @@ use super::super::inspect::{
 use super::super::inspect_shortcuts::SearchShortcut;
 use super::filter_state::{FilterBarSignals, FilterSelection};
 use super::presenter::{self, RATING_OPTIONS};
-use super::widgets::{self, CONTROL_HEIGHT, ChipActive, INPUT_WIDTH};
+use super::widgets::{self, CONTROL_HEIGHT, INPUT_WIDTH};
 
 /// 高级区一个输入：字段、稳定键、无障碍名称、占位文字和是否占两列。
 /// 键只用 ASCII，按键路径找得到。
@@ -298,8 +298,8 @@ fn toggle_chip(
 ) -> AnyView {
     let current = value.clone();
     let toggled = value.clone();
-    widget(widgets::chip(&value, false, swatch))
-        .prop::<bool, ChipActive>(move || {
+    widget(widgets::chip(&value, swatch))
+        .prop::<bool, fields::chip::selected>(move || {
             selected.with(|selected| selected_in(selected, list).contains(&current))
         })
         .key(format!("workspace-filter-{key}-{}", key_part(&value)))
@@ -410,8 +410,8 @@ fn metadata_field(input: MetadataInput, key: &'static str, draft: ModelField) ->
 /// 评分：「全部」清掉最低评分，「N 星+」设成 N。芯片固定，选中态绑在最低评分上。
 fn rating_group(min_rating: Signal<Option<f64>>) -> AnyView {
     let mut chips = vec![
-        widget(widgets::chip("全部", false, None))
-            .prop::<bool, ChipActive>(move || min_rating.with(Option::is_none))
+        widget(widgets::chip("全部", None))
+            .prop::<bool, fields::chip::selected>(move || min_rating.with(Option::is_none))
             .key("workspace-filter-rating-all")
             .on_cx(|_, _: &Activate, cx| {
                 cx.dispatch_program_all(message(InspectMessage::SetMinimumRating(None)))
@@ -421,8 +421,8 @@ fn rating_group(min_rating: Signal<Option<f64>>) -> AnyView {
     for rating in RATING_OPTIONS {
         let value = f64::from(rating);
         chips.push(
-            widget(widgets::chip(&format!("{rating} 星+"), false, None))
-                .prop::<bool, ChipActive>(move || {
+            widget(widgets::chip(&format!("{rating} 星+"), None))
+                .prop::<bool, fields::chip::selected>(move || {
                     min_rating.with(|current| *current == Some(value))
                 })
                 .key(format!("workspace-filter-rating-{rating}"))
@@ -467,7 +467,7 @@ fn shortcut_group(shortcuts: Signal<Vec<SearchShortcut>>) -> AnyView {
         let metadata = shortcut.metadata.clone();
         let sort_field = shortcut.sort_field.clone();
         let sort_direction = shortcut.sort_direction;
-        widget(widgets::chip(&shortcut.label, false, None))
+        widget(widgets::chip(&shortcut.label, None))
             .key(format!(
                 "workspace-filter-shortcut-{}-{}",
                 key_part(&shortcut.plugin_id),

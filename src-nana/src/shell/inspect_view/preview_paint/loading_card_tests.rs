@@ -1,32 +1,22 @@
-//! 音视频准备卡的落影和扫动进度。
+//! 音视频准备卡的落影和不定进度轨。
 //!
 //! 准备卡的落影是 `box-shadow: 0 12px 32px color-mix(in srgb, var(--bg) 70%, transparent)`。
-//! 色条宽 42%，`media-preview-progress-sweep 1.05s ease-in-out infinite` 把 `translateX` 从 -120% 扫到 250%。
-//! 百分比相对色条自己的宽度。时间由动效时钟给出，不依赖真窗口。
+//! 进度轨是 NanaUI 的不定进度 `Progress`，扫动由组件自己的时间线驱动。
 
 use super::LoadingCardShadow;
-use crate::frame_clock::FrameStep;
 use crate::shell::ShellViewModel;
 use crate::shell::view_harness::ShellHarness;
-use nana_ui::runtime::{LayoutBox, PaintOp, PaintRecording, PaintState, Painter};
+use nana_ui::runtime::{
+    Entity, LayoutBox, LengthSpec, PaintOp, PaintRecording, PaintState, Painter, Progress,
+};
 use nana_ui_core::{
     RadiusTier, SemanticColorMix, SemanticColorRole, StyleModelRef, ThemeAppearance,
 };
 
-const TRACK: f32 = 200.0;
-const FILL: f32 = TRACK * 0.42;
-
-/// 准备卡有落影，色条按可控时间停在扫动的起点、中点、四分之一程和循环回到起点。
+/// 准备卡有落影，下面是铺满卡宽的 6px 不定进度轨。
 #[test]
 fn loading_card_sweeps_and_drops_the_vue_shadow() {
-    let mut harness = ShellHarness::mount(scene("online-preview-preparing"));
-    assert_ne!(
-        harness.model.motion.preview_sweep_percent(),
-        0.0,
-        "准备卡在显示时扫动已经接上时钟"
-    );
-    assert!(harness.model.motion.active(), "扫动循环要帧");
-
+    let harness = ShellHarness::mount(scene("online-preview-preparing"));
     let card = node_style(&harness, "inspect-media-loading");
     assert!(card.painter.is_some(), "准备卡要自绘落影");
     assert!(
@@ -82,82 +72,25 @@ fn loading_card_sweeps_and_drops_the_vue_shadow() {
         "尺寸无效时不编阴影"
     );
 
-    let track = node_style(&harness, "inspect-media-loading-progress");
+    let track = sweep_track(&harness, "inspect-media-loading-progress");
+    assert!(track.indeterminate, "准备卡不知道要多久，进度轨是不定进度");
+    assert_eq!(track.thickness, Some(6.0));
+    assert_eq!(track.track, Some(SemanticColorRole::BorderSoft));
     assert_eq!(
-        track.layout.overflow_x,
-        nana_ui_core::OverflowSpec::Hidden,
-        "扫出轨道的部分裁掉"
+        track.style.layout.width,
+        Some(LengthSpec::Fill),
+        "准备卡的进度轨铺满卡宽"
     );
-    restart(&mut harness);
-    assert!(
-        (bar_percent(&harness) - (-120.0)).abs() < 0.05,
-        "起点是 translateX(-120%)"
-    );
-    harness.frame_with(FrameStep::millis(525));
-    assert!(
-        (bar_percent(&harness) - 65.0).abs() < 0.05,
-        "1.05 秒的一半，ease-in-out 正好在 -120 和 250 的中点"
-    );
-    harness.frame_with(FrameStep::millis(525));
-    assert!(
-        (bar_percent(&harness) - (-120.0)).abs() < 0.05,
-        "走满 1.05 秒回到起点，接着循环"
-    );
-    restart(&mut harness);
-    harness.frame_with(FrameStep::millis(262));
-    let quarter = bar_percent(&harness);
-    assert!(
-        (quarter - (-72.4)).abs() < 1.0,
-        "四分之一程应按 ease-in-out，得到 {quarter}"
-    );
-    assert!((quarter - (-27.5)).abs() > 20.0, "不该是线性插值");
 }
 
-/// 从这一刻重新开一条 1.05 秒的扫动，并把起点写进色条。
-fn restart(harness: &mut ShellHarness) {
-    harness.model.motion.set_preview_sweep(false);
-    harness.model.motion.set_preview_sweep(true);
-    harness.frame_with(FrameStep::millis(0));
-}
-
-/// 色条左缘相对自己宽度的 `translateX` 百分比。轨道宽按 200 录，和布局宽无关。
-fn bar_percent(harness: &ShellHarness) -> f32 {
-    let style = node_style(harness, "inspect-media-loading-progress");
-    let painter = style.painter.as_ref().expect("色条自绘").painter();
-    let theme = nana_ui::theme::builtin_theme_arc(nana_ui::theme::ThemeAppearance::Dark);
-    let recording =
-        PaintRecording::record(painter, theme.as_ref(), [TRACK, 6.0], PaintState::default());
-    let rect = bar_rect(&recording.behind_children);
-    assert!(
-        (rect.width - FILL).abs() < 0.05,
-        "色条宽应是轨道的 42%，得到 {}",
-        rect.width
-    );
-    assert!(
-        (rect.height - 6.0).abs() < 0.05 && rect.y.abs() < 0.05,
-        "色条应贴着轨道：{rect:?}"
-    );
-    rect.x / FILL * 100.0
-}
-
-fn bar_rect(ops: &[PaintOp]) -> LayoutBox {
-    let mut found = None;
-    let mut saw_default = false;
-    for op in ops {
-        if matches!(op, PaintOp::DrawDefault) {
-            saw_default = true;
-        }
-        if let PaintOp::RoundedRect {
-            rect,
-            fill: Some(_),
-            ..
-        } = op
-        {
-            assert!(saw_default, "色条应画在轨道底色上面");
-            assert!(found.replace(*rect).is_none(), "只画一条色条");
-        }
-    }
-    found.expect("准备卡要有扫动色条")
+/// 键上的不定进度轨组件。
+pub(super) fn sweep_track(harness: &ShellHarness, key: &str) -> Progress {
+    let id = harness.keyed(key).unwrap_or_else(|| panic!("没有 {key}"));
+    harness
+        .document()
+        .context()
+        .read(Entity::<Progress>::from_stable_id(id), Progress::clone)
+        .unwrap_or_else(|_| panic!("{key} 应该是 NanaUI 的 Progress"))
 }
 
 /// `color-mix(in srgb, var(--bg) 70%, transparent)`。

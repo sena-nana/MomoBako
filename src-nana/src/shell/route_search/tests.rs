@@ -1,7 +1,7 @@
 //! 常驻搜索路由的回归：筛选栏输入框在组合输入中不被打断、打字不重挂，无关更新一个节点都不换，
 //! 再搜一次只换变了的结果行，芯片的选中态原地改；每一步都和同一 ViewModel 新挂的文档一样。
 
-use nana_ui::runtime::StableNodeId;
+use nana_ui::runtime::{Chip, Entity, StableNodeId};
 use nana_ui_core::SemanticColorRole;
 
 use crate::shell::inspect::{FilterList, InspectMessage, SearchRow};
@@ -46,13 +46,17 @@ fn finish_search(harness: &mut ShellHarness, rows: Vec<SearchRow>) {
     harness.flush();
 }
 
-fn chip_foreground(harness: &ShellHarness, chip: StableNodeId) -> Option<SemanticColorRole> {
-    harness
-        .document()
-        .context()
+/// 筛选芯片（NanaUI 的 `Chip`）的选中态和这一刻的底色。
+fn chip_state(harness: &ShellHarness, chip: StableNodeId) -> (bool, Option<SemanticColorRole>) {
+    let context = harness.document().context();
+    let selected = context
+        .read(Entity::<Chip>::from_stable_id(chip), |chip| chip.selected)
+        .expect("筛选芯片应该是 NanaUI 的 Chip");
+    let background = context
         .world()
         .node_style(chip)
-        .and_then(|style| style.foreground)
+        .and_then(|style| style.background);
+    (selected, background)
 }
 
 /// 筛选栏颜色输入框正在组合输入：无关消息和改了筛选条件的消息都不换输入框节点、不断预编辑，
@@ -187,7 +191,7 @@ fn a_new_search_keeps_the_rows_it_still_has() {
     harness.assert_same_as_fresh_mount();
 }
 
-/// 点选格式芯片：芯片还是原来的节点，选中态的颜色原地换；「N 个条件」跟着变。
+/// 点选格式芯片：芯片还是原来的节点，选中态和底色原地换；「N 个条件」跟着变。
 #[test]
 fn toggling_a_chip_restyles_it_in_place() {
     let mut harness = ShellHarness::mount(scene("filter-bar-active"));
@@ -195,9 +199,9 @@ fn toggling_a_chip_restyles_it_in_place() {
         .keyed("workspace-filter-format-pdf")
         .expect("pdf 芯片");
     assert_eq!(
-        chip_foreground(&harness, chip),
-        Some(SemanticColorRole::Muted),
-        "没选时是次要字色"
+        chip_state(&harness, chip),
+        (false, Some(SemanticColorRole::Subtle)),
+        "没选时是浅底"
     );
     harness.apply(ShellMessage::Inspect(InspectMessage::ToggleFilter {
         key: FilterList::Formats,
@@ -210,9 +214,9 @@ fn toggling_a_chip_restyles_it_in_place() {
         "芯片被重建了"
     );
     assert_eq!(
-        chip_foreground(&harness, chip),
-        Some(SemanticColorRole::Accent),
-        "选中以后没有换成强调色"
+        chip_state(&harness, chip),
+        (true, Some(SemanticColorRole::Selected)),
+        "选中以后没有换成选中底"
     );
     assert!(harness.find("4 个条件").is_some());
     harness.assert_same_as_fresh_mount();
@@ -239,4 +243,26 @@ fn closing_and_reopening_the_filter_bar_keeps_its_nodes() {
     );
     assert!(harness.find("当前资源库筛选").is_some());
     harness.assert_same_as_fresh_mount();
+}
+
+/// 颜色芯片在左内边距里给色块留位置：同样两个字的颜色芯片比形状芯片宽出色块和间距，字不被色块盖住。
+#[test]
+fn color_chips_leave_room_for_the_swatch() {
+    let harness = ShellHarness::mount(scene("filter-bar-active"));
+    let width = |key: &str| {
+        let id = harness.keyed(key).unwrap_or_else(|| panic!("没有 {key}"));
+        harness
+            .document()
+            .context()
+            .world()
+            .layout_box(id)
+            .unwrap_or_else(|| panic!("{key} 没有布局盒"))
+            .width
+    };
+    let color = width("workspace-filter-color-红色");
+    let shape = width("workspace-filter-shape-横版");
+    assert!(
+        (color - shape - 15.0).abs() < 1.0,
+        "颜色芯片应比同字数的形状芯片宽 9px 色块加 6px 间距：{color} vs {shape}"
+    );
 }

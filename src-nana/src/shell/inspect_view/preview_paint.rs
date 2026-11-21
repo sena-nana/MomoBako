@@ -3,20 +3,17 @@
 //! 唱片纹路是写死的 #151515 / #202020 / #181818，和主题无关；其它颜色都取主题角色。
 //! 正圆后面有落影。有封面图时按 `object-fit: cover` 画进中间 58% 的圆里；没有图时仍是封面圆。
 //! 卡片上的浅光和 `0 18px 40px` 落影在 [`AudioCardFace`]，不改唱片那条 `0 22px 60px`。
-//! 音视频准备卡的 `0 12px 32px` 落影在 [`LoadingCardShadow`]，色条扫动在 [`PreviewSweep`]。
+//! 音视频准备卡的 `0 12px 32px` 落影在 [`LoadingCardShadow`]；准备卡和读取胶囊的进度轨是 NanaUI 的不定进度 `Progress`。
 
-use std::cell::Cell;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use nana_ui::runtime::LengthSpec;
-use nana_ui::runtime::view::{
-    AnyView, FieldWrite, IntoView, PropSource, Signal, StyledComponent, widget,
-};
+use nana_ui::runtime::view::{AnyView, IntoView, widget};
 
 use nana_ui::runtime::{
     BoxPaint, Gradient, ImageFit, LayoutBox, PaintColor, PaintContext, PaintPath, PaintShadow,
-    Painter, SemanticColorRole, Stack,
+    Painter, Progress, SemanticColorRole,
 };
 use nana_ui_core::SemanticColorMix;
 
@@ -378,29 +375,6 @@ const LOADING_SHADOW_Y: f32 = 12.0;
 const LOADING_SHADOW_BLUR: f32 = 32.0;
 /// `color-mix(in srgb, var(--bg) 70%, transparent)` 里背景色的比例。
 const LOADING_SHADOW_MIX: f32 = 0.7;
-/// 不确定进度色条的宽度，相对轨道，42%。
-const SWEEP_FILL: f32 = 0.42;
-/// `translateX(-120%)`，百分比相对色条自己。
-const SWEEP_FROM: f32 = -120.0;
-
-thread_local! {
-    /// 这一次准备卡投影用的扫动信号。只在 [`loading_sweep_scope`] 里有值。
-    static LOADING_SWEEP: Cell<Option<Signal<f32>>> = const { Cell::new(None) };
-}
-
-/// 建准备卡时把帧时钟的 `translateX` 交给色条。建完清掉，免得下一棵树读到过期信号。
-pub(super) fn loading_sweep_scope<R>(signal: Signal<f32>, build: impl FnOnce() -> R) -> R {
-    struct Clear;
-    impl Drop for Clear {
-        fn drop(&mut self) {
-            LOADING_SWEEP.with(|slot| slot.set(None));
-        }
-    }
-    LOADING_SWEEP.with(|slot| slot.set(Some(signal)));
-    let _clear = Clear;
-    build()
-}
-
 /// 音视频准备卡的落影。
 ///
 /// `box-shadow: 0 12px 32px color-mix(in srgb, var(--bg) 70%, transparent)`，跟着卡片的 md 圆角。
@@ -443,134 +417,32 @@ impl Painter for LoadingCardShadow {
     }
 }
 
-/// 准备卡色条。宽是轨道的 42%，`translate_percent` 是相对这段宽度的 `translateX`。
-/// 轨道溢出裁切，扫出两端的部分不画在轨道外面。
-pub(super) struct PreviewSweep {
-    translate_percent: f32,
-}
-
-impl Painter for PreviewSweep {
-    fn paint(&self, cx: &mut PaintContext<'_>) {
-        let [width, height] = cx.size();
-        if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
-            eprintln!("Nana 准备卡进度没有可画的轨道：{width} x {height}");
-            return;
-        }
-        cx.draw_default();
-        let fill = width * SWEEP_FILL;
-        let rect = LayoutBox {
-            x: fill * (self.translate_percent / 100.0),
-            y: 0.0,
-            width: fill,
-            height,
-        };
-        cx.rounded_rect(
-            rect,
-            height / 2.0,
-            BoxPaint::fill(SemanticColorRole::Accent),
-        );
-    }
-
-    fn paint_key(&self) -> u64 {
-        self.translate_percent.to_bits() as u64
-    }
-}
-
-/// 把这一帧的 `translateX` 写进色条自绘。
-struct SweepTranslateField;
-
-impl FieldWrite<Stack, f32> for SweepTranslateField {
-    const FIELD: &'static str = "Stack.style.painter(PreviewSweep)";
-
-    fn write(target: &mut Stack, percent: f32) {
-        <Stack as StyledComponent>::node_style_mut(target).painter = Some(
-            PreviewSweep {
-                translate_percent: percent,
-            }
-            .into(),
-        );
-    }
-
-    fn differs(target: &Stack, percent: &f32) -> bool {
-        <Stack as StyledComponent>::node_style(target).painter
-            != Some(
-                PreviewSweep {
-                    translate_percent: *percent,
-                }
-                .into(),
-            )
-    }
-}
-
-/// 准备卡上的 6px 进度轨。色条宽 42%，位置跟帧时钟的 `translateX`。没有信号时停在扫动起点，不当成静止的 42% 色条。
+/// 准备卡上的 6px 进度轨：NanaUI 的不定进度 `Progress`，铺满准备卡宽。
+/// 扫动是组件自己的循环时间线，减弱动态效果时换成整条淡填充。
 pub(super) fn loading_progress() -> AnyView {
-    let signal = LOADING_SWEEP.with(Cell::get);
-    let percent = signal
-        .map(|signal| signal.get_untracked())
-        .unwrap_or_else(|| {
-            eprintln!("Nana 准备卡扫动没有绑上帧时钟，进度停在动画起点");
-            SWEEP_FROM
-        });
-    let source = match signal {
-        Some(signal) => PropSource::Signal(signal),
-        None => PropSource::Const(SWEEP_FROM),
-    };
-    let track = Stack::row(0.0)
-        .height(LengthSpec::Px(6.0))
-        .min_height(LengthSpec::Px(6.0))
-        .width(LengthSpec::Fill)
-        .radius_px(999.0)
-        .grow(0.0)
-        .shrink(0.0)
-        .with_layout(|layout| {
-            layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
-            layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
-        });
-    let style = track
-        .node_style()
-        .surface_mix(SemanticColorMix::alpha(SemanticColorRole::BorderSoft, 0.58));
-    widget(track.style(style).painter(PreviewSweep {
-        translate_percent: percent,
-    }))
-    .prop::<f32, SweepTranslateField>(source)
-    .key("inspect-media-loading-progress")
-    .into_any()
+    widget(sweep_track(LengthSpec::Fill))
+        .key("inspect-media-loading-progress")
+        .into_any()
 }
 
-/// 图片读取胶囊里的进度轨。宽 132，在状态胶囊里固定宽度。
-/// 色条和准备卡同一条扫动：宽 42%，`translateX` 从 -120% 到 250%。没有时钟时停在起点并记日志。
+/// 图片读取胶囊里的进度轨：同一种不定进度，宽 132，在状态胶囊里固定宽度。
 pub(super) fn status_progress() -> AnyView {
-    let signal = LOADING_SWEEP.with(Cell::get);
-    let percent = signal
-        .map(|signal| signal.get_untracked())
-        .unwrap_or_else(|| {
-            eprintln!("Nana 图片读取进度没有绑上帧时钟，色条停在动画起点");
-            SWEEP_FROM
-        });
-    let source = match signal {
-        Some(signal) => PropSource::Signal(signal),
-        None => PropSource::Const(SWEEP_FROM),
-    };
-    let track = Stack::row(0.0)
-        .height(LengthSpec::Px(6.0))
-        .min_height(LengthSpec::Px(6.0))
-        .width(LengthSpec::Px(132.0))
-        .radius_px(999.0)
-        .grow(0.0)
-        .shrink(0.0)
-        .with_layout(|layout| {
-            layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
-            layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
-        });
-    let style = track
-        .node_style()
-        .surface_mix(SemanticColorMix::alpha(SemanticColorRole::BorderSoft, 0.58));
-    widget(track.style(style).painter(PreviewSweep {
-        translate_percent: percent,
-    }))
-    .prop::<f32, SweepTranslateField>(source)
-    .key("inspect-status-progress")
-    .into_any()
+    widget(sweep_track(LengthSpec::Px(132.0)))
+        .key("inspect-status-progress")
+        .into_any()
+}
+
+/// 不知道还要多久的 6px 进度轨，轨道是 `--border-soft`，填充走主题的指示色。
+fn sweep_track(width: LengthSpec) -> Progress {
+    let mut track = Progress::new(0.0, 1.0)
+        .indeterminate(true)
+        .thickness(6.0)
+        .track(SemanticColorRole::BorderSoft);
+    let layout = Arc::make_mut(&mut track.style.layout);
+    layout.width = Some(width);
+    layout.flex_grow = Some(0.0);
+    layout.flex_shrink = Some(0.0);
+    track
 }
 
 #[cfg(test)]

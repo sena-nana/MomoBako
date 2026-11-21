@@ -27,6 +27,13 @@ fn has(nodes: &[AccessibilityNode], label: &str) -> bool {
     !find(nodes, label).is_empty()
 }
 
+/// 空状态（NanaUI 的 `EmptyState`）：标题是名字，说明是它的值。
+fn has_empty_state(nodes: &[AccessibilityNode], title: &str, message: &str) -> bool {
+    find(nodes, title)
+        .iter()
+        .any(|node| node.value.as_ref().map(|value| value.as_str()) == Some(message))
+}
+
 fn button<'a>(nodes: &'a [AccessibilityNode], label: &str) -> &'a AccessibilityNode {
     find(nodes, label)
         .into_iter()
@@ -254,11 +261,17 @@ fn search_no_library_draws_the_vue_empty_copy() {
         "输入关键词、标签或评分条件后，这里会展示跨仓库结果。",
         "0 个仓库",
         "0 条结果",
-        "还没有可搜索的资源库",
-        "先在资源库页面添加一个仓库，再执行跨仓库搜索。",
     ] {
         assert!(has(&nodes, label), "缺少 {label}");
     }
+    assert!(
+        has_empty_state(
+            &nodes,
+            "还没有可搜索的资源库",
+            "先在资源库页面添加一个仓库，再执行跨仓库搜索。"
+        ),
+        "缺少没有资源库的空状态"
+    );
     assert!(!has(&nodes, "还没有可用资源库"), "空库拖入页不该盖住搜索");
     assert!(!has(&nodes, "没有匹配的文件"));
     assert!(!has(&nodes, "等待搜索条件"));
@@ -272,9 +285,9 @@ fn search_no_library_draws_the_vue_empty_copy() {
 #[test]
 fn empty_search_keeps_the_filter_bar_closed() {
     let nodes = nodes("search-empty");
-    assert!(has(&nodes, "没有匹配的文件"));
-    assert!(has(
+    assert!(has_empty_state(
         &nodes,
+        "没有匹配的文件",
         "全部资源库里没有符合当前条件的文件。调整关键词、标签或评分条件后再试。"
     ));
     assert!(!has(&nodes, "等待搜索条件"), "搜索已经跑完");

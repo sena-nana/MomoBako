@@ -21,12 +21,10 @@ pub(crate) const SWATCH_SIZE: f32 = 9.0;
 /// 色块外圈宽度，对应 `box-shadow: 0 0 0 1px`。
 const SWATCH_RING: f32 = 1.0;
 
-/// 颜色芯片：先画芯片自己的外观，再在左内边距里画色块。
+/// 颜色芯片：先画芯片自己的外观，再在左内边距里画色块。色块左缘是芯片的发丝边框加主题的小号控件内边距。
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct SwatchChipPainter {
     pub color: SwatchColor,
-    /// 色块左缘到芯片左缘的距离（边框加内边距）。
-    pub inset: f32,
 }
 
 impl Painter for SwatchChipPainter {
@@ -36,15 +34,16 @@ impl Painter for SwatchChipPainter {
 
     fn paint_over_children(&self, cx: &mut PaintContext<'_>) {
         let [_, height] = cx.size();
+        let inset = nana_ui_core::HAIRLINE + cx.metrics().small_control_padding_x();
         let top = ((height - SWATCH_SIZE) * 0.5).max(0.0);
         let ring = LayoutBox {
-            x: self.inset - SWATCH_RING,
+            x: inset - SWATCH_RING,
             y: top - SWATCH_RING,
             width: SWATCH_SIZE + SWATCH_RING * 2.0,
             height: SWATCH_SIZE + SWATCH_RING * 2.0,
         };
         let dot = LayoutBox {
-            x: self.inset,
+            x: inset,
             y: top,
             width: SWATCH_SIZE,
             height: SWATCH_SIZE,
@@ -75,7 +74,6 @@ impl Painter for SwatchChipPainter {
             SwatchColor::Rgb(rgb) => rgb.hash(&mut hasher),
             SwatchColor::Accent => 0u8.hash(&mut hasher),
         }
-        self.inset.to_bits().hash(&mut hasher);
         hasher.finish()
     }
 }

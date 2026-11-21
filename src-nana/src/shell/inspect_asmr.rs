@@ -18,8 +18,8 @@ use std::collections::BTreeMap;
 use nana_ui::ButtonKind;
 use nana_ui::runtime::view::{AnyView, IntoView, widget};
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, JustifySpec, LengthSpec, ListItem, ListItemRole, RadiusTier,
-    ScrollAxes, ScrollView, SemanticColorRole, Stack, Text,
+    Activate, AlignSpec, Button, EmptyState, JustifySpec, LengthSpec, ListItem, ListItemRole,
+    RadiusTier, ScrollAxes, ScrollView, SemanticColorRole, Stack, Text,
 };
 use serde_json::Value;
 
@@ -550,21 +550,11 @@ fn queue_action(label: &str, disabled: bool) -> Button {
     button.style(style)
 }
 
-/// 空队列：10px 内边距，12px 弱色。不编造条目。
+/// 空队列：紧凑的 NanaUI `EmptyState`，靠起始边对齐。不编造条目。
 fn queue_empty(label: &str, key: &str) -> AnyView {
-    let copy = Text::new(label.to_string())
-        .color(SemanticColorRole::Muted)
-        .font_size(12.0)
-        .line_height(18.6);
-    widget(
-        Stack::column(0.0)
-            .padding(10.0)
-            .width(LengthSpec::Fill)
-            .min_width(LengthSpec::Px(0.0)),
-    )
-    .children((widget(copy).key(key.to_string()),))
-    .key(format!("{key}-row"))
-    .into_any()
+    widget(EmptyState::new(label.to_string()).compact(true))
+        .key(key.to_string())
+        .into_any()
 }
 
 /// 标题在左、计数在右，底边 border-soft，两端对齐。

@@ -1,5 +1,7 @@
 //! 元数据编辑区里结构会变的两块：可折叠的标签组，以及 ASMR 条目的「补全候选」。
 //!
+//! 标签片和可加的标签都是 NanaUI 的 `Chip`。
+//!
 //! 两块都常驻：展开、菜单、导入框按 `.visible` 显隐；标签片、标签分组、已有标签和候选是带键的 `each`，
 //! 只有变了的那一片重建；输入框受控，处理器只发消息，要用到当前值时现读信号。
 
@@ -11,9 +13,9 @@ use nana_ui::runtime::view::{
     AnyView, FieldWrite, IntoView, computed, css, each, text, untrack, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, IconGlyph, JustifySpec, LengthSpec, ListItem, NodeStyle, Popover,
-    PopoverAlignment, PopoverToggled, Select, SelectChanged, SemanticColorRole, SettingsCard,
-    Stack, TextChanged, TextInput, TextSubmitted,
+    Activate, AlignSpec, Button, Chip, ChipDismissed, EmptyState, IconGlyph, JustifySpec,
+    LengthSpec, ListItem, NodeStyle, Popover, PopoverAlignment, PopoverToggled, Select,
+    SelectChanged, SemanticColorRole, SettingsCard, Stack, TextChanged, TextInput, TextSubmitted,
 };
 use nana_ui::{ButtonKind, ControlSize};
 use nana_ui_core::Icon;
@@ -137,45 +139,25 @@ fn tag_panel(signals: MetadataSignals) -> AnyView {
     .visible(move || tags.with(|view| view.expanded))
     .into_any()
 }
-/// 标签片：30 高的药丸，浅底，标签文字和一枚「×」。键带序号，重复标签也不撞键。
+/// 标签片：NanaUI 的可关闭 `Chip`，关闭钮由框架装在片尾，点它发 [`ChipDismissed`]，换成 `RemoveTag`。
+/// 不能编辑时整片禁用，关闭钮一并不发事件。键带序号，重复标签也不撞键。
 fn tag_chip(
     index: usize,
     tag: &str,
     locked: impl Fn() -> bool + Send + Clone + 'static,
 ) -> AnyView {
     let remove = tag.to_string();
-    let key = format!("inspect-tag-{index}-{}", style::key_part(tag));
-    let look = ButtonLook {
-        height: 30.0,
-        padding_x: 0.0,
-        foreground: SemanticColorRole::Muted,
-        hover: Some(SemanticColorRole::Active),
-        weight: 400,
-        ..ButtonLook::TOOLBAR
-    };
-    let mut button = style::styled_button("×", None, look).disabled(untrack(&locked));
-    Arc::make_mut(&mut button.style.layout).width = Some(LengthSpec::Px(30.0));
-    let rounded = button.style.clone().radius_px(999.0);
-    let button = widget(button.style(rounded))
-        .prop::<bool, fields::button::disabled>(locked)
-        .key(format!("{key}-remove"))
-        .on_cx(move |_, _: &Activate, cx| {
+    let chip = Chip::new(tag)
+        .dismissible(true)
+        .close_label(format!("移除标签“{tag}”"))
+        .disabled(untrack(&locked));
+    widget(chip)
+        .prop::<bool, fields::chip::disabled>(locked)
+        .key(format!("inspect-tag-{index}-{}", style::key_part(tag)))
+        .on_cx(move |_, _: &ChipDismissed, cx| {
             cx.dispatch_program_all(inspect_message(InspectMessage::RemoveTag(remove.clone())))
-        });
-    widget(
-        Stack::row(6.0)
-            .align(AlignSpec::Center)
-            .min_height(LengthSpec::Px(30.0))
-            .with_layout(|layout| layout.padding_left = Some(LengthSpec::Px(10.0)))
-            .surface(SemanticColorRole::Subtle)
-            .radius_px(999.0),
-    )
-    .children((
-        widget(style::body(tag.to_string()).nowrap(true)).key(format!("{key}-label")),
-        button,
-    ))
-    .key(key)
-    .into_any()
+        })
+        .into_any()
 }
 
 /// 标签菜单：NanaUI 的 `Popover`，触发器是标签片末尾的「+」（没有标签时写「添加标签」）。面板里是新建标签
@@ -381,32 +363,15 @@ fn tag_group(group: TagGroupOption, locked: impl Fn() -> bool + Send + Clone + '
     .into_any()
 }
 
-/// 可加的标签片：26 高的描边药丸，12px 弱化色，点一下加进草稿。键是 `{prefix}-{标签}`。
-/// 高度固定 26，不用按钮通用的 32。
+/// 可加的标签片：NanaUI 的 `Chip`，点一下加进草稿。键是 `{prefix}-{标签}`。
 fn option_chip(
     prefix: &str,
     tag: &str,
     locked: impl Fn() -> bool + Send + Clone + 'static,
 ) -> AnyView {
-    let look = ButtonLook {
-        height: 26.0,
-        padding_x: 9.0,
-        font_size: 12.0,
-        weight: 400,
-        foreground: SemanticColorRole::Muted,
-        background: Some(SemanticColorRole::Background),
-        hover: Some(SemanticColorRole::AccentSoft),
-        ..ButtonLook::TOOLBAR
-    };
-    let button = style::styled_button(tag.to_string(), None, look).disabled(untrack(&locked));
-    let outlined = button
-        .style
-        .clone()
-        .border(SemanticColorRole::Border, 1.0)
-        .radius_px(999.0);
     let add = tag.to_string();
-    widget(button.style(outlined))
-        .prop::<bool, fields::button::disabled>(locked)
+    widget(Chip::new(tag).disabled(untrack(&locked)))
+        .prop::<bool, fields::chip::disabled>(locked)
         .key(format!("{prefix}-{}", style::key_part(tag)))
         .on_cx(move |_, _: &Activate, cx| {
             cx.dispatch_program_all(inspect_message(InspectMessage::AddTag(add.clone())))
@@ -430,7 +395,7 @@ pub(super) fn candidate_section(signals: MetadataSignals) -> AnyView {
     .on_cx(|_, _: &Activate, cx| {
         cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::ToggleImport))
     });
-    let empty = text("暂无候选".to_string())
+    let empty = widget(EmptyState::new("暂无候选").compact(true))
         .visible(move || view.with(|view| view.candidates.is_empty() && !view.import_open))
         .key("inspect-asmr-candidate-empty");
     let cards = each(

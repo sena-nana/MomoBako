@@ -6,7 +6,7 @@
 //! 文件预览页常驻在文件路由里（[`preview_page`]），读 [`PreviewSignals`]。宿主按预览框这一帧画不画
 //! 纹理槽决定上不上传预览画面（[`wants_preview_texture`]）。
 
-use nana_ui::runtime::view::{AnyView, IntoView, NodeRef, Signal, widget};
+use nana_ui::runtime::view::{AnyView, IntoView, NodeRef, widget};
 use nana_ui::runtime::{LengthSpec, Stack};
 
 use super::inspect_metadata_view::MetadataSignals;
@@ -29,9 +29,8 @@ pub(super) fn preview_page(
     signals: PreviewSignals,
     metadata: MetadataSignals,
     bar: NodeRef,
-    sweep: Signal<f32>,
 ) -> AnyView {
-    surface(vec![frame::preview_page(signals, metadata, bar, sweep)])
+    surface(vec![frame::preview_page(signals, metadata, bar)])
 }
 
 /// 预览页的外框：占满剩余高度，行距 8。

@@ -17,14 +17,15 @@ use nana_ui::runtime::view::{
     AnyView, IntoView, Signal, dynamic, fields, node_ref, signal, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, DocumentId, LengthSpec, RadiusTier, ScrollAxes, ScrollMetrics, ScrollView,
-    SemanticColorRole, SizeChanged, Stack, TextHorizontalAlignment, UiWorld, UserScroll,
+    Activate, AlignSpec, Divider, DocumentId, LengthSpec, RadiusTier, ScrollAxes, ScrollMetrics,
+    ScrollView, SemanticColorRole, SizeChanged, Spinner, Stack, TextHorizontalAlignment, UiWorld,
+    UserScroll,
 };
 use nana_ui_core::Icon;
 
 use super::super::field_bind::ButtonIcon;
 use super::super::files::{FileContext, FilesMessage};
-use super::super::hot::{HotSignals, SpinField};
+use super::super::hot::HotSignals;
 use super::super::workspace::{LibraryCategory, WorkspacePanel};
 use super::super::{ShellMessage, ShellViewModel};
 use super::bind::fill_container;
@@ -244,7 +245,7 @@ pub(super) fn body(signals: ListSignals, hot: HotSignals) -> AnyView {
             label,
             error,
             spinner,
-        } => state_box(label.clone(), *error, *spinner, hot),
+        } => state_box(label.clone(), *error, *spinner),
         ListFrame::List { scroll } => list(scroll, signals, hot),
     })
     .css(fill_container())
@@ -252,7 +253,7 @@ pub(super) fn body(signals: ListSignals, hot: HotSignals) -> AnyView {
 }
 
 /// 状态框：圆角小框，白底描边；出错时是浅红底红字。左右各留 20 的边距撑满列表宽，不随文字收窄。
-fn state_box(label: String, error: bool, spinner: bool, hot: HotSignals) -> AnyView {
+fn state_box(label: String, error: bool, spinner: bool) -> AnyView {
     let (fill, border, color) = if error {
         (None, SemanticColorRole::Danger, SemanticColorRole::Danger)
     } else {
@@ -287,16 +288,10 @@ fn state_box(label: String, error: bool, spinner: bool, hot: HotSignals) -> AnyV
     }
     Arc::make_mut(&mut node_style.layout).border_width = Some(1.0);
     frame = frame.style(node_style);
+    // 读取中、处理中的转圈是 NanaUI 的 `Spinner`，旋转由框架的动画时间线驱动。文字照旧写在右边，
+    // 转圈自己的标签只作无障碍名字。
     let icon = spinner.then(|| {
-        let degrees = hot.spinner.get_untracked();
-        let mut glyph = nana_ui::runtime::IconGlyph::new(LOADER_2)
-            .size(16.0)
-            .role(color);
-        Arc::make_mut(&mut glyph.style.layout).transforms.transform =
-            Some(super::super::motion::spin_transform(degrees));
-        // 旋转角逐帧走，绑在热信号上。
-        widget(glyph)
-            .prop::<f32, SpinField>(hot.spinner)
+        widget(Spinner::new(label.clone()).size(16.0).label_visible(false))
             .key("file-state-spinner")
     });
     widget(frame)
@@ -461,17 +456,13 @@ fn section(
         .into_any()
 }
 
-/// 文件夹组和文件组之间的分隔线：1px `--border-strong`，上下各 2px。
+/// 文件夹组和文件组之间的分隔线：NanaUI 的 `Divider`，`--border-strong` 色，上下各 2px。
 fn divider() -> AnyView {
-    let line = Stack::column(0.0)
-        .width(LengthSpec::Fill)
-        .height(LengthSpec::Px(1.0))
-        .min_height(LengthSpec::Px(1.0))
-        .surface(SemanticColorRole::BorderStrong)
-        .with_layout(|layout| {
-            layout.margin_top = Some(LengthSpec::Px(2.0));
-            layout.margin_bottom = Some(LengthSpec::Px(2.0));
-        });
+    let mut line = Divider::horizontal();
+    line.style.background = Some(SemanticColorRole::BorderStrong);
+    let layout = Arc::make_mut(&mut line.style.layout);
+    layout.margin_top = Some(LengthSpec::Px(2.0));
+    layout.margin_bottom = Some(LengthSpec::Px(2.0));
     widget(line).key("file-list-divider").into_any()
 }
 

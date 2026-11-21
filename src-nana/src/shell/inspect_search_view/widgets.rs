@@ -1,18 +1,20 @@
 //! 搜索面板和筛选栏共用的小部件：文字、计数胶囊、筛选芯片、输入胶囊和工具按钮。
 //!
-//! 尺寸：
-//! 芯片、输入胶囊和计数胶囊 26px，结果芯片 28px，筛选栏按钮 28px。
+//! 筛选芯片是 NanaUI 的 `Chip`，尺寸跟着主题的小号控件。
+//! 输入胶囊和计数胶囊 26px，结果芯片 28px，筛选栏按钮 28px。
 //! 颜色只用语义角色；色块的真实颜色由 `search_paint` 自绘。
 
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::X;
-use nana_ui::runtime::view::{AnyView, El, FieldWrite, IntoProp, IntoView, fields, widget};
+use nana_ui::runtime::view::{AnyView, El, IntoProp, IntoView, fields, widget};
 use nana_ui::runtime::{
-    AlignSpec, Button, IconButton, LengthSpec, NodePainter, NodeStyle, SemanticColorRole,
-    SemanticPaint, Stack, Text, TextHorizontalAlignment, TextInput,
+    AlignSpec, Button, Chip, Divider, IconButton, LengthSpec, NodePainter, NodeStyle,
+    SemanticColorRole, SemanticPaint, Stack, Text, TextHorizontalAlignment, TextInput,
 };
-use nana_ui_core::{LineHeightSpec, RadiusTier, SemanticColorMix};
+use nana_ui_core::{
+    ControlPadding, LineHeightSpec, RadiusTier, SemanticColorMix, ThemeExpr, ThemeToken,
+};
 
 use super::paint::SwatchChipPainter;
 use super::presenter::SwatchColor;
@@ -24,8 +26,6 @@ pub(crate) const LINE_RATIO: f32 = 1.55;
 pub(crate) const CONTROL_HEIGHT: f32 = 26.0;
 /// 筛选栏「清除」「关闭」「应用」按钮的高度。
 pub(crate) const BAR_BUTTON_HEIGHT: f32 = 28.0;
-/// 芯片左右内边距。
-const CHIP_PADDING: f32 = 9.0;
 /// 色块和芯片文字之间的间距。
 const CHIP_GAP: f32 = 6.0;
 /// 输入框宽度，`minmax(86px, 120px)` 的上限。
@@ -110,94 +110,18 @@ pub(crate) fn stat(
     .key(key)
 }
 
-/// 筛选芯片：26px 胶囊，1px 边框。未选是主表面底、次要字；
-/// 选中和悬停是强调色描边、柔和强调底、强调色字。颜色芯片在左内边距里画色块。
-pub(crate) fn chip(content: &str, active: bool, swatch: Option<SwatchColor>) -> Button {
-    let button = Button::new(content);
-    let mut style = button.style.clone();
-    let inset = if swatch.is_some() {
-        CHIP_PADDING + super::paint::SWATCH_SIZE + CHIP_GAP
-    } else {
-        CHIP_PADDING
-    };
-    {
-        let layout = Arc::make_mut(&mut style.layout);
-        fixed_height(layout, CONTROL_HEIGHT);
-        layout.padding_left = Some(LengthSpec::Px(inset));
-        layout.padding_right = Some(LengthSpec::Px(CHIP_PADDING));
-        layout.border_width = Some(1.0);
-        layout.border_radius = Some(999.0);
-        layout.font_size = Some(12.0);
-        layout.font_weight = Some(500);
-        layout.line_height = Some(LineHeightSpec::Relative(LINE_RATIO));
-        layout.flex_grow = Some(0.0);
-        layout.flex_shrink = Some(0.0);
-    }
-    clear_control_metrics(&mut style);
-    let accent = SemanticPaint {
-        foreground: Some(SemanticColorRole::Accent),
-        background: Some(SemanticColorRole::AccentSoft),
-        border: Some(SemanticColorRole::Accent),
-        ..SemanticPaint::default()
-    };
-    (style.foreground, style.background, style.border) = chip_roles(active);
-    style.interaction.hovered = accent;
-    style.interaction.pressed = accent;
-    style.interaction.disabled = SemanticPaint::default();
+/// 筛选芯片：NanaUI 的 `Chip`，选中态由调用方绑 `selected`。颜色芯片在左内边距里多留色块和间距的
+/// 位置，色块由 [`SwatchChipPainter`] 画在芯片自己的外观上面。
+pub(crate) fn chip(content: &str, swatch: Option<SwatchColor>) -> Chip {
+    let mut chip = Chip::new(content);
     if let Some(color) = swatch {
-        // 色块左缘：1px 边框加 9px 内边距。
-        style.painter = Some(NodePainter::new(SwatchChipPainter {
-            color,
-            inset: 1.0 + CHIP_PADDING,
-        }));
+        chip.style.painter = Some(NodePainter::new(SwatchChipPainter { color }));
+        Arc::make_mut(&mut chip.style.layout).theme.padding_left = Some(
+            ThemeExpr::token(ThemeToken::ControlPadding(ControlPadding::Compact))
+                .offset(super::paint::SWATCH_SIZE + CHIP_GAP),
+        );
     }
-    button.style(style)
-}
-
-/// 芯片常态的字色、底色和描边：选中是强调色，未选是主表面底、次要字。
-fn chip_roles(
-    active: bool,
-) -> (
-    Option<SemanticColorRole>,
-    Option<SemanticColorRole>,
-    Option<SemanticColorRole>,
-) {
-    if active {
-        (
-            Some(SemanticColorRole::Accent),
-            Some(SemanticColorRole::AccentSoft),
-            Some(SemanticColorRole::Accent),
-        )
-    } else {
-        (
-            Some(SemanticColorRole::Muted),
-            Some(SemanticColorRole::Background),
-            Some(SemanticColorRole::Border),
-        )
-    }
-}
-
-/// 芯片的选中态，绑到 [`chip`] 建出的按钮上：只改常态的三个颜色，悬停和按下的强调色不变。
-pub(crate) struct ChipActive;
-
-impl FieldWrite<Button, bool> for ChipActive {
-    const FIELD: &'static str = "Button.style.{foreground,background,border}(chip)";
-
-    fn write(target: &mut Button, active: bool) {
-        (
-            target.style.foreground,
-            target.style.background,
-            target.style.border,
-        ) = chip_roles(active);
-    }
-
-    fn differs(target: &Button, active: &bool) -> bool {
-        (
-            target.style.foreground,
-            target.style.background,
-            target.style.border,
-        ) != chip_roles(*active)
-    }
+    chip
 }
 
 /// 筛选栏按钮：28px 高、左右 9px 的透明按钮，14px 中等字重正文色。
@@ -337,15 +261,9 @@ pub(crate) fn pill_input(
     input.style(style)
 }
 
-/// 胶囊里输入框和「添加」之间的 1px `--border-soft` 分隔线。
-pub(crate) fn pill_divider() -> Stack {
-    Stack::row(0.0)
-        .width(LengthSpec::Px(1.0))
-        .min_width(LengthSpec::Px(1.0))
-        .height(LengthSpec::Fill)
-        .surface(SemanticColorRole::BorderSoft)
-        .grow(0.0)
-        .shrink(0.0)
+/// 胶囊里输入框和「添加」之间的竖分隔线：NanaUI 的 `Divider`，`--border-soft` 色。
+pub(crate) fn pill_divider() -> Divider {
+    Divider::vertical()
 }
 
 /// 胶囊右侧的「添加」：`--bg-subtle` 底，12px 次要字，右端跟着胶囊的全圆角。

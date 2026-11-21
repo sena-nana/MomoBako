@@ -1,23 +1,23 @@
 //! 搜索结果面板。
 //!
 //! 页头是范围眉题、「搜索结果」、摘要和仓库数、结果数两个计数胶囊。下面依次是错误行、搜索中提示、
-//! 空状态（没有资源库 / 等待搜索条件 / 跑完没有命中）和结果列表。结果行左边是文件图标块，中间是
+//! 空状态（NanaUI 的 `EmptyState`：没有资源库 / 等待搜索条件 / 跑完没有命中）和结果列表。结果行左边是文件图标块，中间是
 //! 文件名和「仓库 / 路径」，右边是格式、前三个标签、颜色、形状和评分芯片。
 //!
 //! 视图只建一次（[`resident_search_panel`]），只读 [`SearchPanelSignals`]：文案按字段绑定，状态块用
 //! `.visible` 显隐，结果行是按「仓库 + 素材」做键的 `each`，再搜一次只换变了的行。
 //! 筛选栏的视图在 `shell/inspect_search_view/filter_bar_view.rs`，放在哪里由壳层决定。
 
-use nana_ui::icons_tabler::LOADER_2;
+use std::sync::Arc;
+
 use nana_ui::runtime::view::{
     AnyView, IntoView, Item, Signal, Store, StoreList, StorePath, computed, css, each, fields,
-    widget,
+    untrack, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, IconGlyph, JustifySpec, LengthSpec, ListItem, RadiusTier,
-    SemanticColorRole, Stack,
+    Activate, AlignSpec, EmptyState, JustifySpec, LengthSpec, ListItem, RadiusTier,
+    SemanticColorRole, Spinner, Stack,
 };
-use nana_ui_core::BorderStyle;
 
 use super::ShellMessage;
 use super::inspect::InspectMessage;
@@ -125,7 +125,7 @@ fn header(head: Signal<SearchHead>) -> AnyView {
     .into_any()
 }
 
-/// 搜索进行中的一行提示。
+/// 搜索进行中的一行提示：NanaUI 的 `Spinner` 转圈，文字写在右边。
 fn searching_state(status: Signal<SearchStatus>) -> AnyView {
     widget(
         state_box()
@@ -134,7 +134,12 @@ fn searching_state(status: Signal<SearchStatus>) -> AnyView {
     )
     .visible(move || status.with(|status| status.searching))
     .children((
-        widget(IconGlyph::new(LOADER_2).size(16.0)).key("search-workbench-spinner"),
+        widget(
+            Spinner::new("正在执行全局搜索")
+                .size(16.0)
+                .label_visible(false),
+        )
+        .key("search-workbench-spinner"),
         widget(widgets::label(
             "正在执行全局搜索",
             14.0,
@@ -174,48 +179,29 @@ fn state_box() -> Stack {
         })
 }
 
-/// 空状态：虚线框，`--bg-subtle` 底，标题 18px、说明 14px。
+/// 空状态：NanaUI 的 `EmptyState`，标题和说明按字段绑定（没有资源库 / 等待搜索条件 / 跑完没有命中）。
 fn empty_state(status: Signal<SearchStatus>) -> AnyView {
-    let text = move |pick: fn(&(String, String)) -> &String| {
-        move || {
-            status.with(|status| {
-                status
-                    .empty
-                    .as_ref()
-                    .map(|empty| pick(empty).clone())
-                    .unwrap_or_default()
-            })
-        }
+    let title = move || {
+        status.with(|status| {
+            Arc::<str>::from(status.empty.as_ref().map_or("", |empty| empty.0.as_str()))
+        })
     };
-    widget(
-        Stack::column(8.0)
-            .justify(JustifySpec::Center)
-            .padding(24.0)
-            .surface(SemanticColorRole::Subtle)
-            .border(SemanticColorRole::BorderStrong, 1.0)
-            .radius(RadiusTier::Xl)
-            .grow(0.0)
-            .shrink(0.0)
-            .with_layout(|layout| {
-                layout.border_style = Some(BorderStyle::Dashed);
-                layout.border_width = Some(1.0);
-            }),
-    )
-    .visible(move || status.with(|status| status.empty.is_some()))
-    .children((
-        widgets::bound(
-            widgets::label(String::new(), 18.0, 700, SemanticColorRole::Text),
-            text(|empty| &empty.0),
-        )
-        .key("search-workbench-empty-title"),
-        widgets::bound(
-            widgets::wrapping_label(String::new(), 14.0, 400, SemanticColorRole::Muted),
-            text(|empty| &empty.1),
-        )
-        .key("search-workbench-empty-message"),
-    ))
-    .key("search-workbench-empty")
-    .into_any()
+    let message = move || {
+        status.with(|status| {
+            status
+                .empty
+                .as_ref()
+                .map(|empty| Arc::<str>::from(empty.1.as_str()))
+        })
+    };
+    let mut empty = EmptyState::new(untrack(&title));
+    empty.message = untrack(&message);
+    widget(empty)
+        .prop::<Arc<str>, fields::empty_state::title>(title)
+        .prop::<Option<Arc<str>>, fields::empty_state::message>(message)
+        .visible(move || status.with(|status| status.empty.is_some()))
+        .key("search-workbench-empty")
+        .into_any()
 }
 
 /// 行内一段文字：行已经删掉时读空值，不去读不存在的行。
