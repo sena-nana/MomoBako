@@ -88,7 +88,11 @@ fn work_queue_splits_the_title_from_the_status() {
         Some("第二轨  unlistened"),
         "状态是行尾补充，读屏在标题后面念"
     );
-    assert_ne!(access.selected, Some(true), "作品队列没有当前项，不画成选中");
+    assert_ne!(
+        access.selected,
+        Some(true),
+        "作品队列没有当前项，不画成选中"
+    );
     let list = harness
         .keyed("inspect-asmr-queue-list")
         .expect("作品队列列表");

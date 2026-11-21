@@ -1,13 +1,13 @@
 //! 搜索面板和筛选栏共用的小部件：文字、计数胶囊、筛选芯片、输入胶囊和工具按钮。
 //!
 //! 筛选芯片是 NanaUI 的 `Chip`，尺寸跟着主题的小号控件。
-//! 输入胶囊和计数胶囊 26px，结果芯片 28px，筛选栏按钮 28px。
+//! 输入胶囊和计数胶囊 26px，筛选栏按钮 28px。结果芯片是只显示的 NanaUI 标签，见 `inspect_library.rs`。
 //! 颜色只用语义角色；色块的真实颜色由 `search_paint` 自绘。
 
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::X;
-use nana_ui::runtime::view::{AnyView, El, IntoProp, IntoView, fields, widget};
+use nana_ui::runtime::view::{El, IntoProp, fields, widget};
 use nana_ui::runtime::{
     AlignSpec, Button, Chip, Divider, IconButton, LengthSpec, NodePainter, NodeStyle,
     SemanticColorRole, SemanticPaint, Stack, Text, TextHorizontalAlignment, TextInput,
@@ -315,26 +315,6 @@ pub(crate) fn pill_button(content: &str, disabled: bool) -> Button {
         ..SemanticPaint::default()
     };
     button.style(style)
-}
-
-/// 提示芯片：28px 胶囊、1px 边框、12px 次要字，只读。
-pub(crate) fn hint_chip(content: &str, key: String) -> AnyView {
-    widget(
-        Stack::row(0.0)
-            .align(AlignSpec::Center)
-            .height(LengthSpec::Px(28.0))
-            .padding_xy(10.0, 0.0)
-            .surface(SemanticColorRole::Background)
-            .border(SemanticColorRole::Border, 1.0)
-            .radius_px(999.0)
-            .grow(0.0)
-            .shrink(0.0),
-    )
-    .children((
-        widget(label(content, 12.0, 500, SemanticColorRole::Muted)).key(format!("{key}-text")),
-    ))
-    .key(key)
-    .into_any()
 }
 
 /// 固定高度：去掉控件尺寸档位推出的最小高和上下内边距。

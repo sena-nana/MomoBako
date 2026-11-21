@@ -538,7 +538,10 @@ pub(crate) struct LyricFollow {
 
 /// 当前行滚到视口正中。没有滚动区或当前行就不改偏移，视口高或当前行变了才滚。
 /// 滚动偏移变了返回 `true`，调用方据此再画一帧。
-pub(crate) fn follow_active_lyric(document: &mut RuntimeDocument, followed: &mut Option<LyricFollow>) -> bool {
+pub(crate) fn follow_active_lyric(
+    document: &mut RuntimeDocument,
+    followed: &mut Option<LyricFollow>,
+) -> bool {
     if followed
         .as_ref()
         .is_some_and(|state| lyric_follow_holds(document, state))

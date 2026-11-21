@@ -15,11 +15,11 @@ use nana_ui::runtime::view::{
     AnyView, IntoView, Item, Signal, Store, StoreList, StorePath, callout, computed, css, each,
     fields, untrack, widget,
 };
-use nana_ui_core::StatusTone;
 use nana_ui::runtime::{
     Activate, AlignSpec, EmptyState, JustifySpec, LengthSpec, List, ListItem, RadiusTier,
     SemanticColorRole, Spinner, Stack,
 };
+use nana_ui_core::StatusTone;
 
 use super::ShellMessage;
 use super::inspect::InspectMessage;
@@ -47,9 +47,13 @@ pub(crate) fn resident_search_panel(signals: SearchPanelSignals) -> AnyView {
     let status = signals.status;
     // 结果行直接是 NanaUI `List` 的子节点，读屏按「搜索结果」列表念。
     let results = signals.hits.keyed(HitRow::key).each(result_row).container(
-        widget(List::new().label("搜索结果").style(Stack::column(10.0).node_style()))
-            .visible(move || status.with(|status| status.listed))
-            .key("search-workbench-results"),
+        widget(
+            List::new()
+                .label("搜索结果")
+                .style(Stack::column(10.0).node_style()),
+        )
+        .visible(move || status.with(|status| status.listed))
+        .key("search-workbench-results"),
     );
     widget(
         Stack::column(16.0)
@@ -284,8 +288,9 @@ fn result_row(item: HitItem) -> AnyView {
     let chips = computed(move || item.try_with(|row| row.chips.clone()).unwrap_or_default());
     let chip_key = key.clone();
     let tags = each(chips, HitChip::clone, move |chip: HitChip| {
-        widgets::hint_chip(
+        super::inspect_library::label_tag(
             &chip.text,
+            false,
             format!("search-hit-chip-{chip_key}-{}", chip.index),
         )
     })

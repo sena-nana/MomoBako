@@ -152,7 +152,7 @@ fn assert_size_fill(harness: &ShellHarness) {
     assert_eq!(style.background, None, "尺寸标签不能再铺不透明的 bg-elev");
     let mix = SemanticColorMix::alpha(SemanticColorRole::Surface, 0.88);
     assert_eq!(style.interaction.base.background_mix, Some(mix));
-    assert_eq!(style.border, Some(SemanticColorRole::Border));
+    assert_eq!(style.border, Some(SemanticColorRole::BorderSoft));
     for (name, mode) in [
         ("深色", ThemeAppearance::Dark),
         ("浅色", ThemeAppearance::Light),

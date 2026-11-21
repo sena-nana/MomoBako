@@ -461,7 +461,11 @@ fn lyric_viewport_fades_at_its_edges() {
         "渐隐带跟着量出来的视口高度"
     );
     assert!(style.background.is_none(), "滚动区不铺底色盖住歌词");
-    for key in ["inspect-audio-lyric-active", "inspect-audio-lyric-0", "inspect-audio-lyric-30"] {
+    for key in [
+        "inspect-audio-lyric-active",
+        "inspect-audio-lyric-0",
+        "inspect-audio-lyric-30",
+    ] {
         let id = harness.keyed(key).unwrap_or_else(|| panic!("没有 {key}"));
         let line = world.node_style(id).expect("行样式");
         assert_eq!(line.layout.opacity, None, "{key} 不另写不透明度");

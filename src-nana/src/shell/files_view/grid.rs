@@ -282,8 +282,14 @@ fn state_box(label: String, error: bool, spinner: bool) -> AnyView {
     widget(frame)
         .children((
             icon,
-            widget(style::text(label, 14.0, 400, SemanticColorRole::Muted, 21.7))
-                .key("file-state-text"),
+            widget(style::text(
+                label,
+                14.0,
+                400,
+                SemanticColorRole::Muted,
+                21.7,
+            ))
+            .key("file-state-text"),
         ))
         .key("file-state")
         .into_any()
