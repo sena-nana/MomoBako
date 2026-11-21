@@ -195,10 +195,41 @@ pub(super) fn model_view(
     if mesh {
         layers.push(orbit_controls());
     }
-    widget(Stack::fill_column(0.0).surface(SemanticColorRole::Background))
+    let surface = Stack::fill_column(0.0).surface(SemanticColorRole::Background);
+    if !mesh {
+        return widget(surface)
+            .children(layers)
+            .key("inspect-model")
+            .into_any();
+    }
+    widget(surface.hittable())
         .children(layers)
         .key("inspect-model")
+        .on_cx(orbit_on_drag())
         .into_any()
+}
+
+/// 在模型画面上拖拽：左右转动、上下缩放。NanaUI 的 `PointerDragged` 报从按下点起的总位移，
+/// 这里记住上一采样，把两次采样之间的位移换成一次转动。按在旋转按钮上没拖开时按钮照常点按。
+fn orbit_on_drag() -> impl FnMut(
+    &mut Stack,
+    &nana_ui::runtime::PointerDragged,
+    &mut nana_ui::runtime::ViewContext<'_, Stack>,
+) + 'static {
+    use nana_ui::runtime::PointerDragPhase;
+    let mut last = (0.0_f32, 0.0_f32);
+    move |_, event, cx| match event.phase {
+        PointerDragPhase::Started => last = (0.0, 0.0),
+        PointerDragPhase::Moved | PointerDragPhase::Ended => {
+            let (yaw, zoom) =
+                crate::shell::inspect::orbit_drag(event.dx - last.0, event.dy - last.1);
+            last = (event.dx, event.dy);
+            if yaw.abs() > f32::EPSILON || (zoom - 1.0).abs() > 0.0001 {
+                cx.dispatch_program_all(ShellMessage::Inspect(InspectMessage::Orbit { yaw, zoom }));
+            }
+        }
+        PointerDragPhase::Cancelled => {}
+    }
 }
 
 /// 模型的旋转和缩放，用按钮操作。

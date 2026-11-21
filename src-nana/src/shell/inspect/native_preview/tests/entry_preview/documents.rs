@@ -410,9 +410,24 @@ fn archive_entry_shows_office_text_and_model_raster() {
     );
     let turned = model_rgba(state.archive_entry.as_ref().expect("还是这一份模型"));
     assert_ne!(turned, before.as_slice(), "旋转没有重画");
-    let harness = mount(state);
-    assert!(harness.keyed("inspect-model").is_some(), "用现有模型预览");
+    let mut harness = mount(state);
+    let surface = harness.keyed("inspect-model").expect("用现有模型预览");
     assert!(harness.keyed("inspect-orbit").is_some());
+    let (x, y) = harness.center(surface);
+    let turns = harness
+        .drag_messages((x - 60.0, y + 40.0), (x - 20.0, y + 40.0))
+        .into_iter()
+        .filter_map(|message| match message {
+            crate::shell::ShellMessage::Inspect(InspectMessage::Orbit { yaw, .. }) => Some(yaw),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert!(turns.len() > 1, "拖拽按采样分几次转动：{turns:?}");
+    let total: f32 = turns.iter().sum();
+    assert!(
+        (total - 0.4).abs() < 0.001,
+        "向右拖 40px 一共转 0.4：{total}"
+    );
     assert!(harness.keyed("inspect-native-page").is_some());
     assert!(harness.find("OBJ").is_some());
     state = unmount(harness);

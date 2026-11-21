@@ -400,8 +400,6 @@ pub struct InputState {
     pub blank_press: Option<BlankPress>,
     /// 最近一次输入按着的修饰键。
     pub modifiers: HeldModifiers,
-    /// 模型画面上的指针拖拽：上一帧坐标。没有可旋转的网格时不记。
-    pub model_drag: Option<(f32, f32)>,
     /// 列表上正在画的框选矩形。没在拖选框时藏着。
     pub(crate) selection_box: super::files_selection_box::SelectionBox,
     /// 指针停在侧栏底部入口那一排上：整排从半透明亮起来（`sidebar_view.rs` 的底部入口）。

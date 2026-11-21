@@ -1,4 +1,4 @@
-//! 文件列表上的条目拖动和框选，以及模型画面上的拖拽旋转。
+//! 文件列表上的条目拖动和框选。模型画面的拖拽旋转在模型画面自己的 `PointerDragged` 里（`inspect_view/body/widgets.rs`）。
 //!
 //! 拖动由 NanaUI 的 `PointerDragged` 报告：卡片接住按在卡片上的拖动，列表框接住按在空白处的
 //! （`files_view/cards.rs`、`files_selection_box.rs`）。框架负责拖动容差、指针抓取和「拖过以后松手
@@ -26,8 +26,7 @@ pub(crate) use targets::{EntryKind, EntryNode, register as register_entry};
 /// 结算这一帧的拖动。返回 true 表示手势还没收尾：这一帧调用方只同步热字段、不做结构同步，
 /// 免得抓着指针的节点被换掉。
 pub fn observe_live_pointer(model: &mut ShellViewModel, document: &RuntimeDocument) -> bool {
-    let orbiting = track_model_drag(model, document);
-    settle_gesture(model, document) || orbiting
+    settle_gesture(model, document)
 }
 
 /// 按记下的采样推进手势：条目拖动越过阈值才起步，之后每帧更新悬停和放下目标；
@@ -234,57 +233,6 @@ fn window_size(document: &RuntimeDocument, anchor: Option<StableNodeId>) -> (f32
             (1200.0, 800.0)
         }
     }
-}
-
-/// 指针按在有网格的模型画面上时，拖拽旋转和缩放。按钮自己处理点击，这里不抢走。
-fn track_model_drag(model: &mut ShellViewModel, document: &RuntimeDocument) -> bool {
-    let document_id = document.document();
-    let context = document.context();
-    let Some(hit) = context.world().pointer_press(document_id, POINTER_ID) else {
-        model.input.model_drag = None;
-        return false;
-    };
-    let Some((x, y)) = context.pointer_position(document_id, POINTER_ID) else {
-        eprintln!("Nana 实况指针已按下，但没有坐标");
-        return model.input.model_drag.is_some();
-    };
-    if !model.inspect.has_mesh() || !model_surface(document, hit) {
-        model.input.model_drag = None;
-        return false;
-    }
-    let Some((last_x, last_y)) = model.input.model_drag else {
-        model.input.model_drag = Some((x, y));
-        return true;
-    };
-    let (yaw, zoom) = super::inspect::orbit_drag(x - last_x, y - last_y);
-    model.input.model_drag = Some((x, y));
-    if yaw.abs() > f32::EPSILON || (zoom - 1.0).abs() > 0.0001 {
-        model.reduce(ShellMessage::Inspect(super::InspectMessage::Orbit {
-            yaw,
-            zoom,
-        }));
-    }
-    true
-}
-
-/// 命中在模型画面上，且不在旋转按钮上。
-fn model_surface(document: &RuntimeDocument, hit: StableNodeId) -> bool {
-    let context = document.context();
-    let mut current = Some(hit);
-    let mut on_model = false;
-    let mut on_controls = false;
-    while let Some(node) = current {
-        if let Some(path) = context.assembly_path(node) {
-            if path.contains("inspect-orbit") {
-                on_controls = true;
-            }
-            if path.contains("inspect-model") {
-                on_model = true;
-            }
-        }
-        current = context.world().parent_id(node);
-    }
-    on_model && !on_controls
 }
 
 fn contains(bounds: nana_ui::runtime::LayoutBox, x: f32, y: f32) -> bool {
