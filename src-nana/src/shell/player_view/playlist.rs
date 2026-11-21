@@ -295,7 +295,7 @@ fn item_list(signals: PlaylistPageSignals) -> AnyView {
     let list = widget(
         ReorderList::new(reorder())
             .live_rows(true)
-            .spacing(tiers::space_px(SpacingStep::Lg))
+            .spacing_step(SpacingStep::Lg)
             .label("播放集条目"),
     )
     .prop::<Vec<ReorderItem>, fields::reorder_list::items>(reorder)

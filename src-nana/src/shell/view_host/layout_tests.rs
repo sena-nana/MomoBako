@@ -213,83 +213,8 @@ struct Node<'a> {
 }
 
 const PADDING_X: &[&str] = &["padding_left", "padding_right"];
-/// 侧栏外框内边距的主题表达式被工作区丢掉的说明。
-const SIDEBAR_FRAME: &str = "workspace.rs:725 `overlay_region_style` 只把侧栏外框内边距的数值带到区域节点上，主题表达式没带过去";
 
 const NANA_DEFAULTS: &[NanaDefault] = &[
-    NanaDefault::new(
-        "nana.stack",
-        &["border_width"],
-        &[1.0],
-        "view/marks.rs:188 `tag_frame()` 写 `.border(BorderSoft, 1.0)`",
-    )
-    .shape(ShapeRole::Tag)
-    .border(Role::BorderSoft),
-    NanaDefault::new(
-        "nana.card",
-        &["border_width"],
-        &[1.0],
-        "view_components.rs:2207 `Card::project` 给 `Outlined` 卡片写 1.0 的边",
-    )
-    .border(Role::Border),
-    NanaDefault::new(
-        "nana.card",
-        &["border_width"],
-        &[1.0],
-        "view_components.rs:2207 `Card::project` 给 `Selected` 卡片写 1.0 的边",
-    )
-    .border(Role::BorderSoft),
-    NanaDefault::new(
-        "nana.action-menu",
-        &["border_width"],
-        &[1.0],
-        "popover.rs:858 `trigger_button_style` 的触发钮发丝边写 `HAIRLINE`",
-    )
-    .shape(ShapeRole::Button),
-    NanaDefault::new(
-        "nana.popover",
-        &["border_width"],
-        &[1.0],
-        "popover.rs:858 `trigger_button_style` 的触发钮发丝边写 `HAIRLINE`",
-    )
-    .shape(ShapeRole::Button),
-    NanaDefault::new(
-        "nana.select",
-        &["border_width"],
-        &[1.0],
-        "select.rs:418 Select 触发框的发丝边写 `HAIRLINE`",
-    )
-    .shape(ShapeRole::Select),
-    NanaDefault::new(
-        "nana.form-field",
-        &["padding_top"],
-        &[18.0, 20.0],
-        "form_surfaces.rs:130 FormField 按标签行高加间距算出给标签留的位置",
-    ),
-    NanaDefault::new(
-        "nana.path-field",
-        &["gap"],
-        &[4.0],
-        "path_field.rs:102 输入框和浏览按钮之间写 4.0",
-    ),
-    NanaDefault::new(
-        "nana.chip",
-        &["border_radius"],
-        &[999.0],
-        "chip.rs:145 Chip 的胶囊圆角写 999.0",
-    ),
-    NanaDefault::new(
-        "nana.status-badge",
-        &["border_radius"],
-        &[999.0],
-        "feedback.rs:217 StatusBadge 的胶囊圆角写 999.0",
-    ),
-    NanaDefault::new(
-        "nana.labeled-value",
-        &["gap"],
-        &[4.0, 8.0],
-        "feedback.rs:1093 LabeledValue 的标签和值之间写 4.0（紧凑）或 8.0",
-    ),
     NanaDefault::new(
         "segmented-option",
         PADDING_X,
@@ -303,36 +228,6 @@ const NANA_DEFAULTS: &[NanaDefault] = &[
         "selection.rs:1035 分段选项的圆角按轨道圆角减去轨道内边距算成像素",
     ),
     NanaDefault::new(
-        "nana.list",
-        &["gap"],
-        &[1.0],
-        "workspace.rs:709 工作区轨道之间写 `REGION_SEPARATOR_PX` 1.0",
-    ),
-    NanaDefault::new(
-        "nana.sidebar-frame",
-        &["padding_top", "padding_bottom"],
-        &[10.0],
-        SIDEBAR_FRAME,
-    ),
-    NanaDefault::new(
-        "nana.sidebar-frame",
-        &["padding_left"],
-        &[8.0],
-        SIDEBAR_FRAME,
-    ),
-    NanaDefault::new(
-        "nana.sidebar-frame",
-        &["padding_right"],
-        &[7.0],
-        SIDEBAR_FRAME,
-    ),
-    NanaDefault::new(
-        "app-title-bar-leading",
-        &["padding_left"],
-        &[6.0],
-        "shell.rs:327 标题栏前导列的左内边距按 `edge_px()` 写像素",
-    ),
-    NanaDefault::new(
         "app-title-bar-controls",
         PADDING_X,
         &[6.0],
@@ -343,13 +238,6 @@ const NANA_DEFAULTS: &[NanaDefault] = &[
         &["gap"],
         &[2.0],
         "shell.rs:695 窗口按钮之间写 `WINDOW_CONTROL_GAP` 2.0",
-    ),
-    NanaDefault::new(
-        "nana.reorder-list",
-        &["gap"],
-        &[10.0],
-        "reorder_list.rs:2183 ReorderList 只收像素间距（`spacing(f32)`）并照写进 `gap`，没有档位写法；\
-         播放集传的是 `tiers::space_px(SpacingStep::Lg)`",
     ),
 ];
 
