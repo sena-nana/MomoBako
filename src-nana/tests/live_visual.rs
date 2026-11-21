@@ -649,13 +649,17 @@ fn display_mode_select(nodes: &[AccessibilityDumpNode]) -> &AccessibilityDumpNod
         .expect("缺少展示方式下拉")
 }
 
-/// 底部四个入口挤在侧栏里，不能被撑出侧栏画到文件列下面。
+/// 底部四个入口挤在侧栏里，不能被撑出侧栏画到文件列下面。「任务」是 NanaUI `Popover` 的触发器，
+/// 读屏角色是菜单，其余是按钮。
 fn assert_footer_inside_sidebar(nodes: &[AccessibilityDumpNode]) {
     let sidebar = required(nodes, "resources");
     for label in FOOTER {
         let button = nodes
             .iter()
-            .find(|node| node.role == "button" && node.label.as_deref() == Some(label))
+            .find(|node| {
+                matches!(node.role.as_str(), "button" | "menu")
+                    && node.label.as_deref() == Some(label)
+            })
             .unwrap_or_else(|| panic!("缺少底部入口 {label}"));
         assert!(
             contains(&sidebar.bounds, &button.bounds),
@@ -692,6 +696,7 @@ fn is_player(hit: &HitDump) -> bool {
         .is_some_and(|label| PLAYER.contains(&label))
 }
 
+/// 按无障碍名找可以点的控件：按钮，或者 NanaUI 原生菜单和弹层的触发器（读屏角色是菜单，如「导入」）。
 fn buttons<'a>(
     nodes: &'a [AccessibilityDumpNode],
     labels: &[&str],
@@ -701,7 +706,10 @@ fn buttons<'a>(
         .map(|label| {
             nodes
                 .iter()
-                .find(|node| node.role == "button" && node.label.as_deref() == Some(*label))
+                .find(|node| {
+                    matches!(node.role.as_str(), "button" | "menu")
+                        && node.label.as_deref() == Some(*label)
+                })
                 .unwrap_or_else(|| panic!("缺少按钮 {label}"))
         })
         .collect()
