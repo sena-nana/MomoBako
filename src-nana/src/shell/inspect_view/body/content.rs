@@ -450,6 +450,7 @@ pub(super) fn text_plugin(
     let mut body = Text::new(shown)
         .color(SemanticColorRole::Text)
         .font_size(13.0)
+        .role(nana_ui_core::TypeRole::Body)
         .line_height(21.45);
     {
         let layout = std::sync::Arc::make_mut(&mut body.style.layout);

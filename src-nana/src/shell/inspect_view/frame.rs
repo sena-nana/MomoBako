@@ -722,9 +722,7 @@ pub(super) fn eyebrow(label: &str) -> Text {
 
 /// 同眉题，字重 700。事实行和导语的标签用它。
 pub(super) fn eyebrow_bold(label: &str) -> Text {
-    let mut node = eyebrow(label);
-    std::sync::Arc::make_mut(&mut node.style.layout).font_weight = Some(700);
-    node
+    eyebrow(label).weight(nana_ui_core::TextWeight::Bold)
 }
 
 pub(super) fn text(
@@ -734,10 +732,8 @@ pub(super) fn text(
     role: SemanticColorRole,
     line_height: f32,
 ) -> Text {
-    let mut node = Text::new(label)
+    let mut node = super::super::files_view::style::typed(Text::new(label), size, weight)
         .color(role)
-        .font_size(size)
-        .font_weight(weight)
         .line_height(line_height);
     let layout = std::sync::Arc::make_mut(&mut node.style.layout);
     layout.min_width = Some(LengthSpec::Px(0.0));

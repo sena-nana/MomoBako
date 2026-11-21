@@ -29,6 +29,7 @@ use super::inspect::{ArchiveFileNotice, FileFacts, InspectState};
 use super::{InspectMessage, ShellMessage, ShellViewModel};
 
 use super::files::hardlink_label;
+use super::files_view::style::typed;
 
 mod archive;
 
@@ -384,10 +385,8 @@ fn stacked_value(
         layout.padding_top = Some(LengthSpec::Px(12.0));
         column = column.style(style);
     }
-    let mut name = Text::new(label)
+    let mut name = typed(Text::new(label), 11.0, 700)
         .color(SemanticColorRole::Faint)
-        .font_size(11.0)
-        .font_weight(700)
         .line_height(17.05);
     std::sync::Arc::make_mut(&mut name.style.layout)
         .text_ext

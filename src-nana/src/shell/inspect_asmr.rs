@@ -499,10 +499,8 @@ fn queue_head(label: &str, count: &str, key: &str) -> AnyView {
         .children((
             widget(super::workbench::meta(label)),
             widget(
-                Text::new(count.to_string())
-                    .color(SemanticColorRole::Text)
-                    .font_size(12.0)
-                    .font_weight(700),
+                super::files_view::style::typed(Text::new(count.to_string()), 12.0, 700)
+                    .color(SemanticColorRole::Text),
             ),
         ))
         .into_any()

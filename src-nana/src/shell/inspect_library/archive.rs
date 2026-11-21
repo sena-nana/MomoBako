@@ -171,15 +171,12 @@ pub(super) fn archive_stage_view(stage: ArchiveStage) -> AnyView {
     } else {
         SemanticColorRole::Text
     };
-    let mut title = Text::new(stage.title)
+    let mut title = typed(Text::new(stage.title), 13.0, 600)
         .color(title_role)
-        .font_size(13.0)
-        .font_weight(600)
         .line_height(20.15);
     title.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
-    let mut detail = Text::new(stage.detail)
+    let mut detail = typed(Text::new(stage.detail), 12.0, 400)
         .color(SemanticColorRole::Muted)
-        .font_size(12.0)
         .line_height(18.6);
     detail.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
     widget(
@@ -338,7 +335,7 @@ pub(super) fn archive_kind_mark(label: &str, key: &str) -> AnyView {
     let mark = Text::new(label.to_string())
         .color(SemanticColorRole::Muted)
         .font_size(10.0)
-        .font_weight(700);
+        .weight(TextWeight::Bold);
     widget(
         Stack::row(0.0)
             .align(AlignSpec::Center)

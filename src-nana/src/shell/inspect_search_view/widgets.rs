@@ -38,10 +38,8 @@ pub(crate) fn label(
     weight: u16,
     role: SemanticColorRole,
 ) -> Text {
-    let mut node = Text::new(content.into())
-        .color(role)
-        .font_size(size)
-        .font_weight(weight);
+    let mut node =
+        super::super::files_view::style::typed(Text::new(content.into()), size, weight).color(role);
     node.style.text_horizontal_alignment = TextHorizontalAlignment::Start;
     let layout = Arc::make_mut(&mut node.style.layout);
     layout.line_height = Some(LineHeightSpec::Relative(LINE_RATIO));
