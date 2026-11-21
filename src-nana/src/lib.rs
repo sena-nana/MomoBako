@@ -262,6 +262,7 @@ impl ApplicationState for MomoBakoApplication {
         windows: &mut std::collections::HashMap<nana_ui_platform::WindowId, ApplicationWindow>,
         context: &RuntimeProgramContext<Self::Message>,
     ) -> RuntimeProgramUpdate {
+        window_host::sync_timers(self);
         if let ShellMessage::ThumbnailPixels(frames) = &mut message {
             self.queue_thumbnail_frames(frames);
         }
@@ -329,6 +330,7 @@ impl ApplicationState for MomoBakoApplication {
         windows: &mut std::collections::HashMap<nana_ui_platform::WindowId, ApplicationWindow>,
         context: &RuntimeProgramContext<Self::Message>,
     ) -> Result<RuntimeProgramUpdate, FrameworkError> {
+        window_host::sync_timers(self);
         window_host::note_modifiers(&mut self.shell, &input.event.payload);
         match windows.get(&id) {
             Some(window) => shell::note_external_folder_drag(
@@ -355,6 +357,37 @@ impl ApplicationState for MomoBakoApplication {
             context.dispatch(message);
         }
         Ok(RuntimeProgramUpdate::default())
+    }
+
+    /// 最早到期的计时器的时刻（`window_host::next_timer_in_ms`）。只有计时器在等时窗口不画帧，NanaUI 到点调 `wake`。
+    fn next_wakeup(&self) -> Option<std::time::Instant> {
+        window_host::next_timer_in_ms(&self.shell).map(|due_in| self.host.frames.deadline(due_in))
+    }
+
+    /// 计时器到点：拨钟并触发到点的计时器，把排下的检视和文件请求交出去。界面要跟着变（有过归约或标了脏）
+    /// 时画一帧，只排了预取解码时不画。
+    fn wake(
+        &mut self,
+        now: std::time::Instant,
+        _windows: &mut std::collections::HashMap<nana_ui_platform::WindowId, ApplicationWindow>,
+        context: &RuntimeProgramContext<Self::Message>,
+    ) -> RuntimeProgramUpdate {
+        let revision = self.shell.revision;
+        let timer_ms = self.host.frames.sync_timers(now);
+        let step = frame_clock::FrameStep {
+            timer_ms,
+            motion_ms: 0,
+        };
+        if crate::shell::poll_timers(&mut self.shell, step) {
+            dispatch::inspect::effects(self, context);
+        }
+        window_host::run_timers(&mut self.shell, timer_ms);
+        dispatch::files::effects(self, context);
+        if self.shell.revision != revision || self.shell.surface_dirty {
+            RuntimeProgramUpdate::redraw(context.window_id())
+        } else {
+            RuntimeProgramUpdate::default()
+        }
     }
 
     /// 系统或标题栏请求关窗：按关闭设置回答，确认和收到托盘时不带关闭命令。

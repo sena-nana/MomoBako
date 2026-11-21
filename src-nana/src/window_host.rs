@@ -1,6 +1,7 @@
-//! 窗口准备阶段的进度条填充、预取、分隔条回写，全局 Escape，以及关闭、托盘和几何恢复。
+//! 窗口准备阶段的进度条填充、计时器、分隔条回写，全局 Escape，以及关闭、托盘和几何恢复。
 //!
-//! 计时器和进度条填充每帧按 [`FrameStep`] 推进，步长是两帧之间真实流逝的时间，见 `frame_clock.rs`。
+//! 计时器（预取、悬停展开、仓库操作行）不要帧：每个回调开头拨钟，到点由 NanaUI 的 `wake` 叫醒触发；
+//! 进度条填充、播放这些动效按帧推进。两条时间线见 `frame_clock.rs`。
 
 use nana_ui::runtime::{Entity, Workspace, component_descriptors};
 use nana_ui::{
@@ -14,12 +15,12 @@ use crate::shell::{
 };
 use crate::{MomoBakoApplication, host_api};
 
-/// 托盘和图标失败原因，以及跟这一扇主窗口走的帧时钟。窗口几何由 NanaUI 持久化（`window_state.rs`）。
+/// 托盘和图标失败原因，以及跟这一扇主窗口走的宿主时钟。窗口几何由 NanaUI 持久化（`window_state.rs`）。
 pub(crate) struct HostSession {
     /// 托盘图标装上了没有。装上的托盘在会话结束时拿掉。
     pub tray_installed: bool,
     pub tray_error: Option<String>,
-    /// 准备帧的时钟：每帧的步长是两帧之间真实流逝的时间。
+    /// 宿主时钟：计时器的时间线和动效的帧步长。
     pub frames: FrameClock,
 }
 
@@ -82,13 +83,14 @@ pub(crate) fn after_update(
     crate::shell::sync_media_session(&window, &app.shell);
 }
 
-/// 进度条填充、侧栏收起展开、计时器或播放还在走时按 30 帧继续画，并把工作区拖动后的宽度写回壳层。
+/// 进度条填充、侧栏收起展开、指针手势或播放还在走时按 30 帧继续画，并把工作区拖动后的宽度写回壳层。
+/// 只有计时器在等时不要帧，到点由 `wake` 叫醒（[`next_timer_in_ms`]、[`run_timers`]）。
 ///
 /// 指针手势先读当前文档。填充过渡、悬停和播放推进只同步热信号，不重挂；这一帧里有过归约、标了脏
 /// 或者工作台排法要换时才整体同步，手势进行中不重挂，否则按下目标会随节点一起消失。
-/// 悬停、预取、仓库操作行和填充过渡的时钟都按 `step.ui_ms` 往前拨。填充过渡每帧照文档上下文跟上减少动态
-/// 效果的设置；别的动效（侧栏收起展开、底部入口淡入淡出、转圈和不确定进度）由 NanaUI 推进，也看同一个设置
-/// （侧栏收起展开由 `ShellView` 按它决定播不播）。文档变了以后先把挂着的缩略图报给文件表面，
+/// 预取、悬停和仓库操作行按 `step.timer_ms` 拨钟并触发到点的，填充过渡按 `step.motion_ms` 走。填充过渡每帧照
+/// 文档上下文跟上减少动态效果的设置；别的动效（侧栏收起展开、底部入口淡入淡出、转圈和不确定进度）由 NanaUI
+/// 推进，也看同一个设置（侧栏收起展开由 `ShellView` 按它决定播不播）。文档变了以后先把挂着的缩略图报给文件表面，
 /// 预取只解码挂着的，纹理回收也按它（`thumbnail_host.rs`）。
 pub(crate) fn prepare_motion(
     shell: &mut ShellViewModel,
@@ -107,23 +109,14 @@ pub(crate) fn prepare_motion(
         .set_reduced(window.document.context().reduced_motion());
     crate::shell::poll_media_keys(shell);
     crate::drag_out::apply_result(shell);
-    drive_prefetch(shell, step.ui_ms);
-    if shell.input.live_gesture.is_some() || shell.sidebar.hover_since_ms.is_some() {
-        shell.sidebar.tick_hover(step.ui_ms);
-    }
-    crate::shell::tick_external_folder_hover(shell);
+    run_timers(shell, step.timer_ms);
     let tracking = crate::shell::observe_live_pointer(shell, &window.document);
     shell.stage_browses();
     // 拖出结果这类归约以外写下的失败收进状态区，状态区变了要整体同步。
     if shell.observe_failures() {
         shell.mark_surface_dirty();
     }
-    // 仓库操作行往上爬、完成后收起，任务弹层和「任务」计数跟着整体同步，进度条的宽度过渡到新值。
-    if shell.operation.tick(step.ui_ms) {
-        shell.mark_surface_dirty();
-        shell.follow_task_fills();
-    }
-    shell.fills.tick(step.ui_ms);
+    shell.fills.tick(step.motion_ms);
     let mut overlay_leaving = false;
     let mut resources_moving = false;
     if let Some(view) = view {
@@ -152,11 +145,7 @@ pub(crate) fn prepare_motion(
         || overlay_leaving
         || resources_moving
         || shell.player.clock_running();
-    window.demand = if busy
-        || shell.files.prefetch_pending()
-        || shell.inspect.timers_pending()
-        || shell.operation.pending()
-    {
+    window.demand = if busy {
         nana_ui::FrameDemand::Continuous(std::num::NonZeroU32::new(30).expect("30"))
     } else {
         nana_ui::FrameDemand::OnDemand
@@ -164,11 +153,53 @@ pub(crate) fn prepare_motion(
     sync_sidebar_resize(shell, &window.document);
 }
 
+/// `update` 和 `input_event` 开头：把上次同步以来流逝的时间交给所有计时器，不触发。归约里武装的计时器
+/// 从这一刻起算，到点的留给 `wake` 或准备帧触发。
+pub(crate) fn sync_timers(app: &mut MomoBakoApplication) {
+    let step_ms = app.host.frames.sync_timers(std::time::Instant::now());
+    pass_timer_time(&mut app.shell, step_ms);
+}
+
+/// 把流逝的 `step_ms` 交给所有计时器，不触发。
+pub(crate) fn pass_timer_time(shell: &mut ShellViewModel, step_ms: u64) {
+    shell.inspect.pass_time(step_ms);
+    shell.files.tick_prefetch(step_ms);
+    shell.sidebar.tick_hover(step_ms);
+    shell.operation.pass_time(step_ms);
+}
+
+/// 最早到期的计时器离现在还有多少毫秒，没有在等的计时器时为 `None`：搜索和元数据保存的延时、缩略图和
+/// 下一页的空闲预取、仓库操作行的爬升和收起、拖放停在文件夹上的展开。宿主据此要 NanaUI 到点叫醒。
+pub(crate) fn next_timer_in_ms(shell: &ShellViewModel) -> Option<u64> {
+    [
+        shell.inspect.timer_due_in(),
+        shell.files.prefetch_due_in(),
+        shell.operation.due_in(),
+        shell.sidebar.hover_due_in(),
+    ]
+    .into_iter()
+    .flatten()
+    .min()
+}
+
+/// 计时器（检视的延时除外，见 `poll_timers`）拨 `step_ms` 并触发到点的：空闲预取排下解码和下一页读取，
+/// 外部拖放停满时展开文件夹，仓库操作行爬升或收起时任务弹层和「任务」计数跟着整体同步，进度条的宽度过渡到
+/// 新值。
+pub(crate) fn run_timers(shell: &mut ShellViewModel, step_ms: u64) {
+    drive_prefetch(shell, step_ms);
+    shell.sidebar.tick_hover(step_ms);
+    crate::shell::tick_external_folder_hover(shell);
+    if shell.operation.tick(step_ms) {
+        shell.mark_surface_dirty();
+        shell.follow_task_fills();
+    }
+}
+
 fn drive_prefetch(shell: &mut ShellViewModel, step_ms: u64) {
+    let now = shell.files.tick_prefetch(step_ms);
     if !shell.files.prefetch_pending() {
         return;
     }
-    let now = shell.files.tick_prefetch(step_ms);
     let paths = shell.files.undecoded_thumbnail_paths();
     shell.files.poll_thumbnail_prefetch(now, &paths);
     // 来源目录的下一页：到点就读，只生成缩略图，不画进列表。

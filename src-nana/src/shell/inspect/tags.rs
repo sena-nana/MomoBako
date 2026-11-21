@@ -1,7 +1,8 @@
 //! 标签菜单、搜索延时和元数据自动保存。
 //!
 //! 标签菜单铺在元数据的标签区里，开合只是一个标志，位置由卡片排版决定，和窗口大小无关。
-//! 搜索等待 250 毫秒，元数据等待 260 毫秒。时钟只在还有到期项时前进，避免空闲时把窗口钉在连续帧上。
+//! 搜索等待 250 毫秒，元数据等待 260 毫秒。两个延时不要帧：宿主在每个回调开头把流逝的时间交给时钟，
+//! 按最早的到期时刻要 NanaUI 到点叫醒（`frame_clock.rs`）。
 
 use super::super::player::ClockStep;
 use super::{InspectMessage, InspectState};
@@ -9,7 +10,7 @@ use super::{InspectMessage, InspectState};
 const SEARCH_DELAY_MS: u64 = 250;
 const METADATA_DELAY_MS: u64 = 260;
 
-/// 实况搜索和元数据的到期时刻。`clock_ms` 只在有到期项时按帧累加。
+/// 实况搜索和元数据的到期时刻。`clock_ms` 是宿主交过来的计时器时间。
 #[derive(Clone, Debug, Default)]
 pub(super) struct LiveTimers {
     clock_ms: u64,
@@ -83,12 +84,27 @@ impl InspectState {
         }
     }
 
-    /// 前进时钟。到期后由调用方再归约搜索或保存。
+    /// 时钟走 `step` 毫秒，不触发。宿主在归约之前调，归约里武装的延时从这一刻起算。
+    pub(crate) fn pass_time(&mut self, step: u64) {
+        self.timers.clock_ms = self.timers.clock_ms.saturating_add(step);
+    }
+
+    /// 最早到期的延时离现在还有多少毫秒，没有在等的延时时为 `None`。
+    pub(crate) fn timer_due_in(&self) -> Option<u64> {
+        let clock = self.timers.clock_ms;
+        [self.timers.search_due_ms, self.timers.metadata_due_ms]
+            .into_iter()
+            .flatten()
+            .map(|due| due.saturating_sub(clock))
+            .min()
+    }
+
+    /// 前进时钟，取走到期的延时。到期后由调用方再归约搜索或保存。
     pub(super) fn advance_timers(&mut self, step: u64) -> (bool, bool) {
+        self.pass_time(step);
         if !self.timers.pending() {
             return (false, false);
         }
-        self.timers.clock_ms = self.timers.clock_ms.saturating_add(step);
         let search = self
             .timers
             .search_due_ms
@@ -106,7 +122,7 @@ impl InspectState {
         (search, metadata)
     }
 
-    /// 单测用：前进并在到期时归约，不经过窗口准备。
+    /// 前进并在到期时归约。
     pub(super) fn poll_own(&mut self, step: u64, writable: bool, repo: Option<&str>) -> bool {
         let (search, metadata) = self.advance_timers(step);
         if search {
@@ -116,10 +132,6 @@ impl InspectState {
             self.reduce(writable, repo, InspectMessage::SaveMetadata);
         }
         search || metadata
-    }
-
-    pub(crate) fn timers_pending(&self) -> bool {
-        self.timers.pending()
     }
 }
 
@@ -133,8 +145,8 @@ impl LiveTimers {
     }
 }
 
-/// 准备阶段拨一帧，返回计时器或播放时钟有没有动。搜索和自动保存的延时按 `step.ui_ms` 走，
-/// 播放时钟（音视频进度、图片停留）按 `step.media_ms` 走，见 `frame_clock.rs`。
+/// 准备帧或计时器叫醒时拨一次，返回计时器或播放时钟有没有动。搜索和自动保存的延时按 `step.timer_ms` 走，
+/// 播放时钟（音视频进度、图片停留）按 `step.motion_ms` 走，见 `frame_clock.rs`。
 ///
 /// 搜索、保存这类计时器触发和播放切项会改界面结构，标脏让随后整体同步；只是播放进度往前走时
 /// 不标脏，进度和时间由热信号跟上。
@@ -154,8 +166,8 @@ pub(crate) fn poll_timers(
     let repo_id = model.workspace.active_repo_id.clone();
     let fired = model
         .inspect
-        .poll_own(step.ui_ms, writable, repo_id.as_deref());
-    let playback = super::bridge::advance_playback(model, step.media_ms);
+        .poll_own(step.timer_ms, writable, repo_id.as_deref());
+    let playback = super::bridge::advance_playback(model, step.motion_ms);
     if fired || playback == ClockStep::Changed {
         model.mark_surface_dirty();
     }

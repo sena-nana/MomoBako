@@ -321,7 +321,7 @@ pub struct SidebarState {
     pub folder_delete_submitting: bool,
     pub hover_folder: Option<String>,
     pub hover_since_ms: Option<u64>,
-    /// 拖放悬停用的空闲时钟。进度条填充的时钟在没有过渡时不前进，不能借用。
+    /// 拖放悬停用的时钟，宿主交过来的计时器时间。
     hover_clock: u64,
     pub smart_delete_id: String,
     pub smart_delete_label: String,
@@ -689,9 +689,16 @@ impl SidebarState {
         }
     }
 
-    /// 拖放还按着，或悬停还没结算时，把悬停时钟向前拨一帧。
+    /// 悬停时钟走 `step_ms`（宿主交过来的计时器时间）。
     pub fn tick_hover(&mut self, step_ms: u64) {
         self.hover_clock = self.hover_clock.saturating_add(step_ms);
+    }
+
+    /// 拖放停在文件夹上、离展开还有多少毫秒。已经停满还没结算时为 `None`：那一次由下一次重判结算
+    /// （拖动的指针帧或外部拖放的悬停事件），不按它反复叫醒。
+    pub(crate) fn hover_due_in(&self) -> Option<u64> {
+        let due = self.hover_since_ms?.saturating_add(gap::FOLDER_HOVER_MS);
+        due.checked_sub(self.hover_clock).filter(|left| *left > 0)
     }
 
     pub fn hover_now(&self) -> u64 {

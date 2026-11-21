@@ -1,78 +1,93 @@
-//! 准备帧的时钟：把两帧之间真实流逝的时间交给壳层的计时器、动效和播放时钟。
+//! 宿主时钟：计时器的时间线和动效的帧步长。
 //!
-//! 宿主按需要要帧（`FrameDemand::Continuous(30)`），实际帧距随负载、输入和别处的重绘变，30 帧、
-//! 120 帧都会有，所以不能按每帧固定的毫秒数累加。这里记下上一帧的时刻，算出这一帧的步长：
-//! - 上一帧没有要连续帧（界面闲着）时，这一帧是计时的起点，步长为 0。闲着的这段时间里没有计时器
-//!   在走，刚在归约里武装的计时器（搜索延时、仓库操作爬升）从这一帧起算，不被空闲间隔提前触发。
-//! - 界面计时器和动效的步长不超过 [`MAX_UI_STEP_MS`]：线程卡住、窗口挂起之后恢复时，动效、进度爬升和
-//!   延时接着原来的位置走，不一下子跳到头（卡住以后只补一拍）。
-//! - 播放时钟用不封顶的真实间隔：声音由系统设备按真实时间放，进度条跟着声音走；幻灯片一帧最多
-//!   切一项（到头以后剩下的时间不带到下一项），不会连跳几张。
-//!
-//! 毫秒以下的零头留到下一帧，长时间累加不漂移。
+//! 时间按第一次读钟以来的整毫秒算，每次都从原点重新换算，毫秒以下的零头不会越攒越多。时钟分两条用：
+//! - 计时器（搜索和元数据自动保存的延时、缩略图和下一页的空闲预取、仓库操作行的爬升和收起、外部拖放停在
+//!   侧栏文件夹上的展开）不要帧。宿主每个回调开头（`update`、`input_event`、`wake`、`prepare`）都用
+//!   [`FrameClock::sync_timers`] 取上次同步以来流逝的时间交给它们，所以归约里武装的计时器从武装那一刻起算。
+//!   最早的到期时刻经 [`FrameClock::deadline`] 换成 `Instant` 交给 NanaUI 的 `next_wakeup`，到点由 `wake`
+//!   触发；只有计时器在等时界面不画帧。
+//! - 动效（进度条填充、播放时钟和图片停留）要连续帧，步长是这一帧和上一帧之间的时间。上一帧没要连续帧
+//!   （界面闲着）时这一帧是起点，步长为 0：刚按下的播放和刚开始的过渡不把闲着的间隔算进去。步长不封顶，
+//!   声音由系统设备按真实时间放，进度跟着声音走。
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use nana_ui::FrameDemand;
 
-/// 界面计时器和动效一帧最多走的毫秒数。正常帧距在 8–40 ms，偶尔的卡顿照实算，几百毫秒以上的
-/// 停顿按这个数算。
-pub const MAX_UI_STEP_MS: u64 = 250;
-
-/// 一帧的步长。
+/// 一次同步交出去的时间。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FrameStep {
-    /// 界面计时器和动效走的毫秒数，不超过 [`MAX_UI_STEP_MS`]。
-    pub ui_ms: u64,
-    /// 播放时钟走的毫秒数：真实间隔，不封顶。
-    pub media_ms: u64,
+    /// 计时器走的毫秒数：上次同步以来真实流逝的时间。
+    pub timer_ms: u64,
+    /// 动效和播放时钟走的毫秒数：和上一帧之间的时间，上一帧没要连续帧时为 0。
+    pub motion_ms: u64,
 }
 
 impl FrameStep {
-    /// 两样都走 `ms` 毫秒。离屏验收和测试没有真实帧时钟，按它推进。
+    /// 两样都走 `ms` 毫秒。单测和离屏场景没有真实时钟，按它推进。
     pub const fn millis(ms: u64) -> Self {
         Self {
-            ui_ms: ms,
-            media_ms: ms,
+            timer_ms: ms,
+            motion_ms: ms,
         }
     }
 }
 
-/// 产品窗口的帧时钟，`prepare` 开头取步长，末尾记下这一帧要不要连续帧。
+/// 产品窗口的宿主时钟。
 #[derive(Debug, Default)]
 pub struct FrameClock {
-    last: Option<Instant>,
-    /// 上一帧要了连续帧：两帧之间有计时器或动效在走。
+    /// 第一次读钟的时刻，毫秒数从这里算。
+    origin: Option<Instant>,
+    /// 计时器上次同步到的毫秒数。
+    timers_ms: u64,
+    /// 上一帧的毫秒数。
+    frame_ms: u64,
+    /// 上一帧要了连续帧：两帧之间有动效在走。
     running: bool,
-    /// 还没凑满一毫秒的零头，单位微秒。
-    carry_us: u64,
 }
 
 impl FrameClock {
-    /// 这一帧的步长，`now` 是这一帧开始准备的时刻。
-    ///
-    /// 算法：上一帧闲着或这是第一帧时返回 0，并丢掉零头；否则把两帧间隔（微秒）加上零头，整毫秒
-    /// 部分是播放时钟的步长，余下的留到下一帧；界面步长再封顶 [`MAX_UI_STEP_MS`]。
+    fn millis(&mut self, now: Instant) -> u64 {
+        let origin = *self.origin.get_or_insert(now);
+        u64::try_from(now.saturating_duration_since(origin).as_millis()).unwrap_or(u64::MAX)
+    }
+
+    /// 计时器从上次同步以来走过的毫秒数，`now` 是这次回调的时刻。比上次还早的时刻按 0 算。
+    pub fn sync_timers(&mut self, now: Instant) -> u64 {
+        let at = self.millis(now);
+        let step = at.saturating_sub(self.timers_ms);
+        self.timers_ms = self.timers_ms.max(at);
+        step
+    }
+
+    /// 准备一帧时的步长，`now` 是这一帧开始准备的时刻：计时器照常同步，动效按上一帧有没有要连续帧取步长。
     pub fn step(&mut self, now: Instant) -> FrameStep {
-        let previous = self.last.replace(now);
-        let Some(previous) = previous.filter(|_| self.running) else {
-            self.carry_us = 0;
-            return FrameStep::default();
+        let timer_ms = self.sync_timers(now);
+        let at = self.timers_ms;
+        let motion_ms = if self.running {
+            at.saturating_sub(self.frame_ms)
+        } else {
+            0
         };
-        let elapsed_us =
-            u64::try_from(now.saturating_duration_since(previous).as_micros()).unwrap_or(u64::MAX);
-        let total_us = elapsed_us.saturating_add(self.carry_us);
-        let media_ms = total_us / 1000;
-        self.carry_us = total_us % 1000;
+        self.frame_ms = at;
         FrameStep {
-            ui_ms: media_ms.min(MAX_UI_STEP_MS),
-            media_ms,
+            timer_ms,
+            motion_ms,
         }
     }
 
-    /// 记下这一帧准备完以后要的帧：要连续帧时下一帧的间隔算进计时，按需重绘时不算。
+    /// 记下这一帧准备完以后要的帧：要连续帧时下一帧的间隔算进动效，按需重绘时不算。
     pub fn note_demand(&mut self, demand: FrameDemand) {
         self.running = matches!(demand, FrameDemand::Continuous(_));
+    }
+
+    /// 计时器时间线上，从上次同步再过 `due_in_ms` 毫秒的时刻。还没读过钟时从现在算。
+    pub fn deadline(&self, due_in_ms: u64) -> Instant {
+        let Some(origin) = self.origin else {
+            return Instant::now() + Duration::from_millis(due_in_ms);
+        };
+        let at = Duration::from_millis(self.timers_ms.saturating_add(due_in_ms));
+        origin.checked_add(at).unwrap_or(origin)
     }
 }
 
@@ -83,23 +98,26 @@ mod tests {
 
     use nana_ui::FrameDemand;
 
-    use super::{FrameClock, FrameStep, MAX_UI_STEP_MS};
+    use super::{FrameClock, FrameStep};
 
     fn continuous() -> FrameDemand {
         FrameDemand::Continuous(NonZeroU32::new(30).expect("30"))
     }
 
-    /// 第一帧和闲着以后的第一帧从 0 起算：空闲的间隔不算进计时。
+    /// 闲着以后的第一帧从 0 起算动效；计时器不看帧，把两次同步之间的时间照实交出去。
     #[test]
-    fn idle_frames_start_the_clock_from_zero() {
+    fn idle_frames_restart_motion_but_timers_keep_real_time() {
         let start = Instant::now();
         let mut clock = FrameClock::default();
         assert_eq!(clock.step(start), FrameStep::default(), "第一帧没有上一帧");
         clock.note_demand(FrameDemand::OnDemand);
         assert_eq!(
             clock.step(start + Duration::from_secs(5)),
-            FrameStep::default(),
-            "闲着时过去的 5 秒不算"
+            FrameStep {
+                timer_ms: 5_000,
+                motion_ms: 0
+            },
+            "闲着时过去的 5 秒不算进动效"
         );
         clock.note_demand(continuous());
         assert_eq!(
@@ -108,9 +126,27 @@ mod tests {
         );
     }
 
-    /// 毫秒以下的零头留到下一帧：30 帧的帧距 33.333 ms，30 帧以后正好 1000 ms。
+    /// 回调之间的同步把时间交给计时器，下一帧只拿剩下的；动效仍按两帧之间算。
     #[test]
-    fn sub_millisecond_remainders_carry_over() {
+    fn syncs_between_frames_split_timer_time_but_not_motion() {
+        let start = Instant::now();
+        let mut clock = FrameClock::default();
+        clock.step(start);
+        clock.note_demand(continuous());
+        assert_eq!(clock.sync_timers(start + Duration::from_millis(10)), 10);
+        assert_eq!(
+            clock.step(start + Duration::from_millis(33)),
+            FrameStep {
+                timer_ms: 23,
+                motion_ms: 33
+            }
+        );
+        assert_eq!(clock.sync_timers(start), 0, "倒回去的时刻按 0 算");
+    }
+
+    /// 毫秒数每次从原点换算：30 帧的帧距 33.333 ms，30 帧以后正好 1000 ms。
+    #[test]
+    fn sub_millisecond_remainders_do_not_drift() {
         let start = Instant::now();
         let mut clock = FrameClock::default();
         clock.step(start);
@@ -118,32 +154,21 @@ mod tests {
         let mut total = 0;
         for frame in 1..=30u64 {
             let at = start + Duration::from_micros(frame * 1_000_000 / 30);
-            total += clock.step(at).ui_ms;
+            total += clock.step(at).motion_ms;
             clock.note_demand(continuous());
         }
         assert_eq!(total, 1_000);
     }
 
-    /// 大间隔：界面步长封顶，播放时钟照真实间隔走。
+    /// 到期时刻从上次同步起算；到点叫醒时同步出的毫秒数正好够到期。
     #[test]
-    fn long_gaps_cap_the_ui_step_but_not_the_media_clock() {
+    fn deadlines_wake_exactly_when_the_timer_is_due() {
         let start = Instant::now();
         let mut clock = FrameClock::default();
-        clock.step(start);
-        clock.note_demand(continuous());
-        let step = clock.step(start + Duration::from_secs(3));
-        assert_eq!(
-            step,
-            FrameStep {
-                ui_ms: MAX_UI_STEP_MS,
-                media_ms: 3_000
-            }
-        );
-        clock.note_demand(continuous());
-        assert_eq!(
-            clock.step(start + Duration::from_millis(3_016)),
-            FrameStep::millis(16),
-            "卡顿以后照常走"
-        );
+        clock.sync_timers(start);
+        clock.sync_timers(start + Duration::from_micros(1_400));
+        let due = clock.deadline(250);
+        assert_eq!(due, start + Duration::from_millis(251));
+        assert_eq!(clock.sync_timers(due), 250);
     }
 }

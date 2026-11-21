@@ -32,12 +32,28 @@ fn waiting_operations_climb_every_220ms_up_to_the_ceiling() {
         slot.tick(CLIMB_INTERVAL_MS);
     }
     assert_eq!(value(&slot), Some(CLIMB_CEILING), "最多爬到 88");
-    assert!(!slot.pending(), "停在上限以后不再要帧");
+    assert!(!slot.pending(), "停在上限以后不再等着叫醒");
+    assert_eq!(slot.due_in(), None);
     assert_eq!(
         slot.shown().map(|progress| progress.indeterminate),
         Some(true),
         "不确定进度一样爬"
     );
+}
+
+/// 下一次爬升按到期时刻报给宿主；卡住很久以后一次只爬一级，下一级从现在起再等一个间隔，不会叫醒以后
+/// 还报着已经过去的时刻。
+#[test]
+fn a_long_stall_climbs_once_and_waits_a_fresh_interval() {
+    let mut slot = RepositoryOperation::default();
+    slot.start(OperationStart::new("加载资源库", "读取已注册资源库", 12.0));
+    assert_eq!(slot.due_in(), Some(CLIMB_INTERVAL_MS));
+    slot.pass_time(100);
+    assert_eq!(slot.due_in(), Some(CLIMB_INTERVAL_MS - 100), "拨钟不触发");
+    assert_eq!(value(&slot), Some(12.0));
+    assert!(slot.tick(CLIMB_INTERVAL_MS * 10));
+    assert_eq!(value(&slot), Some(17.0), "落下的几级不补");
+    assert_eq!(slot.due_in(), Some(CLIMB_INTERVAL_MS));
 }
 
 /// 完成停在 100%，180 ms 以后收起；取消立刻收起。

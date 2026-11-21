@@ -7,8 +7,9 @@
 //!
 //! 有 `&mut ShellViewModel` 的归约直接调槽位；文件、工作台和侧栏这些只拿得到自己状态的子状态机把请求
 //! 排进 [`OperationRequests`]，归约结束时由壳层按顺序交给槽位（[`RepositoryOperation::apply`]）。
-//! 爬升和收起的时钟由宿主在准备帧里拨（[`RepositoryOperation::tick`]），和别的计时器一样按两帧之间
-//! 真实流逝的时间走（`frame_clock.rs`）。
+//! 爬升和收起是计时器，不要帧：宿主在每个回调开头把流逝的时间交给时钟（[`RepositoryOperation::pass_time`]），
+//! 按 [`RepositoryOperation::due_in`] 要 NanaUI 到点叫醒，叫醒和准备帧里触发（[`RepositoryOperation::tick`]），
+//! 见 `frame_clock.rs`。
 
 use super::tree_sync::now_ms;
 
@@ -117,7 +118,7 @@ struct Running {
 pub struct RepositoryOperation {
     /// 发过的编号，下一次开始用它加一。
     issued: u64,
-    /// 准备帧拨的时钟（毫秒）。
+    /// 宿主交过来的计时器时间（毫秒）。
     clock_ms: u64,
     current: Option<Running>,
 }
@@ -208,12 +209,18 @@ impl RepositoryOperation {
         }
     }
 
-    /// 准备帧拨时钟：到点往上爬，完成停留到点收起。返回槽位显示的内容有没有变。
+    /// 时钟走 `step_ms`，不触发。宿主在归约之前调，归约里开始和完成的操作从这一刻起算。
+    pub fn pass_time(&mut self, step_ms: u64) {
+        self.clock_ms = self.clock_ms.saturating_add(step_ms);
+    }
+
+    /// 时钟走 `step_ms`，到点往上爬，完成停留到点收起。返回槽位显示的内容有没有变。
     ///
     /// 算法：每过一个 [`CLIMB_INTERVAL_MS`] 爬一级，增量看爬之前的值（35 以下 5、70 以下 3、其余 1），
-    /// 到 [`CLIMB_CEILING`] 停住；已经被更新到上限以上的值不往回压。
+    /// 到 [`CLIMB_CEILING`] 停住；已经被更新到上限以上的值不往回压。一次最多爬一级：线程卡住、机器睡眠以后
+    /// 落下的几级不补，下一级从现在起再等一个间隔。
     pub fn tick(&mut self, step_ms: u64) -> bool {
-        self.clock_ms = self.clock_ms.saturating_add(step_ms);
+        self.pass_time(step_ms);
         let clock = self.clock_ms;
         let Some(running) = self.current.as_mut() else {
             return false;
@@ -222,35 +229,45 @@ impl RepositoryOperation {
             self.current = None;
             return true;
         }
-        let mut changed = false;
-        while let Some(due) = running.next_climb_ms.filter(|due| clock >= *due) {
-            running.next_climb_ms = Some(due + CLIMB_INTERVAL_MS);
-            let value = running.progress.value;
-            if value >= CLIMB_CEILING {
-                continue;
-            }
-            let increment = if value < 35.0 {
-                5.0
-            } else if value < 70.0 {
-                3.0
-            } else {
-                1.0
-            };
-            running.progress.value = (value + increment).min(CLIMB_CEILING);
-            changed = true;
+        let Some(due) = running.next_climb_ms.filter(|due| clock >= *due) else {
+            return false;
+        };
+        let next = due + CLIMB_INTERVAL_MS;
+        running.next_climb_ms = Some(if next > clock {
+            next
+        } else {
+            clock + CLIMB_INTERVAL_MS
+        });
+        let value = running.progress.value;
+        if value >= CLIMB_CEILING {
+            return false;
         }
-        if changed {
-            running.progress.updated_at_ms = now_ms();
-        }
-        changed
+        let increment = if value < 35.0 {
+            5.0
+        } else if value < 70.0 {
+            3.0
+        } else {
+            1.0
+        };
+        running.progress.value = (value + increment).min(CLIMB_CEILING);
+        running.progress.updated_at_ms = now_ms();
+        true
     }
 
-    /// 还要准备帧接着拨：在爬，或者等着收起。到了上限、只剩爬升的操作也算，收起靠完成或取消。
+    /// 还有要等的时刻：在爬，或者等着收起。到了上限、只剩爬升的操作不算，收起靠完成或取消。
     pub fn pending(&self) -> bool {
-        self.current.as_ref().is_some_and(|running| {
-            running.hide_at_ms.is_some()
-                || running.next_climb_ms.is_some() && running.progress.value < CLIMB_CEILING
-        })
+        self.due_in().is_some()
+    }
+
+    /// 下一次爬升或收起离现在还有多少毫秒，没有要等的时为 `None`。
+    pub fn due_in(&self) -> Option<u64> {
+        let running = self.current.as_ref()?;
+        let due = running.hide_at_ms.or_else(|| {
+            running
+                .next_climb_ms
+                .filter(|_| running.progress.value < CLIMB_CEILING)
+        })?;
+        Some(due.saturating_sub(self.clock_ms))
     }
 
     /// 槽位现在显示的操作。

@@ -113,14 +113,21 @@ impl FilesState {
         self.prefetch_due_ms.is_some() || self.virtual_page_pending()
     }
 
-    /// 实况帧把空闲时钟向前拨。没有待预取时停在原地。
+    /// 空闲时钟走 `step_ms`（宿主交过来的计时器时间），返回现在的时刻。
     ///
     /// 挂着的缩略图解码，和来源目录下一页的缩略图预取，共用这一只钟。
     pub fn tick_prefetch(&mut self, step_ms: u64) -> u64 {
-        if self.prefetch_pending() {
-            self.prefetch_clock = self.prefetch_clock.saturating_add(step_ms);
-        }
+        self.prefetch_clock = self.prefetch_clock.saturating_add(step_ms);
         self.prefetch_clock
+    }
+
+    /// 最早的一次预取离现在还有多少毫秒，没有在等的预取时为 `None`。
+    pub(crate) fn prefetch_due_in(&self) -> Option<u64> {
+        [self.prefetch_due_ms, self.virtual_page_due_ms()]
+            .into_iter()
+            .flatten()
+            .map(|due| due.saturating_sub(self.prefetch_clock))
+            .min()
     }
 
     /// 用解码出的原始宽高替换布局，并按像素取样色板。同一张缩略图在目录、智能文件夹和分类视图里各有一行时一起更新，

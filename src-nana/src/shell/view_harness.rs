@@ -84,7 +84,7 @@ impl ShellHarness {
     /// 同 [`Self::frame`]，步长由调用方给，按帧时钟模拟不同帧率时用。
     pub fn frame_with(&mut self, step: crate::frame_clock::FrameStep) {
         let context = self.window.document.context_mut();
-        let now = context.animation_now() + Duration::from_millis(step.ui_ms);
+        let now = context.animation_now() + Duration::from_millis(step.motion_ms);
         context.advance_animations(now);
         super::poll_timers(&mut self.model, step);
         crate::window_host::prepare_motion(

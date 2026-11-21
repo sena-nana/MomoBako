@@ -68,9 +68,14 @@ impl FilesState {
         self.virtual_page.due_ms = Some(self.prefetch_clock.saturating_add(PREFETCH_IDLE_MS));
     }
 
-    /// 空闲计时还没到。准备帧据此继续要帧。
+    /// 空闲计时还没到。
     pub(in crate::shell::files) fn virtual_page_pending(&self) -> bool {
         self.virtual_page.due_ms.is_some()
+    }
+
+    /// 下一页预取的到期时刻（空闲时钟上的毫秒数）。
+    pub(in crate::shell::files) fn virtual_page_due_ms(&self) -> Option<u64> {
+        self.virtual_page.due_ms
     }
 
     /// 空闲到点就发出下一页读取。还没到、或者没有要读的页时什么也不做。

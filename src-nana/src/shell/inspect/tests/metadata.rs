@@ -413,7 +413,7 @@ fn leaving_the_preview_flushes_the_pending_autosave() {
         Some("repo"),
         InspectMessage::SetComment("刚打的字".into()),
     );
-    assert!(state.timers_pending());
+    assert!(state.timer_due_in().is_some());
     state.clear();
     assert!(
         matches!(state.take_effects().as_slice(), [InspectEffect::SaveMetadata { metadata, .. }] if metadata.get("comment") == Some(&json!("刚打的字")))
