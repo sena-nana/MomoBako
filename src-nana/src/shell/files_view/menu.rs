@@ -26,7 +26,13 @@ use super::style;
 const CHROME: MenuChrome = MenuChrome {
     prefix: "file",
     close: || ShellMessage::Files(FilesMessage::CloseEntryMenu),
-    toggle: Some(|group| ShellMessage::Files(FilesMessage::ToggleMenuGroup(group))),
+    branch: Some(|branch, source, inside| {
+        ShellMessage::Files(FilesMessage::MenuBranchChanged {
+            branch,
+            source,
+            inside,
+        })
+    }),
     arm: Some(|id| ShellMessage::Files(FilesMessage::ArmMenuConfirm(id))),
 };
 
@@ -60,7 +66,10 @@ impl EntryMenuView {
         for entry in &mut entries {
             entry.pending = entry.confirm_label.is_some() && pending == Some(entry.id.as_str());
         }
-        Some(MenuView::new(entries, model.files.menu_group.clone()))
+        Some(MenuView::new(
+            entries,
+            model.files.menu_branch.open().map(str::to_string),
+        ))
     }
 }
 

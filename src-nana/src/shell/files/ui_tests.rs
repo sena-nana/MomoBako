@@ -13,7 +13,9 @@ use crate::shell::{ShellMessage, ShellPage, ShellViewModel, WorkspacePanel, Work
 
 use super::super::files_view::previewing;
 use super::super::inspect::InspectMessage;
-use super::{FileContext, FileDialog, FileRow, FilesEffect, FilesMessage, FilesState};
+use super::{
+    BranchSource, FileContext, FileDialog, FileRow, FilesEffect, FilesMessage, FilesState,
+};
 
 fn row(path: &str, kind: &str, extension: Option<&str>) -> FileRow {
     FileRow::from_entry(&FileBrowserEntry {
@@ -202,17 +204,44 @@ fn context_menu_selects_like_a_click_and_confirms_permanent_delete_twice() {
         [FilesEffect::LoadAsset { .. }]
     ));
 
-    let toggle = |group: &str| FilesMessage::ToggleMenuGroup(group.into());
-    state.reduce(&writable(), toggle("thumbnail"));
-    assert_eq!(state.menu_group.as_deref(), Some("thumbnail"), "点分组展开");
-    state.reduce(&writable(), toggle("playlist-membership"));
-    assert_eq!(
-        state.menu_group.as_deref(),
-        Some("playlist-membership"),
-        "点另一个分组换成展开它，同一时刻只展开一个"
+    let branch =
+        |group: &str, source: BranchSource, inside: bool| FilesMessage::MenuBranchChanged {
+            branch: group.into(),
+            source,
+            inside,
+        };
+    state.reduce(
+        &writable(),
+        branch("thumbnail", BranchSource::Pointer, true),
     );
-    state.reduce(&writable(), toggle("playlist-membership"));
-    assert_eq!(state.menu_group, None, "再点一次收起");
+    assert_eq!(
+        state.menu_branch.open(),
+        Some("thumbnail"),
+        "指针进来就展开"
+    );
+    state.reduce(
+        &writable(),
+        branch("playlist-membership", BranchSource::Focus, true),
+    );
+    assert_eq!(
+        state.menu_branch.open(),
+        Some("thumbnail"),
+        "指针和焦点各在一个分组时只展开指针那一个"
+    );
+    state.reduce(
+        &writable(),
+        branch("thumbnail", BranchSource::Pointer, false),
+    );
+    assert_eq!(
+        state.menu_branch.open(),
+        Some("playlist-membership"),
+        "指针离开以后展开焦点所在的分组"
+    );
+    state.reduce(
+        &writable(),
+        branch("playlist-membership", BranchSource::Focus, false),
+    );
+    assert_eq!(state.menu_branch.open(), None, "都离开就收起，没有延迟");
 
     state.reduce(&writable(), FilesMessage::ArmMenuConfirm("delete".into()));
     assert_eq!(
@@ -221,13 +250,25 @@ fn context_menu_selects_like_a_click_and_confirms_permanent_delete_twice() {
         "第一次只进入待确认"
     );
     assert!(state.entry_menu.is_some(), "待确认时菜单不关");
-    state.reduce(&writable(), toggle("thumbnail"));
+    state.reduce(
+        &writable(),
+        branch("thumbnail", BranchSource::Pointer, true),
+    );
     state.reduce(&writable(), FilesMessage::CloseEntryMenu);
     assert!(
-        state.entry_menu.is_none() && state.menu_pending.is_none() && state.menu_group.is_none()
+        state.entry_menu.is_none()
+            && state.menu_pending.is_none()
+            && state.menu_branch.open().is_none()
     );
-    state.reduce(&writable(), toggle("thumbnail"));
-    assert_eq!(state.menu_group, None, "菜单关掉以后才到的点击不再记");
+    state.reduce(
+        &writable(),
+        branch("thumbnail", BranchSource::Pointer, true),
+    );
+    assert_eq!(
+        state.menu_branch.open(),
+        None,
+        "菜单关掉以后才到的进出不再记"
+    );
 }
 
 /// 右键菜单和导入菜单的 Escape 都由 NanaUI 交给菜单自己，文件页的全局 Escape 只关对话框。

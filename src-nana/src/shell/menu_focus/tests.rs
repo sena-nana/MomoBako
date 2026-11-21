@@ -179,8 +179,9 @@ fn the_menu_key_on_a_card_opens_its_menu_onto_the_first_item() {
     press(&mut harness, "ArrowUp");
     assert_eq!(focused(&harness).as_deref(), Some("缩略图"), "分组也是一项");
     assert_eq!(
-        harness.model.files.menu_group, None,
-        "焦点走到分组上不展开，点了才展开"
+        harness.model.files.menu_branch.open(),
+        Some("thumbnail"),
+        "焦点走到分组上子菜单就展开"
     );
     press(&mut harness, "ArrowUp");
     assert_eq!(focused(&harness).as_deref(), Some("复制到…"));

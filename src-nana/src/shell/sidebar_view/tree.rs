@@ -483,7 +483,7 @@ fn smart_row(item: SmartItem, state: Signal<SmartGroup>) -> AnyView {
 const FOLDER_MENU: MenuChrome = MenuChrome {
     prefix: "folder",
     close: || ShellMessage::Sidebar(SidebarMessage::Gap(GapMessage::CloseFolderMenu)),
-    toggle: None,
+    branch: None,
     arm: None,
 };
 

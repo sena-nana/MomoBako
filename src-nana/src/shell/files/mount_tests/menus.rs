@@ -194,17 +194,19 @@ fn context_menu_closes_outside_and_a_clicked_group_stays_open() {
     let (x, y) = labeled_center(&window, "缩略图");
     let messages = click(&mut window, x, y);
     assert!(
-        matches!(
-            messages.as_slice(),
-            [ShellMessage::Files(FilesMessage::ToggleMenuGroup(group))] if group == "thumbnail"
-        ),
-        "点分组只展开它的子项：{} 条消息",
+        !messages.is_empty()
+            && messages.iter().all(|message| matches!(
+                message,
+                ShellMessage::Files(FilesMessage::MenuBranchChanged { branch, inside: true, .. })
+                    if branch == "thumbnail"
+            )),
+        "点分组只让子菜单展开，菜单不收起：{} 条消息",
         messages.len()
     );
     for message in messages {
         model.reduce(message);
     }
-    assert_eq!(model.files.menu_group.as_deref(), Some("thumbnail"));
+    assert_eq!(model.files.menu_branch.open(), Some("thumbnail"));
     let mut window = laid_out(&model);
     assert!(has_label(&window, "刷新缩略图"), "子项展开");
 
@@ -220,7 +222,7 @@ fn context_menu_closes_outside_and_a_clicked_group_stays_open() {
     for message in messages {
         model.reduce(message);
     }
-    assert!(model.files.entry_menu.is_none() && model.files.menu_group.is_none());
+    assert!(model.files.entry_menu.is_none() && model.files.menu_branch.open().is_none());
 }
 
 #[test]

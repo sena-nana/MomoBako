@@ -1,6 +1,6 @@
 //! 文件右键菜单是 NanaUI 的 `AnchoredActionMenu`：打开时焦点落在首项，方向键在项之间走；
-//! 点分组不收起，只在下面缩进展开或收起子项；点外面、Escape、在菜单上按右键都收起，收起以后
-//! 浮层层空出来；禁用的分组不展开。
+//! 指针或焦点进到分组那一行（含子菜单）就在右边展开子菜单，都离开就收起；点分组不收起菜单；
+//! 点外面、Escape、在菜单上按右键都收起，收起以后浮层层空出来；禁用的分组不展开。
 
 use crate::backend::services::repository::PlaylistSummary;
 use crate::shell::files::FilesMessage;
@@ -8,8 +8,7 @@ use crate::shell::view_harness::ShellHarness;
 use crate::shell::{GapMessage, ShellMessage, SidebarMessage, WorkspacePanel};
 use nana_ui::runtime::{LayoutBox, StableNodeId};
 
-/// 「缩略图」分组的第一项和最后一项。
-const FIRST_CHILD: &str = "自定义缩略图（选择文件）";
+/// 「缩略图」分组的最后一项。
 const LAST_CHILD: &str = "刷新缩略图";
 
 /// 打开着 cover.png 右键菜单的文件页。
@@ -77,72 +76,96 @@ fn the_menu_opens_on_its_first_item_and_arrows_walk_it() {
     assert!(harness.model.files.entry_menu.is_some(), "走动焦点不关菜单");
 }
 
-/// 点分组只发展开的消息，菜单不收起；子项缩进排在分组下面。再点一次收起。
+/// 把指针移到键是 `key` 的节点中间，这一下发出的消息逐条归约。
+fn hover(harness: &mut ShellHarness, key: &str) {
+    let (x, y) = point(harness, key);
+    harness.pointer(
+        nana_ui::PointerPhase::Move,
+        x,
+        y,
+        nana_ui::InputModifiers::default(),
+    );
+    let messages = harness.take_messages();
+    harness.settle(messages);
+}
+
+/// 指针进到分组那一行，子菜单在右边 4px 处展开，顶边和这一行齐；指针移进子菜单还开着，
+/// 移到别的项上就收起，没有延迟。
 #[test]
-fn a_clicked_group_expands_its_items_below_it_and_stays_open() {
+fn hovering_a_group_opens_its_submenu_beside_it() {
     let mut harness = menu();
-    assert!(!children_shown(&harness), "子项一开始收着");
+    assert!(!children_shown(&harness), "子菜单一开始收着");
+    hover(&mut harness, "file-menu-thumbnail");
+    assert_eq!(harness.model.files.menu_branch.open(), Some("thumbnail"));
+    assert!(children_shown(&harness), "指针进来就展开");
+    let group = bounds(&harness, node(&harness, "file-menu-thumbnail"));
+    let first = bounds(&harness, node(&harness, "file-menu-thumbnail-custom-file"));
+    assert!(
+        first.x >= group.x + group.width,
+        "子菜单在分组右边：{group:?} {first:?}"
+    );
+    assert!(
+        (first.y - group.y).abs() < 8.0,
+        "子菜单顶边和分组齐：{group:?} {first:?}"
+    );
+
+    hover(&mut harness, "file-menu-thumbnail-custom-file");
+    assert!(children_shown(&harness), "移进子菜单还开着");
+    hover(&mut harness, "file-menu-preview");
+    assert!(!children_shown(&harness), "移到别的项上就收起");
+    assert!(harness.model.files.entry_menu.is_some());
+}
+
+/// 点分组本身不收起菜单，焦点落在分组上，子菜单跟着开着。
+#[test]
+fn clicking_a_group_keeps_the_menu_open() {
+    let mut harness = menu();
     let (x, y) = point(&harness, "file-menu-thumbnail");
     let clicked = harness.click_messages(x, y);
     assert!(
-        matches!(
-            clicked.as_slice(),
-            [ShellMessage::Files(FilesMessage::ToggleMenuGroup(group))] if group == "thumbnail"
-        ),
-        "点分组只展开它：{} 条消息",
+        clicked.iter().all(|message| matches!(
+            message,
+            ShellMessage::Files(FilesMessage::MenuBranchChanged { inside: true, .. })
+        )),
+        "点分组只让子菜单展开：{} 条消息",
         clicked.len()
     );
     harness.settle(clicked);
     assert!(harness.model.files.entry_menu.is_some(), "点分组不关菜单");
-    assert!(children_shown(&harness), "子项展开");
-    let group = bounds(&harness, node(&harness, "file-menu-thumbnail"));
-    let first = bounds(&harness, node(&harness, "file-menu-thumbnail-custom-file"));
-    assert!(first.y > group.y, "子项排在分组下面：{group:?} {first:?}");
-    assert!(first.x > group.x + 8.0, "子项向右缩进：{group:?} {first:?}");
-    assert!(harness.find(FIRST_CHILD).is_some());
-
-    let (x, y) = point(&harness, "file-menu-thumbnail");
-    let clicked = harness.click_messages(x, y);
-    harness.settle(clicked);
-    assert!(!children_shown(&harness), "再点一次收起");
-    assert!(harness.model.files.entry_menu.is_some());
+    assert!(children_shown(&harness), "子菜单开着");
 }
 
-/// 键盘：Enter 展开分组，焦点留在分组上，方向键接着走进子项。
+/// 键盘：焦点走到分组上子菜单就展开，往下一格进到子菜单的首项，走出子菜单就收起。
 #[test]
-fn enter_on_a_group_expands_it_and_arrows_walk_into_its_items() {
+fn focus_on_a_group_opens_its_submenu_and_arrows_walk_into_it() {
     let mut harness = menu();
     let group = node(&harness, "file-menu-thumbnail");
     harness.focus(group);
-    harness.press_key("Enter");
-    assert!(children_shown(&harness), "Enter 展开分组");
-    assert_eq!(harness.focused(), Some(group), "焦点留在分组上");
+    let messages = harness.take_messages();
+    harness.settle(messages);
+    assert!(children_shown(&harness), "焦点进来就展开");
     harness.press_key("ArrowDown");
     assert_eq!(
         harness.focused(),
         harness.keyed("file-menu-thumbnail-custom-file"),
-        "方向键走进子项"
+        "方向键走进子菜单"
     );
+    assert!(children_shown(&harness), "焦点在子菜单里还开着");
+    harness.press_key("ArrowUp");
+    harness.press_key("ArrowUp");
+    assert_ne!(harness.focused(), Some(group));
+    assert!(!children_shown(&harness), "焦点走出分组就收起");
 }
 
-/// 回收站里「缩略图」是禁用的：点它什么都不发，子项不展开。
+/// 回收站里「缩略图」是禁用的：指针和焦点进来都不展开子菜单。
 #[test]
 fn a_disabled_group_does_not_open() {
     let mut model = menu().model;
     model.workspace.panel = WorkspacePanel::Trash;
     let mut harness = ShellHarness::mount(model);
     harness.take_messages();
-    let (x, y) = point(&harness, "file-menu-thumbnail");
-    let clicked = harness.click_messages(x, y);
-    assert!(
-        clicked.iter().all(|message| !matches!(
-            message,
-            ShellMessage::Files(FilesMessage::ToggleMenuGroup(_))
-        )),
-        "禁用的分组不展开"
-    );
-    harness.settle(clicked);
-    assert!(!children_shown(&harness), "禁用的分组展开了子项");
+    hover(&mut harness, "file-menu-thumbnail");
+    assert!(!children_shown(&harness), "禁用的分组展开了子菜单");
 }
 
 /// 点在菜单外面：框架收起菜单，只发关闭消息，这一下不落到下面的页面；浮层层随即空出来。
@@ -295,9 +318,11 @@ fn playlist_group_draws_the_playlist_name() {
             result: Ok(vec![morning_playlist()]),
         },
     ));
-    model.reduce(ShellMessage::Files(FilesMessage::ToggleMenuGroup(
-        "playlist-membership".into(),
-    )));
+    model.reduce(ShellMessage::Files(FilesMessage::MenuBranchChanged {
+        branch: "playlist-membership".into(),
+        source: crate::shell::files::BranchSource::Pointer,
+        inside: true,
+    }));
     let harness = ShellHarness::mount(model);
     let drawn = harness.nodes().into_iter().any(|node| {
         node.label.as_deref() == Some("早晨")

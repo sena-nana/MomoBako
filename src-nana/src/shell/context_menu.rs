@@ -8,8 +8,10 @@
 //! ViewModel 自己关掉菜单（滚动、窗口缩放、失焦）时浮层块换下这一块，会话经宿主收起它。
 //!
 //! 条目：图标、文字；危险项走危险色；勾选项（已经在里面的播放列表）报成勾选框、前面画勾。
-//! 分组（「缩略图」「加入播放列表」）是一行点了不收起的项，点它在下面缩进展开或收起子项，同一时刻
-//! 只展开一个分组。要点两次的项（回收站的「彻底删除」）第一次点不收起，只把这一行变成待确认：
+//! 分组（「缩略图」「加入播放列表」）带 ›，子菜单贴在这一行右边 4px：指针或键盘焦点进到分组那一行
+//! （含子菜单）就展开，都离开就收起，没有延迟；点分组本身不收起菜单（按下时焦点落在分组上），
+//! 禁用的分组不展开。指针和焦点各在一个分组时只展开指针那一个。方向键按先后走：焦点在分组上时
+//! 子菜单展开，往下一格进到子菜单的首项，走出子菜单子菜单就收起。要点两次的项（回收站的「彻底删除」）第一次点不收起，只把这一行变成待确认：
 //! 文案换成确认句、标成当前项；再点一次才执行并收起。不能用的项禁用，后面可以跟一行弱色小字写原因
 //! （不是菜单项，不能点、不能聚焦）。在菜单上按右键或菜单键也收起：菜单自己不提供右键菜单。
 //! 任意滚动区的偏移变了、窗口失焦、窗口逻辑尺寸变了也收起，文件菜单和文件夹菜单一起收；
@@ -31,12 +33,13 @@ use nana_ui::runtime::view::{
 };
 use nana_ui::runtime::{
     ActionMenuItem, Activate, AlignSpec, AnchoredActionMenu, AnchoredMenuDismissed, AppContext,
-    LengthSpec, OverlayHost, SecondaryPress, SemanticColorRole, Stack,
+    FocusWithinChanged, LengthSpec, OverlayHost, PointerHoverChanged, PositionSpec, RadiusTier,
+    SecondaryPress, SemanticColorRole, Stack,
 };
 use nana_ui_core::Icon;
 
 use super::admin::AdminMessage;
-use super::files::FilesMessage;
+use super::files::{BranchSource, FilesMessage};
 use super::files_view::style;
 use super::input::InputMessage;
 use super::player::PlayerMessage;
@@ -54,8 +57,12 @@ pub(crate) struct MenuScrollSnapshot {
 
 /// 菜单的最小宽度。
 const MENU_MIN_WIDTH: f32 = 180.0;
-/// 分组展开的子项向右缩进的距离。
-const NEST_INDENT: f32 = 16.0;
+/// 子菜单离分组那一行右缘的距离。
+const SUBMENU_GAP: f32 = 4.0;
+/// 子菜单的内边距。
+const SUBMENU_PADDING: f32 = 4.0;
+/// 分组后面的箭头。
+const BRANCH_MARK: &str = "›";
 /// 行间距。
 const ITEM_GAP: f32 = 2.0;
 
@@ -218,51 +225,39 @@ impl MenuView {
         })
     }
 
-    /// 摊平成菜单里一行一行：分组后面跟着它展开的子项。禁用的分组不展开。
+    /// 菜单里的一行一行。分组带着它的子项，子菜单挂在那一行上。
     fn rows(&self) -> Vec<MenuRow> {
-        let mut rows = Vec::new();
-        for entry in &self.entries {
-            let group = !entry.children.is_empty();
-            rows.push(MenuRow::of(entry, group, false));
-            if group && !entry.disabled && self.expanded.as_deref() == Some(entry.id.as_str()) {
-                rows.extend(
-                    entry
-                        .children
-                        .iter()
-                        .map(|child| MenuRow::of(child, false, true)),
-                );
-            }
-        }
-        rows
+        self.entries.iter().map(MenuRow::of).collect()
     }
 }
 
-/// 菜单里画出来的一行：条目本身（不带子项），是不是分组、是不是分组展开的子项。
+/// 菜单里画出来的一行：条目和它的子项（分组时）。
 #[derive(Clone, Debug, PartialEq)]
 struct MenuRow {
     entry: MenuEntry,
-    group: bool,
-    nested: bool,
 }
 
 impl MenuRow {
-    fn of(entry: &MenuEntry, group: bool, nested: bool) -> Self {
+    fn of(entry: &MenuEntry) -> Self {
         Self {
-            entry: MenuEntry {
-                children: Vec::new(),
-                ..entry.clone()
-            },
-            group,
-            nested,
+            entry: entry.clone(),
         }
+    }
+
+    fn group(&self) -> bool {
+        !self.entry.children.is_empty()
     }
 
     /// 行的键：条目内容，不含禁用和待确认，这两样只改绑定的字段，这一行不重建。
     fn key(&self) -> String {
-        let mut row = self.clone();
-        row.entry.disabled = false;
-        row.entry.pending = false;
-        format!("{row:?}")
+        let mut entry = self.entry.clone();
+        entry.disabled = false;
+        entry.pending = false;
+        for child in &mut entry.children {
+            child.disabled = false;
+            child.pending = false;
+        }
+        format!("{entry:?}")
     }
 }
 
@@ -273,8 +268,8 @@ pub(crate) struct MenuChrome {
     pub prefix: &'static str,
     /// 框架收起了菜单（点外面、Escape、选了一项）或者在菜单上按了右键时发的关闭消息。
     pub close: fn() -> ShellMessage,
-    /// 点分组：展开或收起它的子项。没有分组的菜单为 `None`。
-    pub toggle: Option<fn(String) -> ShellMessage>,
+    /// 指针或焦点进出带子菜单的分组。没有分组的菜单为 `None`。
+    pub branch: Option<fn(String, BranchSource, bool) -> ShellMessage>,
     /// 要点两次的项第一次被点。没有这种项的菜单为 `None`，这样的项点一次就执行。
     pub arm: Option<fn(String) -> ShellMessage>,
 }
@@ -455,7 +450,7 @@ pub(crate) fn context_menu(view: Signal<MenuView>, x: f32, y: f32, chrome: MenuC
     .gap(ITEM_GAP);
     let close = chrome.close;
     let surface = widget(AnchoredActionMenu::new(x, y))
-        .prop::<f32, MenuWidth>(move || view.with(menu_width))
+        .prop::<f32, MenuWidth>(move || view.with(|view| menu_width(&view.entries)))
         .entity_ref(menu)
         .children((rows,))
         .key(format!("{}-context-menu", chrome.prefix))
@@ -511,38 +506,34 @@ impl OverlaySession for MenuPresence {
     }
 }
 
-/// 菜单宽：至少 180，按所有可能露出来的文案撑开（确认句、分组的子项、写原因的小字），展开分组、
-/// 待确认时宽度不跳。中文按字号算，其余按半个字号多一点。
-fn menu_width(view: &MenuView) -> f32 {
+/// 菜单宽：至少 180，按这一层所有可能露出来的文案撑开（确认句、写原因的小字、分组后面的 ›），待确认时
+/// 宽度不跳。中文按字号算，其余按半个字号多一点。子菜单按自己的条目另算。
+fn menu_width(entries: &[MenuEntry]) -> f32 {
     fn text(label: &str, size: f32) -> f32 {
         label
             .chars()
             .map(|ch| if ch.is_ascii() { size * 0.55 } else { size })
             .sum()
     }
-    fn entry(entry: &MenuEntry, indent: f32) -> f32 {
-        if entry.note {
-            return 20.0 + text(&entry.label, 12.0);
-        }
-        let label = text(&entry.label, 13.0).max(
-            entry
-                .confirm_label
-                .map(|label| text(label, 13.0))
-                .unwrap_or(0.0),
-        );
-        let icon = if entry.icon.is_some() || entry.checked {
-            22.0
-        } else {
-            0.0
-        };
-        indent + 24.0 + icon + label
-    }
-    let widest = view
-        .entries
+    let widest = entries
         .iter()
-        .flat_map(|top| {
-            std::iter::once(entry(top, 0.0))
-                .chain(top.children.iter().map(|child| entry(child, NEST_INDENT)))
+        .map(|entry| {
+            if entry.note {
+                return 20.0 + text(&entry.label, 12.0);
+            }
+            let label = text(&entry.label, 13.0).max(
+                entry
+                    .confirm_label
+                    .map(|label| text(label, 13.0))
+                    .unwrap_or(0.0),
+            );
+            let icon = if entry.icon.is_some() || entry.checked {
+                22.0
+            } else {
+                0.0
+            };
+            let mark = if entry.children.is_empty() { 0.0 } else { 20.0 };
+            24.0 + icon + label + mark
         })
         .fold(0.0_f32, f32::max);
     (widest + 12.0).max(MENU_MIN_WIDTH)
@@ -564,7 +555,7 @@ impl FieldWrite<AnchoredActionMenu, f32> for MenuWidth {
     }
 }
 
-/// 点了不收起菜单：分组，和还没进入待确认的要点两次的项。
+/// 点了不收起菜单：分组（点它只把焦点放上去，子菜单跟着展开），和还没进入待确认的要点两次的项。
 struct KeepOpen;
 
 impl FieldWrite<ActionMenuItem, bool> for KeepOpen {
@@ -579,37 +570,102 @@ impl FieldWrite<ActionMenuItem, bool> for KeepOpen {
     }
 }
 
-/// 一行：写原因的小字，或者菜单项。分组展开的子项向右缩进。
+/// 一行：写原因的小字、菜单项，或者带子菜单的分组。分组那一格报告指针和焦点的进出，子菜单挂在它右边。
 fn slot(view: Signal<MenuView>, row: MenuRow, chrome: MenuChrome) -> AnyView {
     let key = format!("{}-menu-{}", chrome.prefix, row.entry.id);
     if row.entry.note {
         return note(&row.entry, key);
     }
-    let nested = row.nested;
-    let item = item(view, row, chrome).key(key).into_any();
-    if !nested {
-        return item;
+    if !row.group() {
+        return item(view, row.entry, false, chrome).key(key).into_any();
     }
-    widget(
-        Stack::column(0.0)
-            .width(LengthSpec::Fill)
-            .with_layout(|layout| layout.padding_left = Some(LengthSpec::Px(NEST_INDENT))),
-    )
-    .children((item,))
-    .into_any()
+    let Some(branch) = chrome.branch else {
+        eprintln!(
+            "Nana {} 右键菜单没有分组的进出消息，子菜单展不开：{}",
+            chrome.prefix, row.entry.id
+        );
+        return item(view, row.entry, true, chrome).key(key).into_any();
+    };
+    let frame = Stack::column(0.0)
+        .width(LengthSpec::Fill)
+        .with_layout(|layout| layout.position = PositionSpec::Relative);
+    let (pointer, focus) = (row.entry.id.clone(), row.entry.id.clone());
+    let sub = submenu(view, &row.entry, chrome);
+    widget(frame)
+        .children((item(view, row.entry, true, chrome).key(key), sub))
+        .on_cx(move |_, event: &PointerHoverChanged, cx| {
+            cx.dispatch_program_all(branch(
+                pointer.clone(),
+                BranchSource::Pointer,
+                event.hovered,
+            ));
+        })
+        .on_cx(move |_, event: &FocusWithinChanged, cx| {
+            cx.dispatch_program_all(branch(focus.clone(), BranchSource::Focus, event.focused));
+        })
+        .into_any()
 }
 
-/// 点一项做什么：分组展开或收起子项，要点两次的项第一次只进入待确认，别的发这一项的消息。
+/// 分组的子菜单：贴在这一行右边 4px，顶边和这一行齐。中间的 4px 也算在子菜单里，指针从分组移过去不会
+/// 中途离开。分组禁用时不展开。
+fn submenu(view: Signal<MenuView>, entry: &MenuEntry, chrome: MenuChrome) -> AnyView {
+    let id = entry.id.clone();
+    let rows = entry
+        .children
+        .iter()
+        .map(|child| {
+            item(view, child.clone(), false, chrome)
+                .key(format!("{}-menu-{}", chrome.prefix, child.id))
+                .into_any()
+        })
+        .collect::<Vec<_>>();
+    let panel = Stack::column(ITEM_GAP)
+        .width(LengthSpec::Px(menu_width(&entry.children)))
+        .padding(SUBMENU_PADDING)
+        .surface(SemanticColorRole::Surface)
+        .border(SemanticColorRole::BorderStrong, 1.0)
+        .radius(RadiusTier::Md);
+    let bridge = Stack::column(0.0).hittable().with_layout(|layout| {
+        layout.position = PositionSpec::Absolute;
+        layout.offset_top = Some(LengthSpec::Px(-SUBMENU_PADDING));
+        layout.offset_left = Some(LengthSpec::Percent(100.0));
+        layout.width = Some(LengthSpec::Shrink);
+        layout.padding_left = Some(LengthSpec::Px(SUBMENU_GAP));
+        layout.z_index = Some(1);
+    });
+    widget(bridge)
+        .visible(move || {
+            view.with(|view| {
+                view.expanded.as_deref() == Some(id.as_str())
+                    && view.find(&id).is_some_and(|entry| !entry.disabled)
+            })
+        })
+        .children((widget(panel.with_layout(|layout| {
+            layout.paint.box_shadows = vec![submenu_shadow()];
+        }))
+        .children(rows),))
+        .key(format!("{}-menu-sub-{}", chrome.prefix, entry.id))
+        .into_any()
+}
+
+/// 子菜单的投影：往下 10、模糊 28、收 10，黑色 55%。
+fn submenu_shadow() -> nana_ui_core::BoxShadowSpec {
+    nana_ui_core::BoxShadowSpec {
+        paint_color: None,
+        offset_x: 0.0,
+        offset_y: 10.0,
+        blur_radius: 28.0,
+        spread_radius: -10.0,
+        color: [0.0, 0.0, 0.0, 0.55],
+        inset: false,
+    }
+}
+
+/// 点一项做什么：分组什么都不发，要点两次的项第一次只进入待确认，别的发这一项的消息。
 fn click(entry: &MenuEntry, group: bool, chrome: MenuChrome) -> Option<ShellMessage> {
     if group {
-        let Some(toggle) = chrome.toggle else {
-            eprintln!(
-                "Nana {} 右键菜单没有展开分组的消息：{}",
-                chrome.prefix, entry.id
-            );
-            return None;
-        };
-        return Some(toggle(entry.id.clone()));
+        // 点分组本身只把焦点放到它上面，子菜单跟着焦点展开，菜单不收起。
+        return None;
     }
     match chrome.arm {
         Some(arm) if entry.confirm_label.is_some() && !entry.pending => Some(arm(entry.id.clone())),
@@ -618,9 +674,16 @@ fn click(entry: &MenuEntry, group: bool, chrome: MenuChrome) -> Option<ShellMess
 }
 
 /// 菜单项。禁用、待确认的文案、标成当前项和点了收不收起都按这一行现在的样子绑定。
-fn item(view: Signal<MenuView>, row: MenuRow, chrome: MenuChrome) -> El<ActionMenuItem> {
-    let MenuRow { entry, group, .. } = row;
+fn item(
+    view: Signal<MenuView>,
+    entry: MenuEntry,
+    group: bool,
+    chrome: MenuChrome,
+) -> El<ActionMenuItem> {
     let mut item = ActionMenuItem::new(entry.shown_label()).danger(entry.danger);
+    if group {
+        item = item.hint(BRANCH_MARK);
+    }
     if entry.checked {
         item = item.check(true).leading(CHECK);
     } else if let Some(icon) = entry.icon {

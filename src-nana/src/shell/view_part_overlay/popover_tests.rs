@@ -538,9 +538,11 @@ fn entry_menu_expands_a_group_without_rebuilding_rows() {
     });
     assert!(harness.find("刷新缩略图").is_none(), "分组一开始收着");
 
-    harness.apply(ShellMessage::Files(FilesMessage::ToggleMenuGroup(
-        "thumbnail".into(),
-    )));
+    harness.apply(ShellMessage::Files(FilesMessage::MenuBranchChanged {
+        branch: "thumbnail".into(),
+        source: crate::shell::files::BranchSource::Pointer,
+        inside: true,
+    }));
     harness.flush();
     assert_eq!(
         harness.content_roots().0,

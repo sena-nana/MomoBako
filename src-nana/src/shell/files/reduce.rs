@@ -32,12 +32,13 @@ impl FilesState {
             FilesMessage::OpenEntryMenu { path, x, y } => self.open_entry_menu(ctx, &path, x, y),
             FilesMessage::CloseEntryMenu => self.close_entry_menu(),
             FilesMessage::ArmMenuConfirm(item) => self.menu_pending = Some(item),
-            FilesMessage::ToggleMenuGroup(group) if self.entry_menu.is_some() => {
-                self.menu_group =
-                    (self.menu_group.as_deref() != Some(group.as_str())).then_some(group);
-            }
-            // 菜单关掉以后才到的点击不再记。
-            FilesMessage::ToggleMenuGroup(_) => {}
+            FilesMessage::MenuBranchChanged {
+                branch,
+                source,
+                inside,
+            } if self.entry_menu.is_some() => self.menu_branch.note(source, branch, inside),
+            // 菜单关掉以后才到的进出（节点拆掉时的离开）不再记。
+            FilesMessage::MenuBranchChanged { .. } => {}
             FilesMessage::ListResized(width) => self.note_list_width(width),
             FilesMessage::ExitPreview => {
                 eprintln!("Nana 预览返回要由壳层按正在看的文件收起");
