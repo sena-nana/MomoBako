@@ -9,6 +9,7 @@
 
 use nana_ui::runtime::view::{AnyView, IntoView, Signal, widget};
 use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, Stack};
+use nana_ui_core::SpacingStep;
 
 use super::super::super::workspace::WorkspacePanel;
 use super::super::ShellViewModel;
@@ -132,7 +133,8 @@ pub(super) fn action_row(page_id: &str, view: Signal<ImportView>) -> AnyView {
         })
         .collect::<Vec<_>>();
     widget(
-        Stack::row(8.0)
+        Stack::row(0.0)
+            .gap_step(SpacingStep::Md)
             .wrap(true)
             .align(AlignSpec::Center)
             .width(LengthSpec::Fill),

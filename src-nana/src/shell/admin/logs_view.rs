@@ -17,7 +17,7 @@
 use std::sync::Arc;
 
 use nana_ui::runtime::view::{
-    AnyView, IntoView, Item, Signal, Store, StoreList, StorePath, chip, css, fields, node_ref,
+    AnyView, IntoView, Item, Signal, Store, StoreList, StorePath, chip, fields, node_ref,
     status_badge, tag_frame, widget,
 };
 use nana_ui::runtime::{
@@ -25,7 +25,8 @@ use nana_ui::runtime::{
     SelectChanged, SelectOption, Stack, StatusTone, TextChanged, TextInput,
 };
 use nana_ui_core::{
-    ButtonKind, RadiusTier, SemanticColorMix, SemanticColorRole as Role, TextWeight, TypeRole,
+    ButtonKind, ControlSize, RadiusTier, SemanticColorMix, SemanticColorRole as Role, SpacingStep,
+    TextWeight, TypeRole,
 };
 
 use super::super::ShellMessage;
@@ -34,7 +35,9 @@ use super::bind::{ActionDisabled, ButtonIcon, FollowEnd, row_flag, row_text};
 use super::icons;
 use super::logs_state::{LogRowView, LogsSignals, LogsToolbar};
 use super::marks;
-use super::style::{self, action, column, label, mono, pad, row, wrapping};
+use super::style::{
+    self, Edge, Gap, Hairline, action, column, inset, label, mono, pad, pad_xy, row, wrapping,
+};
 use super::support;
 
 const LEVELS: [&str; 4] = ["debug", "info", "warn", "error"];
@@ -56,12 +59,14 @@ pub(crate) fn logs_panel(signals: LogsSignals) -> AnyView {
     let loading = signals.loading;
     let rows = signals.rows;
     let follow = signals.follow_end;
-    let list = rows
-        .keyed(LogRowView::key)
-        .each(log_item)
-        .gap(10.0)
-        .css(css! { padding-right: 4px; })
-        .key("admin-log-list");
+    let list = rows.keyed(LogRowView::key).each(log_item).container(
+        widget(pad(
+            column(SpacingStep::Lg),
+            &[Edge::Right],
+            SpacingStep::Xs,
+        ))
+        .key("admin-log-list"),
+    );
     let body = vec![
         style::workbench_header(
             "Logs",
@@ -146,7 +151,11 @@ fn toolbar(signals: LogsSignals) -> AnyView {
         layout.min_width = Some(LengthSpec::Px(0.0));
     }))
     .children((
-        widget(style::glyph(icons::SEARCH, 15.0, Role::Muted)),
+        widget(style::glyph(
+            icons::SEARCH,
+            TypeRole::CardTitle,
+            Role::Muted,
+        )),
         widget(style::bare_input(
             TextInput::new(search_value.get_untracked())
                 .label("搜索日志")
@@ -228,7 +237,8 @@ fn toolbar(signals: LogsSignals) -> AnyView {
     .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::ClearLogs))
     .into_any();
     widget(
-        Stack::fill_row(10.0)
+        Stack::fill_row(0.0)
+            .gap_step(SpacingStep::Lg)
             .wrap(true)
             .grow(0.0)
             .align(AlignSpec::Start),
@@ -280,17 +290,18 @@ fn select_field(
         // 约 122 宽，选项都很短时不窄于它。
         layout.width = Some(LengthSpec::Shrink);
         layout.min_width = Some(LengthSpec::Px(122.0));
-        layout.height = Some(LengthSpec::Px(32.0));
+        style::control_height(layout, ControlSize::Medium, true);
         layout.padding_left = Some(LengthSpec::Px(0.0));
     }
-    let frame = style::field_frame().with_layout(|layout| {
-        layout.width = Some(LengthSpec::Shrink);
-        layout.min_width = Some(LengthSpec::Px(180.0));
-        layout.flex_grow = Some(0.0);
-        layout.flex_shrink = Some(0.0);
-        layout.gap = Some(LengthSpec::Px(10.0));
-        layout.justify_content = JustifySpec::SpaceBetween;
-    });
+    let frame = style::field_frame()
+        .gap_step(SpacingStep::Lg)
+        .with_layout(|layout| {
+            layout.width = Some(LengthSpec::Shrink);
+            layout.min_width = Some(LengthSpec::Px(180.0));
+            layout.flex_grow = Some(0.0);
+            layout.flex_shrink = Some(0.0);
+            layout.justify_content = JustifySpec::SpaceBetween;
+        });
     let caption = node_ref();
     widget(frame)
         .children((
@@ -339,21 +350,19 @@ fn filters(selected: Signal<(Vec<String>, Vec<String>)>) -> AnyView {
             )
         })
         .collect::<Vec<_>>();
-    widget(column(8.0))
+    widget(column(SpacingStep::Md))
         .children((filter_group("级别", levels), filter_group("来源", kinds)))
         .key("admin-log-filters")
         .into_any()
 }
 
 fn filter_group(title: &str, chips: Vec<AnyView>) -> AnyView {
-    widget(Stack::bar(10.0).align(AlignSpec::Start))
+    widget(style::gapped(Stack::bar(0.0), SpacingStep::Lg).align(AlignSpec::Start))
         .children((
             widget(pad(
-                style::fixed(column(0.0), Some(42.0), None),
-                5.0,
-                0.0,
-                0.0,
-                0.0,
+                style::fixed(column(Gap::None), Some(42.0), None),
+                &[Edge::Top],
+                SpacingStep::Xs,
             ))
             .children((widget(label(
                 title,
@@ -362,7 +371,8 @@ fn filter_group(title: &str, chips: Vec<AnyView>) -> AnyView {
                 Role::Muted,
             )),)),
             widget(
-                Stack::row(8.0)
+                Stack::row(0.0)
+                    .gap_step(SpacingStep::Md)
                     .wrap(true)
                     .width(LengthSpec::Shrink)
                     .grow(1.0)
@@ -409,9 +419,9 @@ fn log_item(item: LogItem) -> AnyView {
         .into_any(),
         source,
     ];
-    let head = widget(style::spread(12.0, AlignSpec::Center))
+    let head = widget(style::spread(SpacingStep::Xl, AlignSpec::Center))
         .children((
-            widget(row(8.0).wrap(true).shrink(1.0)).children(badges),
+            widget(row(SpacingStep::Md).wrap(true).shrink(1.0)).children(badges),
             style::bound(
                 mono(
                     String::new(),
@@ -424,15 +434,15 @@ fn log_item(item: LogItem) -> AnyView {
             .key(format!("admin-log-time-{key}")),
         ))
         .into_any();
-    let meta = widget(row(8.0).wrap(true).width(LengthSpec::Fill)).children((
+    let meta = widget(row(SpacingStep::Md).wrap(true).width(LengthSpec::Fill)).children((
         meta_chip(item, |row| &row.category, false),
         meta_chip(item, |row| &row.plugin, true),
         meta_chip(item, |row| &row.repo, true),
         meta_chip(item, |row| &row.location, true),
     ));
-    let body = widget(column(8.0))
+    let body = widget(column(SpacingStep::Md))
         .children((
-            widget(column(6.0)).children((
+            widget(column(SpacingStep::Sm)).children((
                 style::bound(
                     label(
                         String::new(),
@@ -458,9 +468,9 @@ fn log_item(item: LogItem) -> AnyView {
             meta,
         ))
         .into_any();
-    let card = pad(column(12.0), 14.0, 16.0, 14.0, 16.0)
+    let card = pad_xy(column(SpacingStep::Xl), SpacingStep::Xxxl, SpacingStep::Xxl)
+        .hairline(Role::BorderSoft)
         .surface(Role::Background)
-        .border(Role::BorderSoft, 1.0)
         .radius(RadiusTier::Xl);
     widget(card)
         .children((head, body, context_block(item, &id)))
@@ -515,7 +525,7 @@ fn context_block(item: LogItem, id: &str) -> AnyView {
             )))
         });
     let json = widget(
-        pad(column(0.0), 12.0, 12.0, 12.0, 12.0)
+        inset(column(Gap::None), SpacingStep::Xl)
             .surface(Role::Subtle)
             .radius(RadiusTier::Lg),
     )
@@ -530,10 +540,14 @@ fn context_block(item: LogItem, id: &str) -> AnyView {
         )),
         row_text(item, |row| &row.context),
     ),));
-    widget(style::top_rule(pad(column(10.0), 10.0, 0.0, 0.0, 0.0)))
-        .visible(row_flag(item, |row| row.has_context))
-        .children((summary, json))
-        .into_any()
+    widget(style::top_rule(pad(
+        column(SpacingStep::Lg),
+        &[Edge::Top],
+        SpacingStep::Lg,
+    )))
+    .visible(row_flag(item, |row| row.has_context))
+    .children((summary, json))
+    .into_any()
 }
 
 /// 上下文标题按钮：12/700 弱色，无底无边，左对齐。
@@ -547,7 +561,7 @@ fn summary_style() -> nana_ui::runtime::NodeStyle {
     node.type_role = Some(TypeRole::Meta);
     node.type_weight = Some(TextWeight::Bold);
     let layout = Arc::make_mut(&mut node.layout);
-    layout.line_height = Some(nana_ui_core::LineHeightSpec::Relative(style::LINE));
+    crate::theme_map::tiers::line_ratio(layout, TypeRole::Meta, style::LINE);
     layout.width = Some(LengthSpec::Shrink);
     node
 }

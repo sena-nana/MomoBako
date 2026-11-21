@@ -23,7 +23,8 @@ use nana_ui::runtime::{
     SelectChanged, SelectOption, Stack, StatusTone, ValidationIntent,
 };
 use nana_ui_core::{
-    ButtonKind, GridTrack, Icon, RadiusTier, SemanticColorRole as Role, TextWeight, TypeRole,
+    ButtonKind, GridTrack, Icon, RadiusTier, SemanticColorRole as Role, SpacingStep, TextWeight,
+    TypeRole,
 };
 
 use super::super::ShellMessage;
@@ -32,37 +33,38 @@ use super::bind::ActionDisabled;
 use super::icons;
 use super::plugins_state::PluginPanelSignals;
 use super::settings_state::{ExternalCard, KvRow, SettingsSignals};
-use super::style::{self, action, column, label, pad, row};
+use super::style::{self, Edge, Gap, action, column, inset, label, pad, row};
 use super::support;
+use crate::theme_map::tiers;
 
-/// 设置页整页。卡片之间留 12，插件管理面板之后不留。
+/// 设置页整页。卡片之间留 `Xl`，插件管理面板之后不留。
 pub(crate) fn settings_page(signals: SettingsSignals, plugins: PluginPanelSignals) -> AnyView {
     let children = vec![
-        spaced(page_header(), 16.0),
-        spaced(audio_card(signals), 12.0),
-        spaced(appearance_card(signals), 12.0),
-        spaced(repository_card(signals), 12.0),
-        spaced(external_card(signals.external), 12.0),
+        spaced(page_header(), SpacingStep::Xxxl),
+        spaced(audio_card(signals), SpacingStep::Xl),
+        spaced(appearance_card(signals), SpacingStep::Xl),
+        spaced(repository_card(signals), SpacingStep::Xl),
+        spaced(external_card(signals.external), SpacingStep::Xl),
         super::plugins_view::manager_panel(plugins, &super::plugins_view::SETTINGS_COPY),
-        spaced(cache_card(signals), 12.0),
-        spaced(api_card(signals), 12.0),
+        spaced(cache_card(signals), SpacingStep::Xl),
+        spaced(api_card(signals), SpacingStep::Xl),
     ];
-    widget(column(0.0))
+    widget(column(Gap::None))
         .children(children)
         .key("admin-settings")
         .into_any()
 }
 
-/// 给块加下外边距：卡片之间 12，页头 16。
-fn spaced(view: AnyView, bottom: f32) -> AnyView {
-    widget(pad(column(0.0), 0.0, 0.0, bottom, 0.0))
+/// 给块加下边距：卡片之间 `Xl`，页头 `Xxxl`。
+fn spaced(view: AnyView, bottom: SpacingStep) -> AnyView {
+    widget(pad(column(Gap::None), &[Edge::Bottom], bottom))
         .children((view,))
         .into_any()
 }
 
-/// 页头：18/600 标题，下面 13 号弱色说明，间距 4。
+/// 页头：`Title`/600 标题，下面 `Body` 弱色说明，间距 `Xs`。
 fn page_header() -> AnyView {
-    widget(column(4.0))
+    widget(column(SpacingStep::Xs))
         .children((
             widget(label(
                 "设置",
@@ -90,7 +92,10 @@ fn card(key: &'static str, title: &str, rows: Vec<GroupRow>) -> AnyView {
 
 /// 给设置分组套一层带键的列，键给测试和滚动定位用。
 fn card_with(key: &'static str, group: SettingsGroupView) -> AnyView {
-    widget(column(0.0)).children((group,)).key(key).into_any()
+    widget(column(Gap::None))
+        .children((group,))
+        .key(key)
+        .into_any()
 }
 
 /// 音频播放：喇叭图标加下拉框。实现音频能力的插件从插件清单里找；一个都没有时下拉框禁用，
@@ -111,9 +116,10 @@ fn audio_card(signals: SettingsSignals) -> AnyView {
         .disabled(!initial.selectable)
         .fit_options(true);
     Arc::make_mut(&mut select.style.layout).width = Some(LengthSpec::Shrink);
-    let picker = widget(row(8.0))
+    let picker = widget(row(SpacingStep::Md))
         .children((
-            widget(style::glyph(icons::VOLUME2, 14.0, Role::Text)).key("admin-audio-icon"),
+            widget(style::glyph(icons::VOLUME2, TypeRole::Section, Role::Text))
+                .key("admin-audio-icon"),
             widget(select)
                 .prop::<Vec<SelectOption>, fields::select::options>(move || {
                     audio.with(|audio| options(&audio.options))
@@ -349,7 +355,7 @@ fn external_text(
 fn external_card(external: Signal<ExternalCard>) -> AnyView {
     let not_loaded = move || external.with(|card| !card.loaded);
     let no_json = move || external.with(|card| card.json.is_empty());
-    let actions = widget(row(8.0).wrap(true))
+    let actions = widget(row(SpacingStep::Md).wrap(true))
         .children((
             copy_action(
                 "复制 Base URL",
@@ -402,16 +408,16 @@ fn external_card(external: Signal<ExternalCard>) -> AnyView {
             }
         })
     };
-    let footer = widget(column(10.0)).children((
+    let footer = widget(column(SpacingStep::Lg)).children((
         actions,
-        widget(column(0.0))
+        widget(column(Gap::None))
             .key("admin-external-error")
             .children((callout(
                 ALERT_CIRCLE,
                 StatusTone::Danger,
                 external_text(external, |card| &card.error),
             ),)),
-        widget(column(0.0))
+        widget(column(Gap::None))
             .key("admin-external-message")
             .children((callout(INFO_CIRCLE, StatusTone::Info, message),)),
     ));
@@ -497,10 +503,9 @@ fn cache_card(signals: SettingsSignals) -> AnyView {
             GridTrack::Fr(1.0),
             GridTrack::Fr(1.0),
         ]);
-        layout.gap = Some(LengthSpec::Px(10.0));
+        tiers::gap(layout, SpacingStep::Lg);
         layout.width = Some(LengthSpec::Fill);
-        layout.padding_top = Some(LengthSpec::Px(12.0));
-        layout.padding_bottom = Some(LengthSpec::Px(12.0));
+        tiers::padding(layout, &Edge::Y, SpacingStep::Xl);
     });
     let cells = [
         ("缩略图", "admin-cache-thumbnail"),
@@ -527,11 +532,11 @@ fn cache_card(signals: SettingsSignals) -> AnyView {
     )
 }
 
-/// 缓存容量格：主背景、lg 圆角、内边距 12，数据库图标 16，数字 14/700 加 12 号弱色名称。
+/// 缓存容量格：主背景、lg 圆角、内边距 `Xl`，数据库图标 `Heading` 大小，数字 `Section`/700 加 `Meta` 弱色名称。
 /// NanaUI 没有统计格组件，照原样拼。
 fn metric(value: impl Fn() -> String + Send + 'static, name: &str, key: &'static str) -> AnyView {
     widget(
-        pad(row(10.0), 12.0, 12.0, 12.0, 12.0)
+        inset(row(SpacingStep::Lg), SpacingStep::Xl)
             .surface(Role::Background)
             .radius(RadiusTier::Lg)
             .with_layout(|layout| {
@@ -540,7 +545,7 @@ fn metric(value: impl Fn() -> String + Send + 'static, name: &str, key: &'static
             }),
     )
     .children((
-        widget(style::glyph(icons::DATABASE, 16.0, Role::Text)),
+        widget(style::glyph(icons::DATABASE, TypeRole::Heading, Role::Text)),
         widget(Stack::column(0.0).width(LengthSpec::Shrink)).children((
             style::bound(
                 label(
@@ -567,7 +572,7 @@ fn metric(value: impl Fn() -> String + Send + 'static, name: &str, key: &'static
 /// API 设计：传输方式（一行安静的提示）和端点列表。没有快照时写「本地服务契约未加载」。
 fn api_card(signals: SettingsSignals) -> AnyView {
     let api = signals.api;
-    let transport = widget(column(0.0))
+    let transport = widget(column(Gap::None))
         .key("admin-api-transport")
         .children((callout(icons::SERVER_COG, StatusTone::Neutral, move || {
             api.with(|card| card.transport.clone())

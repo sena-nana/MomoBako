@@ -12,12 +12,13 @@ use nana_ui::runtime::{
     Activate, AlignSpec, LengthSpec, List, ListItem, NodeStyle, RadiusTier, RovingFocusGroup,
     SemanticColorRole, SemanticPaint, Stack, Text,
 };
-use nana_ui_core::{DialogSize, TextWeight, TypeRole};
+use nana_ui_core::{DialogSize, SpacingStep, TextWeight, TypeRole};
 
 use super::super::view_part_overlay::dialog::{DialogFrame, action, footer};
 use super::super::{ShellMessage, ShellViewModel};
 use super::AdminMessage;
 use super::source_target::TargetCandidate;
+use crate::theme_map::tiers::{self, Edge};
 
 /// 对话框宽 `min(560px, 92vw)`。
 const PICKER_DIALOG: DialogSize = DialogSize::capped(560.0, 92.0);
@@ -34,9 +35,12 @@ pub(crate) fn target_dialog(model: &ShellViewModel) -> Option<AnyView> {
         .iter()
         .map(candidate_card)
         .collect::<Vec<_>>();
-    let list = List::new()
-        .label("候选资源库")
-        .style(Stack::column(10.0).width(LengthSpec::Fill).node_style());
+    let list = List::new().label("候选资源库").style(
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Lg)
+            .width(LengthSpec::Fill)
+            .node_style(),
+    );
     let body = widget(list)
         .roving_focus(RovingFocusGroup::vertical())
         .children(cards)
@@ -59,7 +63,7 @@ pub(crate) fn target_dialog(model: &ShellViewModel) -> Option<AnyView> {
     )
 }
 
-/// 一个候选：内边距 12、`--radius-lg`、`--bg` 底、`--border-soft` 描边，悬停换底色、
+/// 一个候选：内边距 `Xl`、`--radius-lg`、`--bg` 底、`--border-soft` 发丝边，悬停换底色、
 /// 描强调色；名称 14px 600，路径 12px 弱色，都是单行省略。点它发选中这个资源库。
 fn candidate_card(candidate: &TargetCandidate) -> AnyView {
     let mut style = NodeStyle::default();
@@ -67,14 +71,11 @@ fn candidate_card(candidate: &TargetCandidate) -> AnyView {
         let layout = Arc::make_mut(&mut style.layout);
         layout.direction = Some(nana_ui_core::FlexDirection::Column);
         layout.align_items = AlignSpec::Stretch;
-        layout.gap = Some(LengthSpec::Px(4.0));
+        tiers::gap(layout, SpacingStep::Xs);
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.padding_left = Some(LengthSpec::Px(12.0));
-        layout.padding_right = Some(LengthSpec::Px(12.0));
-        layout.padding_top = Some(LengthSpec::Px(12.0));
-        layout.padding_bottom = Some(LengthSpec::Px(12.0));
-        layout.border_width = Some(1.0);
+        tiers::padding(layout, &Edge::ALL, SpacingStep::Xl);
+        tiers::border(layout, 1);
     }
     style.radius = Some(RadiusTier::Lg);
     style.background = Some(SemanticColorRole::Background);
@@ -87,7 +88,8 @@ fn candidate_card(candidate: &TargetCandidate) -> AnyView {
     };
     style.interaction.pressed = style.interaction.hovered;
     let content = widget(
-        Stack::column(4.0)
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Xs)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
     )

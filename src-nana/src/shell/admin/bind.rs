@@ -10,7 +10,7 @@ use nana_ui::runtime::{Button, ScrollView, TextInput};
 
 pub(crate) use super::super::field_bind::ButtonIcon;
 use super::super::hot::ModelField;
-use crate::theme_map::DISABLED_OPACITY;
+use super::style::disabled_opacity;
 
 /// 行里的一段文字。行已经删掉时读空串，不去读不存在的行。
 pub(crate) fn row_text<P: StorePath>(
@@ -40,7 +40,7 @@ pub(crate) fn row_draft(read: impl Fn() -> Option<String> + 'static) -> ModelFie
     draft
 }
 
-/// `style::action` 按钮的禁用：整体 45% 不透明，不换颜色，所以和禁用标志一起写透明度。
+/// `style::action` 按钮的禁用：整体按主题停用档淡化，不换颜色，所以和禁用标志一起写透明度。
 pub(crate) struct ActionDisabled;
 
 impl FieldWrite<Button, bool> for ActionDisabled {
@@ -48,7 +48,7 @@ impl FieldWrite<Button, bool> for ActionDisabled {
 
     fn write(target: &mut Button, disabled: bool) {
         target.disabled = disabled;
-        let opacity = disabled.then_some(DISABLED_OPACITY);
+        let opacity = disabled.then_some(disabled_opacity());
         if target.style.layout.opacity != opacity {
             std::sync::Arc::make_mut(&mut target.style.layout).opacity = opacity;
         }
@@ -56,7 +56,7 @@ impl FieldWrite<Button, bool> for ActionDisabled {
 
     fn differs(target: &Button, disabled: &bool) -> bool {
         target.disabled != *disabled
-            || target.style.layout.opacity != disabled.then_some(DISABLED_OPACITY)
+            || target.style.layout.opacity != disabled.then_some(disabled_opacity())
     }
 }
 

@@ -20,7 +20,7 @@
 use nana_ui::runtime::view::{AnyView, IntoView, Signal, fields, signal, widget};
 use nana_ui::runtime::{Activate, AlignSpec, Card, LengthSpec, Stack};
 use nana_ui_core::{
-    ButtonKind, CardKind, RadiusTier, SemanticColorRole as Role, TextWeight, TypeRole,
+    ButtonKind, CardKind, RadiusTier, SemanticColorRole as Role, SpacingStep, TextWeight, TypeRole,
 };
 
 use super::super::files::{
@@ -30,7 +30,9 @@ use super::super::{ShellMessage, ShellViewModel};
 use super::AdminMessage;
 use super::bind::ActionDisabled;
 use super::marks;
-use super::style::{self, action, column, label, mono, pad, row, wrapping};
+use super::style::{
+    self, Edge, Gap, Hairline, action, column, inset, label, mono, pad, pad_xy, row, wrapping,
+};
 use super::support::{TOOL_EAGLE_IMPORTER, TOOL_FILE_MANAGER};
 use crate::backend::services::repository::{
     EagleLibraryImportResponse, EagleLibraryImportSummary, EagleLibraryImportWarning,
@@ -142,53 +144,65 @@ pub(super) fn import_page(id: &str, signals: ImportSignals) -> AnyView {
         ("文件导入", "目标固定为当前工作区的当前目录。")
     };
     let text = move |pick: fn(&ImportView) -> &String| move || view.with(|view| pick(view).clone());
-    let mut body =
-        vec![
-            widget(column(0.0))
-                .children((
-                    widget(style::eyebrow_text(eyebrow)).key(format!("admin-tool-eyebrow-{id}")),
-                    widget(pad(column(0.0), 4.0, 0.0, 0.0, 0.0)).children((style::bound(
-                        style::label_lh(String::new(), 22.0, TextWeight::Bold, Role::Text, 1.25),
+    let mut body = vec![
+        widget(column(Gap::None))
+            .children((
+                widget(style::eyebrow_text(eyebrow)).key(format!("admin-tool-eyebrow-{id}")),
+                widget(pad(column(Gap::None), &[Edge::Top], SpacingStep::Xs)).children((
+                    style::bound(
+                        style::label_lh(
+                            String::new(),
+                            TypeRole::Display,
+                            TextWeight::Bold,
+                            Role::Text,
+                            1.25,
+                        ),
                         text(|view| &view.title),
                     )
-                    .key(format!("admin-tool-title-{id}")),)),
-                    widget(pad(column(0.0), 8.0, 0.0, 0.0, 0.0)).children((widget(wrapping(
-                        label(subline, TypeRole::Body, TextWeight::Regular, Role::Muted),
-                    ))
-                    .key(format!("admin-tool-subline-{id}")),)),
-                ))
-                .into_any(),
-            target_card(vec![
-                target_row(
-                    "目标仓库",
-                    style::bound(
-                        label(
-                            String::new(),
-                            TypeRole::Section,
-                            TextWeight::Semibold,
-                            Role::Text,
-                        ),
-                        text(|view| &view.repository),
-                    )
-                    .key(format!("admin-tool-repo-{id}"))
-                    .into_any(),
-                ),
-                target_row(
-                    "目标目录",
-                    code(text(|view| &view.directory), format!("admin-tool-dir-{id}")),
-                ),
-            ]),
-            marks::notice(
-                move || view.with(|view| view.reason.unwrap_or_default().to_string()),
-                false,
-                "admin-tool-reason",
-            )
-            .visible(move || view.with(|view| view.reason.is_some()))
+                    .key(format!("admin-tool-title-{id}")),
+                )),
+                widget(pad(column(Gap::None), &[Edge::Top], SpacingStep::Md)).children((widget(
+                    wrapping(label(
+                        subline,
+                        TypeRole::Body,
+                        TextWeight::Regular,
+                        Role::Muted,
+                    )),
+                )
+                .key(format!("admin-tool-subline-{id}")),)),
+            ))
             .into_any(),
-            marks::notice(text(|view| &view.error), true, "admin-tool-error")
-                .visible(move || view.with(|view| !view.error.is_empty()))
+        target_card(vec![
+            target_row(
+                "目标仓库",
+                style::bound(
+                    label(
+                        String::new(),
+                        TypeRole::Section,
+                        TextWeight::Semibold,
+                        Role::Text,
+                    ),
+                    text(|view| &view.repository),
+                )
+                .key(format!("admin-tool-repo-{id}"))
                 .into_any(),
-        ];
+            ),
+            target_row(
+                "目标目录",
+                code(text(|view| &view.directory), format!("admin-tool-dir-{id}")),
+            ),
+        ]),
+        marks::notice(
+            move || view.with(|view| view.reason.unwrap_or_default().to_string()),
+            false,
+            "admin-tool-reason",
+        )
+        .visible(move || view.with(|view| view.reason.is_some()))
+        .into_any(),
+        marks::notice(text(|view| &view.error), true, "admin-tool-error")
+            .visible(move || view.with(|view| !view.error.is_empty()))
+            .into_any(),
+    ];
     if id == TOOL_EAGLE_IMPORTER {
         let library = move || view.with(|view| eagle_path_label(&view.library_path));
         let notice = move || view.with(|view| view.notice.clone());
@@ -219,7 +233,7 @@ pub(super) fn import_page(id: &str, signals: ImportSignals) -> AnyView {
             .into_any(),
         );
     }
-    widget(pad(column(14.0), 18.0, 18.0, 18.0, 18.0))
+    widget(inset(column(SpacingStep::Xxl), SpacingStep::PageTight))
         .children(body)
         .key(format!("admin-tool-native-{id}"))
         .into_any()
@@ -237,12 +251,12 @@ fn plugin_name(model: &ShellViewModel, tool_id: &str) -> Option<String> {
 /// 目标卡片：NanaUI 的描边卡片，行间 8。
 fn target_card(rows: Vec<AnyView>) -> AnyView {
     widget(Card::new().kind(CardKind::Outlined))
-        .children((widget(column(8.0)).children(rows),))
+        .children((widget(column(SpacingStep::Md)).children(rows),))
         .into_any()
 }
 
 fn target_row(name: &str, value: AnyView) -> AnyView {
-    widget(row(8.0).wrap(true))
+    widget(row(SpacingStep::Md).wrap(true))
         .children((
             widget(label(
                 name,
@@ -258,9 +272,9 @@ fn target_row(name: &str, value: AnyView) -> AnyView {
 /// 行内代码：等宽 12 号、`bg-subtle`、`border-soft` 边线、xs 圆角。文字可以绑定。
 fn code(text: impl nana_ui::runtime::view::IntoProp<String>, key: String) -> AnyView {
     widget(
-        pad(row(0.0), 1.0, 6.0, 1.0, 6.0)
+        pad_xy(row(Gap::None), SpacingStep::Sm, SpacingStep::Xxs)
             .surface(Role::Subtle)
-            .border(Role::BorderSoft, 1.0)
+            .hairline(Role::BorderSoft)
             .radius(RadiusTier::Xs),
     )
     .children((style::bound(
@@ -433,7 +447,7 @@ fn eagle_result_card(view: Signal<ImportView>) -> AnyView {
         warning_title(view),
     ];
     rows.extend((0..20).map(|index| warning_row(view, index)));
-    widget(column(0.0))
+    widget(column(Gap::None))
         .children((target_card(rows),))
         .visible(shown)
         .key("admin-tool-eagle-result")
@@ -455,7 +469,7 @@ fn count_row(
                 .unwrap_or_default()
         })
     };
-    widget(row(8.0).wrap(true))
+    widget(row(SpacingStep::Md).wrap(true))
         .children((
             widget(label(
                 name,
@@ -523,7 +537,7 @@ fn warning_row(view: Signal<ImportView>, index: usize) -> AnyView {
     };
     let shown = move || shown_view.with(|view| warning_at(view, index).is_some());
     let key = format!("admin-tool-eagle-warning-{index}");
-    widget(row(8.0).wrap(true))
+    widget(row(SpacingStep::Md).wrap(true))
         .children((
             style::bound(
                 label(
@@ -722,7 +736,8 @@ fn eagle_action_row(page_id: &str, view: Signal<ImportView>) -> AnyView {
         eagle_submit_button(page_id, view, "move", "剪切导入", ButtonKind::Ghost),
     ];
     widget(
-        Stack::row(8.0)
+        Stack::row(0.0)
+            .gap_step(SpacingStep::Md)
             .wrap(true)
             .align(AlignSpec::Center)
             .width(LengthSpec::Fill),

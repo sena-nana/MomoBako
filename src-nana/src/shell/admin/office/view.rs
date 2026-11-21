@@ -9,7 +9,7 @@ pub(in super::super) fn settings_block(status: Signal<Option<OfficeConvertView>>
     nana_ui::runtime::view::dynamic(status, move |view: &Option<OfficeConvertView>| {
         view.as_ref()
             .map(panel)
-            .unwrap_or_else(|| widget(column(0.0)).into_any())
+            .unwrap_or_else(|| widget(column(Gap::None)).into_any())
     })
     .visible(move || shown.with(Option::is_some))
     .key("admin-office-status")
@@ -38,10 +38,10 @@ pub(super) fn panel(view: &OfficeConvertView) -> AnyView {
 
 /// 页头：眉题、标题和刷新。读取中按钮写「刷新中」、转圈并禁用。
 pub(super) fn head(loading: bool) -> AnyView {
-    widget(style::spread(10.0, AlignSpec::Start))
+    widget(style::spread(SpacingStep::Lg, AlignSpec::Start))
         .children((
             widget(
-                column(0.0)
+                column(Gap::None)
                     .width(LengthSpec::Shrink)
                     .min_width(LengthSpec::Px(0.0))
                     .grow(1.0)
@@ -49,13 +49,9 @@ pub(super) fn head(loading: bool) -> AnyView {
             )
             .children((
                 widget(style::eyebrow_text("Office Convert")).key("admin-office-eyebrow"),
-                widget(pad(column(0.0), 2.0, 0.0, 0.0, 0.0)).children((widget(style::label_lh(
-                    TITLE,
-                    TypeRole::Section,
-                    TextWeight::Bold,
-                    Role::Text,
-                    1.25,
-                ))
+                widget(pad(column(Gap::None), &[Edge::Top], SpacingStep::Xxs)).children((widget(
+                    style::label_lh(TITLE, TypeRole::Section, TextWeight::Bold, Role::Text, 1.25),
+                )
                 .key("admin-office-title"),)),
             )),
             widget(action(
@@ -77,7 +73,7 @@ pub(super) fn head(loading: bool) -> AnyView {
 
 pub(super) fn actions(view: &OfficeConvertView) -> AnyView {
     let shutdown_disabled = view.stopping || !view.daemon_running;
-    widget(row(8.0).align(AlignSpec::Center).wrap(true))
+    widget(row(SpacingStep::Md).align(AlignSpec::Center).wrap(true))
         .children((
             widget(action(
                 if view.self_checking {
@@ -119,24 +115,31 @@ pub(super) fn actions(view: &OfficeConvertView) -> AnyView {
 /// 按资源库清理预览缓存。下拉框只列宿主已经拿到的资源库。
 pub(super) fn cache_section(view: &OfficeConvertView) -> AnyView {
     let clear_disabled = view.clearing || view.selected_repo_id.is_empty();
-    widget(pad(column(8.0), 12.0, 0.0, 0.0, 0.0).width(LengthSpec::Fill))
+    widget(pad(column(SpacingStep::Md), &[Edge::Top], SpacingStep::Xl).width(LengthSpec::Fill))
         .children((
-            widget(column(0.0)).children((
+            widget(column(Gap::None)).children((
                 widget(style::eyebrow_text("Preview Cache")).key("admin-office-cache-eyebrow"),
-                widget(pad(column(0.0), 2.0, 0.0, 0.0, 0.0)).children((widget(style::label_lh(
-                    CACHE_TITLE,
-                    TypeRole::Section,
-                    TextWeight::Bold,
-                    Role::Text,
-                    1.25,
-                ))
+                widget(pad(column(Gap::None), &[Edge::Top], SpacingStep::Xxs)).children((widget(
+                    style::label_lh(
+                        CACHE_TITLE,
+                        TypeRole::Section,
+                        TextWeight::Bold,
+                        Role::Text,
+                        1.25,
+                    ),
+                )
                 .key("admin-office-cache-title"),)),
             )),
             marks::status_rows(
                 &[("当前资源库".into(), view.selected_repo_name.clone())],
                 "admin-office-repo",
             ),
-            widget(row(8.0).align(AlignSpec::Center).width(LengthSpec::Fill)).children((
+            widget(
+                row(SpacingStep::Md)
+                    .align(AlignSpec::Center)
+                    .width(LengthSpec::Fill),
+            )
+            .children((
                 repo_select(view),
                 clear_button(view.clearing, clear_disabled),
             )),
@@ -174,7 +177,7 @@ pub(super) fn repo_select(view: &OfficeConvertView) -> AnyView {
         let layout = Arc::make_mut(&mut select.style.layout);
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.height = Some(LengthSpec::Px(32.0));
+        style::control_height(layout, ControlSize::Medium, true);
         layout.flex_grow = Some(1.0);
         layout.flex_shrink = Some(1.0);
     }

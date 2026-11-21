@@ -1,8 +1,7 @@
 //! 设置、插件、日志和工具页的版式原语。
 //!
-//! 字号和字重按主题档位写（没有档位的字号写像素），行高、内边距、间距和控件高度写成固定值；
-//! 颜色只用主题角色。
-//! 圆角一律用 `RadiusTier`，形状和半径基数由渲染层统一生效。
+//! 字号、字重、行高、间距、圆角、边框宽度、控件高度和停用不透明度都取主题档位（`theme_map::tiers`），
+//! 装上的主题换刻度时跟着变；颜色只用主题角色。行高写成字号档的倍数，正文 1.55 倍，标题和说明另给倍数。
 
 use std::sync::Arc;
 
@@ -12,9 +11,13 @@ use nana_ui::runtime::{
     SemanticPaint, Stack, Text, TextHorizontalAlignment, TextInput,
 };
 use nana_ui_core::{
-    ButtonKind, Icon, LineHeightSpec, OverflowWrapSpec, RadiusTier, SemanticColorRole as Role,
-    TextWeight, TypeRole,
+    BorderWidth, ButtonKind, ControlHeight, ControlPadding, ControlSize, Icon, LayoutStyle,
+    OverflowWrapSpec, RadiusTier, SemanticColorRole as Role, SpacingRole, SpacingStep, StateLayer,
+    TextWeight, ThemeToken, TypeRole, TypographyTokens,
 };
+
+use crate::theme_map::tiers;
+pub(crate) use crate::theme_map::tiers::Edge;
 
 /// 正文行高倍数。
 pub(crate) const LINE: f32 = 1.55;
@@ -25,95 +28,64 @@ pub(crate) fn bound(node: Text, value: impl IntoProp<String>) -> El<Text> {
     widget(node).prop::<String, fields::text::value>(value)
 }
 
-/// 字号：主题字号档（11 `Hint`、12 `Meta`、13 `Body`、14 `Section`、15 `CardTitle`、18 `Title`、
-/// 20 `Display`），换了字号刻度的主题跟着变；没有对应档位的字号（22、24 和小数）写像素。
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum FontSize {
-    Role(TypeRole),
-    Px(f32),
+/// 按字号档和字重档写文字的字号、字重：11 `Hint`、12 `Meta`、13 `Body`、14 `Section`、15 `CardTitle`、
+/// 16 `Heading`、18 `Title`、20 `Display`，换了字阶的主题跟着变。行高另外设。
+pub(crate) fn typeset(text: Text, role: TypeRole, weight: TextWeight) -> Text {
+    text.role(role).weight(weight)
 }
 
-impl From<TypeRole> for FontSize {
-    fn from(role: TypeRole) -> Self {
-        Self::Role(role)
-    }
-}
-
-impl From<f32> for FontSize {
-    fn from(px: f32) -> Self {
-        Self::Px(px)
-    }
-}
-
-/// 按字号档和字重档写文字的字号、字重。行高另外设，不跟着档位变。
-pub(crate) fn typeset(text: Text, size: impl Into<FontSize>, weight: TextWeight) -> Text {
-    let text = match size.into() {
-        FontSize::Role(role) => text.role(role),
-        FontSize::Px(px) => {
-            let mut text = text;
-            Arc::make_mut(&mut text.style.layout).font_size = Some(px);
-            text
-        }
-    };
-    text.weight(weight)
+/// 行高取字号档的倍数，例如正文 1.55 倍；主题换字阶时行高跟着字号变，比例不变。
+pub(crate) fn lined(mut text: Text, role: TypeRole, ratio: f32) -> Text {
+    tiers::line_ratio(Arc::make_mut(&mut text.style.layout), role, ratio);
+    text
 }
 
 /// 一段文字：字号、字重、颜色，行高按默认的 1.55 倍。
 pub(crate) fn label(
     value: impl Into<String>,
-    size: impl Into<FontSize>,
+    role: TypeRole,
     weight: TextWeight,
     color: Role,
 ) -> Text {
-    label_lh(value, size, weight, color, LINE)
+    label_lh(value, role, weight, color, LINE)
 }
 
 /// 指定行高倍数的文字。标题 1.25、说明 1.45 或 1.5 这类单独写。
 pub(crate) fn label_lh(
     value: impl Into<String>,
-    size: impl Into<FontSize>,
+    role: TypeRole,
     weight: TextWeight,
     color: Role,
     line: f32,
 ) -> Text {
-    let mut text = typeset(Text::new(value.into()).color(color), size, weight);
-    Arc::make_mut(&mut text.style.layout).line_height = Some(LineHeightSpec::Relative(line));
+    let mut text = lined(
+        typeset(Text::new(value.into()).color(color), role, weight),
+        role,
+        line,
+    );
     text.style.text_horizontal_alignment = TextHorizontalAlignment::Start;
-    text
-}
-
-/// 行高写成像素的文字，用于行高固定为 24px 一类的标签。
-pub(crate) fn label_px(
-    value: impl Into<String>,
-    size: impl Into<FontSize>,
-    weight: TextWeight,
-    color: Role,
-    line_px: f32,
-) -> Text {
-    let mut text = label(value, size, weight, color);
-    Arc::make_mut(&mut text.style.layout).line_height = Some(LineHeightSpec::Absolute(line_px));
     text
 }
 
 /// 等宽文字。
 pub(crate) fn mono(
     value: impl Into<String>,
-    size: impl Into<FontSize>,
+    role: TypeRole,
     weight: TextWeight,
     color: Role,
 ) -> Text {
-    mono_lh(value, size, weight, color, LINE)
+    mono_lh(value, role, weight, color, LINE)
 }
 
 /// 指定行高倍数的等宽文字，日志上下文的 `<pre>` 用 1.6。
 pub(crate) fn mono_lh(
     value: impl Into<String>,
-    size: impl Into<FontSize>,
+    role: TypeRole,
     weight: TextWeight,
     color: Role,
     line: f32,
 ) -> Text {
-    let mut text = label_lh(value, size, weight, color, line);
+    let mut text = label_lh(value, role, weight, color, line);
     Arc::make_mut(&mut text.style.layout).text_ext.font_family = Some(MONO_FAMILY.into());
     text
 }
@@ -133,15 +105,48 @@ pub(crate) fn align_end(mut text: Text) -> Text {
     text
 }
 
-/// 小图标。颜色跟随所在控件的前景角色。
-pub(crate) fn glyph(icon: Icon, size: f32, color: Role) -> IconGlyph {
-    IconGlyph::new(icon).size(size).role(color)
+/// 小图标：边长取字号档（14 `Section`、15 `CardTitle`、16 `Heading`……），跟着主题字阶变。
+/// 颜色跟随所在控件的前景角色。
+pub(crate) fn glyph(icon: Icon, size: TypeRole, color: Role) -> IconGlyph {
+    IconGlyph::new(icon).size_role(size).role(color)
+}
+
+/// 停用控件的整体不透明度：主题状态层的停用档（深浅两套主题都是 0.5）。
+pub(crate) const fn disabled_opacity() -> f32 {
+    tiers::opacity(StateLayer::Disabled, true)
+}
+
+/// 控件高度取主题的控件档：`exact` 定高，否则是最小高、内容可以撑高。
+pub(crate) fn control_height(layout: &mut LayoutStyle, size: ControlSize, exact: bool) {
+    let px = Some(LengthSpec::Px(
+        ControlHeight::Exact(size).resolve(nana_ui::theme::UI_METRICS),
+    ));
+    let expr = Some(ThemeToken::Control(size).into());
+    layout.min_height = px;
+    layout.theme.min_height = expr.clone();
+    if exact {
+        layout.height = px;
+        layout.theme.height = expr;
+    }
+}
+
+/// 只在上边画一根发丝线，其余三边为 0。
+fn hairline_top(layout: &mut LayoutStyle) {
+    layout.border_width = None;
+    layout.theme.border_width = None;
+    let sides = &mut layout.border_sides;
+    sides.top_width = Some(tiers::hairline_px());
+    sides.right_width = Some(0.0);
+    sides.bottom_width = Some(0.0);
+    sides.left_width = Some(0.0);
+    layout.theme.border_top_width = Some(ThemeToken::Border(BorderWidth::Hairline).into());
 }
 
 /// 普通按钮：配色按 `kind` 取主题按钮配方（`Ghost` 透明底正文色、`Primary` 强调浅底、`Danger` 红字），
-/// 这里只改版式：高 32、左右内边距 10、字 14（`Section`）/500、主操作 600、图标 14、间距 6。
-/// 禁用时整体 45% 不透明，不换颜色（主题的禁用配色会换成弱色和浅底）。要绑定禁用时用
-/// `bind::ActionDisabled`，透明度一起换；进行中用 `fields::button::loading`，图标位转圈。
+/// 这里只改版式：中号控件定高（32）、中号控件的左右内边距（10）、字 `Section`/500、主操作 600、行高 1.55 倍、
+/// 图标 14（`Section` 字号）、图标间距取主题默认（`Sm`）。
+/// 停用时整体按主题停用档淡化（[`disabled_opacity`]），不换颜色（主题的禁用配色会换成弱色和浅底）。
+/// 要绑定禁用时用 `bind::ActionDisabled`，透明度一起换；进行中用 `fields::button::loading`，图标位转圈。
 pub(crate) fn action(
     text: impl Into<String>,
     icon: Option<Icon>,
@@ -150,36 +155,32 @@ pub(crate) fn action(
 ) -> Button {
     let mut button = Button::new(text)
         .kind(kind)
-        .icon_size(14.0)
-        .icon_gap(6.0)
+        .icon_size(TypographyTokens::DEFAULT.size(TypeRole::Section))
         .disabled(disabled);
     if let Some(icon) = icon {
         button = button.icon(icon);
     }
     let style = &mut button.style;
     style.interaction.disabled = SemanticPaint::default();
-    style.control_height = None;
-    style.control_padding_x = None;
+    style.control_height = Some(ControlHeight::Exact(ControlSize::Medium));
+    style.control_padding_x = Some(ControlPadding::Standard);
     let layout = Arc::make_mut(&mut style.layout);
-    layout.height = Some(LengthSpec::Px(32.0));
-    layout.min_height = Some(LengthSpec::Px(32.0));
     layout.width = Some(LengthSpec::Shrink);
-    layout.padding_left = Some(LengthSpec::Px(10.0));
-    layout.padding_right = Some(LengthSpec::Px(10.0));
     layout.padding_top = Some(LengthSpec::Px(0.0));
     layout.padding_bottom = Some(LengthSpec::Px(0.0));
+    layout.theme.padding_top = None;
+    layout.theme.padding_bottom = None;
     layout.border_width = None;
-    layout.line_height = Some(LineHeightSpec::Relative(LINE));
+    layout.theme.border_width = None;
+    tiers::line_ratio(layout, TypeRole::Section, LINE);
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
-    layout.theme.border_width = None;
-    layout.theme.line_height = None;
     crate::theme_map::control_font(layout, TypeRole::Section);
     if kind == ButtonKind::Primary {
         crate::theme_map::control_weight(layout, TextWeight::Semibold);
     }
     if disabled {
-        layout.opacity = Some(crate::theme_map::DISABLED_OPACITY);
+        layout.opacity = Some(disabled_opacity());
     }
     button
 }
@@ -220,21 +221,48 @@ pub(crate) fn capped(min_px: f32, max_px: f32) -> nana_ui_core::GridTrack {
     }
 }
 
+/// 子项间距：0 或主题的一档间距。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Gap {
+    None,
+    Step(SpacingStep),
+}
+
+impl From<SpacingStep> for Gap {
+    fn from(step: SpacingStep) -> Self {
+        Self::Step(step)
+    }
+}
+
+impl From<SpacingRole> for Gap {
+    fn from(role: SpacingRole) -> Self {
+        Self::Step(role.step())
+    }
+}
+
+/// 按 `gap` 写子项间距：0 照写，档位跟着主题刻度。
+pub(crate) fn gapped(stack: Stack, gap: impl Into<Gap>) -> Stack {
+    match gap.into() {
+        Gap::None => stack,
+        Gap::Step(step) => stack.gap_step(step),
+    }
+}
+
 /// 水平排列：子项垂直居中，宽度随内容。
-pub(crate) fn row(gap: f32) -> Stack {
-    Stack::row(gap).align(AlignSpec::Center)
+pub(crate) fn row(gap: impl Into<Gap>) -> Stack {
+    gapped(Stack::row(0.0), gap).align(AlignSpec::Center)
 }
 
 /// 两端对齐的一行，对应 `display:flex; justify-content: space-between`。
-pub(crate) fn spread(gap: f32, align: AlignSpec) -> Stack {
-    Stack::bar(gap)
+pub(crate) fn spread(gap: impl Into<Gap>, align: AlignSpec) -> Stack {
+    gapped(Stack::bar(0.0), gap)
         .align(align)
         .justify(JustifySpec::SpaceBetween)
 }
 
 /// 竖直排列，宽度占满，高度随内容。
-pub(crate) fn column(gap: f32) -> Stack {
-    Stack::column(gap)
+pub(crate) fn column(gap: impl Into<Gap>) -> Stack {
+    gapped(Stack::column(0.0), gap)
 }
 
 /// 定高定宽不收缩的盒子，给图标格和固定列用。
@@ -253,48 +281,59 @@ pub(crate) fn fixed(stack: Stack, width: Option<f32>, height: Option<f32>) -> St
     })
 }
 
-/// 四边内边距不同的盒子。顺序同 CSS：上、右、下、左。
-pub(crate) fn pad(stack: Stack, top: f32, right: f32, bottom: f32, left: f32) -> Stack {
-    stack.with_layout(|layout| {
-        layout.padding = None;
-        layout.padding_top = Some(LengthSpec::Px(top));
-        layout.padding_right = Some(LengthSpec::Px(right));
-        layout.padding_bottom = Some(LengthSpec::Px(bottom));
-        layout.padding_left = Some(LengthSpec::Px(left));
-    })
+/// 给出的几条边取同一档内边距，其余边不动。
+pub(crate) fn pad(stack: Stack, edges: &[Edge], step: SpacingStep) -> Stack {
+    stack.with_layout(|layout| tiers::padding(layout, edges, step))
 }
 
-/// 只画上边线的盒子，对应 `border-top: 1px solid var(--border-soft)`。
+/// 左右一档、上下一档的内边距。
+pub(crate) fn pad_xy(stack: Stack, x: SpacingStep, y: SpacingStep) -> Stack {
+    stack.with_layout(|layout| tiers::padding_xy(layout, x, y))
+}
+
+/// 四边同一档的内边距。
+pub(crate) fn inset(stack: Stack, step: SpacingStep) -> Stack {
+    pad(stack, &Edge::ALL, step)
+}
+
+/// 一圈发丝边：边色取 `role`，线宽是主题的发丝边，主题换发丝边时跟着变。
+pub(crate) trait Hairline {
+    fn hairline(self, role: Role) -> Self;
+}
+
+impl Hairline for Stack {
+    fn hairline(self, role: Role) -> Self {
+        self.border(role, tiers::hairline_px())
+            .with_layout(|layout| tiers::border(layout, 1))
+    }
+}
+
+/// 只画上边线的盒子，对应 `border-top: 1px solid var(--border-soft)`，线宽是主题的发丝边。
 pub(crate) fn top_rule(stack: Stack) -> Stack {
     let mut style = stack.node_style();
     style.border = Some(Role::BorderSoft);
-    {
-        let layout = Arc::make_mut(&mut style.layout);
-        layout.border_width = None;
-        layout.border_sides.top_width = Some(1.0);
-        layout.border_sides.left_width = Some(0.0);
-        layout.border_sides.right_width = Some(0.0);
-        layout.border_sides.bottom_width = Some(0.0);
-    }
+    hairline_top(Arc::make_mut(&mut style.layout));
     stack.style(style)
 }
 
-/// 工作区面板：`bg-elev` 底、`--radius-2xl`、1px 透明边加 22 内边距、竖排间距 16，
-/// 撑满主区剩余高度。
+/// 工作区面板：`bg-elev` 底、`--radius-2xl`、`Page` 内边距、竖排间距 `Xxxl`，撑满主区剩余高度。
 pub(crate) fn workbench_panel(body: Vec<AnyView>, key: &'static str) -> AnyView {
-    let panel = pad(Stack::fill_column(16.0), 23.0, 23.0, 23.0, 23.0)
-        .surface(Role::Surface)
-        .radius(RadiusTier::Xxl)
-        .with_layout(|layout| {
-            layout.height = Some(LengthSpec::Shrink);
-            layout.min_height = Some(LengthSpec::MinContent);
-            layout.flex_grow = Some(1.0);
-            layout.flex_shrink = Some(0.0);
-        });
+    let panel = inset(
+        gapped(Stack::fill_column(0.0), SpacingStep::Xxxl),
+        SpacingStep::Page,
+    )
+    .surface(Role::Surface)
+    .radius(RadiusTier::Xxl)
+    .with_layout(|layout| {
+        layout.height = Some(LengthSpec::Shrink);
+        layout.min_height = Some(LengthSpec::MinContent);
+        layout.flex_grow = Some(1.0);
+        layout.flex_shrink = Some(0.0);
+    });
     widget(panel).children(body).key(key).into_any()
 }
 
-/// 面板页头：左边眉题、24/700 标题和说明，右边统计和操作，顶对齐。
+/// 面板页头：左边眉题、`Display`/700 标题和说明，右边统计和操作，顶对齐。
 pub(crate) fn workbench_header(
     eyebrow: &str,
     title: &str,
@@ -306,14 +345,19 @@ pub(crate) fn workbench_header(
         widget(eyebrow_text(eyebrow))
             .key(format!("{key}-eyebrow"))
             .into_any(),
-        widget(pad(column(0.0), 4.0, 0.0, 0.0, 0.0))
-            .children((widget(label(title, 24.0, TextWeight::Bold, Role::Text))
-                .key(format!("{key}-title")),))
+        widget(pad(column(Gap::None), &[Edge::Top], SpacingStep::Xs))
+            .children((widget(label(
+                title,
+                TypeRole::Display,
+                TextWeight::Bold,
+                Role::Text,
+            ))
+            .key(format!("{key}-title")),))
             .into_any(),
     ];
     if !subline.is_empty() {
         left.push(
-            widget(pad(column(0.0), 8.0, 0.0, 0.0, 0.0))
+            widget(pad(column(Gap::None), &[Edge::Top], SpacingStep::Md))
                 .children((widget(wrapping(label(
                     subline,
                     TypeRole::Section,
@@ -325,14 +369,14 @@ pub(crate) fn workbench_header(
         );
     }
     let stats = widget(
-        Stack::row(10.0)
+        gapped(Stack::row(0.0), SpacingStep::Lg)
             .align(AlignSpec::Start)
             .wrap(true)
             .grow(0.0)
             .shrink(0.0),
     )
     .children(trailing);
-    widget(spread(16.0, AlignSpec::Start))
+    widget(spread(SpacingStep::Xxxl, AlignSpec::Start))
         .children((
             widget(
                 Stack::column(0.0)
@@ -348,7 +392,7 @@ pub(crate) fn workbench_header(
         .into_any()
 }
 
-/// 眉题：11/600 弱色、大写、字距 0.4。
+/// 眉题：`Hint`/600 弱色、大写、字距 0.4（主题没有字距档）。
 pub(crate) fn eyebrow_text(value: &str) -> Text {
     let mut text = label(
         value.to_uppercase(),
@@ -362,19 +406,23 @@ pub(crate) fn eyebrow_text(value: &str) -> Text {
     text
 }
 
-/// 输入框外框：主背景、1px 边线、lg 圆角，最小高 38，左右 12，间距 8，弱色。
+/// 输入框外框：主背景、发丝边、lg 圆角，最小高是大号控件档（36），左右 `Xl`，间距 `Md`，弱色。
 pub(crate) fn field_frame() -> Stack {
-    pad(Stack::fill_row(8.0), 0.0, 12.0, 0.0, 12.0)
-        .surface(Role::Background)
-        .border(Role::Border, 1.0)
-        .radius(RadiusTier::Lg)
-        .with_layout(|layout| {
-            layout.min_height = Some(LengthSpec::Px(38.0));
-            layout.flex_grow = Some(0.0);
-        })
+    let frame = pad(
+        gapped(Stack::fill_row(0.0), SpacingStep::Md),
+        &Edge::X,
+        SpacingStep::Xl,
+    )
+    .surface(Role::Background)
+    .radius(RadiusTier::Lg)
+    .with_layout(|layout| {
+        control_height(layout, ControlSize::Large, false);
+        layout.flex_grow = Some(0.0);
+    });
+    frame.hairline(Role::Border)
 }
 
-/// 嵌在 [`field_frame`] 里的输入框：透明、无边、无内边距，高 32，正文档字号。
+/// 嵌在 [`field_frame`] 里的输入框：透明、无边、无内边距，中号控件定高（32），正文档字号。
 pub(crate) fn bare_input(input: TextInput) -> TextInput {
     let mut style = NodeStyle {
         foreground: Some(Role::Text),
@@ -385,11 +433,13 @@ pub(crate) fn bare_input(input: TextInput) -> TextInput {
         let layout = Arc::make_mut(&mut style.layout);
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.height = Some(LengthSpec::Px(32.0));
+        control_height(layout, ControlSize::Medium, true);
+        layout.min_height = None;
+        layout.theme.min_height = None;
         layout.flex_grow = Some(1.0);
         layout.flex_shrink = Some(1.0);
         crate::theme_map::control_font(layout, TypeRole::Body);
-        layout.line_height = Some(LineHeightSpec::Relative(LINE));
+        tiers::line_ratio(layout, TypeRole::Body, LINE);
         layout.white_space_nowrap = true;
         layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
         layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
@@ -397,14 +447,21 @@ pub(crate) fn bare_input(input: TextInput) -> TextInput {
     input.style(style)
 }
 
-/// 单行输入框：高 32、内边距 6/10、sm 圆角、1px `border-strong`、`bg-subtle`，
-/// 聚焦时换主背景。
+/// 单行输入框：中号控件定高（32）、内边距左右是输入框档（10）上下 `Sm`、sm 圆角、发丝边 `border-strong`、
+/// `bg-subtle`，聚焦时换主背景。
 pub(crate) fn native_input(input: TextInput) -> TextInput {
-    input.style(native_field_style(32.0))
+    let mut style = native_field_style();
+    {
+        let layout = Arc::make_mut(&mut style.layout);
+        control_height(layout, ControlSize::Medium, true);
+        layout.min_height = None;
+        layout.theme.min_height = None;
+    }
+    input.style(style)
 }
 
-/// 原生输入框和文本域共用的外形。`height` 给单行高度，文本域另设最小高。
-pub(crate) fn native_field_style(height: f32) -> NodeStyle {
+/// 原生输入框和文本域共用的外形。高度由调用方定：单行用中号控件档，文本域另设最小高。
+pub(crate) fn native_field_style() -> NodeStyle {
     let mut style = NodeStyle {
         foreground: Some(Role::Text),
         background: Some(Role::Subtle),
@@ -426,14 +483,16 @@ pub(crate) fn native_field_style(height: f32) -> NodeStyle {
         let layout = Arc::make_mut(&mut style.layout);
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.height = Some(LengthSpec::Px(height));
-        layout.border_width = Some(1.0);
-        layout.padding_left = Some(LengthSpec::Px(10.0));
-        layout.padding_right = Some(LengthSpec::Px(10.0));
-        layout.padding_top = Some(LengthSpec::Px(6.0));
-        layout.padding_bottom = Some(LengthSpec::Px(6.0));
+        tiers::border(layout, 1);
+        let field = ControlPadding::Field;
+        let field_px = Some(LengthSpec::Px(field.resolve(nana_ui::theme::UI_METRICS)));
+        layout.padding_left = field_px;
+        layout.padding_right = field_px;
+        layout.theme.padding_left = Some(ThemeToken::ControlPadding(field).into());
+        layout.theme.padding_right = Some(ThemeToken::ControlPadding(field).into());
+        tiers::padding(layout, &Edge::Y, SpacingStep::Sm);
         crate::theme_map::control_font(layout, TypeRole::Body);
-        layout.line_height = Some(LineHeightSpec::Relative(LINE));
+        tiers::line_ratio(layout, TypeRole::Body, LINE);
         layout.white_space_nowrap = true;
         layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
         layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;

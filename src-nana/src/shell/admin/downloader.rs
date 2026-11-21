@@ -7,13 +7,13 @@
 
 use nana_ui::runtime::view::{AnyView, IntoView, Signal, fields, widget};
 use nana_ui::runtime::{Activate, AlignSpec, LengthSpec};
-use nana_ui_core::{ButtonKind, SemanticColorRole as Role, TextWeight, TypeRole};
+use nana_ui_core::{ButtonKind, SemanticColorRole as Role, SpacingStep, TextWeight, TypeRole};
 use serde_json::Value;
 
 use super::super::{ShellMessage, ShellViewModel};
 use super::bind::ActionDisabled;
 use super::marks;
-use super::style::{self, action, column, pad};
+use super::style::{self, Edge, Gap, action, column, pad};
 use super::{AdminEffect, AdminMessage, PluginCallOrigin};
 
 /// 下载服务插件。只有这一张设置页挂运行状态。
@@ -193,7 +193,7 @@ pub(super) fn settings_block(status: Signal<Option<DownloaderStatusView>>) -> An
     nana_ui::runtime::view::dynamic(status, move |view: &Option<DownloaderStatusView>| {
         view.as_ref()
             .map(panel)
-            .unwrap_or_else(|| widget(column(0.0)).into_any())
+            .unwrap_or_else(|| widget(column(Gap::None)).into_any())
     })
     .visible(move || shown.with(Option::is_some))
     .key("admin-downloader-status")
@@ -217,10 +217,10 @@ fn panel(view: &DownloaderStatusView) -> AnyView {
 
 /// 页头：眉题、标题和刷新。读取中按钮写「刷新中」并禁用。
 fn head(loading: bool) -> AnyView {
-    widget(style::spread(10.0, AlignSpec::Start))
+    widget(style::spread(SpacingStep::Lg, AlignSpec::Start))
         .children((
             widget(
-                column(0.0)
+                column(Gap::None)
                     .width(LengthSpec::Shrink)
                     .min_width(LengthSpec::Px(0.0))
                     .grow(1.0)
@@ -228,13 +228,9 @@ fn head(loading: bool) -> AnyView {
             )
             .children((
                 widget(style::eyebrow_text("Downloader")).key("admin-downloader-eyebrow"),
-                widget(pad(column(0.0), 2.0, 0.0, 0.0, 0.0)).children((widget(style::label_lh(
-                    TITLE,
-                    TypeRole::Section,
-                    TextWeight::Bold,
-                    Role::Text,
-                    1.25,
-                ))
+                widget(pad(column(Gap::None), &[Edge::Top], SpacingStep::Xxs)).children((widget(
+                    style::label_lh(TITLE, TypeRole::Section, TextWeight::Bold, Role::Text, 1.25),
+                )
                 .key("admin-downloader-title"),)),
             )),
             widget(action(

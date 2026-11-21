@@ -9,12 +9,14 @@ use std::sync::Arc;
 
 use nana_ui::runtime::view::{AnyView, IntoView, Signal, fields, widget};
 use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, Select, SelectChanged, SelectOption};
-use nana_ui_core::{ButtonKind, SemanticColorRole as Role, TextWeight, TypeRole};
+use nana_ui_core::{
+    ButtonKind, ControlSize, SemanticColorRole as Role, SpacingStep, TextWeight, TypeRole,
+};
 use serde_json::Value;
 
 use super::super::{ShellMessage, ShellViewModel};
 use super::bind::ActionDisabled;
-use super::style::{self, action, column, pad, row};
+use super::style::{self, Edge, Gap, action, column, pad, row};
 use super::{AdminEffect, AdminMessage, OfficeCall, PluginCallOrigin};
 use crate::backend::services::repository::RepositorySummary;
 

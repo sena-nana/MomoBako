@@ -19,8 +19,8 @@ use nana_ui::runtime::{
     Activate, AlignSpec, Card, LengthSpec, Stack, StatusTone, Switch, ToggleChanged,
 };
 use nana_ui_core::{
-    ButtonKind, CardKind, GridTrack, SemanticColorRole as Role, SwitchControlPosition, TextWeight,
-    TypeRole,
+    ButtonKind, CardKind, GridTrack, SemanticColorRole as Role, SpacingRole, SpacingStep,
+    SwitchControlPosition, TextWeight, TypeRole,
 };
 
 use super::super::ShellMessage;
@@ -28,7 +28,8 @@ use super::AdminMessage;
 use super::bind::{ActionDisabled, row_flag, row_text};
 use super::icons;
 use super::plugins_state::{ExecutionView, PluginCardView, PluginPanelSignals};
-use super::style::{self, action, column, label, pad, row, wrapping};
+use super::style::{self, Edge, Gap, action, column, label, pad, row, wrapping};
+use crate::theme_map::tiers;
 
 /// 卡片在 Store 里的句柄。
 pub(crate) type CardItem = Item<
@@ -48,7 +49,7 @@ pub(crate) type CardItem = Item<
 pub(super) fn plugin_card(card: CardItem, signals: PluginPanelSignals) -> AnyView {
     let plugin_id = card.get_untracked().plugin_id;
     let pid = style::key_part(&plugin_id);
-    let head = widget(style::spread(10.0, AlignSpec::Center))
+    let head = widget(style::spread(SpacingStep::Lg, AlignSpec::Center))
         .children((
             style::bound(
                 label(
@@ -74,7 +75,7 @@ pub(super) fn plugin_card(card: CardItem, signals: PluginPanelSignals) -> AnyVie
     )
     .key(format!("admin-plugin-desc-{pid}"))
     .into_any();
-    let meta = widget(row(10.0).wrap(true))
+    let meta = widget(row(SpacingStep::Lg).wrap(true))
         .children((
             style::bound(
                 label(
@@ -100,7 +101,7 @@ pub(super) fn plugin_card(card: CardItem, signals: PluginPanelSignals) -> AnyVie
     let notices = dynamic(
         row_flag(card, |card| card.notices.clone()),
         |notices: &Vec<(String, bool)>| {
-            widget(column(6.0))
+            widget(column(SpacingStep::Sm))
                 .children(
                     notices
                         .iter()
@@ -131,7 +132,7 @@ pub(super) fn plugin_card(card: CardItem, signals: PluginPanelSignals) -> AnyVie
     body.push(card_actions(card, signals, &plugin_id));
     body.push(settings);
     widget(Card::new().kind(CardKind::Outlined))
-        .children((widget(column(10.0)).children(body),))
+        .children((widget(column(SpacingStep::Lg)).children(body),))
         .key(format!("admin-plugin-card-{pid}"))
         .into_any()
 }
@@ -160,7 +161,7 @@ fn plugin_notice(text: &str, danger: bool) -> AnyView {
 
 /// 一枚标签：NanaUI 的 `tag`，不能点。
 fn keyed_tag(text: &str, key: String) -> AnyView {
-    widget(column(0.0).width(LengthSpec::Shrink))
+    widget(column(Gap::None).width(LengthSpec::Shrink))
         .children((tag(text.to_string()),))
         .key(key)
         .into_any()
@@ -173,9 +174,16 @@ fn chips_row(values: &[String], pid: &str) -> AnyView {
         .enumerate()
         .map(|(index, value)| keyed_tag(value, format!("admin-plugin-chip-{pid}-{index}")))
         .collect::<Vec<_>>();
-    widget(pad(row(8.0).wrap(true), 8.0, 0.0, 0.0, 0.0).width(LengthSpec::Fill))
-        .children(items)
-        .into_any()
+    widget(
+        pad(
+            row(SpacingStep::Md).wrap(true),
+            &[Edge::Top],
+            SpacingStep::Md,
+        )
+        .width(LengthSpec::Fill),
+    )
+    .children(items)
+    .into_any()
 }
 
 /// 依赖、权限、Hook 和执行记录四段，标签列 56 宽。每段没有内容时不占布局，内容变了整段换。
@@ -214,7 +222,7 @@ fn sections(card: CardItem, pid: &str) -> Vec<AnyView> {
         |items: &Vec<ExecutionView>| {
             section_with_body(
                 "执行记录",
-                widget(column(8.0))
+                widget(column(SpacingStep::Md))
                     .children(items.iter().map(execution_item).collect::<Vec<_>>())
                     .into_any(),
             )
@@ -233,7 +241,7 @@ fn badge(text: &str, tone: StatusTone) -> AnyView {
 
 fn section(title: &str, items: Vec<AnyView>) -> AnyView {
     let list = widget(
-        row(6.0)
+        row(SpacingStep::Sm)
             .wrap(true)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
@@ -243,7 +251,7 @@ fn section(title: &str, items: Vec<AnyView>) -> AnyView {
     section_with_body(title, list)
 }
 
-/// 卡片里的一段：`grid-template-columns: 56px minmax(0, 1fr)`，间距 8，顶对齐。
+/// 卡片里的一段：`grid-template-columns: 56px minmax(0, 1fr)`，间距 `Md`，顶对齐。
 /// 网格先定列宽、再按列宽量行高，折行的芯片按内容列的宽度排。
 fn section_with_body(title: &str, body: AnyView) -> AnyView {
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
@@ -256,18 +264,18 @@ fn section_with_body(title: &str, body: AnyView) -> AnyView {
                 max_px: None,
             },
         ]);
-        layout.gap = Some(LengthSpec::Px(8.0));
+        tiers::gap(layout, SpacingStep::Md);
         layout.width = Some(LengthSpec::Fill);
         layout.align_items = AlignSpec::Start;
     });
     widget(grid)
         .children((
-            widget(style::label_px(
+            widget(style::label_lh(
                 title,
                 TypeRole::Meta,
                 TextWeight::Regular,
                 Role::Muted,
-                24.0,
+                2.0,
             )),
             body,
         ))
@@ -277,7 +285,7 @@ fn section_with_body(title: &str, body: AnyView) -> AnyView {
 /// 一条执行记录：`grid-template-columns: auto minmax(0, 1fr)`，状态小块加标题、槽位、消息和时间。
 fn execution_item(record: &ExecutionView) -> AnyView {
     let mut lines = vec![
-        widget(row(6.0).wrap(true))
+        widget(row(SpacingStep::Sm).wrap(true))
             .children((
                 widget(label(
                     record.title.clone(),
@@ -326,14 +334,19 @@ fn execution_item(record: &ExecutionView) -> AnyView {
                 max_px: None,
             },
         ]);
-        layout.gap = Some(LengthSpec::Px(8.0));
+        tiers::gap(layout, SpacingStep::Md);
         layout.width = Some(LengthSpec::Fill);
         layout.align_items = AlignSpec::Start;
     });
     widget(grid)
         .children((
             badge(&record.status, record.tone),
-            widget(Stack::column(3.0).min_width(LengthSpec::Px(0.0))).children(lines),
+            widget(
+                Stack::column(0.0)
+                    .gap_step(SpacingRole::Copy)
+                    .min_width(LengthSpec::Px(0.0)),
+            )
+            .children(lines),
         ))
         .key(format!("admin-plugin-execution-{}", record.key))
         .into_any()
@@ -389,7 +402,7 @@ fn card_actions(card: CardItem, signals: PluginPanelSignals, plugin_id: &str) ->
             )));
         }),
     );
-    widget(row(8.0).wrap(true).width(LengthSpec::Fill))
+    widget(row(SpacingStep::Md).wrap(true).width(LengthSpec::Fill))
         .children(buttons)
         .key(format!("admin-plugin-actions-{pid}"))
         .into_any()
@@ -402,7 +415,7 @@ fn enable_switch(card: CardItem) -> Switch {
     switch
 }
 
-/// 设置区：上边线、上内边距 12，竖排间距 12。头部是设置标题、说明和
+/// 设置区：上边线、上内边距 `Xl`，竖排间距 `Xl`。头部是设置标题、说明和
 /// 「打开目录」；下面是下载服务或 Office 转换状态、来源账号区和字段表单。只在这张卡片的设置展开时建。
 fn settings_section(plugin_id: &str, signals: PluginPanelSignals) -> AnyView {
     let pid = style::key_part(plugin_id);
@@ -422,7 +435,7 @@ fn settings_section(plugin_id: &str, signals: PluginPanelSignals) -> AnyView {
             move || settings.with(|head| head.label.clone()),
         )
         .key(format!("admin-plugin-settings-title-{pid}")),
-        widget(pad(column(0.0), 4.0, 0.0, 0.0, 0.0))
+        widget(pad(column(Gap::None), &[Edge::Top], SpacingStep::Xs))
             .visible(move || settings.with(|head| !head.description.is_empty()))
             .children((style::bound(
                 wrapping(style::label_lh(
@@ -436,7 +449,7 @@ fn settings_section(plugin_id: &str, signals: PluginPanelSignals) -> AnyView {
             )
             .key(format!("admin-plugin-settings-desc-{pid}")),)),
     ));
-    let head = widget(style::spread(12.0, AlignSpec::Start))
+    let head = widget(style::spread(SpacingStep::Xl, AlignSpec::Start))
         .children((
             head_text,
             widget(action(
@@ -454,18 +467,18 @@ fn settings_section(plugin_id: &str, signals: PluginPanelSignals) -> AnyView {
             }),
         ))
         .key(format!("admin-plugin-settings-head-{pid}"));
-    widget(style::top_rule(pad(column(12.0), 12.0, 0.0, 0.0, 0.0)))
-        .children((
-            head,
-            super::downloader::settings_block(signals.downloader),
-            super::office::settings_block(signals.office),
-            super::source_page::source_auth_settings(
-                plugin_id,
-                signals.source,
-                signals.source_repos,
-            ),
-            super::super::admin_fields::fields_form(plugin_id, signals.fields),
-        ))
-        .key(format!("admin-plugin-settings-section-{pid}"))
-        .into_any()
+    widget(style::top_rule(pad(
+        column(SpacingStep::Xl),
+        &[Edge::Top],
+        SpacingStep::Xl,
+    )))
+    .children((
+        head,
+        super::downloader::settings_block(signals.downloader),
+        super::office::settings_block(signals.office),
+        super::source_page::source_auth_settings(plugin_id, signals.source, signals.source_repos),
+        super::super::admin_fields::fields_form(plugin_id, signals.fields),
+    ))
+    .key(format!("admin-plugin-settings-section-{pid}"))
+    .into_any()
 }

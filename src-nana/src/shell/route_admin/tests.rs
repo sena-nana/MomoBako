@@ -273,6 +273,9 @@ fn at_end(harness: &ShellHarness) -> bool {
     (scroll_y(harness, LOG_SCROLL) - scroll_end(harness, LOG_SCROLL)).abs() < 0.5
 }
 
+/// 工作区面板的内边距：主题的 `Page` 档。
+const PANEL_INSET: f32 = crate::theme_map::tiers::space_px(nana_ui_core::SpacingStep::Page);
+
 /// 宽敞的窗口（1200×800）表现不变：主体的滚动范围只算到列表自己的盒子，日志再多主体也不滚；
 /// 面板正好撑满主体，列表在筛选下面占满剩下的高度（比 360 还高）、自己滚，追踪时停在末尾。
 #[test]
@@ -301,7 +304,7 @@ fn a_roomy_window_scrolls_only_the_log_list() {
     );
     assert!(list.height >= 360.0, "列表不该矮过 360：{list:?}");
     assert!(
-        (panel.y + panel.height - 23.0 - (list.y + list.height)).abs() < 0.5,
+        (panel.y + panel.height - PANEL_INSET - (list.y + list.height)).abs() < 0.5,
         "列表要占满面板剩下的高度：{list:?} / {panel:?}"
     );
     assert!(
@@ -336,7 +339,7 @@ fn short_windows_keep_the_latest_log_in_view_without_scrolling_the_page() {
             "{height} 高时列表不矮过下限：{list:?}"
         );
         assert!(
-            (panel.y + panel.height - 23.0 - (list.y + list.height)).abs() < 0.5,
+            (panel.y + panel.height - PANEL_INSET - (list.y + list.height)).abs() < 0.5,
             "{height} 高时列表占满面板剩下的高度：{list:?}"
         );
         assert!(

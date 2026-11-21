@@ -17,15 +17,16 @@ use nana_ui::runtime::{
     Activate, FocusWithinChanged, LengthSpec, Select, SelectChanged, SelectOption, Switch,
     TextArea, TextChanged, TextInput, TextSubmitted, ToggleChanged,
 };
-use nana_ui_core::{ButtonKind, SwitchControlPosition};
+use nana_ui_core::{ButtonKind, ControlSize, SpacingStep, SwitchControlPosition};
 use serde_json::Value;
 
 use super::admin::AdminMessage;
 use super::admin::bind::{ActionDisabled, row_draft, row_flag};
-use super::admin::style::{self, action};
+use super::admin::style::{self, Edge, action};
 use super::admin::support::{self, ConfigField};
 use super::{ShellMessage, ShellViewModel};
 use crate::backend::services::repository::PluginManifest;
+use crate::theme_map::tiers;
 
 /// 字段的控件类型。类型变了整行重建。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -124,9 +125,11 @@ pub(super) fn fields_form(plugin_id: &str, fields: Store<Vec<FieldRowView>>) -> 
     fields
         .keyed(FieldRowView::key)
         .each(field_row)
-        .gap(10.0)
-        .visible(move || !fields.is_empty())
-        .key(format!("admin-fields-{}", style::key_part(plugin_id)))
+        .container(
+            widget(style::column(SpacingStep::Lg))
+                .visible(move || !fields.is_empty())
+                .key(format!("admin-fields-{}", style::key_part(plugin_id))),
+        )
         .into_any()
 }
 
@@ -199,7 +202,7 @@ fn control(item: FieldItem, row: &FieldRowView, fkey: &str) -> AnyView {
                 let layout = Arc::make_mut(&mut select.style.layout);
                 layout.width = Some(LengthSpec::Fill);
                 layout.min_width = Some(LengthSpec::Px(0.0));
-                layout.height = Some(LengthSpec::Px(32.0));
+                style::control_height(layout, ControlSize::Medium, true);
             }
             widget(select)
                 .prop::<Vec<SelectOption>, fields::select::options>(move || {
@@ -225,15 +228,13 @@ fn control(item: FieldItem, row: &FieldRowView, fkey: &str) -> AnyView {
             let draft = row_draft(move || item.try_with(|row| row.text.clone()));
             let mut area =
                 TextArea::new(draft.signal().get_untracked()).placeholder(row.placeholder.clone());
-            area.style = style::native_field_style(92.0);
+            area.style = style::native_field_style();
             {
                 let layout = Arc::make_mut(&mut area.style.layout);
-                layout.height = None;
                 layout.min_height = Some(LengthSpec::Px(92.0));
                 layout.white_space_nowrap = false;
                 layout.text_ext.font_family = Some(style::MONO_FAMILY.into());
-                layout.padding_top = Some(LengthSpec::Px(10.0));
-                layout.padding_bottom = Some(LengthSpec::Px(10.0));
+                tiers::padding(layout, &Edge::Y, SpacingStep::Lg);
             }
             area.style.text_vertical_alignment = nana_ui::runtime::TextVerticalAlignment::Top;
             // 多行框按回车只换行，不发提交事件，在焦点离开时提交。

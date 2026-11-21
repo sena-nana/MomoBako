@@ -17,8 +17,8 @@ use nana_ui::runtime::{
     SelectOption, Stack, TextArea, TextChanged, TextInput, ToggleChanged,
 };
 use nana_ui_core::{
-    ButtonKind, GridTrack, RadiusTier, SemanticColorMix, SemanticColorRole as Role, TextWeight,
-    TypeRole,
+    ButtonKind, ControlSize, GridTrack, RadiusTier, SemanticColorMix, SemanticColorRole as Role,
+    SpacingStep, TextWeight, TypeRole,
 };
 
 use super::super::super::hot::ModelField;
@@ -26,11 +26,14 @@ use super::super::super::{ShellMessage, ShellViewModel};
 use super::super::AdminMessage;
 use super::super::bind::{ActionDisabled, ReadOnly};
 use super::super::marks;
-use super::super::style::{self, action, column, label, mono, pad, row, wrapping};
+use super::super::style::{
+    self, Edge, Gap, Hairline, action, column, inset, label, mono, pad, pad_xy, row, wrapping,
+};
 use super::{
     ApiMessage, can_send, endpoints, request_summary, selected_ref, target_text, token_preview,
     visible,
 };
+use crate::theme_map::tiers;
 
 const TRANSPORTS: [(&str, &str); 3] = [
     ("all", "全部"),
@@ -235,10 +238,13 @@ pub(crate) fn playground(signals: PlaygroundSignals) -> AnyView {
         meta(head),
         columns(signals),
     );
-    widget(pad(Stack::fill_column(14.0), 18.0, 18.0, 18.0, 18.0))
-        .children(body)
-        .key("admin-api-playground")
-        .into_any()
+    widget(inset(
+        Stack::fill_column(0.0).gap_step(SpacingStep::Xxl),
+        SpacingStep::PageTight,
+    ))
+    .children(body)
+    .key("admin-api-playground")
+    .into_any()
 }
 
 fn header(signals: PlaygroundSignals) -> AnyView {
@@ -252,15 +258,17 @@ fn header(signals: PlaygroundSignals) -> AnyView {
     )
     .children((
         widget(style::eyebrow_text("API Playground")).key("admin-api-eyebrow"),
-        widget(pad(column(0.0), 4.0, 0.0, 0.0, 0.0)).children((widget(style::label_lh(
-            "后端 API 调试",
-            22.0,
-            TextWeight::Bold,
-            Role::Text,
-            1.25,
-        ))
+        widget(pad(column(Gap::None), &[Edge::Top], SpacingStep::Xs)).children((widget(
+            style::label_lh(
+                "后端 API 调试",
+                TypeRole::Display,
+                TextWeight::Bold,
+                Role::Text,
+                1.25,
+            ),
+        )
         .key("admin-api-title"),)),
-        widget(pad(column(0.0), 8.0, 0.0, 0.0, 0.0)).children((style::bound(
+        widget(pad(column(Gap::None), &[Edge::Top], SpacingStep::Md)).children((style::bound(
             wrapping(mono(
                 String::new(),
                 TypeRole::Meta,
@@ -271,14 +279,14 @@ fn header(signals: PlaygroundSignals) -> AnyView {
         )
         .key("admin-api-summary"),)),
     ));
-    let actions = widget(row(12.0).wrap(true).align(AlignSpec::Start)).children((
+    let actions = widget(row(SpacingStep::Xl).wrap(true).align(AlignSpec::Start)).children((
         widget(action("刷新契约", None, ButtonKind::Ghost, false))
             .prop::<bool, ActionDisabled>(move || head.with(|head| head.loading))
             .key("admin-api-refresh")
             .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(api(ApiMessage::Refresh))),
         send_button("发送", head).key("admin-api-send"),
     ));
-    widget(style::spread(12.0, AlignSpec::Start))
+    widget(style::spread(SpacingStep::Xl, AlignSpec::Start))
         .children((left, actions))
         .into_any()
 }
@@ -306,7 +314,7 @@ fn meta(head: Signal<PlaygroundHead>) -> AnyView {
         .enumerate()
         .map(|(index, name)| {
             widget(
-                pad(row(4.0), 4.0, 9.0, 4.0, 9.0)
+                pad_xy(row(SpacingStep::Xs), SpacingStep::Md, SpacingStep::Xs)
                     .surface(Role::Background)
                     .radius(RadiusTier::Sm)
                     .with_layout(|layout| {
@@ -334,7 +342,7 @@ fn meta(head: Signal<PlaygroundHead>) -> AnyView {
             .into_any()
         })
         .collect::<Vec<_>>();
-    widget(row(8.0).wrap(true).width(LengthSpec::Fill))
+    widget(row(SpacingStep::Md).wrap(true).width(LengthSpec::Fill))
         .children(blocks)
         .key("admin-api-meta")
         .into_any()
@@ -352,7 +360,7 @@ fn columns(signals: PlaygroundSignals) -> AnyView {
                 max_px: None,
             },
         ]);
-        layout.gap = Some(LengthSpec::Px(12.0));
+        tiers::gap(layout, SpacingStep::Xl);
         layout.width = Some(LengthSpec::Fill);
         layout.flex_grow = Some(1.0);
         layout.min_height = Some(LengthSpec::Px(0.0));
@@ -363,11 +371,11 @@ fn columns(signals: PlaygroundSignals) -> AnyView {
         .into_any()
 }
 
-/// 两栏共用的框：主背景、`border-soft` 边线、md 圆角、1px 边加 14 内边距。
-fn frame(gap: f32) -> Stack {
-    pad(column(gap), 14.0, 14.0, 14.0, 14.0)
+/// 两栏共用的框：主背景、`border-soft` 发丝边、md 圆角、内边距 `Xxl`。
+fn frame(gap: SpacingStep) -> Stack {
+    inset(column(gap), SpacingStep::Xxl)
         .surface(Role::Background)
-        .border(Role::BorderSoft, 1.0)
+        .hairline(Role::BorderSoft)
         .radius(RadiusTier::Md)
         .with_layout(|layout| {
             layout.min_height = Some(LengthSpec::Px(0.0));
@@ -387,16 +395,15 @@ fn field(title: &str, caption: NodeRef, control: AnyView) -> AnyView {
         .into_any()
 }
 
-/// 原生下拉框的外观：`bg-subtle` 底、`border-strong` 边线，高 32，字号是下拉框尺寸档的正文档。
+/// 原生下拉框的外观：`bg-subtle` 底、`border-strong` 边线，中号控件定高（32），字号是下拉框尺寸档的正文档。
 fn native_select(select: Select) -> Select {
     let mut select = select;
-    select.style.interaction.base.background_mix = Some(SemanticColorMix::alpha(Role::Subtle, 1.0));
-    select.style.interaction.base.border_mix =
-        Some(SemanticColorMix::alpha(Role::BorderStrong, 1.0));
+    select.style.interaction.base.background_mix = Some(SemanticColorMix::role(Role::Subtle));
+    select.style.interaction.base.border_mix = Some(SemanticColorMix::role(Role::BorderStrong));
     let layout = Arc::make_mut(&mut select.style.layout);
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
-    layout.height = Some(LengthSpec::Px(32.0));
+    style::control_height(layout, ControlSize::Medium, true);
     select
 }
 
@@ -409,7 +416,7 @@ fn two_columns(
     let grid = Stack::from_layout(nana_ui_core::LayoutStyle::default()).with_layout(|layout| {
         layout.display = Some(nana_ui_core::DisplaySpec::Grid);
         layout.grid.columns = Some(vec![first, second]);
-        layout.gap = Some(LengthSpec::Px(10.0));
+        tiers::gap(layout, SpacingStep::Lg);
         layout.width = Some(LengthSpec::Fill);
     });
     widget(grid).children(children).key(key).into_any()
@@ -637,7 +644,7 @@ fn request_column(signals: PlaygroundSignals) -> AnyView {
         .into_any();
     let head = signals.head;
     let actions = widget(
-        row(12.0)
+        row(SpacingStep::Xl)
             .wrap(true)
             .width(LengthSpec::Fill)
             .justify(JustifySpec::End),
@@ -651,39 +658,40 @@ fn request_column(signals: PlaygroundSignals) -> AnyView {
     ))
     .key("admin-api-actions")
     .into_any();
-    widget(frame(12.0).with_layout(|layout| layout.overflow_y = nana_ui_core::OverflowSpec::Hidden))
-        .children((
-            filters,
-            endpoint_row,
-            summary,
-            target,
-            auth,
-            request_body,
-            actions,
-        ))
-        .key("admin-api-request-column")
-        .into_any()
+    widget(
+        frame(SpacingStep::Xl)
+            .with_layout(|layout| layout.overflow_y = nana_ui_core::OverflowSpec::Hidden),
+    )
+    .children((
+        filters,
+        endpoint_row,
+        summary,
+        target,
+        auth,
+        request_body,
+        actions,
+    ))
+    .key("admin-api-request-column")
+    .into_any()
 }
 
-/// 等宽文本域：正文档字号、1.5 倍行高、内边距 10、sm 圆角、`border-strong` 边线、`bg-subtle`。字色另外绑定。
+/// 等宽文本域：正文档字号、1.5 倍行高、内边距 `Lg`、sm 圆角、`border-strong` 发丝边、`bg-subtle`。字色另外绑定。
 fn code_area_style(min_height: f32) -> nana_ui::runtime::NodeStyle {
-    let mut node = style::native_field_style(min_height);
+    let mut node = style::native_field_style();
     node.text_vertical_alignment = nana_ui::runtime::TextVerticalAlignment::Top;
     let layout = Arc::make_mut(&mut node.layout);
-    layout.height = None;
     layout.min_height = Some(LengthSpec::Px(min_height));
     layout.flex_grow = Some(1.0);
     layout.white_space_nowrap = false;
     layout.text_ext.font_family = Some(style::MONO_FAMILY.into());
-    layout.line_height = Some(nana_ui_core::LineHeightSpec::Relative(1.5));
-    layout.padding_top = Some(LengthSpec::Px(10.0));
-    layout.padding_bottom = Some(LengthSpec::Px(10.0));
+    tiers::line_ratio(layout, TypeRole::Body, 1.5);
+    tiers::padding(layout, &Edge::Y, SpacingStep::Lg);
     node
 }
 
 fn response_column(response: Signal<PlaygroundResponse>) -> AnyView {
-    let head = widget(style::spread(12.0, AlignSpec::Center)).children((
-        widget(row(8.0)).children((
+    let head = widget(style::spread(SpacingStep::Xl, AlignSpec::Center)).children((
+        widget(row(SpacingStep::Md)).children((
             widget(label(
                 "Response",
                 TypeRole::Meta,
@@ -724,7 +732,7 @@ fn response_column(response: Signal<PlaygroundResponse>) -> AnyView {
                 max_px: None,
             },
         ]);
-        layout.gap = Some(LengthSpec::Px(10.0));
+        tiers::gap(layout, SpacingStep::Lg);
         layout.width = Some(LengthSpec::Fill);
         layout.flex_grow = Some(1.0);
         layout.min_height = Some(LengthSpec::Px(0.0));
@@ -754,18 +762,21 @@ fn response_column(response: Signal<PlaygroundResponse>) -> AnyView {
             )
             .into_any()
     };
-    widget(frame(12.0).with_layout(|layout| layout.overflow_y = nana_ui_core::OverflowSpec::Hidden))
-        .children((
-            head,
-            widget(grid).children((
-                block(
-                    "Headers",
-                    |response| response.headers.clone(),
-                    "admin-api-headers",
-                ),
-                block("Body", |response| response.body.clone(), "admin-api-body"),
-            )),
-        ))
-        .key("admin-api-response-column")
-        .into_any()
+    widget(
+        frame(SpacingStep::Xl)
+            .with_layout(|layout| layout.overflow_y = nana_ui_core::OverflowSpec::Hidden),
+    )
+    .children((
+        head,
+        widget(grid).children((
+            block(
+                "Headers",
+                |response| response.headers.clone(),
+                "admin-api-headers",
+            ),
+            block("Body", |response| response.body.clone(), "admin-api-body"),
+        )),
+    ))
+    .key("admin-api-response-column")
+    .into_any()
 }

@@ -9,15 +9,19 @@
 
 use nana_ui::runtime::view::{AnyView, IntoView, Signal, dynamic, each, fields, signal, widget};
 use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, List, ListItem, Stack};
-use nana_ui_core::{ButtonKind, RadiusTier, SemanticColorRole as Role, TextWeight, TypeRole};
+use nana_ui_core::{
+    ButtonKind, RadiusTier, SemanticColorRole as Role, SpacingRole, SpacingStep, TextWeight,
+    TypeRole,
+};
 
 use super::super::{ShellMessage, ShellViewModel};
 use super::AdminMessage;
 use super::bind::ActionDisabled;
 use super::icons;
 use super::marks;
-use super::style::{self, action, column, label, pad, wrapping};
+use super::style::{self, Edge, Gap, Hairline, action, column, inset, label, pad, wrapping};
 use super::support::{action_can_run, action_status_label};
+use crate::theme_map::tiers;
 
 /// 面板主体显示哪一块。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -181,9 +185,9 @@ impl ActionsSignals {
 /// 仓库动作面板。
 pub(crate) fn actions_panel(signals: ActionsSignals) -> AnyView {
     let (count, state, error) = (signals.count, signals.state, signals.error);
-    let header = widget(style::spread(12.0, AlignSpec::Center))
+    let header = widget(style::spread(SpacingStep::Xl, AlignSpec::Center))
         .children((
-            widget(column(0.0)).children((
+            widget(column(Gap::None)).children((
                 widget(style::eyebrow_text("动作")).key("admin-actions-eyebrow"),
                 widget(style::label_lh(
                     "仓库动作",
@@ -212,7 +216,7 @@ pub(crate) fn actions_panel(signals: ActionsSignals) -> AnyView {
         marks::notice(error, true, "admin-actions-error")
             .visible(move || error.with(|error| !error.is_empty())),
     );
-    widget(pad(column(12.0), 18.0, 18.0, 18.0, 18.0))
+    widget(inset(column(SpacingStep::Xl), SpacingStep::PageTight))
         .children(body)
         .key("admin-actions")
         .into_any()
@@ -226,9 +230,9 @@ fn action_body(signals: ActionsSignals) -> AnyView {
         action_row(item, detail)
     });
     let list = widget(
-        column(0.0)
+        column(Gap::None)
             .surface(Role::Surface)
-            .border(Role::BorderSoft, 1.0)
+            .hairline(Role::BorderSoft)
             .radius(RadiusTier::Md),
     )
     .children((widget(List::new().label("仓库动作")).children((items,)),))
@@ -244,7 +248,7 @@ fn action_body(signals: ActionsSignals) -> AnyView {
                 max_px: None,
             },
         ]);
-        layout.gap = Some(LengthSpec::Px(12.0));
+        tiers::gap(layout, SpacingStep::Xl);
         layout.width = Some(LengthSpec::Fill);
         layout.align_items = AlignSpec::Start;
     });
@@ -260,7 +264,8 @@ fn action_row(item: ActionRow, detail: Signal<Option<ActionDetail>>) -> AnyView 
     let id = item.id.clone();
     let selected_id = item.id.clone();
     let content = widget(
-        Stack::column(3.0)
+        Stack::column(0.0)
+            .gap_step(SpacingRole::Copy)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
     )
@@ -288,7 +293,11 @@ fn action_row(item: ActionRow, detail: Signal<Option<ActionDetail>>) -> AnyView 
         })
         .content(content);
     let row = if item.warn {
-        row.trailing(widget(style::glyph(icons::SHIELD_ALERT, 14.0, Role::Text)))
+        row.trailing(widget(style::glyph(
+            icons::SHIELD_ALERT,
+            TypeRole::Section,
+            Role::Text,
+        )))
     } else {
         row
     };
@@ -310,8 +319,8 @@ fn detail_value<R: Default + 'static>(
 /// 选中动作的详情卡片：名称、状态、「执行」、不支持的原因和步骤。
 fn action_detail(detail: Signal<Option<ActionDetail>>) -> AnyView {
     let running = detail_value(detail, |detail| detail.running);
-    let head = widget(style::spread(12.0, AlignSpec::Center)).children((
-        widget(column(4.0)).children((
+    let head = widget(style::spread(SpacingStep::Xl, AlignSpec::Center)).children((
+        widget(column(SpacingStep::Xs)).children((
             style::bound(
                 style::label_lh(
                     String::new(),
@@ -349,7 +358,7 @@ fn action_detail(detail: Signal<Option<ActionDetail>>) -> AnyView {
             cx.dispatch_program_all(ShellMessage::Admin(AdminMessage::RunAction(action_id)));
         }),
     ));
-    let unsupported = widget(pad(column(0.0), 12.0, 0.0, 0.0, 0.0))
+    let unsupported = widget(pad(column(Gap::None), &[Edge::Top], SpacingStep::Xl))
         .visible(detail_value(detail, |detail| detail.unsupported.is_some()))
         .children((marks::notice(
             detail_value(detail, |detail| {
@@ -361,15 +370,15 @@ fn action_detail(detail: Signal<Option<ActionDetail>>) -> AnyView {
     let steps = dynamic(
         detail_value(detail, |detail| detail.steps.clone()),
         |steps: &Vec<StepView>| {
-            widget(pad(column(8.0), 12.0, 0.0, 0.0, 0.0))
+            widget(pad(column(SpacingStep::Md), &[Edge::Top], SpacingStep::Xl))
                 .children(steps.iter().map(step_view).collect::<Vec<_>>())
                 .into_any()
         },
     );
     widget(
-        pad(column(0.0), 14.0, 14.0, 14.0, 14.0)
+        inset(column(Gap::None), SpacingStep::Xxl)
             .surface(Role::Surface)
-            .border(Role::BorderSoft, 1.0)
+            .hairline(Role::BorderSoft)
             .radius(RadiusTier::Md),
     )
     .visible(move || detail.with(Option::is_some))
@@ -381,7 +390,7 @@ fn action_detail(detail: Signal<Option<ActionDetail>>) -> AnyView {
 /// 一步：标签和「类型 · 状态」，不支持时右边写原因。
 fn step_view(step: &StepView) -> AnyView {
     let mut children = vec![
-        widget(column(3.0).shrink(1.0))
+        widget(column(SpacingRole::Copy).shrink(1.0))
             .children((
                 widget(label(
                     step.label.clone(),
@@ -410,15 +419,12 @@ fn step_view(step: &StepView) -> AnyView {
         );
     }
     widget(
-        pad(
-            style::spread(10.0, AlignSpec::Start),
-            10.0,
-            10.0,
-            10.0,
-            10.0,
+        inset(
+            style::spread(SpacingStep::Lg, AlignSpec::Start),
+            SpacingStep::Lg,
         )
         .surface(Role::Subtle)
-        .border(Role::BorderSoft, 1.0)
+        .hairline(Role::BorderSoft)
         .radius(RadiusTier::Sm),
     )
     .children(children)

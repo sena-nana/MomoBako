@@ -16,7 +16,7 @@ use nana_ui::runtime::view::{
 use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, QrCode, Stack};
 use nana_ui_core::{
     BackgroundImage, BackgroundImageFit, BackgroundPosition, BackgroundRepeat, ButtonKind,
-    ImageSampling, RadiusTier, SemanticColorRole as Role, TextWeight, TypeRole,
+    ImageSampling, RadiusTier, SemanticColorRole as Role, SpacingStep, TextWeight, TypeRole,
 };
 
 use super::super::{ShellMessage, ShellViewModel};
@@ -25,7 +25,7 @@ use super::bind::{ActionDisabled, row_text};
 use super::icons;
 use super::marks;
 use super::source_provision::{self as flow};
-use super::style::{self, action, column, label, pad, row, wrapping};
+use super::style::{self, Gap, Hairline, action, column, inset, label, row, wrapping};
 use crate::backend::services::repository::PluginManifest;
 
 /// 二维码边长。
@@ -160,7 +160,7 @@ fn qr_image(session: &serde_json::Value) -> Option<String> {
     data
 }
 
-/// 整个账号与仓库区，竖排间距 12。`plugin_id` 是展开了设置的这张卡片的插件。
+/// 整个账号与仓库区，竖排间距 `Xl`。`plugin_id` 是展开了设置的这张卡片的插件。
 pub(super) fn source_auth_settings(
     plugin_id: &str,
     source: Signal<Option<SourceAuthView>>,
@@ -172,12 +172,14 @@ pub(super) fn source_auth_settings(
     let rows = repos
         .keyed(SourceRepoRow::key)
         .each(move |item| repository_row(&repo_plugin, item, source))
-        .gap(12.0)
-        .visible(move || !repos.is_empty())
-        .key(format!("admin-source-repos-{pid}"));
+        .container(
+            widget(column(SpacingStep::Xl))
+                .visible(move || !repos.is_empty())
+                .key(format!("admin-source-repos-{pid}")),
+        );
     let notice = source_notice(source, &pid);
     // 不是来源插件时整块不占布局。
-    widget(column(12.0))
+    widget(column(SpacingStep::Xl))
         .visible(move || source.with(Option::is_some))
         .children((
             head(plugin_id, busy),
@@ -192,10 +194,11 @@ pub(super) fn source_auth_settings(
 /// 页头：标题和说明在左，「连接新账号」在右。
 fn head(plugin_id: &str, busy: impl Fn() -> bool + Send + 'static) -> AnyView {
     let id = plugin_id.to_string();
-    widget(style::spread(10.0, AlignSpec::Center))
+    widget(style::spread(SpacingStep::Lg, AlignSpec::Center))
         .children((
             widget(
-                Stack::column(4.0)
+                Stack::column(0.0)
+                    .gap_step(SpacingStep::Xs)
                     .width(LengthSpec::Shrink)
                     .min_width(LengthSpec::Px(0.0))
                     .grow(1.0)
@@ -290,20 +293,18 @@ fn repository_row(
             format!("admin-source-clear-{}", style::key_part(&repo_id)),
         ),
     ];
-    let frame = pad(
-        style::spread(10.0, AlignSpec::Center),
-        12.0,
-        12.0,
-        12.0,
-        12.0,
+    let frame = inset(
+        style::spread(SpacingStep::Lg, AlignSpec::Center),
+        SpacingStep::Xl,
     )
     .surface(Role::Subtle)
-    .border(Role::BorderSoft, 1.0)
+    .hairline(Role::BorderSoft)
     .radius(RadiusTier::Md);
     widget(frame)
         .children((
             widget(
-                Stack::column(2.0)
+                Stack::column(0.0)
+                    .gap_step(SpacingStep::Xxs)
                     .width(LengthSpec::Shrink)
                     .min_width(LengthSpec::Px(0.0))
                     .grow(1.0)
@@ -335,7 +336,7 @@ fn repository_row(
                 )),
             )),
             widget(
-                row(10.0)
+                row(SpacingStep::Lg)
                     .wrap(true)
                     .justify(nana_ui::runtime::JustifySpec::End),
             )
@@ -426,7 +427,7 @@ fn session_flow(plugin_id: &str, source: Signal<Option<SourceAuthView>>) -> AnyV
         }))
         .key("admin-source-qr-image");
     let qr_row = widget(
-        row(0.0)
+        row(Gap::None)
             .width(LengthSpec::Fill)
             .justify(nana_ui::runtime::JustifySpec::Center),
     )
@@ -437,7 +438,7 @@ fn session_flow(plugin_id: &str, source: Signal<Option<SourceAuthView>>) -> AnyV
     let refresh_id = plugin_id.to_string();
     let poll_id = plugin_id.to_string();
     let actions = widget(
-        row(10.0)
+        row(SpacingStep::Lg)
             .wrap(true)
             .width(LengthSpec::Fill)
             .justify(nana_ui::runtime::JustifySpec::End),
@@ -474,9 +475,9 @@ fn session_flow(plugin_id: &str, source: Signal<Option<SourceAuthView>>) -> AnyV
                 }));
             }),
     ));
-    let frame = pad(column(12.0), 12.0, 12.0, 12.0, 12.0)
+    let frame = inset(column(SpacingStep::Xl), SpacingStep::Xl)
         .surface(Role::Subtle)
-        .border(Role::BorderSoft, 1.0)
+        .hairline(Role::BorderSoft)
         .radius(RadiusTier::Md);
     widget(frame)
         .visible(move || {
@@ -500,7 +501,7 @@ fn source_notice(source: Signal<Option<SourceAuthView>>, pid: &str) -> AnyView {
             })
         }
     };
-    widget(column(0.0))
+    widget(column(Gap::None))
         .visible(move || {
             source.with(|view| view.as_ref().is_some_and(|view| view.notice.is_some()))
         })

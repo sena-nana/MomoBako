@@ -13,13 +13,13 @@ use nana_ui::runtime::view::{
 use nana_ui::runtime::{
     Activate, AlignSpec, Button, IconButton, LengthSpec, ScrollAxes, ScrollView, Stack,
 };
-use nana_ui_core::{RadiusTier, SemanticColorRole as Role, TextWeight, TypeRole};
+use nana_ui_core::{RadiusTier, SemanticColorRole as Role, SpacingStep, TextWeight, TypeRole};
 
 use super::super::hot::{self, TaskFills};
 use super::super::{ShellMessage, ShellViewModel};
 use super::AdminMessage;
 use super::icons;
-use super::style::{self, column, label, pad, row};
+use super::style::{self, Hairline, column, inset, label, row};
 
 /// 任务弹层的一行。
 #[derive(Clone, Debug, PartialEq)]
@@ -123,11 +123,10 @@ pub(crate) fn task_panel(view: Signal<TaskPopoverView>) -> AnyView {
         .children((each(keys, Clone::clone, move |key: String| {
             task_item(view, key, fills)
         })
-        .gap(10.0)
-        .key("admin-task-list"),))
+        .container(widget(column(SpacingStep::Lg)).key("admin-task-list")),))
         .key("admin-task-list-scroll")
         .into_any();
-    widget(column(10.0).width(LengthSpec::Fill))
+    widget(column(SpacingStep::Lg).width(LengthSpec::Fill))
         .children((header, empty, list))
         .key("admin-task-popover")
         .into_any()
@@ -164,7 +163,7 @@ fn cancel_button(view: Signal<TaskPopoverView>, key: &str) -> AnyView {
         .into_any()
 }
 
-/// 一个任务：`bg` 底、`border-soft` 边线、sm 圆角、内边距 9；来源加进度条。字段按键从投影里取。
+/// 一个任务：`bg` 底、`border-soft` 发丝边、sm 圆角、内边距 `Md`；来源加进度条。字段按键从投影里取。
 fn task_item(
     view: Signal<TaskPopoverView>,
     key: String,
@@ -186,13 +185,13 @@ fn task_item(
         }
     };
     widget(
-        pad(column(6.0), 9.0, 9.0, 9.0, 9.0)
+        inset(column(SpacingStep::Sm), SpacingStep::Md)
+            .hairline(Role::BorderSoft)
             .surface(Role::Background)
-            .border(Role::BorderSoft, 1.0)
             .radius(RadiusTier::Sm),
     )
     .children((
-        widget(style::spread(8.0, AlignSpec::Center)).children((
+        widget(style::spread(SpacingStep::Md, AlignSpec::Center)).children((
             widget(label(
                 String::new(),
                 TypeRole::Meta,
@@ -215,7 +214,7 @@ fn task_item(
     .into_any()
 }
 
-/// 进度条：NanaUI 的 `Progress`（6 高的轨道，满格 100）；下面是标签、细节和百分比，间距 7。值按
+/// 进度条：NanaUI 的 `Progress`（6 高的轨道，满格 100）；下面是标签、细节和百分比，间距 `Sm`。值按
 /// 0.18s ease 过渡，取填充过渡这一帧的值（`fills`；不经 `ShellView` 建树时没有，直接用目标值）。
 /// 不确定进度不写百分比，进度条改成沿轨道扫的不确定样式（减少动态效果时由组件改成淡填充）。
 fn progress_bar(
@@ -304,10 +303,10 @@ fn progress_bar(
         .visible(move || percent().is_some())
         .into_any(),
     ];
-    widget(column(7.0))
+    widget(column(SpacingStep::Sm))
         .children((
             track,
-            widget(row(8.0).width(LengthSpec::Fill))
+            widget(row(SpacingStep::Md).width(LengthSpec::Fill))
                 .children(meta)
                 .into_any(),
         ))

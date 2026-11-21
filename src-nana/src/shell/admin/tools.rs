@@ -10,16 +10,19 @@
 
 use nana_ui::runtime::view::{AnyView, IntoView, Signal, css, dynamic, signal, widget};
 use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, List, ListItem, Stack};
-use nana_ui_core::{GridTrack, RadiusTier, SemanticColorRole as Role, TextWeight, TypeRole};
+use nana_ui_core::{
+    GridTrack, RadiusTier, SemanticColorRole as Role, SpacingStep, TextWeight, TypeRole,
+};
 
 use super::super::{ShellMessage, ShellViewModel};
 use super::api::view::PlaygroundSignals;
 use super::marks;
 use super::plugins_state::PluginPanelSignals;
-use super::style::{self, column, label, pad, wrapping};
+use super::style::{self, Edge, Gap, column, inset, label, pad, wrapping};
 use super::support::{self, TOOL_API_PLAYGROUND};
 use super::tool_native::ImportSignals;
 use super::{AdminMessage, ToolPageEntry};
+use crate::theme_map::tiers;
 
 /// 右侧工具页显示哪一种内容。原生页面按页面 id 区分，第三方页面带着它的说明。
 #[derive(Clone, Debug, PartialEq)]
@@ -119,7 +122,7 @@ impl ToolsSignals {
     }
 }
 
-/// 整个拓展页：工具区和插件管理，间距 14。没有工具页时工具区不占布局。
+/// 整个拓展页：工具区和插件管理，间距 `Xxl`。没有工具页时工具区不占布局。
 pub(crate) fn extensions_page(signals: ToolsSignals, plugins: PluginPanelSignals) -> AnyView {
     let tabs = signals.tabs;
     let body = (
@@ -133,7 +136,7 @@ pub(crate) fn extensions_page(signals: ToolsSignals, plugins: PluginPanelSignals
             &super::plugins_view::EXTENSIONS_COPY,
         ),)),
     );
-    widget(column(14.0))
+    widget(column(SpacingStep::Xxl))
         .children(body)
         .key("admin-extensions")
         .into_any()
@@ -151,7 +154,7 @@ fn tools(signals: ToolsSignals) -> nana_ui::runtime::view::El<Stack, (AnyView, A
                 max_px: None,
             },
         ]);
-        layout.gap = Some(LengthSpec::Px(12.0));
+        tiers::gap(layout, SpacingStep::Xl);
         layout.width = Some(LengthSpec::Fill);
         layout.min_height = Some(LengthSpec::Px(520.0));
         layout.align_items = AlignSpec::Stretch;
@@ -161,7 +164,7 @@ fn tools(signals: ToolsSignals) -> nana_ui::runtime::view::El<Stack, (AnyView, A
         .key("admin-tool-workbench")
 }
 
-/// 左侧导航：`bg-elev` 底、md 圆角、内边距 14、间距 8；工具页是一列 NanaUI 列表行，按 id 做键。
+/// 左侧导航：`bg-elev` 底、md 圆角、内边距 `Xxl`、间距 `Md`；工具页是一列 NanaUI 列表行，按 id 做键。
 fn nav(signals: ToolsSignals) -> AnyView {
     let active = signals.active;
     let tabs = widget(List::new().label("插件工具")).children((nana_ui::runtime::view::each(
@@ -170,7 +173,7 @@ fn nav(signals: ToolsSignals) -> AnyView {
         move |tab: ToolTab| tool_tab(tab, active),
     ),));
     widget(
-        pad(column(8.0), 14.0, 14.0, 14.0, 14.0)
+        inset(column(SpacingStep::Md), SpacingStep::Xxl)
             .surface(Role::Surface)
             .radius(RadiusTier::Md),
     )
@@ -188,7 +191,8 @@ fn tool_tab(page: ToolTab, active: Signal<Option<String>>) -> AnyView {
     let tid = style::key_part(&page.id);
     let id = page.id.clone();
     let content = widget(
-        Stack::column(4.0)
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Xs)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
     )
@@ -239,7 +243,7 @@ fn page_frame(signals: ToolsSignals) -> AnyView {
         ToolPageKind::Playground => super::api::view::playground(signals.playground),
         ToolPageKind::Native(id) => super::tool_native::import_page(id, signals.import),
         ToolPageKind::Foreign(page) => foreign_page(page),
-        ToolPageKind::None => widget(column(0.0)).into_any(),
+        ToolPageKind::None => widget(column(Gap::None)).into_any(),
     })
     .css(css! { height: 100%; min-height: 0; flex-grow: 1; flex-shrink: 1; });
     widget(
@@ -266,10 +270,10 @@ fn foreign_page(page: &ToolPageEntry) -> AnyView {
                 style::key_part(&page.id)
             ))
             .into_any(),
-        widget(pad(column(0.0), 4.0, 0.0, 0.0, 0.0))
+        widget(pad(column(Gap::None), &[Edge::Top], SpacingStep::Xs))
             .children((widget(style::label_lh(
                 page.label.clone(),
-                22.0,
+                TypeRole::Display,
                 TextWeight::Bold,
                 Role::Text,
                 1.25,
@@ -282,7 +286,7 @@ fn foreign_page(page: &ToolPageEntry) -> AnyView {
     ];
     if !page.description.trim().is_empty() {
         header.push(
-            widget(pad(column(0.0), 8.0, 0.0, 0.0, 0.0))
+            widget(pad(column(Gap::None), &[Edge::Top], SpacingStep::Md))
                 .children((widget(wrapping(label(
                     page.description.clone(),
                     TypeRole::Body,
@@ -298,8 +302,8 @@ fn foreign_page(page: &ToolPageEntry) -> AnyView {
         "admin-foreign-tool-notice",
     )
     .into_any();
-    widget(pad(column(14.0), 18.0, 18.0, 18.0, 18.0))
-        .children((widget(column(0.0)).children(header), notice))
+    widget(inset(column(SpacingStep::Xxl), SpacingStep::PageTight))
+        .children((widget(column(Gap::None)).children(header), notice))
         .key(format!("admin-foreign-tool-{}", style::key_part(&page.id)))
         .into_any()
 }

@@ -14,8 +14,8 @@ use nana_ui::icons_tabler::ALERT_TRIANGLE;
 use nana_ui::runtime::view::{
     AnyView, IntoView, Item, Store, StoreList, StorePath, signal, widget,
 };
-use nana_ui::runtime::{Activate, AlignSpec, LengthSpec, TextChanged, TextInput};
-use nana_ui_core::{SemanticColorRole as Role, TextWeight, TypeRole};
+use nana_ui::runtime::{Activate, AlignSpec, TextChanged, TextInput};
+use nana_ui_core::{ControlSize, SemanticColorRole as Role, SpacingStep, TextWeight, TypeRole};
 
 use super::super::hot::ModelField;
 use super::super::view_part_overlay::dialog::{DialogFrame, MODAL_CARD, intent_button};
@@ -172,16 +172,18 @@ fn search_field(keyword: ModelField, placeholder: &'static str) -> AnyView {
         .into_any()
 }
 
-/// 分组：组间 16，组内标题行最小高 28，卡片间 10。按分类做键，面板显示分组时才占布局。
+/// 分组：组间 `Xxxl`，组内标题行最小高是小号控件档（28），卡片间 `Lg`。按分类做键，面板显示分组时才占布局。
 fn groups(signals: PluginPanelSignals) -> AnyView {
     let state = signals.state;
     signals
         .groups
         .keyed(PluginGroupView::key)
         .each(move |group| group_view(group, signals))
-        .gap(16.0)
-        .visible(move || state.with(|state| *state == PanelState::Groups))
-        .key("admin-plugin-groups")
+        .container(
+            widget(column(SpacingStep::Xxxl))
+                .visible(move || state.with(|state| *state == PanelState::Groups))
+                .key("admin-plugin-groups"),
+        )
         .into_any()
 }
 
@@ -189,9 +191,12 @@ fn groups(signals: PluginPanelSignals) -> AnyView {
 fn group_view(group: GroupItem, signals: PluginPanelSignals) -> AnyView {
     let category = style::key_part(&group.get_untracked().category);
     let head = widget(
-        style::fixed(style::spread(12.0, AlignSpec::Center), None, None).with_layout(|layout| {
-            layout.min_height = Some(LengthSpec::Px(28.0));
-        }),
+        style::fixed(
+            style::spread(SpacingStep::Xl, AlignSpec::Center),
+            None,
+            None,
+        )
+        .with_layout(|layout| style::control_height(layout, ControlSize::Small, false)),
     )
     .children((
         style::bound(
@@ -220,8 +225,8 @@ fn group_view(group: GroupItem, signals: PluginPanelSignals) -> AnyView {
         .cards()
         .keyed(PluginCardView::key)
         .each(move |card| super::plugin_card::plugin_card(card, signals))
-        .gap(10.0);
-    widget(column(8.0))
+        .container(widget(column(SpacingStep::Lg)));
+    widget(column(SpacingStep::Md))
         .children((head, cards))
         .key(format!("admin-plugin-section-{category}"))
         .into_any()

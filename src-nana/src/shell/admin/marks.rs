@@ -12,9 +12,9 @@ use nana_ui::runtime::view::{
     tag_frame, widget,
 };
 use nana_ui::runtime::{Card, EmptyState, Spinner, Stack, StatusTone, Text};
-use nana_ui_core::{CardKind, SemanticColorRole as Role, TextWeight, TypeRole};
+use nana_ui_core::{CardKind, SemanticColorRole as Role, SpacingStep, TextWeight, TypeRole};
 
-use super::style::column;
+use super::style::{Gap, column};
 
 /// 带键的提示条：NanaUI 的 `callout`，错误用危险色调和圆叉，否则信息色调。文字为空时整条藏起来；
 /// 返回元素，调用方还能再绑显隐。
@@ -28,7 +28,7 @@ pub(crate) fn notice(
     } else {
         (INFO_CIRCLE, StatusTone::Info)
     };
-    widget(column(0.0))
+    widget(column(Gap::None))
         .children((callout(icon, tone, text),))
         .key(key.into())
 }
@@ -64,17 +64,17 @@ pub(crate) fn loading(text: &str, key: impl Into<String>) -> El<Spinner> {
     spinner().label(Arc::<str>::from(text)).key(key.into())
 }
 
-/// 插件设置区里的状态卡：NanaUI 的选中样式卡片（选中底色加柔和边框），里面竖排间距 10。
+/// 插件设置区里的状态卡：NanaUI 的选中样式卡片（选中底色加柔和边框），里面竖排间距 `Lg`。
 pub(crate) fn status_card(body: Vec<AnyView>, key: &'static str) -> AnyView {
     widget(Card::new().kind(CardKind::Selected))
-        .children((widget(column(10.0)).children(body),))
+        .children((widget(column(SpacingStep::Lg)).children(body),))
         .key(key)
         .into_any()
 }
 
 /// 警示色调的说明条：错误、空状态和页底说明都用它。
 pub(crate) fn warning_note(text: &str, key: &'static str) -> AnyView {
-    widget(column(0.0))
+    widget(column(Gap::None))
         .children((callout(
             ALERT_TRIANGLE,
             StatusTone::Warning,
@@ -97,7 +97,7 @@ pub(crate) fn status_rows(items: &[(String, String)], prefix: &str) -> AnyView {
                 .into_any()
         })
         .collect::<Vec<_>>();
-    widget(column(0.0))
+    widget(column(Gap::None))
         .children(lines)
         .key(format!("{prefix}-rows"))
         .into_any()
