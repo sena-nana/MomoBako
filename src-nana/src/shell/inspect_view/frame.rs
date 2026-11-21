@@ -17,9 +17,10 @@ use nana_ui::runtime::{
     ScrollView, SemanticColorRole, Stack, Text, Toolbar,
 };
 use nana_ui::{ButtonKind, Icon};
-use nana_ui_core::TextWeight;
+use nana_ui_core::{ControlHeight, ControlSize, SpacingStep, TextWeight};
 
 use super::super::files_view::bind::{StyleField, fill_container};
+use super::super::files_view::style as files_style;
 use super::super::inspect_asmr::{self, AsmrPanels};
 use super::super::inspect_library::{self, FactsView};
 use super::super::inspect_metadata_view::{self, MetadataSignals};
@@ -27,6 +28,7 @@ use super::super::player_view::icons;
 use super::super::{ShellMessage, ShellViewModel};
 use super::body::{self, PreviewSnapshot};
 use crate::theme_map::disabled_paint;
+use crate::theme_map::tiers::{self, Edge};
 
 mod facts;
 
@@ -36,8 +38,8 @@ pub(crate) use facts::*;
 const STACK_BREAKPOINT: f32 = 900.0;
 /// 右侧文件事实卡宽度，对应 `--workspace-file-detail-width`。
 const DETAIL_WIDTH: f32 = 300.0;
-/// 正文两栏间距，对应 `--workspace-file-detail-gap`。
-const DETAIL_GAP: f32 = 18.0;
+/// 正文两栏间距和正文四周的内边距，对应 `--workspace-file-detail-gap`；页头左右也取这一档，和正文对齐。
+const DETAIL_GAP_STEP: SpacingStep = SpacingStep::PageTight;
 
 /// 页头：排法、文件名和路径、注释和链接导语，以及三个按钮能不能点、点了去哪。
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -241,7 +243,7 @@ pub(super) fn preview_page(
         .into_any()
 }
 
-/// 外框：bg-elev、`--radius-2xl` 的面板，裁掉溢出，四边留 1px。
+/// 外框：bg-elev、`--radius-2xl` 的面板，裁掉溢出，四边留一根发丝边宽。
 fn page_style() -> NodeStyle {
     Stack::fill_column(0.0)
         .surface(SemanticColorRole::Surface)
@@ -251,10 +253,7 @@ fn page_style() -> NodeStyle {
             layout.flex_basis = Some(LengthSpec::Px(0.0));
             layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
             layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
-            layout.padding_top = Some(LengthSpec::Px(1.0));
-            layout.padding_left = Some(LengthSpec::Px(1.0));
-            layout.padding_right = Some(LengthSpec::Px(1.0));
-            layout.padding_bottom = Some(LengthSpec::Px(1.0));
+            files_style::hairline_padding(layout);
         })
         .node_style()
 }
@@ -266,7 +265,12 @@ fn header(head: Signal<HeadView>) -> AnyView {
     let open_disabled = move || head.with(|view| !view.can_open);
     let reveal_disabled = move || head.with(|view| !view.can_reveal);
     let back = action(
-        ("返回", icons::ARROW_LEFT, 15.0, 34.0),
+        (
+            "返回",
+            icons::ARROW_LEFT,
+            15.0,
+            ActionHeight::Px(BACK_HEIGHT),
+        ),
         "inspect-back",
         back_disabled,
     )
@@ -276,7 +280,12 @@ fn header(head: Signal<HeadView>) -> AnyView {
         ));
     });
     let open = action(
-        ("打开", icons::EYE, 14.0, 32.0),
+        (
+            "打开",
+            icons::EYE,
+            14.0,
+            ActionHeight::Control(ControlSize::Medium),
+        ),
         "inspect-open",
         open_disabled,
     )
@@ -292,7 +301,12 @@ fn header(head: Signal<HeadView>) -> AnyView {
         ));
     });
     let reveal = action(
-        ("定位", icons::FOLDER_OPEN, 14.0, 32.0),
+        (
+            "定位",
+            icons::FOLDER_OPEN,
+            14.0,
+            ActionHeight::Control(ControlSize::Medium),
+        ),
         "inspect-reveal",
         reveal_disabled,
     )
@@ -303,7 +317,7 @@ fn header(head: Signal<HeadView>) -> AnyView {
         ));
     });
     // 「打开」「定位」是一条不画表面的 NanaUI 工具栏，左右方向键在两个按钮之间走。
-    let actions_row = Stack::row(8.0)
+    let actions_row = files_style::row(SpacingStep::Md)
         .align(AlignSpec::Center)
         .grow(0.0)
         .shrink(0.0);
@@ -335,18 +349,17 @@ fn header(head: Signal<HeadView>) -> AnyView {
         .into_any()
 }
 
-/// 页头的排法：窄窗口上下排，宽窗口一行居中对齐；四周内边距、底边发丝线。
+/// 页头的排法：窄窗口上下排，宽窗口一行居中对齐；四周内边距（上下 `Xxxl`、左右和正文同一档）、底边发丝线。
 fn header_style(stacked: bool) -> NodeStyle {
     let frame = if stacked {
-        Stack::column(14.0)
+        files_style::column(SpacingStep::Xxl)
     } else {
-        Stack::bar(14.0).align(AlignSpec::Center)
+        Stack::bar(0.0)
+            .gap_theme(SpacingStep::Xxl)
+            .align(AlignSpec::Center)
     };
     super::super::workbench::with_bottom_divider(frame.with_layout(|layout| {
-        layout.padding_top = Some(LengthSpec::Px(16.0));
-        layout.padding_bottom = Some(LengthSpec::Px(16.0));
-        layout.padding_left = Some(LengthSpec::Px(18.0));
-        layout.padding_right = Some(LengthSpec::Px(18.0));
+        tiers::padding_xy(layout, DETAIL_GAP_STEP, SpacingStep::Xxxl);
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
     }))
@@ -359,7 +372,7 @@ fn title_lines(head: Signal<HeadView>) -> (AnyView, AnyView, AnyView, AnyView) {
     let lead_row = |label: &str, key: &'static str, pick: fn(&HeadView) -> String| {
         let value = move || head.with(|view| pick(view));
         widget(
-            Stack::column(4.0)
+            files_style::column(SpacingStep::Xs)
                 .width(LengthSpec::Fill)
                 .min_width(LengthSpec::Px(0.0)),
         )
@@ -382,12 +395,10 @@ fn title_lines(head: Signal<HeadView>) -> (AnyView, AnyView, AnyView, AnyView) {
         .into_any()
     };
     let lead = widget(
-        Stack::column(8.0)
+        files_style::column(SpacingStep::Md)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0))
-            .with_layout(|layout| {
-                layout.margin_top = Some(LengthSpec::Px(12.0));
-            }),
+            .with_layout(|layout| tiers::margin(layout, &[Edge::Top], SpacingStep::Xl)),
     )
     .visible(move || head.with(|view| !view.comment.is_empty() || !view.link.is_empty()))
     .children((
@@ -411,7 +422,7 @@ fn title_lines(head: Signal<HeadView>) -> (AnyView, AnyView, AnyView, AnyView) {
                 31.0,
             )
             .wrap_anywhere(),
-            4.0,
+            SpacingStep::Xs,
         ))
         .prop::<String, fields::text::value>(move || head.with(|view| view.name.clone()))
         .key("inspect-preview-name")
@@ -425,7 +436,7 @@ fn title_lines(head: Signal<HeadView>) -> (AnyView, AnyView, AnyView, AnyView) {
                 21.7,
             )
             .wrap_anywhere(),
-            4.0,
+            SpacingStep::Xs,
         ))
         .prop::<String, HiddenWhenEmpty<fields::text::value>>(move || {
             head.with(|view| view.path.clone())
@@ -444,12 +455,13 @@ fn main(key: &MainKey, signals: PreviewSignals, metadata: MetadataSignals) -> An
     }
     let stacked = key.stacked;
     let frame = if stacked {
-        Stack::fill_column(DETAIL_GAP)
+        Stack::fill_column(0.0).gap_theme(DETAIL_GAP_STEP)
     } else {
-        Stack::fill_row(DETAIL_GAP).align(AlignSpec::Stretch)
+        Stack::fill_row(0.0)
+            .gap_theme(DETAIL_GAP_STEP)
+            .align(AlignSpec::Stretch)
     };
-    let frame = frame
-        .padding(18.0)
+    let frame = files_style::pad(frame, DETAIL_GAP_STEP, DETAIL_GAP_STEP)
         .min_height(LengthSpec::Px(0.0))
         .with_layout(|layout| {
             layout.flex_basis = Some(LengthSpec::Px(0.0));
@@ -479,17 +491,19 @@ fn main(key: &MainKey, signals: PreviewSignals, metadata: MetadataSignals) -> An
     .into_any()
 }
 
-/// 预览框（铺满）、色板槽（至少 14px）和资源库扩展的预览面板，行距 10。
+/// 预览框（铺满）、色板槽（至少 14px）和资源库扩展的预览面板，行距 `Lg`。
 fn preview_shell(signals: PreviewSignals, stacked: bool) -> AnyView {
     let panels = signals.panels;
     let frame = if stacked {
-        Stack::column(10.0).min_height(LengthSpec::Px(360.0))
+        files_style::column(SpacingStep::Lg).min_height(LengthSpec::Px(360.0))
     } else {
-        Stack::fill_column(10.0).with_layout(|layout| {
-            layout.flex_basis = Some(LengthSpec::Px(0.0));
-            layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
-            layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
-        })
+        Stack::fill_column(0.0)
+            .gap_theme(SpacingStep::Lg)
+            .with_layout(|layout| {
+                layout.flex_basis = Some(LengthSpec::Px(0.0));
+                layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
+                layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
+            })
     };
     widget(
         frame
@@ -535,10 +549,7 @@ fn box_style(plugin: bool) -> NodeStyle {
             layout.flex_basis = Some(LengthSpec::Px(0.0));
             layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
             layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
-            layout.padding_top = Some(LengthSpec::Px(1.0));
-            layout.padding_left = Some(LengthSpec::Px(1.0));
-            layout.padding_right = Some(LengthSpec::Px(1.0));
-            layout.padding_bottom = Some(LengthSpec::Px(1.0));
+            files_style::hairline_padding(layout);
         });
     let frame = if plugin {
         frame.painter(super::preview_paint::PluginGlow)
@@ -613,14 +624,16 @@ fn palette_slot(colors: &[String]) -> AnyView {
         .enumerate()
         .map(|(index, (color, rgba))| {
             widget(
-                Stack::row(0.0)
-                    .width(LengthSpec::Px(34.0))
-                    .height(LengthSpec::Px(12.0))
-                    .grow(0.0)
-                    .shrink(0.0)
-                    .border(SemanticColorRole::BorderSoft, 1.0)
-                    .radius_px(999.0)
-                    .with_layout(move |layout| layout.background = Some(rgba)),
+                files_style::hairline(
+                    Stack::row(0.0)
+                        .width(LengthSpec::Px(34.0))
+                        .height(LengthSpec::Px(12.0))
+                        .grow(0.0)
+                        .shrink(0.0),
+                    SemanticColorRole::BorderSoft,
+                )
+                .radius(RadiusTier::Full)
+                .with_layout(move |layout| layout.background = Some(rgba)),
             )
             .key(format!(
                 "inspect-palette-{index}-{}",
@@ -630,7 +643,7 @@ fn palette_slot(colors: &[String]) -> AnyView {
         })
         .collect::<Vec<_>>();
     widget(
-        Stack::row(8.0)
+        files_style::row(SpacingStep::Md)
             .wrap(true)
             .min_height(LengthSpec::Px(14.0))
             .width(LengthSpec::Fill),
@@ -654,7 +667,7 @@ fn parse_hex(color: &str) -> Option<[f32; 4]> {
     Some([channel(0)?, channel(2)?, channel(4)?, 1.0])
 }
 
-/// 右侧事实卡：bg 底、12px 圆角、14px 内边距，行距 12，内容超高时卡内滚动。滚动区按预览目标取键。
+/// 右侧事实卡：bg 底、`Xl` 圆角、`Xxxl` 内边距，行距 `Xl`，内容超高时卡内滚动。滚动区按预览目标取键。
 fn stats(
     signals: PreviewSignals,
     metadata: MetadataSignals,
@@ -662,7 +675,7 @@ fn stats(
     scope: &str,
 ) -> AnyView {
     let rows = widget(
-        Stack::column(12.0)
+        files_style::column(SpacingStep::Xl)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
     )
@@ -683,10 +696,7 @@ fn stats(
         if !stacked {
             layout.height = Some(LengthSpec::Fill);
         }
-        layout.padding_top = Some(LengthSpec::Px(15.0));
-        layout.padding_bottom = Some(LengthSpec::Px(15.0));
-        layout.padding_left = Some(LengthSpec::Px(15.0));
-        layout.padding_right = Some(LengthSpec::Px(15.0));
+        tiers::padding(layout, &Edge::ALL, SpacingStep::Xxxl);
     });
     let mut style = card.style.clone();
     style.background = Some(SemanticColorRole::Background);
@@ -697,21 +707,39 @@ fn stats(
         .into_any()
 }
 
-/// 页头按钮：透明底、正文色，图标在字前，悬停铺 bg-hover。
+/// 「返回」高 34：控件档在 32 和 36 之间，没有对应的档，照写像素。
+const BACK_HEIGHT: f32 = 34.0;
+
+/// 页头按钮的高度：控件高度档，或者档以外的像素。
+#[derive(Clone, Copy, Debug)]
+enum ActionHeight {
+    Control(ControlSize),
+    Px(f32),
+}
+
+/// 页头按钮：透明底、正文色，图标在字前，悬停铺 bg-hover。左右内边距是按钮自带的控件内边距档。
 /// 停用色写在 `interaction.disabled` 里：字和图标在面板底色上按 sRGB 混淡，能不能点只换停用态。
-fn action_button(label: &str, icon: Icon, icon_size: f32, height: f32) -> Button {
+fn action_button(label: &str, icon: Icon, icon_size: f32, height: ActionHeight) -> Button {
     let mut button = Button::new(label)
         .kind(ButtonKind::Ghost)
         .icon(icon)
         .icon_size(icon_size)
-        .icon_gap(6.0);
+        .icon_gap(tiers::space_px(SpacingStep::Sm));
     button.style.interaction.disabled =
         disabled_paint(SemanticColorRole::Text, SemanticColorRole::Surface);
+    let px = match height {
+        ActionHeight::Control(size) => {
+            button.style.control_height = Some(ControlHeight::Exact(size));
+            size.height_in(nana_ui::theme::UI_METRICS)
+        }
+        ActionHeight::Px(px) => px,
+    };
+    let padding = nana_ui_core::ControlPadding::Standard.resolve(nana_ui::theme::UI_METRICS);
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
-    layout.height = Some(LengthSpec::Px(height));
-    layout.min_height = Some(LengthSpec::Px(height));
-    layout.padding_left = Some(LengthSpec::Px(10.0));
-    layout.padding_right = Some(LengthSpec::Px(10.0));
+    layout.height = Some(LengthSpec::Px(px));
+    layout.min_height = Some(LengthSpec::Px(px));
+    layout.padding_left = Some(LengthSpec::Px(padding));
+    layout.padding_right = Some(LengthSpec::Px(padding));
     layout.width = Some(LengthSpec::Shrink);
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
@@ -719,7 +747,7 @@ fn action_button(label: &str, icon: Icon, icon_size: f32, height: f32) -> Button
 }
 
 /// 页头按钮的文字、图标、图标尺寸和高度。
-type ActionLook = (&'static str, Icon, f32, f32);
+type ActionLook = (&'static str, Icon, f32, ActionHeight);
 
 /// 页头按钮，能不能点按字段绑定。
 fn action(
@@ -733,6 +761,9 @@ fn action(
         .key(key)
 }
 
+/// 眉题的字距 0.4：主题没有字距档，照写像素。
+const EYEBROW_TRACKING: f32 = 0.4;
+
 /// 11px 半粗、弱色、字距 0.4 的眉题。
 pub(super) fn eyebrow(label: &str) -> Text {
     let mut node = text(
@@ -744,7 +775,7 @@ pub(super) fn eyebrow(label: &str) -> Text {
     );
     std::sync::Arc::make_mut(&mut node.style.layout)
         .text_ext
-        .letter_spacing = Some(0.4);
+        .letter_spacing = Some(EYEBROW_TRACKING);
     node
 }
 
@@ -760,18 +791,17 @@ pub(super) fn text(
     role: SemanticColorRole,
     line_height: f32,
 ) -> Text {
-    let mut node = crate::theme_map::typed_text(Text::new(label), size, weight)
-        .color(role)
-        .line_height(line_height);
+    let mut node = crate::theme_map::typed_text(Text::new(label), size, weight).color(role);
+    let type_role = node.style.type_role;
     let layout = std::sync::Arc::make_mut(&mut node.style.layout);
+    files_style::line_height(layout, type_role, size, line_height);
     layout.min_width = Some(LengthSpec::Px(0.0));
     node
 }
 
-/// 文字上方留出外边距。
-fn spaced(mut node: Text, margin: f32) -> Text {
-    std::sync::Arc::make_mut(&mut node.style.layout).margin_top = Some(LengthSpec::Px(margin));
-    node
+/// 文字上方留出一档外边距。
+fn spaced(node: Text, margin: SpacingStep) -> Text {
+    files_style::margin_top(node, margin)
 }
 
 /// 长路径和长文件名按任意位置折行，不撑宽页头。

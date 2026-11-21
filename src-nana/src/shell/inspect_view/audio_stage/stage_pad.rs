@@ -15,6 +15,8 @@ const PAD_MIN: f32 = 12.0;
 const PAD_MAX: f32 = 30.0;
 /// `3vh`。
 const PAD_VH: f32 = 3.0;
+/// 唱片和标题行之间的行距档。
+pub(super) const BODY_GAP: nana_ui_core::SpacingStep = nana_ui_core::SpacingStep::PageTight;
 
 /// 窗口高度上的舞台内边距。
 ///
@@ -62,7 +64,7 @@ pub(super) fn stage_pad_spec() -> LengthSpec {
 /// 唱片和标题所在的舞台。
 ///
 /// 舞台是两行网格：`grid-template-rows: var(--audio-record-size) minmax(0, auto)`，
-/// `align-items: center`，行距 18px。第一行高就是唱片直径，唱片钉在内容顶。
+/// `align-items: center`，行距 `PageTight`（[`BODY_GAP`]）。第一行高就是唱片直径，唱片钉在内容顶。
 /// 第二行吃掉剩下的高度，标题在这一行里居中，不和唱片捆成一组再垂直居中。
 /// 窗口不宽于 820px 时只改直径和 `padding: 0`，顶对齐是同一套。
 /// 窗口宽于 820px 时，四边各留一条 [`stage_pad_spec`]。不宽于 820px 时不留这四边。
@@ -74,7 +76,8 @@ pub(super) fn stage_view(
     caption: AnyView,
 ) -> AnyView {
     let body = widget(
-        Stack::column(18.0)
+        Stack::column(0.0)
+            .gap_theme(BODY_GAP)
             .align(AlignSpec::Center)
             .justify(JustifySpec::Start)
             // `Shrink` 会保住内容高，宽舞台那一行的拉伸拉不动它，第二行就吃不到剩余高度。
@@ -138,7 +141,7 @@ pub(super) fn stage_view(
 /// 标题所在的第二行。
 ///
 /// 行高是唱片下面的剩余空间（第二行 `minmax(0, auto)` 在默认 `align-content` 下被拉高）。
-/// 标题作为这一行的内容居中。行本身从唱片下沿再隔 18px 排起，所以标题不会回到唱片旁边。
+/// 标题作为这一行的内容居中。行本身从唱片下沿再隔一档 [`BODY_GAP`] 排起，所以标题不会回到唱片旁边。
 fn caption_row(caption: AnyView) -> AnyView {
     widget(
         Stack::column(0.0)
@@ -366,7 +369,8 @@ mod tests {
             "视口 {width} x {height} 的唱片应贴着内容顶 {content_top}，实际 {}",
             record.y
         );
-        let group = record.height + 18.0 + caption.height;
+        let body_gap = crate::theme_map::tiers::space_px(super::BODY_GAP);
+        let group = record.height + body_gap + caption.height;
         let centered = content_top + (content_bottom - content_top - group) / 2.0;
         assert!(
             (record.y - centered).abs() > 24.0,
@@ -379,7 +383,7 @@ mod tests {
             title.y,
             record.y + record.height
         );
-        let row_top = record.y + record.height + 18.0;
+        let row_top = record.y + record.height + body_gap;
         assert!(
             (row.y - row_top).abs() < 1.5,
             "第二行应从唱片下沿再隔 18px 排起：期望 {row_top}，实际 {}",

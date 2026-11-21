@@ -1,17 +1,19 @@
 //! 音频舞台唱片的落影。
 //!
-//! 唱片正圆后面画
-//! `box-shadow: 0 22px 60px color-mix(in srgb, var(--bg) 78%, transparent)`。
+//! 唱片正圆后面画主题覆盖层高度档的落影。
 //! 舞台格子不是正方形时，阴影仍跟着较小边画出的圆，不铺成方块。
 
 use super::VinylRecord;
 use crate::shell::ShellViewModel;
 use crate::shell::view_harness::ShellHarness;
-use nana_ui::runtime::{LayoutBox, PaintOp, PaintRecording, PaintState, Painter};
-use nana_ui_core::{SemanticColorMix, SemanticColorRole, StyleModelRef, ThemeAppearance};
+use nana_ui::runtime::{
+    ComponentElevation, LayoutBox, PaintOp, PaintRecording, PaintState, Painter,
+};
+use nana_ui::theme::EffectTokens;
+use nana_ui_core::{ElevationRole, ThemeAppearance};
 
-/// 唱片正圆后面画出落影：下移 22、模糊 60、不扩展、背景色 78%。
-/// 浅色和深色各跟自己的背景。没有图和有封面时都画，而且画在底色下面。
+/// 唱片正圆后面画出落影：主题覆盖层高度档的偏移、模糊、扩展和颜色。
+/// 浅色和深色各跟自己的高度档。没有图和有封面时都画，而且画在底色下面。
 /// 格子是 240×180 时圆的直径是 180，贴在左边留白 30，不是整块 240 宽的方阴影。
 #[test]
 fn audio_record_draws_its_drop_shadow() {
@@ -30,20 +32,9 @@ fn audio_record_draws_its_drop_shadow() {
         let recording = record_paint(painter, mode, [240.0, 180.0]);
         let (shadow, bounds) = only_shadow(&recording.behind_children);
         assert_eq!(
-            (
-                shadow.offset_x,
-                shadow.offset_y,
-                shadow.blur_radius,
-                shadow.spread_radius,
-                shadow.inset
-            ),
-            (0.0, 22.0, 60.0, 0.0, false),
-            "{theme}"
-        );
-        assert_eq!(
-            shadow.color.to_srgb(),
-            expected_background(mode),
-            "{theme} 应是背景色的 78%"
+            shadow,
+            expected_shadow(mode),
+            "{theme} 应是主题覆盖层高度档的落影"
         );
         assert_circle(&bounds, 30.0, 0.0, 180.0, theme);
         assert!(
@@ -87,11 +78,11 @@ fn audio_record_draws_its_drop_shadow() {
     );
 }
 
-/// 和 `color-mix(in srgb, var(--bg) 78%, transparent)` 同一条混合。比例写死，不跟着实现常量走。
-fn expected_background(mode: ThemeAppearance) -> [f32; 4] {
-    SemanticColorMix::alpha(SemanticColorRole::Background, 0.78)
-        .resolve(StyleModelRef::new(mode))
-        .as_rgba_array()
+/// 主题覆盖层高度档的落影。档位写死，不跟着实现常量走。
+fn expected_shadow(mode: ThemeAppearance) -> ComponentElevation {
+    ComponentElevation::from_shadow(
+        EffectTokens::for_appearance(mode).shadow(ElevationRole::Overlay),
+    )
 }
 
 /// 落影路径的外接矩形应是这个圆。

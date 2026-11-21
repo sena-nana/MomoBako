@@ -13,8 +13,6 @@ use nana_ui_core::SemanticColorMix;
 
 /// `color-mix(in srgb, var(--accent) 60%, transparent)` 里强调色的比例。
 const ACCENT_MIX: f32 = 0.6;
-/// `box-shadow: 0 2px 0` 的垂直偏移。模糊和扩展都是 0。
-const SHADOW_Y: f32 = 2.0;
 
 /// 有时间的歌词按钮：键盘焦点时字色改成悬停那一档，并挂上下沿阴影。
 ///
@@ -44,7 +42,8 @@ impl Painter for LyricFocusUnderline {
     }
 }
 
-/// 行盒原样下移 2px 的不透明阴影。先画阴影，再画字，字盖在阴影上面。
+/// 行盒原样下移一条焦点环粗细（主题的 `focus_ring.width`，默认 2px）的不透明阴影，模糊和扩展都是 0。
+/// 先画阴影，再画字，字盖在阴影上面。
 fn underline(cx: &mut PaintContext<'_>) {
     let [width, height] = cx.size();
     if !(width.is_finite() && height.is_finite()) || width <= 0.0 || height <= 0.0 {
@@ -58,6 +57,7 @@ fn underline(cx: &mut PaintContext<'_>) {
         width,
         height,
     });
+    let stroke = cx.metrics().focus_ring.width;
     cx.shadow(
         &path,
         PaintShadow::Custom {
@@ -65,7 +65,7 @@ fn underline(cx: &mut PaintContext<'_>) {
                 SemanticColorRole::Accent,
                 ACCENT_MIX,
             )),
-            offset: [0.0, SHADOW_Y],
+            offset: [0.0, stroke],
             blur: 0.0,
             spread: 0.0,
             inset: false,

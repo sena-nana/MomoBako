@@ -1,38 +1,48 @@
 //! 歌词行的盒子。
 //!
-//! 歌词行是 `font-size: 16px`、`line-height: 1.72`、
-//! `padding: 7px 0`、`overflow-wrap: anywhere`，不把长句收成一行省略号。
-//! 行与行的间距是 4px。
+//! 歌词行是 16px（主题的 `Heading` 字号档）、1.72 倍行高、上下各一档 `Md` 内边距、
+//! `overflow-wrap: anywhere`，不把长句收成一行省略号。
+//! 行与行的间距是 `Xs`。
 //! 单行盒子只用来估算还没排出来的滚动；排出来以后按布局盒居中，折行的行可以更高。
 
 use nana_ui_core::{
-    LayoutStyle, LengthSpec, LineHeightSpec, OverflowWrapSpec, TypeRole, WhiteSpaceSpec,
+    LayoutStyle, LengthSpec, OverflowWrapSpec, SpacingStep, TypeRole, WhiteSpaceSpec,
 };
 
-/// 歌词行的字号。
-pub(super) const FONT: f32 = 16.0;
-/// `line-height: 1.72`，按 16px 算成像素。
-pub(super) const LEADING: f32 = FONT * 1.72;
-/// 上下内边距。左右是 0。
-pub(super) const PAD_Y: f32 = 7.0;
-/// 单行盒子：行高加上上下 7px。折行以后布局盒会更高。
+use crate::theme_map::tiers::{self, Edge};
+
+/// 歌词行的字号档。
+const ROLE: TypeRole = TypeRole::Heading;
+/// 歌词行的字号（默认主题 16px）。
+pub(super) const FONT: f32 = nana_ui_core::TypographyTokens::DEFAULT.size(ROLE);
+/// 行高是字号的 1.72 倍。
+const LEADING_RATIO: f32 = 1.72;
+/// 行高（默认主题），估算滚动用。
+pub(super) const LEADING: f32 = FONT * LEADING_RATIO;
+/// 上下内边距档。左右是 0。
+const PAD_STEP: SpacingStep = SpacingStep::Md;
+/// 上下内边距（默认主题）。
+pub(super) const PAD_Y: f32 = tiers::space_px(PAD_STEP);
+/// 单行盒子：行高加上上下内边距。折行以后布局盒会更高。
 pub(super) const LINE: f32 = LEADING + PAD_Y * 2.0;
-/// 歌词行之间的间距。
-pub(super) const GAP: f32 = 4.0;
+/// 歌词行之间的间距档。
+pub(super) const GAP_STEP: SpacingStep = SpacingStep::Xs;
+/// 歌词行之间的间距（默认主题）。
+pub(super) const GAP: f32 = tiers::space_px(GAP_STEP);
 
 /// 把一行歌词收成上面这套盒子。
 ///
 /// 不写死高度，第二行才撑得开。长句在任意位置断开，和 `overflow-wrap: anywhere` 一样，
 /// 不再 `nowrap` 加省略号。
 pub(super) fn apply(layout: &mut LayoutStyle) {
-    crate::theme_map::control_font(layout, TypeRole::Heading);
-    layout.line_height = Some(LineHeightSpec::Absolute(LEADING));
-    // 按钮自带行高和边框令牌，解析时盖过上面的行高和下面的 0 边框，所以一并清掉。
-    layout.theme.line_height = None;
-    layout.padding_top = Some(LengthSpec::Px(PAD_Y));
-    layout.padding_bottom = Some(LengthSpec::Px(PAD_Y));
+    crate::theme_map::control_font(layout, ROLE);
+    // 按钮自带行高令牌，解析时盖过数值行高，所以行高连令牌一起写成字号档的倍数。
+    tiers::line_ratio(layout, ROLE, LEADING_RATIO);
+    tiers::padding(layout, &Edge::Y, PAD_STEP);
     layout.padding_left = Some(LengthSpec::Px(0.0));
     layout.padding_right = Some(LengthSpec::Px(0.0));
+    layout.theme.padding_left = None;
+    layout.theme.padding_right = None;
     // 歌词行不要边框。按钮默认的 1px 边会把单行盒子撑高 2px。
     layout.border_width = Some(0.0);
     layout.theme.border_width = None;
