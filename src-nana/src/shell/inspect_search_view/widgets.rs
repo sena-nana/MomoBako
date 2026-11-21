@@ -39,7 +39,7 @@ pub(crate) fn label(
     role: SemanticColorRole,
 ) -> Text {
     let mut node =
-        super::super::files_view::style::typed(Text::new(content.into()), size, weight).color(role);
+        crate::theme_map::typed_text(Text::new(content.into()), size, weight).color(role);
     node.style.text_horizontal_alignment = TextHorizontalAlignment::Start;
     let layout = Arc::make_mut(&mut node.style.layout);
     layout.line_height = Some(LineHeightSpec::Relative(LINE_RATIO));

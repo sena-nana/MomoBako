@@ -11,7 +11,7 @@ use nana_ui::runtime::{
     Gradient, LayoutBox, LengthSpec, PaintContext, Painter, RadiusTier, SemanticColorRole, Stack,
     Text, TextHorizontalAlignment,
 };
-use nana_ui_core::{Icon, TextWeight, ThemeAppearance, TypeRole};
+use nana_ui_core::{Icon, ThemeAppearance};
 
 /// 正文行高 1.55。
 const LINE_BODY: f32 = 1.55;
@@ -24,40 +24,9 @@ pub(crate) fn text(
     role: SemanticColorRole,
     line_height: f32,
 ) -> Text {
-    typed(Text::new(label.into()), size, weight)
+    crate::theme_map::typed_text(Text::new(label.into()), size, weight)
         .color(role)
         .line_height(line_height)
-}
-
-/// 主题字阶上的字号：11 提示、12 元信息、13 正文、18 标题、20 展示。14 和 24 不在字阶上。
-const TYPE_STEPS: [(f32, TypeRole); 5] = [
-    (11.0, TypeRole::Hint),
-    (12.0, TypeRole::Meta),
-    (13.0, TypeRole::Body),
-    (18.0, TypeRole::Title),
-    (20.0, TypeRole::Display),
-];
-
-/// 主题的四档字重。
-const WEIGHT_STEPS: [(u16, TextWeight); 4] = [
-    (400, TextWeight::Regular),
-    (500, TextWeight::Medium),
-    (600, TextWeight::Semibold),
-    (700, TextWeight::Bold),
-];
-
-/// 给文字定字号和字重：落在主题字阶、字重档上的跟主题走，其余照写的数值。
-/// 行盒先按数值字号定，主题换字阶时行盒不跟着跳；调用方另写行高时以调用方为准。
-pub(crate) fn typed(node: Text, size: f32, weight: u16) -> Text {
-    let node = node.font_size(size);
-    let node = match TYPE_STEPS.iter().find(|(px, _)| *px == size) {
-        Some((_, role)) => node.role(*role),
-        None => node,
-    };
-    match WEIGHT_STEPS.iter().find(|(value, _)| *value == weight) {
-        Some((_, step)) => node.weight(*step),
-        None => node.font_weight(weight),
-    }
 }
 
 /// 正文：14px、400、主文本色，行高 21.7。
@@ -382,35 +351,6 @@ mod tests {
         assert_eq!(key_part("notes/page.pdf"), "notes\u{2215}page.pdf");
         assert_eq!(key_part("a\\b"), "a\u{2215}b");
         assert_eq!(key_part("封面"), "封面");
-    }
-
-    /// 字阶上的字号和四档字重跟主题走；14px 和不在档上的字重照写的数值。行盒都按数值字号定。
-    #[test]
-    fn typed_text_follows_the_theme_steps_it_lands_on() {
-        let meta = typed(Text::new("元信息"), 12.0, 500);
-        assert_eq!(meta.style.type_role, Some(TypeRole::Meta));
-        assert_eq!(meta.style.type_weight, Some(TextWeight::Medium));
-        assert_eq!(meta.style.layout.font_size, Some(12.0));
-        let numeric = Text::new("元信息").font_size(12.0);
-        assert_eq!(
-            meta.style.layout.line_height,
-            numeric.style.layout.line_height
-        );
-
-        let work = typed(Text::new("正文"), 14.0, 450);
-        assert_eq!(work.style.type_role, None, "14px 不在字阶上");
-        assert_eq!(work.style.type_weight, None);
-        assert_eq!(work.style.layout.font_size, Some(14.0));
-        assert_eq!(work.style.layout.font_weight, Some(450));
-
-        for (size, role) in [
-            (11.0, TypeRole::Hint),
-            (13.0, TypeRole::Body),
-            (18.0, TypeRole::Title),
-            (20.0, TypeRole::Display),
-        ] {
-            assert_eq!(typed(Text::new(""), size, 700).style.type_role, Some(role));
-        }
     }
 
     #[test]

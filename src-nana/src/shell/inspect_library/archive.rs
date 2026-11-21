@@ -171,11 +171,11 @@ pub(super) fn archive_stage_view(stage: ArchiveStage) -> AnyView {
     } else {
         SemanticColorRole::Text
     };
-    let mut title = typed(Text::new(stage.title), 13.0, 600)
+    let mut title = typed_text(Text::new(stage.title), 13.0, 600)
         .color(title_role)
         .line_height(20.15);
     title.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
-    let mut detail = typed(Text::new(stage.detail), 12.0, 400)
+    let mut detail = typed_text(Text::new(stage.detail), 12.0, 400)
         .color(SemanticColorRole::Muted)
         .line_height(18.6);
     detail.style.text_horizontal_alignment = TextHorizontalAlignment::Center;

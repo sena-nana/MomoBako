@@ -499,7 +499,7 @@ fn queue_head(label: &str, count: &str, key: &str) -> AnyView {
         .children((
             widget(super::workbench::meta(label)),
             widget(
-                super::files_view::style::typed(Text::new(count.to_string()), 12.0, 700)
+                crate::theme_map::typed_text(Text::new(count.to_string()), 12.0, 700)
                     .color(SemanticColorRole::Text),
             ),
         ))

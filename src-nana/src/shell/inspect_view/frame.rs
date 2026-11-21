@@ -732,7 +732,7 @@ pub(super) fn text(
     role: SemanticColorRole,
     line_height: f32,
 ) -> Text {
-    let mut node = super::super::files_view::style::typed(Text::new(label), size, weight)
+    let mut node = crate::theme_map::typed_text(Text::new(label), size, weight)
         .color(role)
         .line_height(line_height);
     let layout = std::sync::Arc::make_mut(&mut node.style.layout);

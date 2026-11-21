@@ -141,30 +141,37 @@ pub const TYPE_ROLES: &[TypeRole] = &[
     },
 ];
 
-/// 写一段字的字号和字重。字号正好是 [`TYPE_ROLES`] 里的台阶（或 20px 的展示字号）时用 Nana 的字号角色，
-/// 字重正好是 400 / 500 / 600 / 700 时用字重台阶，都跟着装上的主题走；落在台阶之间的照写像素。
+/// 主题字阶：字号台阶对应的 Nana 字号角色（默认主题下的像素值）。
+const TYPE_STEPS: [(f32, NanaTypeRole); 8] = [
+    (type_scale::HINT, NanaTypeRole::Hint),
+    (type_scale::META, NanaTypeRole::Meta),
+    (type_scale::BODY, NanaTypeRole::Body),
+    (type_scale::SECTION, NanaTypeRole::Section),
+    (type_scale::CARD_TITLE, NanaTypeRole::CardTitle),
+    (type_scale::HEADING, NanaTypeRole::Heading),
+    (type_scale::TITLE, NanaTypeRole::Title),
+    (type_scale::DISPLAY, NanaTypeRole::Display),
+];
+
+/// 主题的四档字重。
+const WEIGHT_STEPS: [(u16, TextWeight); 4] = [
+    (400, TextWeight::Regular),
+    (500, TextWeight::Medium),
+    (600, TextWeight::Semibold),
+    (700, TextWeight::Bold),
+];
+
+/// 写一段字的字号和字重。字号落在主题字阶上时用 Nana 的字号角色，字重正好是 400 / 500 / 600 / 700
+/// 时用字重台阶，都跟着装上的主题走；落在台阶之间的照写数值。
+/// 行盒先按数值字号定，主题换字阶时行盒不跟着跳；调用方另写行高时以调用方为准。
 pub fn typed_text(node: Text, size: f32, weight: u16) -> Text {
-    let steps = [
-        (type_scale::HINT, NanaTypeRole::Hint),
-        (type_scale::META, NanaTypeRole::Meta),
-        (type_scale::BODY, NanaTypeRole::Body),
-        (type_scale::SECTION, NanaTypeRole::Section),
-        (type_scale::TITLE, NanaTypeRole::Title),
-        (type_scale::DISPLAY, NanaTypeRole::Display),
-    ];
-    let node = match steps.iter().find(|(px, _)| *px == size) {
+    let node = node.font_size(size);
+    let node = match TYPE_STEPS.iter().find(|(px, _)| *px == size) {
         Some((_, role)) => node.role(*role),
-        None => node.font_size(size),
+        None => node,
     };
-    let weight_step = match weight {
-        400 => Some(TextWeight::Regular),
-        500 => Some(TextWeight::Medium),
-        600 => Some(TextWeight::Semibold),
-        700 => Some(TextWeight::Bold),
-        _ => None,
-    };
-    match weight_step {
-        Some(step) => node.weight(step),
+    match WEIGHT_STEPS.iter().find(|(value, _)| *value == weight) {
+        Some((_, step)) => node.weight(*step),
         None => node.font_weight(weight),
     }
 }
@@ -246,6 +253,41 @@ pub fn clear_matches_background(theme: &str, clear: [f32; 4]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 字阶上的字号和四档字重跟主题走；不在档上的字号、字重照写的数值。行盒都按数值字号定。
+    #[test]
+    fn typed_text_follows_the_theme_steps_it_lands_on() {
+        let meta = typed_text(Text::new("元信息"), 12.0, 500);
+        assert_eq!(meta.style.type_role, Some(NanaTypeRole::Meta));
+        assert_eq!(meta.style.type_weight, Some(TextWeight::Medium));
+        assert_eq!(meta.style.layout.font_size, Some(12.0));
+        let numeric = Text::new("元信息").font_size(12.0);
+        assert_eq!(
+            meta.style.layout.line_height,
+            numeric.style.layout.line_height
+        );
+
+        let odd = typed_text(Text::new("正文"), 24.0, 450);
+        assert_eq!(odd.style.type_role, None, "24px 不在字阶上");
+        assert_eq!(odd.style.type_weight, None);
+        assert_eq!(odd.style.layout.font_size, Some(24.0));
+        assert_eq!(odd.style.layout.font_weight, Some(450));
+
+        for (size, role) in [
+            (11.0, NanaTypeRole::Hint),
+            (13.0, NanaTypeRole::Body),
+            (14.0, NanaTypeRole::Section),
+            (15.0, NanaTypeRole::CardTitle),
+            (16.0, NanaTypeRole::Heading),
+            (18.0, NanaTypeRole::Title),
+            (20.0, NanaTypeRole::Display),
+        ] {
+            assert_eq!(
+                typed_text(Text::new(""), size, 700).style.type_role,
+                Some(role)
+            );
+        }
+    }
 
     #[test]
     fn light_and_dark_backgrounds_follow_distinct_palette_roles() {
