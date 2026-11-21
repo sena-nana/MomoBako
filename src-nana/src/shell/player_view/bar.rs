@@ -134,7 +134,8 @@ impl BarProps {
     /// 「当前 / 总长」。条上的读数由传输条自己按同一格式写，这里只给测试核对会话。
     #[cfg(test)]
     pub(crate) fn time_text(&self) -> String {
-        clock_parts(self.current_ms, self.duration_ms).1
+        let clock = |ms: u64| format!("{}:{:02}", ms / 1000 / 60, ms / 1000 % 60);
+        format!("{} / {}", clock(self.current_ms), clock(self.duration_ms))
     }
 
     pub(crate) fn has_item(&self) -> bool {
@@ -207,21 +208,9 @@ pub(crate) fn display_title(filename: &str, extension: &str) -> String {
     }
 }
 
-fn format_time(ms: u64) -> String {
-    let total = ms / 1000;
-    format!("{}:{:02}", total / 60, total % 60)
-}
-
-/// 随播放时钟变的三个值：进度比例、「当前 / 总长」和当前位置（毫秒）。没有时长时比例为 0，
-/// 位置按 1 毫秒的总长夹住。挂载和逐帧同步（热信号）共用这一份算法。
-pub(crate) fn clock_parts(current_ms: u64, duration_ms: u64) -> (f32, String, f64) {
-    let ratio = if duration_ms == 0 {
-        0.0
-    } else {
-        (current_ms as f32 / duration_ms as f32).clamp(0.0, 1.0)
-    };
-    let time = format!("{} / {}", format_time(current_ms), format_time(duration_ms));
-    (ratio, time, current_ms.min(duration_ms.max(1)) as f64)
+/// 传输条上的当前位置（毫秒），按 1 毫秒的总长夹住。挂载和逐帧同步（热信号）共用这一份算法。
+pub(crate) fn position_ms(current_ms: u64, duration_ms: u64) -> f64 {
+    current_ms.min(duration_ms.max(1)) as f64
 }
 
 /// 播放条。卡片里上面是媒体行，下面是 NanaUI 的 `MediaTransportBar`；窗口不宽于 1120px 时传输条
@@ -264,7 +253,7 @@ pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
 /// 音量拖动中每一格都写入。没有条目、或播放器既不能跳转也不能调音量时，进度和音量一起停用。
 fn transport_bar(props: &BarProps, narrow: bool) -> AnyView {
     let has_item = props.has_item();
-    let (_, _, position_ms) = clock_parts(props.current_ms, props.duration_ms);
+    let position_ms = position_ms(props.current_ms, props.duration_ms);
     let mut bar = MediaTransportBar::new()
         .placement(MediaTransportPlacement::Inline)
         .density(if narrow {

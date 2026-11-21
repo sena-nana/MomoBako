@@ -1,7 +1,7 @@
-//! 每帧会变的显示值：动效时钟、播放进度，以及标题栏随状态变的字段。
+//! 每帧会变的显示值：进度条填充、底部入口的悬停、播放进度和框选矩形，以及标题栏随状态变的字段。
 //!
 //! 投影是从 ViewModel 算出的纯值（实现 `PartialEq`），`ShellView` 同步时只在值变了才写进信号。
-//! 槽位里的现有视图函数挂载期间经 [`prop`] 拿到这些信号，绑到节点自己的字段上：动效帧和播放推进
+//! 槽位里的现有视图函数挂载期间经 [`prop`] 拿到这些信号，绑到节点自己的字段上：填充过渡、悬停和播放推进
 //! 只改这几个字段，不重挂内容，焦点、选区、悬停和输入法预编辑都留在原节点上。
 //! 不经 `ShellView` 建树时 [`prop`] 按投影值写成常量，画面和绑定时一样。
 //!
@@ -9,92 +9,54 @@
 //! 绑定，逐帧重投影会把补丁冲掉。
 
 use std::cell::Cell;
-use std::sync::Arc;
-use std::time::Duration;
 
-use nana_ui::runtime::view::{FieldWrite, PropSource, Signal, StyledComponent, signal};
-use nana_ui::runtime::{IconGlyph, LengthSpec, Stack, Workspace};
-use nana_ui::{RegionId, WorkspaceMutation};
+use nana_ui::runtime::view::{PropSource, Signal, signal};
 
 use super::ShellViewModel;
-use super::motion::spin_transform;
 
-/// 动效时钟这一刻在界面上的样子。
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct MotionFrame {
-    /// 启动进度条填充的百分比。
+/// 这一帧热信号的值。
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct HotFrame {
+    /// 启动进度条这一刻的百分比（`progress_fill.rs`）。
     pub startup_percent: f32,
-    /// 忙指示旋转角，单位度。
-    pub spinner_degrees: f32,
-    /// 侧栏底部入口平时的透明度。
-    pub footer_opacity: f32,
-    /// 不确定进度条填充的透明度（`progress-pulse` 呼吸）。
-    pub pulse_opacity: f32,
-    /// 准备卡色条的 `translateX` 百分比，相对色条自己的宽度。
-    pub sweep_percent: f32,
-    /// 侧栏呈现宽度，折叠动画中逐帧变化。`ShellView` 直接写进工作区，不经信号，见 [`set_resources_width`]。
-    pub sidebar_width: f32,
+    /// 任务弹层各行进度条这一刻的百分比。
+    pub task_fills: TaskFills,
+    /// 指针停在侧栏底部入口那一排上。
+    pub footer_hover: bool,
+    /// 播放条拖动条的位置，单位毫秒。
+    pub position: f64,
+    /// 文件列表框选矩形。
+    pub selection_box: super::files_selection_box::SelectionBox,
 }
 
-impl MotionFrame {
-    /// 按 ViewModel 的动效时钟取这一帧。
+impl HotFrame {
     pub(crate) fn project(model: &ShellViewModel) -> Self {
-        let motion = &model.motion;
+        let session = &model.player.session;
         Self {
-            startup_percent: motion.startup_percent(),
-            spinner_degrees: motion.spinner_degrees(),
-            footer_opacity: motion.footer_opacity(),
-            pulse_opacity: motion.pulse_opacity(),
-            sweep_percent: motion.preview_sweep_percent(),
-            sidebar_width: motion.sidebar_presented_width(),
+            startup_percent: model.fills.startup(),
+            task_fills: TaskFills(model.fills.rows()),
+            footer_hover: model.input.footer_hover,
+            position: super::player_view::bar::position_ms(
+                session.current_time_ms,
+                session.duration_ms.unwrap_or(0),
+            ),
+            selection_box: model.input.selection_box,
         }
     }
 }
 
 /// 任务弹层各行进度条这一刻的填充百分比，按行键（宽度过渡见
-/// `MotionState::set_task_fills`）。弹层关着时为空。
+/// `ProgressFills::set_rows`）。弹层关着时为空。
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct TaskFills(Vec<(String, f32)>);
 
 impl TaskFills {
-    /// 按 ViewModel 的动效时钟取这一帧。
-    pub(crate) fn project(model: &ShellViewModel) -> Self {
-        Self(model.motion.task_fills())
-    }
-
-    /// 某一行这一刻的填充百分比；这一行没有轨道时为 `None`。
+    /// 某一行这一刻的填充百分比；这一行没有填充时为 `None`。
     pub(crate) fn get(&self, key: &str) -> Option<f32> {
         self.0
             .iter()
             .find(|(row, _)| row == key)
             .map(|(_, fill)| *fill)
-    }
-}
-
-/// 播放条随播放时钟变的部分。
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct PlaybackView {
-    /// 进度轨填充比例。
-    pub ratio: f32,
-    /// 「当前 / 总长」。
-    pub time: String,
-    /// 拖动条的位置，单位毫秒。
-    pub position: f64,
-}
-
-impl PlaybackView {
-    /// 按播放会话的当前时间和时长取值，算法和播放条挂载时相同。
-    pub(crate) fn project(model: &ShellViewModel) -> Self {
-        let session = &model.player.session;
-        let (ratio, time, position) = super::player_view::bar::clock_parts(
-            session.current_time_ms,
-            session.duration_ms.unwrap_or(0),
-        );
-        Self {
-            ratio,
-            time,
-            position,
-        }
     }
 }
 
@@ -122,14 +84,8 @@ impl TitleBarView {
 #[derive(Clone, Copy)]
 pub(crate) struct HotSignals {
     pub startup: Signal<f32>,
-    pub spinner: Signal<f32>,
-    pub footer: Signal<f32>,
-    pub pulse: Signal<f32>,
-    /// 准备卡色条的 `translateX` 百分比。
-    pub sweep: Signal<f32>,
     pub task_fills: Signal<TaskFills>,
-    pub progress: Signal<f32>,
-    pub time: Signal<String>,
+    pub footer_hover: Signal<bool>,
     pub position: Signal<f64>,
     /// 文件列表框选矩形。拖动中每帧更新，列表不重挂。
     pub selection_box: Signal<super::files_selection_box::SelectionBox>,
@@ -137,23 +93,13 @@ pub(crate) struct HotSignals {
 
 impl HotSignals {
     /// 在当前作用域里建信号，初值是这一刻的投影。只在骨架的挂载闭包里调用，否则信号会留到线程结束。
-    pub(crate) fn new(
-        motion: MotionFrame,
-        fills: TaskFills,
-        playback: &PlaybackView,
-        selection_box: super::files_selection_box::SelectionBox,
-    ) -> Self {
+    pub(crate) fn new(frame: HotFrame) -> Self {
         Self {
-            startup: signal(motion.startup_percent),
-            spinner: signal(motion.spinner_degrees),
-            footer: signal(motion.footer_opacity),
-            pulse: signal(motion.pulse_opacity),
-            sweep: signal(motion.sweep_percent),
-            task_fills: signal(fills),
-            progress: signal(playback.ratio),
-            time: signal(playback.time.clone()),
-            position: signal(playback.position),
-            selection_box: signal(selection_box),
+            startup: signal(frame.startup_percent),
+            task_fills: signal(frame.task_fills),
+            footer_hover: signal(frame.footer_hover),
+            position: signal(frame.position),
+            selection_box: signal(frame.selection_box),
         }
     }
 
@@ -163,23 +109,12 @@ impl HotSignals {
     }
 
     /// 写入这一帧的投影，只写变了的。信号可能已经随文档回收，回收了就不写。
-    pub(crate) fn write(
-        &self,
-        motion: MotionFrame,
-        fills: TaskFills,
-        playback: &PlaybackView,
-        selection_box: super::files_selection_box::SelectionBox,
-    ) {
-        self.startup.try_set_if_changed(motion.startup_percent);
-        self.spinner.try_set_if_changed(motion.spinner_degrees);
-        self.footer.try_set_if_changed(motion.footer_opacity);
-        self.pulse.try_set_if_changed(motion.pulse_opacity);
-        self.sweep.try_set_if_changed(motion.sweep_percent);
-        self.task_fills.try_set_if_changed(fills);
-        self.progress.try_set_if_changed(playback.ratio);
-        self.time.try_set_if_changed(playback.time.clone());
-        self.position.try_set_if_changed(playback.position);
-        self.selection_box.try_set_if_changed(selection_box);
+    pub(crate) fn write(&self, frame: HotFrame) {
+        self.startup.try_set_if_changed(frame.startup_percent);
+        self.task_fills.try_set_if_changed(frame.task_fills);
+        self.footer_hover.try_set_if_changed(frame.footer_hover);
+        self.position.try_set_if_changed(frame.position);
+        self.selection_box.try_set_if_changed(frame.selection_box);
     }
 }
 
@@ -298,99 +233,4 @@ pub(crate) fn prop<T: Clone + 'static>(
         Some(signals) => PropSource::Signal(pick(&signals)),
         None => PropSource::Const(fallback),
     }
-}
-
-/// `Stack` 的宽度百分比，启动进度条和任务弹层进度条的填充用。超出 0..100 的值按两端算。
-pub(crate) struct FillPercentField;
-
-impl FieldWrite<Stack, f32> for FillPercentField {
-    const FIELD: &'static str = "Stack.style.layout.width%";
-
-    fn write(target: &mut Stack, percent: f32) {
-        Arc::make_mut(&mut <Stack as StyledComponent>::node_style_mut(target).layout).width =
-            Some(fill_percent(percent));
-    }
-
-    fn differs(target: &Stack, percent: &f32) -> bool {
-        <Stack as StyledComponent>::node_style(target).layout.width != Some(fill_percent(*percent))
-    }
-}
-
-fn fill_percent(percent: f32) -> LengthSpec {
-    LengthSpec::Percent(percent.clamp(0.0, 100.0))
-}
-
-/// 图标的旋转角，忙指示用。
-pub(crate) struct SpinField;
-
-impl FieldWrite<IconGlyph, f32> for SpinField {
-    const FIELD: &'static str = "IconGlyph.style.layout.transform";
-
-    fn write(target: &mut IconGlyph, degrees: f32) {
-        Arc::make_mut(&mut target.style.layout).transforms.transform =
-            Some(spin_transform(degrees));
-    }
-
-    fn differs(target: &IconGlyph, degrees: &f32) -> bool {
-        target.style.layout.transforms.transform != Some(spin_transform(*degrees))
-    }
-}
-
-/// 控件的透明度：侧栏底部入口平时的半透明，不确定进度条填充的呼吸。
-pub(crate) struct OpacityField;
-
-impl<C: StyledComponent> FieldWrite<C, f32> for OpacityField {
-    const FIELD: &'static str = "style.layout.opacity";
-
-    fn write(target: &mut C, opacity: f32) {
-        Arc::make_mut(&mut target.node_style_mut().layout).opacity = Some(opacity);
-    }
-
-    fn differs(target: &C, opacity: &f32) -> bool {
-        target.node_style().layout.opacity != Some(*opacity)
-    }
-}
-
-/// 进度轨自绘的填充比例，播放条用。
-pub(crate) struct TrackRatioField;
-
-impl FieldWrite<Stack, f32> for TrackRatioField {
-    const FIELD: &'static str = "Stack.style.painter(ProgressTrack)";
-
-    fn write(target: &mut Stack, ratio: f32) {
-        <Stack as StyledComponent>::node_style_mut(target).painter = Some(track(ratio));
-    }
-
-    fn differs(target: &Stack, ratio: &f32) -> bool {
-        <Stack as StyledComponent>::node_style(target).painter != Some(track(*ratio))
-    }
-}
-
-fn track(ratio: f32) -> nana_ui::runtime::NodePainter {
-    super::player_view::paint::ProgressTrack { ratio }.into()
-}
-
-/// 按侧栏呈现宽度设工作区资源区尺寸，返回尺寸有没有变。侧栏宽度少一条发丝间隙，和挂载时的区域
-/// 尺寸同一个口径，按区域上下限夹取；写的是区域尺寸，拖动中的指针状态不受影响。
-///
-/// 不做成绑定：工作区是 AppShell 的 body，它自己重投影会冲掉 AppShell 给 body 打的布局补丁，
-/// 调用方写完要让 AppShell 重新投影一次。
-pub(crate) fn set_resources_width(target: &mut Workspace, width: f32) -> bool {
-    let Some(region) = target.layout.region(&RegionId::Resources) else {
-        eprintln!("Nana 工作区没有资源区，侧栏宽度写不进去");
-        return false;
-    };
-    let wanted = resources_size(width).clamp(region.min_size_value(), region.max_size_value());
-    if region.size_value() == Some(wanted) {
-        return false;
-    }
-    target.apply(
-        WorkspaceMutation::SetRegionSize(RegionId::Resources, wanted),
-        Duration::ZERO,
-    )
-}
-
-/// 侧栏呈现宽度换成资源区尺寸。
-pub(crate) fn resources_size(width: f32) -> f32 {
-    (width - super::render::WORKBENCH_GAP_PX).max(0.0)
 }

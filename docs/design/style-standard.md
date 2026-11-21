@@ -6,7 +6,7 @@
 
 - `src-nana/src/theme_map.rs`：`DESIGN.md` 的令牌（`--bg`、`--text`、`--accent` 等）到 Nana `SemanticPalette` 角色的对应，以及字号角色、侧栏宽度和圆角刻度。颜色的具体数值由 NanaUI 主题持有，这里不复制。
 - `src-nana/src/appearance.rs`：设置里的主题和圆角落到 Nana 主题；对话框的站位、分区、开合动效和遮罩写成主题配方（`DialogRecipe`、`EffectTokens`），深浅两套相同。
-- `src-nana/src/shell/admin/style.rs`、`src-nana/src/shell/files_view/style.rs`、`palette.rs`、`motion.rs`：各区域共用的布局辅助、调色和动效时长。
+- `src-nana/src/shell/admin/style.rs`、`src-nana/src/shell/files_view/style.rs`、`palette.rs`、`progress_fill.rs`：各区域共用的布局辅助、调色，以及进度条填充的过渡时长。其余动效写在用到它的视图上：底部入口的淡入淡出是 `sidebar_view/parts.rs` 里 `stylesheet!` 的 `transition`，侧栏收起展开用工作区自己的区域过渡（`render.rs`、`view_host.rs`）。
 - `src-nana/src/capability.rs`：本构建编译的 Nana 组件目录。组件和旧界面的对应见 [Nana 组件对应](../nana-component-map.md)。
 
 ## 标准组件

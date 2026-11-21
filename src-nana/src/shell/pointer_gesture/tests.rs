@@ -313,13 +313,32 @@ fn empty_list_point(window: &ApplicationWindow) -> (f32, f32) {
         })
 }
 
-/// 悬停任一底部入口，整排从半透明变成不透明。
+/// 悬停任一底部入口，整排从半透明淡入到不透明：样式表的 `footer-entry` 平时 0.44、`lit` 时 1，
+/// 中间按 `transition: opacity 0.35s ease` 由 NanaUI 推进，从这一刻的透明度起步。
 #[test]
 fn hovering_a_footer_button_lights_up_the_whole_footer() {
+    use nana_ui::runtime::{AnimatableProperty, MotionValue};
+    use std::time::Duration;
     let mut model = files_model();
     let mut window = mounted(&model);
     let mut input = bind(&mut window);
-    assert!(model.motion.footer_opacity() < 1.0, "底部入口平时半透明");
+    let log = accessibility(&window)
+        .into_iter()
+        .find(|node| node.label.as_deref() == Some("日志"))
+        .expect("日志入口")
+        .id;
+    let opacity = |window: &ApplicationWindow, at: Duration| match window
+        .document
+        .context()
+        .world()
+        .presentation_motion_value(log, AnimatableProperty::Opacity, at)
+    {
+        Some(MotionValue::Scalar(value)) => value,
+        other => panic!("日志入口的透明度：{other:?}"),
+    };
+    let start = window.document.context().animation_now();
+    assert!(!model.input.footer_hover);
+    assert_eq!(opacity(&window, start), 0.44, "底部入口平时半透明");
     let settings = labeled_center(&window, "设置");
     pointer(
         &mut window,
@@ -328,20 +347,29 @@ fn hovering_a_footer_button_lights_up_the_whole_footer() {
         settings.0,
         settings.1,
     );
-    for _ in 0..40 {
-        prepare_motion(&mut model, &mut window);
-        window
-            .document
-            .flush(
-                LayoutViewport::new(1200.0, 800.0),
-                &mut NanaTextShaper::default(),
-            )
-            .expect("布局");
-    }
+    prepare_motion(&mut model, &mut window);
+    window
+        .document
+        .flush(
+            LayoutViewport::new(1200.0, 800.0),
+            &mut NanaTextShaper::default(),
+        )
+        .expect("布局");
+    assert!(model.input.footer_hover, "指针停在底栏上");
+    let world = window.document.context().world();
     assert_eq!(
-        model.motion.footer_opacity(),
+        world.node_style(log).and_then(|style| style.layout.opacity),
+        Some(1.0),
+        "悬停底部入口时整排的终点是不透明"
+    );
+    let now = window.document.context().animation_now();
+    assert_eq!(opacity(&window, now), 0.44, "从这一刻的透明度起步");
+    let halfway = opacity(&window, now + Duration::from_millis(175));
+    assert!(halfway > 0.44 && halfway < 1.0, "淡入中：{halfway}");
+    assert_eq!(
+        opacity(&window, now + Duration::from_millis(350)),
         1.0,
-        "悬停底部入口时整排不透明"
+        "0.35s 以后不透明"
     );
 }
 

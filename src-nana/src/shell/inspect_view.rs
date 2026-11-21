@@ -20,7 +20,6 @@ mod page;
 mod preview_paint;
 
 pub(crate) use audio_stage::{LyricFollow, follow_active_lyric};
-pub(crate) use body::shows_preview_sweep;
 pub(crate) use body::wants_preview_texture;
 pub(crate) use frame::{PreviewSignals, seed_detail_card_editor, seed_preview_facts};
 

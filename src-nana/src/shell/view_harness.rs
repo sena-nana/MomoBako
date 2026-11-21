@@ -75,13 +75,17 @@ impl ShellHarness {
         self.model.surface_dirty = false;
     }
 
-    /// 照生产 `prepare` 跑一帧准备（计时器和播放时钟、动效时钟、指针、同步），再刷新布局。一帧按 16ms 算。
+    /// 照生产的一帧：NanaUI 的动画时钟先走一步（侧栏收起展开、淡入淡出这些由它推进），再跑 `prepare`
+    /// （计时器和播放时钟、进度条填充、指针、同步），最后刷新布局。一帧按 16ms 算。
     pub fn frame(&mut self) {
         self.frame_with(crate::frame_clock::FrameStep::millis(16));
     }
 
     /// 同 [`Self::frame`]，步长由调用方给，按帧时钟模拟不同帧率时用。
     pub fn frame_with(&mut self, step: crate::frame_clock::FrameStep) {
+        let context = self.window.document.context_mut();
+        let now = context.animation_now() + Duration::from_millis(step.ui_ms);
+        context.advance_animations(now);
         super::poll_timers(&mut self.model, step);
         crate::window_host::prepare_motion(
             &mut self.model,
@@ -528,6 +532,11 @@ impl ShellHarness {
         self.flush();
         finish_animations(&mut self.window.document);
         self.view.settle_overlays(&mut self.window.document);
+        // 侧栏收起的过渡走完以后，下一次准备帧换成主区独占。
+        if self.view.stale(&self.window.document, &self.model) {
+            self.sync();
+        }
+        self.view.settle_workspace(&mut self.window.document);
         self.flush();
     }
 

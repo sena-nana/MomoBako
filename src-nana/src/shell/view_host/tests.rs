@@ -5,6 +5,7 @@
 //! 二是热路径：动效帧和播放推进只改绑定的字段，内容一次都不重挂。
 //! 三是一致性：一串消息增量同步之后，文档和同一 ViewModel 新挂的文档无障碍树相同。
 //! 四是收敛：视图量到尺寸后发回的消息归约、同步几轮就停，不在每帧重建。
+//! 五是侧栏收起展开：资源区交给工作区自己的区域过渡，走完才换排法；减少动态效果时直接到位。
 
 use crate::backend::services::repository::{
     SystemLogLocation, SystemLogRecord, SystemLogSource, TaskProgressSnapshot,
@@ -513,4 +514,117 @@ fn size_feedback_settles_in_every_scene() {
             harness.flush();
         }
     }
+}
+
+/// 挂着的工作区的布局盒高度：AppShell 给 body 的补丁在时，是窗口高度减去标题栏。
+fn workspace_height(harness: &ShellHarness) -> Option<f32> {
+    use nana_ui::runtime::component_descriptors;
+    let document = harness.document();
+    let world = document.context().world();
+    let node = world
+        .nodes_of_component(
+            document.document(),
+            component_descriptors::WORKSPACE.type_id,
+        )
+        .find(|node| world.is_mounted(*node))?;
+    world.layout_box(node).map(|bounds| bounds.height)
+}
+
+/// 工作区资源区这一刻的宽度和有没有在过渡。工作区停放在树外时为 `None`。
+fn resources(harness: &ShellHarness) -> Option<(f32, bool)> {
+    use nana_ui::RegionId;
+    use nana_ui::runtime::{Entity, Workspace, component_descriptors};
+    let document = harness.document();
+    let context = document.context();
+    let node = context
+        .world()
+        .nodes_of_component(
+            document.document(),
+            component_descriptors::WORKSPACE.type_id,
+        )
+        .find(|node| context.world().is_mounted(*node))?;
+    context
+        .read(Entity::<Workspace>::from_stable_id(node), |workspace| {
+            (
+                workspace.model.region_extent(&RegionId::Resources),
+                workspace.model.region_transitioning(&RegionId::Resources),
+            )
+        })
+        .ok()
+}
+
+/// 收起侧栏：资源区在工作区里按 NanaUI 的区域过渡收到 0，过渡期间侧栏还在、要帧，走完才换成主区独占；
+/// 展开时主区先回工作区，资源区再从 0 展开回原来的宽度。存下的侧栏宽度不跟着过渡变。
+#[test]
+fn collapsing_the_sidebar_plays_the_workspace_region_transition() {
+    let mut harness = ShellHarness::mount(scene("live-files-plain"));
+    let width = harness.model.workspace.sidebar_width;
+    let (expanded, moving) = resources(&harness).expect("工作台里有工作区");
+    assert!(!moving && expanded > 200.0, "{expanded}");
+
+    harness.apply(ShellMessage::ToggleSidebar);
+    harness.frame();
+    harness.frame();
+    let (shrinking, moving) = resources(&harness).expect("收起过渡中工作区还在");
+    assert!(moving, "资源区交给工作区自己的过渡");
+    assert!(shrinking > 0.0 && shrinking < expanded, "{shrinking}");
+    assert!(
+        harness.keyed("repository-switcher").is_some(),
+        "走完以前侧栏还在"
+    );
+    assert_eq!(
+        workspace_height(&harness),
+        Some(800.0 - crate::shell::render::TITLE_BAR_PX),
+        "过渡中工作区每帧重投影，AppShell 给 body 的布局补丁要补回"
+    );
+    assert!(
+        matches!(harness.window.demand, nana_ui::FrameDemand::Continuous(_)),
+        "过渡中要帧"
+    );
+    for _ in 0..30 {
+        harness.frame();
+    }
+    assert!(
+        resources(&harness).is_none(),
+        "走完以后主区独占，工作区停放"
+    );
+    assert!(harness.keyed("repository-switcher").is_none());
+    assert_eq!(
+        harness.model.workspace.sidebar_width, width,
+        "宽度不跟着过渡变"
+    );
+    harness.assert_same_as_fresh_mount();
+
+    harness.apply(ShellMessage::ToggleSidebar);
+    harness.frame();
+    let (growing, moving) = resources(&harness).expect("展开时工作区先回来");
+    assert!(moving && growing < expanded, "从 0 展开：{growing}");
+    for _ in 0..30 {
+        harness.frame();
+    }
+    assert_eq!(
+        resources(&harness),
+        Some((expanded, false)),
+        "展开回原来的宽度"
+    );
+    assert_eq!(harness.model.workspace.sidebar_width, width);
+    harness.assert_same_as_fresh_mount();
+}
+
+/// 减少动态效果（NanaUI 文档上下文的设置）时侧栏直接收起展开，不播过渡。
+#[test]
+fn reduced_motion_collapses_the_sidebar_at_once() {
+    let mut harness = ShellHarness::mount(scene("live-files-plain"));
+    harness
+        .window
+        .document
+        .context_mut()
+        .set_reduced_motion(true);
+    harness.apply(ShellMessage::ToggleSidebar);
+    harness.flush();
+    assert!(resources(&harness).is_none(), "直接换成主区独占");
+    harness.apply(ShellMessage::ToggleSidebar);
+    harness.flush();
+    let (extent, moving) = resources(&harness).expect("展开后工作区回来");
+    assert!(!moving && extent > 200.0, "直接展开到原来的宽度：{extent}");
 }

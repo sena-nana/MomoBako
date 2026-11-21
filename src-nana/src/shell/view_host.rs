@@ -1,7 +1,8 @@
 //! 常驻的壳层视图 `ShellView`：只做调度。
 //!
 //! 骨架只挂一次：AppShell、标题栏（字段绑定，搜索框受控）、浮层层（AppShell 的 overlay 槽位）、
-//! 工作区（资源区宽度跟侧栏呈现宽度）和一个认出这棵骨架的隐藏标记。内容分三块，各在自己的模块里：
+//! 工作区（资源区宽度跟侧栏宽度，侧栏收起展开时资源区按工作区自己的区域过渡收起展开）和一个认出这棵骨架的
+//! 隐藏标记。内容分三块，各在自己的模块里：
 //! 侧栏（`view_part_sidebar.rs`）、主区（`view_part_primary.rs`，按路由键切换分支）和浮层
 //! （`view_part_overlay.rs`，按浮层身份换块）。三块实现同一个接口 [`ShellPart`]：挂载、同步、是否
 //! 需要重挂、组合延后。这里按同一套流程调它们，再把侧栏和主区的根放进骨架组合控件的槽位：有侧栏时
@@ -16,7 +17,11 @@
 //! 每帧经 [`ShellView::retry_deferred`] 检查，组合结束后补挂；`prepare` 每帧还经
 //! [`ShellView::settle_overlays`] 卸掉放完退场的对话框。每帧画完以后（`presented`）经
 //! [`ShellView::settle_focus`] 补还刷新时才落定的焦点（对话框关上、控件卸掉）。
-//! 动效帧和播放推进只走 [`ShellView::sync_hot`]。这里只写信号，不刷新绑定，刷新由输入路由和帧开头完成。
+//! 填充过渡、悬停和播放推进只走 [`ShellView::sync_hot`]。这里只写信号，不刷新绑定，刷新由输入路由和帧开头完成。
+//!
+//! 侧栏收起：资源区先在工作区里收到 0（区域过渡由 NanaUI 推进），走完以后主区才独占（[`ShellView::stale`]
+//! 在这时报变化）；展开：主区先回到工作区，资源区再从 0 展开。过渡期间工作区每帧重投影，`prepare` 经
+//! [`ShellView::settle_workspace`] 让 AppShell 补回给 body 打的布局补丁。
 
 use std::cell::RefCell;
 use std::collections::HashSet;
@@ -31,15 +36,14 @@ use nana_ui::runtime::{
 
 use super::ShellViewModel;
 use super::focus_return::{Before, FocusReturn, Regions};
-use super::hot::{
-    self, HotSignals, ModelField, MotionFrame, PlaybackView, TaskFills, TitleBarView, TitleSignals,
-};
+use super::hot::{HotFrame, HotSignals, ModelField, TitleBarView, TitleSignals};
 use super::view_part::{BodyMode, PartCx, PartId, ShellPart, Swap, body_mode};
 use super::view_part_overlay::{OverlayPart, OverlaySignals};
 use super::view_part_primary::PrimaryPart;
 use super::view_part_sidebar::SidebarPart;
+use super::{StartupStatus, render};
 
-/// 同步计数，测试用来确认动效帧不重挂、组合输入会延后。
+/// 同步计数，测试用来确认填充过渡和播放推进不重挂、组合输入会延后。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct ViewStats {
     /// 重挂的内容块（或主区分支）数。
@@ -65,8 +69,12 @@ pub(crate) struct ShellView {
     title: TitleSignals,
     query: ModelField,
     mode: BodyMode,
-    /// 最近写进工作区资源区的侧栏呈现宽度。
+    /// 最近写进工作区资源区的侧栏宽度。
     sidebar_width: f32,
+    /// 最近交给工作区的资源区收起状态。
+    collapsed: bool,
+    /// 上一帧资源区还在收起或展开。
+    resources_moving: bool,
     sidebar: SidebarPart,
     primary: PrimaryPart,
     overlay: OverlayPart,
@@ -101,15 +109,16 @@ impl ShellView {
             "{MARKER_PREFIX}{}",
             NEXT_MARKER.fetch_add(1, Ordering::Relaxed)
         );
-        let motion = MotionFrame::project(model);
-        let fills = TaskFills::project(model);
-        let playback = PlaybackView::project(model);
-        let selection_box = model.input.selection_box;
+        let hot_frame = HotFrame::project(model);
+        let (sidebar_width, collapsed) = (
+            model.workspace.sidebar_width,
+            model.workspace.sidebar_collapsed,
+        );
         let title_view = TitleBarView::project(model);
         let mut made = None;
         let (_skeleton, (shell, workspace, marker)) =
             document.context_mut().mount_view_root(document_id, || {
-                let hot = HotSignals::new(motion, fills.clone(), &playback, selection_box);
+                let hot = HotSignals::new(hot_frame);
                 let title = TitleSignals::new(&title_view);
                 let query = ModelField::new(&title_view.query);
                 let sidebar = SidebarPart::signals(model);
@@ -125,7 +134,7 @@ impl ShellView {
                 let view = (
                     detached(widget(hidden_marker(&marker_text)).node_ref(marker)),
                     detached(
-                        widget(super::render::workbench_workspace(motion.sidebar_width))
+                        widget(render::workbench_workspace(sidebar_width, collapsed))
                             .entity_ref(workspace),
                     ),
                     widget(AppShell::new())
@@ -152,7 +161,9 @@ impl ShellView {
             title,
             query,
             mode,
-            sidebar_width: motion.sidebar_width,
+            sidebar_width,
+            collapsed,
+            resources_moving: false,
             sidebar: SidebarPart::new(sidebar),
             primary: PrimaryPart::new(primary),
             overlay: OverlayPart::new(overlay),
@@ -224,9 +235,53 @@ impl ShellView {
         self.sidebar.root()
     }
 
-    /// ViewModel 有没有骨架之外要同步的变化：版本变了，或者工作台排法换了。
-    pub(crate) fn stale(&self, model: &ShellViewModel) -> bool {
-        model.revision != self.revision || body_mode(model) != self.mode
+    /// ViewModel 有没有骨架之外要同步的变化：版本变了，或者工作台排法换了（包括侧栏收起的过渡刚走完）。
+    pub(crate) fn stale(&self, document: &RuntimeDocument, model: &ShellViewModel) -> bool {
+        model.revision != self.revision || self.layout_mode(document.context(), model) != self.mode
+    }
+
+    /// 这一刻的排法。侧栏收起时资源区先在工作区里收到 0：过渡没走完以前留在工作台排法，走完才换成主区独占。
+    fn layout_mode(&self, context: &AppContext, model: &ShellViewModel) -> BodyMode {
+        let wanted = body_mode(model);
+        let collapsing = wanted == BodyMode::Solo
+            && self.mode == BodyMode::Workbench
+            && model.workspace.sidebar_collapsed
+            && model.workspace.startup.status == StartupStatus::Ready
+            && self.resources_moving_now(context);
+        if collapsing {
+            BodyMode::Workbench
+        } else {
+            wanted
+        }
+    }
+
+    /// 工作区的资源区正在收起或展开。
+    fn resources_moving_now(&self, context: &AppContext) -> bool {
+        context
+            .read(self.workspace, render::resources_moving)
+            .unwrap_or(false)
+    }
+
+    /// 资源区还在收起或展开：准备帧要一直要帧，走完以后才换排法。
+    pub(crate) fn resources_moving(&self) -> bool {
+        self.resources_moving
+    }
+
+    /// 每帧收尾：资源区收起展开期间工作区每帧重投影，冲掉 AppShell 给 body 打的布局补丁，让 AppShell
+    /// 重新投影补回；过渡走完的那一帧再补一次。
+    pub(crate) fn settle_workspace(&mut self, document: &mut RuntimeDocument) {
+        if !self.alive() {
+            return;
+        }
+        let context = document.context_mut();
+        let moving = self.mode == BodyMode::Workbench && self.resources_moving_now(context);
+        if (moving || self.resources_moving)
+            && self.mode == BodyMode::Workbench
+            && let Err(error) = context.reproject_component(self.shell)
+        {
+            eprintln!("Nana 侧栏收起展开时补 AppShell 布局失败：{error}");
+        }
+        self.resources_moving = moving;
     }
 
     /// 整体同步：写热信号和标题栏；排法变了时侧栏和主区挪到新槽位（第一次排成工作台时才建侧栏）；
@@ -244,7 +299,9 @@ impl ShellView {
         let document_id = document.document();
         let before = Before::capture(document.context(), document_id, self.regions());
         self.write_signals(document, model)?;
-        let mode = body_mode(model);
+        // 收起先在工作区里播，再按过渡有没有走完定排法；展开要等工作区放回 AppShell（下面 `settle` 之后）再播。
+        self.follow_collapse(document.context_mut(), model)?;
+        let mode = self.layout_mode(document.context(), model);
         let mut swap = Swap::default();
         let mut error = None;
         {
@@ -287,9 +344,38 @@ impl ShellView {
             );
         }
         self.settle(document, mode, swap, error)?;
+        self.follow_collapse(document.context_mut(), model)?;
         self.overlay.sweep(document.context_mut());
         self.return_focus(document, model, before);
         self.revision = model.revision;
+        Ok(())
+    }
+
+    /// 资源区跟上 ViewModel 的侧栏收起状态。工作区在 AppShell 里时交给工作区自己的区域过渡（减少动态效果时
+    /// 直接到位）；工作区停放在树外时直接到位，只有马上要放回工作台的展开留到放回以后再播。
+    fn follow_collapse(
+        &mut self,
+        context: &mut AppContext,
+        model: &ShellViewModel,
+    ) -> Result<(), FrameworkError> {
+        let collapsed = model.workspace.sidebar_collapsed;
+        if collapsed == self.collapsed {
+            return Ok(());
+        }
+        let placed = self.mode == BodyMode::Workbench;
+        if !collapsed && !placed && body_mode(model) == BodyMode::Workbench {
+            return Ok(());
+        }
+        let animate = placed && !context.reduced_motion();
+        let now = context.animation_now();
+        context.update_component(self.workspace, |workspace, _| {
+            render::set_resources_collapsed(workspace, collapsed, now, animate)
+        })?;
+        self.collapsed = collapsed;
+        self.resources_moving |= animate;
+        if placed {
+            context.reproject_component(self.shell)?;
+        }
         Ok(())
     }
 
@@ -393,7 +479,7 @@ impl ShellView {
         Some(mounted)
     }
 
-    /// 只同步热信号和侧栏宽度：动效帧和播放推进走这里，不重挂内容。排法要换时由调用方整体同步。
+    /// 只同步热信号和侧栏宽度：填充过渡、悬停和播放推进走这里，不重挂内容。排法要换时由调用方整体同步。
     pub(crate) fn sync_hot(
         &mut self,
         document: &mut RuntimeDocument,
@@ -445,26 +531,20 @@ impl ShellView {
         settled
     }
 
-    /// 写热投影和标题栏投影；搜索框草稿只在 ViewModel 的值变了时写。侧栏呈现宽度变了时写进工作区。
+    /// 写热投影和标题栏投影；搜索框草稿只在 ViewModel 的值变了时写。侧栏宽度变了时写进工作区。
     fn write_signals(
         &mut self,
         document: &mut RuntimeDocument,
         model: &ShellViewModel,
     ) -> Result<(), FrameworkError> {
-        let motion = MotionFrame::project(model);
         let title = TitleBarView::project(model);
-        self.hot.write(
-            motion,
-            TaskFills::project(model),
-            &PlaybackView::project(model),
-            model.input.selection_box,
-        );
+        self.hot.write(HotFrame::project(model));
         self.title.write(&title);
         self.query.sync(&title.query);
-        self.sync_sidebar_width(document.context_mut(), motion.sidebar_width)
+        self.sync_sidebar_width(document.context_mut(), model.workspace.sidebar_width)
     }
 
-    /// 资源区宽度跟着侧栏呈现宽度，只在投影值变了时写，拖动中的区域尺寸不会被旧值拉回。
+    /// 资源区宽度跟着侧栏宽度，只在 ViewModel 的值变了时写，拖动中的区域尺寸不会被旧值拉回。
     ///
     /// 工作区每次 `update_component` 都会重投影（哪怕夹到上下限以后区域尺寸没变），冲掉 AppShell 给 body
     /// 打的布局补丁，所以工作区是 body 时写完总让 AppShell 重新投影补回。
@@ -478,7 +558,7 @@ impl ShellView {
         }
         self.sidebar_width = width;
         context.update_component(self.workspace, |workspace, _| {
-            hot::set_resources_width(workspace, width)
+            render::set_resources_width(workspace, width)
         })?;
         if self.mode == BodyMode::Workbench {
             context.reproject_component(self.shell)?;

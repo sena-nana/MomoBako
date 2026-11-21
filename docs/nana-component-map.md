@@ -65,7 +65,7 @@
 | composable 分支 | `ShellMessage` 和 `ShellViewModel`，记在逻辑矩阵 |
 | `repositoryApi` invoke | `NativeServices` 上的应用服务 |
 | 宿主事件 | `HostEvent` / `HostEventSink` |
-| 侧栏宽度 220–480，默认 276 | `theme_map::SIDEBAR_MIN_PX` / `SIDEBAR_DEFAULT_PX` / `SIDEBAR_MAX_PX`；工作区资源区的宽度跟着侧栏呈现宽度（`render.rs`、`hot.rs`），宽度存进 `sidebar.json` |
+| 侧栏宽度 220–480，默认 276 | `theme_map::SIDEBAR_MIN_PX` / `SIDEBAR_DEFAULT_PX` / `SIDEBAR_MAX_PX`；工作区资源区的宽度跟着侧栏宽度，收起展开用工作区自己的区域过渡（`render.rs`、`view_host.rs`），宽度存进 `sidebar.json` |
 | CSS 变量 | `theme_map::COLOR_ROLES` 指向的 `SemanticPalette` 字段 |
 | 对话框（`.modal-overlay`、`.modal-card`） | NanaUI `Dialog` / `ConfirmDialog`，距顶、分区、遮罩和开合动效写在主题配方里（`appearance.rs`） |
 | Vue 插件组件 | 已删：插件只剩后端形态（`native-dylib`、`process`、`manifest-only`），清单只声明工具页和播放器类型，页面、预览和播放器都由宿主原生绘制，预览由内置视图按扩展名接手。合同见 [API 设计](./api-design.md)，现状见 [迁移边界](./nana-migration.md) |

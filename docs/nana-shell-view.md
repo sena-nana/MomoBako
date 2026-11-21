@@ -46,6 +46,7 @@
 - 工作区放下外框时会把它停放，外框上还带着区域打的样式和无障碍补丁（区域底色、圆角、`primary` 的无障碍名），放进底色后让外框重新投影一次换回自己的；放回工作区时区域照常重打。
 - 停放会清掉焦点。挪位置前 `mount` 在外框下记下焦点、选区和滚动，放好后由 `Swap` 收尾时找回；节点没换，找回的就是原来那个节点。输入法组合会被打断，和以前一样不等。
 - 侧栏收起时留在工作区的资源区里，跟着工作区一起停放，照常写信号；展开时工作区回到 body，侧栏原样回来。
+- 收起和展开的宽度过渡是工作区自己的区域过渡（`render::set_resources_collapsed`，NanaUI 按自己的动画时钟推进）：收起时资源区先在工作区里收到 0，`ShellView::stale` 等过渡走完才报排法变了、换成主区独占；展开时主区先回到工作区，`ShellView::sync` 在放好以后再让资源区从 0 展开。过渡期间工作区每帧重投影，会冲掉 AppShell 给 body 打的布局补丁，`prepare` 经 `ShellView::settle_workspace` 让 AppShell 重新投影补回。减少动态效果（`AppContext::reduced_motion()`）或工作区停放在树外时直接到位。过渡中读回的资源区尺寸不写进侧栏宽度（`window_host::sync_sidebar_resize`）。
 
 ### 首页筛选栏
 
@@ -113,7 +114,7 @@
 - 用 `view_harness::ShellHarness`：
   - `assert_same_as_fresh_mount()`：增量更新后的文档和同一 ViewModel 新挂的文档逐个比较，每一步更新后都调。先比无障碍树（角色、名称、值、布局盒），再按文档顺序比每个节点（含不进无障碍树的容器）的组装路径、组件类型、无障碍状态（禁用、选中、勾选、忙、无效）和整份样式，只绑在样式和状态上的字段也比得到。路径里 `#v0`、`#adopt-1` 这类自动起名的段不比：先挂后插的行和一次建出的行名字不同，结构一样。滚动偏移、焦点和悬停不比。
   - 「N 次无关更新后节点 id 不变」：用 `harness.keyed("键")` 记下节点，`apply` 几条无关消息并 `flush` 后再取，应该是同一个节点；相关更新后绑定的字段原地变，结构变了的那一行才换（`src-nana/src/shell/route_startup/tests.rs`）。
-  - `view_stats().remounts` 不变：动效帧、播放推进和常驻区域的更新都不该重挂。
+  - `view_stats().remounts` 不变：填充过渡、悬停、播放推进和常驻区域的更新都不该重挂。
   - `route_branch()`、`sidebar_root()`、`content_roots()` 判断哪一块换了（`src-nana/src/shell/view_part_primary/tests.rs`）。
   - 常驻路由里的输入框：组合输入中后台消息和相关消息都不换节点、不断预编辑；按键消息排在后台消息后面时刚打的字不回滚；新列表项到达时已有行的节点不换（`src-nana/src/shell/route_search/tests.rs`、`src-nana/src/shell/route_admin/tests.rs`）。
 - 藏起（`.visible(false)`）的块排过一次版才退出无障碍树，取节点前先 `flush`（`ShellHarness::mount` 已经排过）。
@@ -155,7 +156,7 @@
 
 清只作用在归约开始时已经记下的失败上：同一次归约里新记的失败按序号留着。
 
-**忙碌。** Vue `isBusy`：启动以后在读资源库列表（`workspace.list_loading`）、读仓库摘要（`workspace.snapshot_loading`）或读素材详情（`inspect.detail_loading`）。显示「正在同步仓库状态」，前面的转圈读热信号。启动中由启动页显示进度。
+**忙碌。** Vue `isBusy`：启动以后在读资源库列表（`workspace.list_loading`）、读仓库摘要（`workspace.snapshot_loading`）或读素材详情（`inspect.detail_loading`）。显示「正在同步仓库状态」，前面是 NanaUI 的转圈（`spinner`），自己转，减少动态效果时停住。启动中由启动页显示进度。
 
 **同步进度。** 第三档是仓库同步的进度。文件夹分组的「刷新」照 Vue `refreshFileBrowserTree` 同步整个仓库（`tree_sync.rs`，请求在 `dispatch/sync.rs`，同步走启动时同一条 `PROTOCOL_REPOSITORY_SYNC`）：
 - 进度记在 `tree_sync.progress`（`SyncProgress`，照 Vue `RepositorySyncProgress` 记阶段、文案、第几步、一共几步和百分比，初值是空闲 0/3），依次是「扫描文件夹结构」1/3 → 「写入索引结果」2/3 → 「刷新文件夹树」3/3 → 「刷新完成」。2/3 和 3/3 在同一次归约里连写（照 Vue），状态区实际看到的是 1/3 和 3/3：转圈、文案、右边弱色的百分比，占满一行。失败和忙碌优先。
@@ -255,7 +256,7 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 - （已补）AppShell 原来只在自己投影时按「有没有子节点」决定 overlay 槽位挡不挡点击，浮层块只好每次换块都换掉 overlay 槽位、重新装配。现在 AppShell 盯着槽位的子节点（增删、显隐都重新判断，隐藏的不算），浮层层改成常驻的槽位内容。
 - `TreeView` 是一个自绘节点：`nodes` 只能整份绑定，展开、计数变了都整树重投影；行不是节点，放不了行内按钮、右侧计数、右键菜单和行级无障碍。侧栏的文件夹树和智能文件夹树改成按显示顺序展开的扁平行，放进按键对照的 Store，用 `keyed(..).each` 建：展开只插子级，三角、当前目录和计数原地改。
 - 侧栏的快捷方式、快捷访问和「动作」入口是 NanaUI 的 `SidebarRow`（行图标、计数、当前和禁用合成一个 `SidebarRowState` 绑定）。分组没有换成 `SidebarSection`：它的标题工具只在指针悬停标题时显出，键盘焦点不会让它们出来，「新建」「刷新文件夹树」「新建播放集」就到不了；播放集的开合和空状态说明也由 ViewModel 决定（锁定时的说明随原因变），不是组件自己的开合和固定空文案。文件夹树的行也没有换成 `SidebarRow`：树行要按行接系统文件拖放（放下目标高亮）、三角和卡片分开激活、缩进导引线和右键菜单，智能文件夹行的三颗工具常驻。播放集行是两行（名称和「播放器 · N 项」），`SidebarRow` 是固定的单行高度。
-- 侧栏底部入口没有换成 `SidebarFooterButton`：它没有样式入口，底栏平时 0.44 透明度、悬停淡入和「任务」有任务时的强调色都写不进去；「任务」又必须是 `Popover` 的触发器，混用会是两套样子。任务数和标题栏筛选条件数的角标也留着自绘：`StatusBadge` 总带一个状态圆点，是一枚状态标签，不是压在图标角上的数字角标。
+- 侧栏底部入口没有换成 `SidebarFooterButton`：它没有样式入口，底栏平时 0.44 透明度、悬停淡入（这里写成样式表的 `footer-entry` / `lit` 两个类，`transition: opacity 350ms ease`）和「任务」有任务时的强调色都写不进去；「任务」又必须是 `Popover` 的触发器，混用会是两套样子。任务数和标题栏筛选条件数的角标也留着自绘：`StatusBadge` 总带一个状态圆点，是一枚状态标签，不是压在图标角上的数字角标。
 - （已补）`ReorderList` 拖动时按自己的直接子节点取行的盒子（`reorder_row_boxes`），`each` 原来总会多一层容器，播放集页只好用按条目顺序做键的 `dynamic`，增删、重排时整个列表重建。现在 `each(..).container(元素)` 把行直接建进给定的元素，播放集条目用 Store 的 `keyed(..).each(..)` 建进 `ReorderList`，留下的行不重建。
 - （已补）`ReorderList` 原来按下行就开始拖动手势、把指针抓走，行里的按钮收不到点击，只能用 `.tools(节点)` 给一行标一块不拖的区域，播放集条目只好把扩展名方块、标题、播放和移除包成一段登记成 `tools`。NanaUI `b02eaa231` 起按在行里能获得焦点的控件上，不移动松开就是控件自己的点击，移动超过 4px 才拖这一行；`tools` 登记已删，整行都能拖，和 Vue 一样。
 - `#[derive(Store)]` 给每个字段生成同名访问器，但 `Item` 自己有 `id()`（键的哈希），名叫 `id` 的字段在行上读不到，行结构里的编号字段要换个名字（`playlist_id`、`item_id`）。

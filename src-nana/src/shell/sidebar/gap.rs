@@ -11,6 +11,8 @@ pub const FOLDER_RENAME_TITLE: &str = "重命名文件夹";
 pub const FOLDER_DELETE_TITLE: &str = "处理文件夹";
 pub const SMART_EDIT_TITLE: &str = "编辑智能文件夹";
 pub const SMART_DELETE_TITLE: &str = "删除智能文件夹";
+/// 拖着东西在文件夹上停这么久，展开并打开这个文件夹。
+pub const FOLDER_HOVER_MS: u64 = 450;
 
 /// 文件夹新建或重命名。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -331,7 +333,7 @@ impl SidebarState {
             return None;
         }
         let since = self.hover_since_ms.unwrap_or(now_ms);
-        if now_ms.saturating_sub(since) >= super::super::motion::FOLDER_HOVER_MS {
+        if now_ms.saturating_sub(since) >= FOLDER_HOVER_MS {
             self.hover_since_ms = None;
             return Some(path);
         }

@@ -267,7 +267,7 @@ fn progress_state(harness: &ShellHarness, task_id: &str) -> (bool, Option<f64>) 
 }
 
 /// 不确定进度是 NanaUI 的不确定进度条：读屏标成忙、不报数值，沿轨道扫的动画由组件自己跑；
-/// 确定进度报出数值。换成不确定和换回来都不重建这一行；弹层关上以后不再为它要帧。
+/// 确定进度报出数值。换成不确定和换回来都不重建这一行；弹层关上以后壳层不再为进度要帧。
 #[test]
 fn indeterminate_progress_sweeps_in_the_task_popover() {
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
@@ -294,11 +294,16 @@ fn indeterminate_progress_sweeps_in_the_task_popover() {
         harness.frame();
     }
     assert!(
-        matches!(harness.window.demand, nana_ui::FrameDemand::Continuous(_)),
-        "不确定进度在扫，要帧"
+        harness
+            .document()
+            .context()
+            .next_animation_deadline()
+            .is_some(),
+        "不确定进度由组件自己扫，NanaUI 按它的动画时钟要帧"
     );
+    assert!(!harness.model.fills.active(), "壳层不为扫动另外要帧");
 
-    harness.model.motion.set_reduced(true);
+    reduce_motion(&mut harness, true);
     harness.apply(ShellMessage::TaskProgressLoaded(vec![task("task-1", 50.0)]));
     harness.flush();
     assert_eq!(
@@ -311,12 +316,22 @@ fn indeterminate_progress_sweeps_in_the_task_popover() {
         Some(row),
         "换成确定进度不重建这一行"
     );
-    harness.model.motion.set_reduced(false);
+    reduce_motion(&mut harness, false);
     harness.apply(ShellMessage::Admin(AdminMessage::CloseTaskPopover));
     for _ in 0..20 {
         harness.frame();
     }
-    assert!(!harness.model.motion.active(), "弹层关着时不为进度要帧");
+    assert!(!harness.model.fills.active(), "弹层关着时不为进度要帧");
+}
+
+/// 在 NanaUI 的文档上下文上开关减少动态效果，跑一帧让进度条填充照它跟上（生产里系统设置也是这样传下来的）。
+fn reduce_motion(harness: &mut ShellHarness, reduced: bool) {
+    harness
+        .window
+        .document
+        .context_mut()
+        .set_reduced_motion(reduced);
+    harness.frame();
 }
 
 /// 任务弹层里进度条的值（百分比），取读屏报出的数值。
@@ -367,7 +382,7 @@ fn task_progress_widths_transition_like_vue() {
         "过渡不重建这一行"
     );
 
-    harness.model.motion.set_reduced(true);
+    reduce_motion(&mut harness, true);
     harness.apply(ShellMessage::TaskProgressLoaded(vec![task("task-1", 20.0)]));
     harness.flush();
     assert_eq!(

@@ -9,7 +9,9 @@
 
 use std::sync::Arc;
 
-use nana_ui::runtime::view::{AnyView, El, FieldWrite, IntoProp, IntoView, Signal, fields, widget};
+use nana_ui::runtime::view::{
+    AnyView, El, FieldWrite, IntoProp, IntoView, Signal, fields, stylesheet, widget,
+};
 use nana_ui::runtime::{
     Activate, AlignSpec, Button, IconButton, IconGlyph, InteractionStyle, LengthSpec, NodeStyle,
     Popover, PopoverAlignment, PopoverPlacement, PopoverToggled, RadiusTier, SemanticColorRole,
@@ -25,6 +27,13 @@ const GROUP_HEADER_HEIGHT: f32 = 24.0;
 const TREE_ACTION_EDGE: f32 = 22.0;
 /// 底部入口：26×26。
 const FOOTER_BUTTON_EDGE: f32 = 26.0;
+
+stylesheet! {
+    pub(crate) mod footer_styles;
+    /* 底部入口平时 0.44 透明度，亮起（悬停底栏、当前入口、有任务）时为 1，按 0.35s ease 淡入淡出。 */
+    .footer-entry { opacity: 0.44; transition: opacity 350ms ease; }
+    .footer-entry.lit { opacity: 1; }
+}
 
 /// 侧栏行的状态色。`accent` 为 true 时当前态是强调色（快捷方式、底部入口），
 /// 否则是 `--bg-active` 灰底（文件夹树）。
@@ -409,16 +418,16 @@ pub(crate) struct FooterLook {
 }
 
 /// 底部入口按钮：26×26、14px 图标、`--text-muted`；
-/// 当前入口 `--accent-soft` 底、强调色，其余按 `rest` 透明度（悬停底栏时为 1）。
+/// 当前入口 `--accent-soft` 底、强调色，其余平时 0.44 透明度（悬停底栏时为 1）。
 ///
-/// 颜色按 `look` 绑定；平时的半透明随底栏悬停淡入淡出，绑在热信号 `rest` 上，当前入口和有任务时
-/// 常亮，不读它。
+/// 颜色按 `look` 绑定；透明度是样式表的 `footer-entry` 和 `lit`（[`footer_lit`]），亮暗之间由 NanaUI 按
+/// `transition: opacity 0.35s ease` 淡入淡出。
 pub(crate) fn footer_button(
     icon: Icon,
     label: &'static str,
     key: &'static str,
     look: impl Fn() -> FooterLook + Copy + Send + 'static,
-    rest: Signal<f32>,
+    hover: Signal<bool>,
     on_activate: impl Fn(&mut ViewContext<IconButton>) + Send + 'static,
 ) -> AnyView {
     let mut button = IconButton::new(icon, label)
@@ -432,17 +441,22 @@ pub(crate) fn footer_button(
     );
     widget(button.colors_from_style())
         .prop::<FooterLook, FooterPaint>(look)
-        .prop::<f32, super::super::hot::OpacityField>(move || {
-            let look = look();
-            if look.active || look.highlight {
-                1.0
-            } else {
-                rest.get()
-            }
-        })
+        .class(footer_styles::footer_entry)
+        .class_when(footer_styles::lit, footer_lit(look, hover))
         .key(key)
         .on_cx(move |_, _: &Activate, cx| on_activate(cx))
         .into_any()
+}
+
+/// 底部入口亮着：指针停在底栏上，或者是当前入口、有任务的「任务」入口（这两种常亮，不跟悬停）。
+pub(crate) fn footer_lit(
+    look: impl Fn() -> FooterLook + Copy + Send + 'static,
+    hover: Signal<bool>,
+) -> impl Fn() -> bool + Copy + Send + 'static {
+    move || {
+        let look = look();
+        look.active || look.highlight || hover.get()
+    }
 }
 
 /// 「任务」入口：外观和别的底部入口一样，是 NanaUI `Popover` 的触发器，面板是任务列表
@@ -539,7 +553,7 @@ fn footer_paint(look: FooterLook) -> (SemanticColorRole, Option<SemanticColorRol
     (foreground, None, hover_paint())
 }
 
-/// 底部入口按状态换颜色：前景、底色、悬停和按下。透明度另由 `OpacityField` 绑。
+/// 底部入口按状态换颜色：前景、底色、悬停和按下。透明度另由样式表的 `footer-entry` 给。
 pub(crate) struct FooterPaint;
 
 impl FieldWrite<IconButton, FooterLook> for FooterPaint {

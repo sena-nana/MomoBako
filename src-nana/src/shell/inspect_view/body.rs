@@ -417,14 +417,5 @@ pub(crate) fn wants_preview_texture(model: &ShellViewModel) -> bool {
     }
 }
 
-/// 不定进度色条正在预览框里：音视频准备卡，或图片读取中的状态胶囊。扫动只在这时要帧。
-pub(crate) fn shows_preview_sweep(model: &ShellViewModel) -> bool {
-    super::super::files_view::previewing(model)
-        && matches!(
-            resolve(model).0,
-            ContentRef::Loading(LoadingRef::Media { .. } | LoadingRef::Pill { progress: true, .. })
-        )
-}
-
 #[cfg(test)]
 mod tests;

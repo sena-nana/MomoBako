@@ -213,7 +213,12 @@ fn fingerprint(row: &FileRow, library: &str) -> u64 {
 /// 还没有布局回报时，按窗口宽估算列表内容宽：减去侧栏、主区左右 24、详情 300 和间距 18、
 /// 卡片描边和列表左右内边距。窗口不超过 900 时详情排到下面，不再减详情宽。
 pub(crate) fn estimated_list_width(model: &ShellViewModel) -> f32 {
-    let sidebar = model.motion.sidebar_presented_width();
+    let workspace = &model.workspace;
+    let sidebar = if workspace.sidebar_collapsed {
+        0.0
+    } else {
+        workspace.sidebar_width
+    };
     let detail = if model.viewport_width <= 900.0 {
         0.0
     } else {

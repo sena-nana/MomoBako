@@ -4,8 +4,12 @@
 //! `route_*.rs`，浮层 `view_part_overlay.rs`。
 
 use crate::theme_map::{SIDEBAR_MAX_PX, SIDEBAR_MIN_PX};
+use std::time::Duration;
+
 use nana_ui::runtime::Workspace;
-use nana_ui::{RegionId, RegionRole, RegionState, WorkspaceLayout, WorkspaceModel};
+use nana_ui::{
+    RegionId, RegionRole, RegionState, WorkspaceLayout, WorkspaceModel, WorkspaceMutation,
+};
 
 /// 窄窗逻辑宽。默认侧栏不随窗口缩小，主区下限要和它对得上。
 const NARROW_WINDOW_PX: f32 = 390.0;
@@ -24,19 +28,20 @@ fn primary_min_px() -> f32 {
 /// 标题栏高度。启动页的最小高度要扣掉它和主区内边距。
 pub(super) const TITLE_BAR_PX: f32 = 36.0;
 
-/// 骨架里的工作区：资源区和主区，资源区宽度按侧栏呈现宽度给。主区圆角，不画常驻浅色分割条。
-/// 区域内容由 `ShellView` 挂好后放进来，宽度之后由绑定跟着侧栏呈现宽度走。
+/// 骨架里的工作区：资源区和主区，资源区宽度按侧栏宽度给，侧栏收起时资源区也收起。主区圆角，不画常驻浅色分割条。
+/// 区域内容由 `ShellView` 挂好后放进来，宽度和收起之后由 `ShellView` 跟着 ViewModel 写。
 ///
 /// 主区要紧贴侧栏（侧栏 276 时主区从 x=276 起）。Nana 两条轨道之间多一条发丝间隙，
 /// 所以资源区少给一条间隙，侧栏右内边距也少一条（见 `sidebar_frame`），
 /// 侧栏看上去仍是 `width` 宽，内容盒不变。
-pub(super) fn workbench_workspace(width: f32) -> Workspace {
+pub(super) fn workbench_workspace(width: f32, collapsed: bool) -> Workspace {
     let layout = WorkspaceLayout::new([
         RegionState::new(RegionId::Resources, RegionRole::Resources)
-            .size(super::hot::resources_size(width))
+            .size(resources_size(width))
             .min_size(SIDEBAR_MIN_PX - WORKBENCH_GAP_PX)
             .max_size(SIDEBAR_MAX_PX - WORKBENCH_GAP_PX)
             .collapsible(true)
+            .collapsed(collapsed)
             .resizable(true),
         RegionState::new(RegionId::Primary, RegionRole::Primary)
             .min_size(primary_min_px())
@@ -44,4 +49,58 @@ pub(super) fn workbench_workspace(width: f32) -> Workspace {
     ])
     .expect("工作台只注册资源区和主区");
     Workspace::from_model(&WorkspaceModel::with_layout(layout), [])
+}
+
+/// 按侧栏宽度设工作区资源区尺寸，返回尺寸有没有变。侧栏宽度少一条发丝间隙，和挂载时的区域
+/// 尺寸同一个口径，按区域上下限夹取；写的是区域尺寸，拖动中的指针状态不受影响。
+///
+/// 不做成绑定：工作区是 AppShell 的 body，它自己重投影会冲掉 AppShell 给 body 打的布局补丁，
+/// 调用方写完要让 AppShell 重新投影一次。
+pub(super) fn set_resources_width(target: &mut Workspace, width: f32) -> bool {
+    let Some(region) = target.layout.region(&RegionId::Resources) else {
+        eprintln!("Nana 工作区没有资源区，侧栏宽度写不进去");
+        return false;
+    };
+    let wanted = resources_size(width).clamp(region.min_size_value(), region.max_size_value());
+    if region.size_value() == Some(wanted) {
+        return false;
+    }
+    target.apply(
+        WorkspaceMutation::SetRegionSize(RegionId::Resources, wanted),
+        Duration::ZERO,
+    )
+}
+
+/// 收起或展开资源区，返回有没有变。`animate` 时交给工作区自己的区域过渡：宽度从这一刻的宽度走到 0 或
+/// 展开宽度，NanaUI 按 `now` 起的动画时钟推进、要帧；不 `animate` 时（减少动态效果，或工作区停放在树外）
+/// 直接到位，走到一半的过渡一起停掉。
+pub(super) fn set_resources_collapsed(
+    target: &mut Workspace,
+    collapsed: bool,
+    now: Duration,
+    animate: bool,
+) -> bool {
+    if animate {
+        return target.apply(
+            WorkspaceMutation::SetRegionCollapsed(RegionId::Resources, collapsed),
+            now,
+        );
+    }
+    let moving = target.model.region_transitioning(&RegionId::Resources);
+    let changed = target
+        .model
+        .layout_mut()
+        .set_collapsed(&RegionId::Resources, collapsed);
+    target.layout = target.model.layout().clone();
+    changed || moving
+}
+
+/// 资源区正在收起或展开。
+pub(super) fn resources_moving(target: &Workspace) -> bool {
+    target.model.region_transitioning(&RegionId::Resources)
+}
+
+/// 侧栏宽度换成资源区尺寸。
+pub(super) fn resources_size(width: f32) -> f32 {
+    (width - WORKBENCH_GAP_PX).max(0.0)
 }

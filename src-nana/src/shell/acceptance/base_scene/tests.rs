@@ -169,7 +169,7 @@ fn task_fills_rest_on_their_targets() {
             continue;
         }
         assert_eq!(
-            model.motion.task_fills(),
+            model.fills.rows(),
             targets,
             "{name} 的任务进度条没有停在目标宽度"
         );

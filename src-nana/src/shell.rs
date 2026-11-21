@@ -19,12 +19,13 @@ pub(crate) use system_media::{poll as poll_media_keys, sync as sync_media_sessio
 mod admin_fields;
 mod entry_actions;
 mod inspect_shortcuts;
-mod motion;
 mod palette;
 mod pointer_gesture;
-pub use motion::note_sidebar_resize;
+mod progress_fill;
+mod sidebar_resize;
 pub use pointer_gesture::observe_live_pointer;
 pub(crate) use pointer_gesture::{note_external_folder_drag, tick_external_folder_hover};
+pub use sidebar_resize::note_sidebar_resize;
 mod files_selection_box;
 mod files_view;
 mod thumbs;
@@ -305,7 +306,8 @@ pub struct ShellViewModel {
     pub player: player::PlayerState,
     pub admin: admin::AdminState,
     pub input: input::InputState,
-    pub motion: motion::MotionState,
+    /// 启动页和任务弹层进度条填充的宽度过渡，见 `progress_fill.rs`。
+    pub fills: progress_fill::ProgressFills,
     /// 全局状态区：最近一次失败和它的来源，见 `status.rs`。
     pub status: status::StatusState,
     /// 文件夹树的「刷新」：同步仓库再刷新工作区，见 `tree_sync.rs`。
@@ -362,7 +364,7 @@ impl Default for ShellViewModel {
             player: player::PlayerState::default(),
             admin: admin::AdminState::default(),
             input: input::InputState::default(),
-            motion: motion::MotionState::default(),
+            fills: progress_fill::ProgressFills::default(),
             status: status::StatusState::default(),
             tree_sync: tree_sync::TreeSyncState::default(),
             operation: repo_operation::RepositoryOperation::default(),
@@ -484,7 +486,7 @@ impl ShellViewModel {
         self.operation.apply(&mut self.sidebar.operation);
         self.operation.apply(&mut self.workspace.operation);
         self.settle_status(&before, seq, started);
-        self.follow_motion();
+        self.follow_fills();
     }
 
     fn flush_folder_mutations(&mut self) {
@@ -523,34 +525,18 @@ impl ShellViewModel {
         self.files.enqueue(effect);
     }
 
-    fn follow_motion(&mut self) {
-        let startup = f32::from(self.workspace.startup.percent);
-        let spinner = self.sidebar.tree_loading
-            || self.sidebar.submitting
-            || self.sidebar.smart_draft.busy
-            || self.files.mutating
-            || self.tree_sync.running()
-            || status::busy(self);
-        self.motion.set_startup_percent(startup);
+    /// 启动页进度条的目标百分比交给填充过渡（`progress_fill.rs`），任务弹层各行的也一样。
+    fn follow_fills(&mut self) {
+        self.fills
+            .set_startup(f32::from(self.workspace.startup.percent));
         self.follow_task_fills();
-        self.motion.set_spinner(spinner);
-        // 任务弹层开着、里面有不确定进度的行时，进度条按 `progress-pulse` 呼吸；弹层关着不画，也不要帧。
-        let pulse = self.admin.popover_open && self.task_rows().iter().any(|row| row.indeterminate);
-        self.motion.set_pulse(pulse);
-        // 准备卡和图片读取胶囊的色条按 `media-preview-progress-sweep` 来回扫。不在预览框里时不要帧。
-        self.motion
-            .set_preview_sweep(inspect_view::shows_preview_sweep(self));
-        self.motion.set_sidebar_collapsed(
-            self.workspace.sidebar_collapsed,
-            self.workspace.sidebar_width,
-        );
     }
 
-    /// 任务弹层各行进度条的目标宽度交给动效时钟（`.progress-bar__fill` 的宽度过渡）。归约以后、准备帧里仓库操作行
+    /// 任务弹层各行进度条的目标宽度交给填充过渡（`.progress-bar__fill` 的宽度过渡）。归约以后、准备帧里仓库操作行
     /// 往上爬或收起以后都要调。
     pub(crate) fn follow_task_fills(&mut self) {
         let targets = admin::task_fill_targets(self);
-        self.motion.set_task_fills(&targets);
+        self.fills.set_rows(&targets);
     }
 
     fn reduce_inner(&mut self, message: ShellMessage) {

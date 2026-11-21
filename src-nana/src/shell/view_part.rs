@@ -20,10 +20,10 @@ pub(crate) enum BodyMode {
     Solo,
 }
 
-/// 侧栏呈现宽度大于半像素、启动已就绪时才放侧栏。折叠动画走完才换成主区独占。
+/// 侧栏展开、启动已就绪时才放侧栏。收起时资源区的过渡走完才换成主区独占，由 `ShellView` 按工作区决定。
 pub(crate) fn body_mode(model: &ShellViewModel) -> BodyMode {
-    let presented = model.motion.sidebar_presented_width();
-    if presented > 0.5 && model.workspace.startup.status == StartupStatus::Ready {
+    if !model.workspace.sidebar_collapsed && model.workspace.startup.status == StartupStatus::Ready
+    {
         BodyMode::Workbench
     } else {
         BodyMode::Solo

@@ -1,6 +1,6 @@
-//! 窗口准备阶段的动效时钟、预取、分隔条回写，全局 Escape，以及关闭、托盘和几何恢复。
+//! 窗口准备阶段的进度条填充、预取、分隔条回写，全局 Escape，以及关闭、托盘和几何恢复。
 //!
-//! 计时器和动效每帧按 [`FrameStep`] 推进，步长是两帧之间真实流逝的时间，见 `frame_clock.rs`。
+//! 计时器和进度条填充每帧按 [`FrameStep`] 推进，步长是两帧之间真实流逝的时间，见 `frame_clock.rs`。
 
 use nana_ui::runtime::{Entity, Workspace, component_descriptors};
 use nana_ui::{
@@ -82,11 +82,13 @@ pub(crate) fn after_update(
     crate::shell::sync_media_session(&window, &app.shell);
 }
 
-/// 动效、计时器或播放还在走时按 30 帧继续画，并把工作区拖动后的宽度写回壳层。
+/// 进度条填充、侧栏收起展开、计时器或播放还在走时按 30 帧继续画，并把工作区拖动后的宽度写回壳层。
 ///
-/// 指针手势先读当前文档。动效和播放推进只同步热信号，不重挂；这一帧里有过归约、标了脏
+/// 指针手势先读当前文档。填充过渡、悬停和播放推进只同步热信号，不重挂；这一帧里有过归约、标了脏
 /// 或者工作台排法要换时才整体同步，手势进行中不重挂，否则按下目标会随节点一起消失。
-/// 悬停、预取、仓库操作行和动效的时钟都按 `step.ui_ms` 往前拨。文档变了以后先把挂着的缩略图报给文件表面，
+/// 悬停、预取、仓库操作行和填充过渡的时钟都按 `step.ui_ms` 往前拨。填充过渡每帧照文档上下文跟上减少动态
+/// 效果的设置；别的动效（侧栏收起展开、底部入口淡入淡出、转圈和不确定进度）由 NanaUI 推进，也看同一个设置
+/// （侧栏收起展开由 `ShellView` 按它决定播不播）。文档变了以后先把挂着的缩略图报给文件表面，
 /// 预取只解码挂着的，纹理回收也按它（`thumbnail_host.rs`）。
 pub(crate) fn prepare_motion(
     shell: &mut ShellViewModel,
@@ -100,6 +102,9 @@ pub(crate) fn prepare_motion(
     {
         shell.files.note_mounted_thumbnails(mounted);
     }
+    shell
+        .fills
+        .set_reduced(window.document.context().reduced_motion());
     crate::shell::poll_media_keys(shell);
     crate::drag_out::apply_result(shell);
     drive_prefetch(shell, step.ui_ms);
@@ -118,14 +123,11 @@ pub(crate) fn prepare_motion(
         shell.mark_surface_dirty();
         shell.follow_task_fills();
     }
-    if shell.motion.active() {
-        shell
-            .motion
-            .advance(shell.motion.now_ms().saturating_add(step.ui_ms));
-    }
+    shell.fills.tick(step.ui_ms);
     let mut overlay_leaving = false;
+    let mut resources_moving = false;
     if let Some(view) = view {
-        let structural = shell.surface_dirty || view.stale(shell);
+        let structural = shell.surface_dirty || view.stale(&window.document, shell);
         let synced = if tracking {
             view.sync_hot(&mut window.document, shell)
         } else if structural {
@@ -141,8 +143,15 @@ pub(crate) fn prepare_motion(
         // 换下的对话框放完退场才卸，卸掉以前浮层层还挡着点击，所以放退场期间一直要帧。
         view.settle_overlays(&mut window.document);
         overlay_leaving = view.overlay_leaving();
+        // 侧栏收起展开时工作区每帧重投影，AppShell 要补回 body 的布局补丁；走完以前一直要帧。
+        view.settle_workspace(&mut window.document);
+        resources_moving = view.resources_moving();
     }
-    let busy = shell.motion.active() || tracking || overlay_leaving || shell.player.clock_running();
+    let busy = shell.fills.active()
+        || tracking
+        || overlay_leaving
+        || resources_moving
+        || shell.player.clock_running();
     window.demand = if busy
         || shell.files.prefetch_pending()
         || shell.inspect.timers_pending()
@@ -207,7 +216,7 @@ pub(crate) fn escape_message(
 fn sync_sidebar_resize(shell: &mut ShellViewModel, document: &nana_ui::runtime::RuntimeDocument) {
     let context = document.context();
     let document_id = document.document();
-    // 主区独占时工作区停放在树外，它的区域尺寸不是侧栏宽度。
+    // 主区独占时工作区停放在树外，它的区域尺寸不是侧栏宽度；资源区收着或正在收起展开时也不是。
     let Some(node) = context
         .world()
         .nodes_of_component(document_id, component_descriptors::WORKSPACE.type_id)
@@ -215,8 +224,13 @@ fn sync_sidebar_resize(shell: &mut ShellViewModel, document: &nana_ui::runtime::
     else {
         return;
     };
-    let Ok(extent) = context.read(Entity::<Workspace>::from_stable_id(node), |workspace| {
-        workspace.model.region_extent(&RegionId::Resources)
+    let Ok(Some(extent)) = context.read(Entity::<Workspace>::from_stable_id(node), |workspace| {
+        let settled = !workspace.model.region_transitioning(&RegionId::Resources)
+            && workspace
+                .layout
+                .region(&RegionId::Resources)
+                .is_some_and(|region| !region.collapsed_value());
+        settled.then(|| workspace.model.region_extent(&RegionId::Resources))
     }) else {
         return;
     };
@@ -289,8 +303,9 @@ pub(crate) fn on_window_event(
             }
             RuntimeProgramUpdate::default()
         }
-        nana_ui_platform::WindowEvent::ReducedMotionChanged { reduced, .. } => {
-            app.shell.motion.set_reduced(*reduced);
+        // NanaUI 在转发这个事件以前已经把系统设置交给了文档上下文，视图层的过渡由它自己跟上；
+        // 进度条填充在下一次准备帧里照文档上下文跟上（`prepare_motion`）。
+        nana_ui_platform::WindowEvent::ReducedMotionChanged { .. } => {
             RuntimeProgramUpdate::redraw(context.window_id())
         }
         nana_ui_platform::WindowEvent::FileDialogCompleted { id, result } => {

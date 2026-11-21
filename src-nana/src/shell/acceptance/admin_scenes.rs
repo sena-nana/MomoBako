@@ -160,8 +160,8 @@ pub(super) fn seed_task(model: &mut ShellViewModel, cancelling: bool) {
         },
     ]));
     model.reduce(ShellMessage::Admin(AdminMessage::ToggleTaskPopover));
-    // 离屏会话不走帧时钟，把弹层的出现动效拨到结束，截图里是停稳的样子。
-    model.motion.advance(60_000);
+    // 离屏会话不走帧时钟，把进度条填充的过渡拨到结束，截图里是停稳的样子。
+    model.fills.tick(60_000);
 }
 
 /// `logs-paused`：日志面板点了「暂停追踪」，日志列表不跟随末尾，停在顶部。

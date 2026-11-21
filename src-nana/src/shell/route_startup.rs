@@ -200,7 +200,7 @@ fn panel(signals: StartupSignals, hot: HotSignals) -> AnyView {
     .into_any()
 }
 
-/// NanaUI 的进度条（`progress`），满格 100。数值绑在热信号上，逐帧走动效。
+/// NanaUI 的进度条（`progress`），满格 100。数值绑在热信号上，按 0.18s 过渡到新值（`progress_fill.rs`）。
 fn progress_bar(percent: Signal<f32>) -> AnyView {
     progress(100.0)
         .value(move || f64::from(percent.get()))

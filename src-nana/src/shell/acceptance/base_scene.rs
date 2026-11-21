@@ -281,15 +281,14 @@ pub(super) fn acceptance_model() -> ShellViewModel {
     model
 }
 
-/// 把动效时钟拨过所有过渡，日志时间换成夹具的固定时刻，截图拿到静止画面。
+/// 把进度条填充拨过所有过渡，日志时间换成夹具的固定时刻，截图拿到静止画面。
 pub(super) fn settle(model: &mut ShellViewModel) {
     model
-        .motion
-        .set_startup_percent(f32::from(model.workspace.startup.percent));
+        .fills
+        .set_startup(f32::from(model.workspace.startup.percent));
     // 场景直接推仓库操作行（`operation.tick`），不经过准备帧，任务弹层进度条的目标在这里跟上。
     model.follow_task_fills();
-    let now = model.motion.now_ms();
-    model.motion.advance(now.saturating_add(1_000));
+    model.fills.tick(1_000);
     for log in &mut model.workspace.startup.logs {
         log.time = FIXED_CLOCK.into();
     }

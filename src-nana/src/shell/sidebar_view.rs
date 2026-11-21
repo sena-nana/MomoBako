@@ -80,7 +80,7 @@ pub fn sidebar_frame() -> SidebarFrame {
     frame
 }
 
-/// 常驻侧栏：仓库头、分组和底部入口，放进工作区的资源区。底部入口平时的透明度读热信号。
+/// 常驻侧栏：仓库头、分组和底部入口，放进工作区的资源区。底部入口亮不亮读热信号里的底栏悬停。
 ///
 /// 三个槽位的根节点（仓库头外框、分组外的滚动区、底部入口行）上不放绑定：侧栏外框装配时给它们
 /// 打布局补丁，带绑定的根节点重投影会把补丁冲掉。
@@ -88,7 +88,11 @@ pub(crate) fn sidebar(signals: SidebarSignals, hot: HotSignals) -> AnyView {
     widget(sidebar_frame())
         .top(sidebar_switcher(&signals))
         .body(sidebar_sections(signals))
-        .footer(sidebar_footer(signals.footer, signals.tasks, hot.footer))
+        .footer(sidebar_footer(
+            signals.footer,
+            signals.tasks,
+            hot.footer_hover,
+        ))
         .into_any()
 }
 
@@ -575,12 +579,12 @@ pub(super) fn danger_tree_action_titled(
         .into_any()
 }
 
-/// 设置、拓展、任务和日志。当前入口 `--accent-soft` 底，其余平时 0.44 透明度，悬停底栏时为 1。
+/// 设置、拓展、任务和日志。当前入口 `--accent-soft` 底，其余平时 0.44 透明度，悬停底栏时淡入到 1。
 /// 任务入口外面套一层定位用的行，有任务时右上角显示数量角标，没有时角标藏起来。
 fn sidebar_footer(
     footer: Signal<FooterView>,
     tasks_view: Signal<super::admin::TaskPopoverView>,
-    rest: Signal<f32>,
+    hover: Signal<bool>,
 ) -> AnyView {
     let look = move |active: fn(&FooterView) -> bool| {
         move || {
@@ -600,14 +604,8 @@ fn sidebar_footer(
         Stack::row(0.0)
             .with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative),
     )
-    .prop::<f32, super::hot::OpacityField>(move || {
-        let look = tasks();
-        if look.active || look.highlight {
-            1.0
-        } else {
-            rest.get()
-        }
-    })
+    .class(parts::footer_styles::footer_entry)
+    .class_when(parts::footer_styles::lit, parts::footer_lit(tasks, hover))
     .children((
         footer_popover(
             CLIPBOARD_LIST,
@@ -632,7 +630,7 @@ fn sidebar_footer(
                 "设置",
                 "footer-settings",
                 look(|footer| footer.settings),
-                rest,
+                hover,
                 |cx| {
                     cx.dispatch_program_all(ShellMessage::OpenSettings);
                 },
@@ -642,7 +640,7 @@ fn sidebar_footer(
                 "拓展",
                 "footer-extensions",
                 look(|footer| footer.extensions),
-                rest,
+                hover,
                 |cx| {
                     cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(
                         WorkspacePanel::Extensions,
@@ -655,7 +653,7 @@ fn sidebar_footer(
                 "日志",
                 "footer-logs",
                 look(|footer| footer.logs),
-                rest,
+                hover,
                 |cx| {
                     cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs));
                 },

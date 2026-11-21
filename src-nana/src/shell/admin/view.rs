@@ -3,8 +3,8 @@
 //! 任务弹层的面板：每个任务一块，来源加 NanaUI 的 `Progress` 进度条（下面是标签、细节、百分比）；
 //! 没有任务时是紧凑的 NanaUI `EmptyState`。面板挂在侧栏底部「任务」按钮的
 //! NanaUI `Popover` 里（`sidebar_view.rs`），开合、点外面、Escape 和焦点归还都由框架负责。面板常驻：
-//! 任务按键增删行，进度、标签和细节只改绑定的字段；进度条的值按 0.18s 过渡（动效时钟在
-//! `motion.rs`，逐帧的值经热信号写进来）。不确定进度由 `Progress` 自己沿轨道扫。
+//! 任务按键增删行，进度、标签和细节只改绑定的字段；进度条的值按 0.18s 过渡（填充的时钟在
+//! `progress_fill.rs`，逐帧的值经热信号写进来）。不确定进度由 `Progress` 自己沿轨道扫。
 
 use nana_ui::runtime::view::{
     AnyView, IntoView, Signal, computed, each, empty_state, fields, progress, widget,
@@ -77,7 +77,7 @@ fn task_row_views(model: &ShellViewModel) -> Vec<TaskRowView> {
         .collect()
 }
 
-/// 弹层开着时各行进度条的目标值（行键、百分比），交给动效时钟按 0.18s 过渡；关着时为空。
+/// 弹层开着时各行进度条的目标值（行键、百分比），交给填充过渡（`progress_fill.rs`）按 0.18s 走；关着时为空。
 pub(crate) fn task_fill_targets(model: &ShellViewModel) -> Vec<(String, f32)> {
     if !model.admin.popover_open {
         return Vec::new();
@@ -226,7 +226,7 @@ fn task_item(
 }
 
 /// 进度条：NanaUI 的 `Progress`（6 高的轨道，满格 100）；下面是标签、细节和百分比，间距 7。值按
-/// 0.18s ease 过渡，取动效时钟这一帧的值（`fills`；不经 `ShellView` 建树时没有，直接用目标值）。
+/// 0.18s ease 过渡，取填充过渡这一帧的值（`fills`；不经 `ShellView` 建树时没有，直接用目标值）。
 /// 不确定进度不写百分比，进度条改成沿轨道扫的不确定样式（减少动态效果时由组件改成淡填充）。
 fn progress_bar(
     view: Signal<TaskPopoverView>,

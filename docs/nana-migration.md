@@ -29,7 +29,7 @@ cargo run -p momobako-nana                   # 原生窗口
 
 ## 渲染和验收路径
 
-- 产品窗口：`run()` 用 `NanaApplication::builder(..).run::<RuntimeApplication<MomoBakoApplication>>(..)`。`MomoBakoApplication` 实现 `ApplicationState`：`initialize` 启动领域服务，读应用设置和本地偏好；`build` 在窗口文档里挂常驻壳层（`ShellView::mount`，挂之前照 Vue 的 `lang="zh-CN"` 声明文档语言），提交读资源库列表的任务，建托盘；`update` 先做服务派发，再归约、执行副作用、同步视图；`prepare` 每帧推进计时器、动效和播放时钟，派发预取和目录请求，上传预览和缩略图纹理。步长是两帧之间真实流逝的时间（`frame_clock.rs`）：上一帧没要连续帧时从 0 起算，界面计时器和动效一帧最多算 250 ms，播放时钟不封顶；动效、计时器或播放还在走时按 30 帧要帧。界面进 `RuntimeDocument`，NanaUI 把它提交成 `UiScene`，由 `SceneWgpuPainter` 画到宿主 Surface。
+- 产品窗口：`run()` 用 `NanaApplication::builder(..).run::<RuntimeApplication<MomoBakoApplication>>(..)`。`MomoBakoApplication` 实现 `ApplicationState`：`initialize` 启动领域服务，读应用设置和本地偏好；`build` 在窗口文档里挂常驻壳层（`ShellView::mount`，挂之前照 Vue 的 `lang="zh-CN"` 声明文档语言），提交读资源库列表的任务，建托盘；`update` 先做服务派发，再归约、执行副作用、同步视图；`prepare` 每帧推进计时器、进度条填充和播放时钟，派发预取和目录请求，上传预览和缩略图纹理。步长是两帧之间真实流逝的时间（`frame_clock.rs`）：上一帧没要连续帧时从 0 起算，界面计时器和填充过渡一帧最多算 250 ms，播放时钟不封顶；填充过渡、侧栏收起展开、计时器或播放还在走时按 30 帧要帧。别的动效都交给 NanaUI：转圈和不确定进度由 `Spinner`、`Progress` 自己画，侧栏收起展开是工作区的区域过渡（`WorkspaceMutation::SetRegionCollapsed`），底部入口的淡入淡出是样式表的 `transition`，按 NanaUI 自己的动画时钟推进、要帧。减少动态效果跟文档上下文的 `AppContext::reduced_motion()`（NanaUI 建文档和系统设置变了时自己写进去）：NanaUI 的过渡这时直接到终点，侧栏收起展开和进度条填充也照它直接到位。界面进 `RuntimeDocument`，NanaUI 把它提交成 `UiScene`，由 `SceneWgpuPainter` 画到宿主 Surface。
 - 离屏和测试不开窗口：`acceptance_document_for_model`（`lib.rs`）新建一份 `RuntimeDocument`，用 `mount_shell` 挂壳层（和产品窗口一样走 `ShellView::mount`），再交给 `nana-ui-devtools` 的 `RuntimeAgentSession` 布局、出图、读无障碍树和点击。这条路径不启动领域服务和网络服务，验收场景的服务应答由场景按夹具送回（`src-nana/src/shell/acceptance/base_scene.rs`）。
 - 离屏结果不替代 Windows 真窗口、拖放、IME、托盘、UIA/AccessKit 和发布包的验收，见 [设备矩阵](./nana-device-matrix.md)。
 
@@ -40,7 +40,7 @@ cargo run -p momobako-nana                   # 原生窗口
 - 骨架（AppShell、标题栏、工作区、浮层层）只挂一次。内容分侧栏、主区、浮层三块，都常驻，同步只写信号和 Store。主区按 `RouteKey` 切换路由分支，分支在进入路由时建一次。
 - 还会整块换的只有两处：浮层按 `OverlayIdentity` 换块；文件页和播放集页里的播放条是旧视图岛，按 `player_view::bar_stamp` 重建。
 - 对话框都是 NanaUI `Dialog` / `ConfirmDialog`（`src-nana/src/shell/view_part_overlay/dialog.rs`），常驻在浮层层下，靠 `open` 开合，换下的放完退场才卸。距顶、最高、圆角、分区、遮罩和开合动效由主题配方给出（`src-nana/src/appearance.rs`）。
-- `reduce` 和 `mark_surface_dirty` 都把 `ShellViewModel::revision` 加一。`prepare` 看到版本或工作台排法变了才整体同步；指针手势进行中、只有动效或播放推进的帧只写热信号（`hot.rs`）。
+- `reduce` 和 `mark_surface_dirty` 都把 `ShellViewModel::revision` 加一。`prepare` 看到版本或工作台排法变了才整体同步；指针手势进行中、只有填充过渡、底栏悬停或播放推进的帧只写热信号（`hot.rs`）。
 
 分块、路由、浮层会话、全局状态区和把一块区域改成常驻的步骤见 [壳层绑定式视图](./nana-shell-view.md)。
 
@@ -71,7 +71,7 @@ cargo run -p momobako-nana                   # 原生窗口
 - **日志**：日志页按级别、来源和关键字筛选，可以暂停追踪、清空；页面主体和日志列表都能滚，列表在筛选下面分走面板剩下的高度、最矮 72（有意小于 Vue 的 360，矮窗口里追踪时最新一条不用滚页面就看得到），窗口放得下时只有列表滚（`route_admin.rs`、`src-nana/src/shell/admin/logs_view.rs`）。日志、拓展和动作面板没有资源库时也能进（Vue 的这几个面板不要求仓库，没有筛选栏）。每次切到日志面板照 Vue 读最近 200 条历史日志（读的时候手上没有日志就写「正在加载系统日志」），之后经宿主事件合并新记录。
 - **任务**：侧栏底部的「任务」是 NanaUI `Popover` 的触发器，打开任务弹层（面板在 `src-nana/src/shell/admin/view.rs`），列出当前的仓库操作和宿主观察到的运行中任务（排队、运行和取消中，结束就拿掉；Vue 只列仓库操作）。后台任务按协议写中文标题（同步资源库、准备播放、生成缩略图……），仓库操作那一行已经表示的任务（加载资源库的同步、复制文件的复制……）不再单列；「任务」右上角的计数是去重以后的行数。弹层里没有取消按钮，Vue 的 `TaskPopover.vue` 也没有；点弹层外面、头部的关闭按钮和 Escape 都关掉它，开合和焦点归还由框架负责。
   - 仓库操作只有一个槽位（`repo_operation.rs`，Vue `operationProgress`）：最后开始的操作占着它，旧操作的更新和完成不再生效；等待时每 220 ms 往上爬到 88，完成停在 100% 再过 180 ms 收起，失败立即收起。
-  - 每一行进度条的宽度照 Vue `.progress-bar__fill` 按 0.18 s 过渡到新值，减少动态效果时直接跳到新值（`motion.rs` 的 `set_task_fills`）。
+  - 每一行进度条的宽度照 Vue `.progress-bar__fill` 按 0.18 s 过渡到新值，减少动态效果时直接跳到新值（`progress_fill.rs` 的 `ProgressFills::set_rows`）。NanaUI 的 `Progress` 收到新值直接画到新值，`El::animate` 和样式表的 `transition` 又只作用在节点自己的透明度、变换、像素宽高和颜色上，填充不是单独的节点，所以这一段过渡留在壳层里。
   - 出这一行的操作：加载资源库（换仓库、刷新）、挂载资源库、创建资源库、重定向资源库、刷新文件树、来源下载，复制、移动、导入、ZIP 和 Eagle 导入、多选删除和还原，以及非静默的读目录（「读取目录」「读取回收站」「读取文件树」：回收站和快捷访问、刷新时重读目录、仓库动作完成后的重读、搜索命中所在目录）。点文件夹、双击进入和面包屑在 Vue 里是静默读取，不出。见 `operation_row_tests.rs`、`workspace_switch_tests.rs`。
 - **键盘和焦点**：弹层和菜单都是 NanaUI 原生控件：「导入」是 `ActionMenu`，仓库头、「任务」和标签菜单是 `Popover`，Enter 或空格打开，收起后框架把焦点还给触发器；文件卡片和文件夹行上的菜单键和 Shift+F10 打开右键菜单（`AnchoredActionMenu`），焦点落在首项。菜单项首尾相接，Enter 执行，Escape 关掉。对话框、弹层和菜单关掉以后按同一条规则交还焦点（`focus_return.rs`）：回到打开它的控件；它随菜单、弹层收起了，回到菜单、弹层的主人（文件条目、文件夹行、仓库头、「导入」）；被删掉了，回到它那一片里选中的项或第一个能聚焦的控件；自己弹出来的硬链接确认回到文件列表里的条目。对话框在刷新时才关上，每帧画完以后（`presented`）补还。各对话框和弹层还到哪见 [壳层绑定式视图](./nana-shell-view.md) 的「焦点归还」，和 Vue 的差别见 [对照](./nana-vue-parity.md)。
 - **宿主操作**：标题栏的最小化、最大化、关闭；关闭行为按设置确认、退出或最小化到托盘（`src-nana/src/window_host.rs`）；托盘用 NanaUI 的 `install_tray`，选中的菜单项经菜单激活队列转成壳层消息（`src-nana/src/tray.rs`）；主窗口几何由 NanaUI 持久化，下次启动建窗前恢复；打开和定位启动系统程序；拖出文件在 Windows 上用 `drag` crate（`src-nana/src/drag_out.rs`）；剪贴板读写系统剪贴板（`src-nana/src/host_bridge.rs`）；文件区和空库页接收系统文件拖入（`input::accept_file_drops`）；Escape 由运行时交给激活的对话框，其余按 `escape_layer` 关最上面一层。

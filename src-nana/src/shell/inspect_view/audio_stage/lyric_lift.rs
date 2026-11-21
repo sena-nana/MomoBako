@@ -39,8 +39,20 @@ pub(crate) fn note_accent(mode: ThemeAppearance) {
 pub(super) fn lift_active_line(button: &mut Button) {
     let mode = ACCENT.with(Cell::get);
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
-    layout.transforms.transform = Some(crate::shell::motion::shift_scale(0.0, ACTIVE_LYRIC_SCALE));
+    layout.transforms.transform = Some(scale(ACTIVE_LYRIC_SCALE));
     layout.paint.filter = Some(active_filter(mode));
+}
+
+/// 绕控件中心等比缩放的绘制矩阵。
+fn scale(factor: f32) -> nana_ui_core::PaintTransform {
+    nana_ui_core::PaintTransform {
+        a: factor,
+        b: 0.0,
+        c: 0.0,
+        d: factor,
+        e: 0.0,
+        f: 0.0,
+    }
 }
 
 /// 当前行的 `filter: drop-shadow`。颜色是强调色按 0.16 混进透明。
@@ -66,7 +78,7 @@ fn accent_shadow(mode: ThemeAppearance) -> [f32; 4] {
 
 #[cfg(test)]
 mod tests {
-    use super::{ACTIVE_LYRIC_SCALE, accent_shadow, active_filter};
+    use super::{ACTIVE_LYRIC_SCALE, accent_shadow, active_filter, scale};
     use crate::shell::view_harness::ShellHarness;
     use crate::shell::{ShellViewModel, inspect_lyrics};
     use nana_ui_core::{SemanticColorMix, SemanticColorRole, StyleModelRef, ThemeAppearance};
@@ -118,7 +130,7 @@ mod tests {
                     .world()
                     .node_style(harness.keyed("inspect-audio-lyric-active").expect("当前行"))
                     .and_then(|style| style.layout.transforms.transform),
-                Some(crate::shell::motion::shift_scale(0.0, ACTIVE_LYRIC_SCALE)),
+                Some(scale(ACTIVE_LYRIC_SCALE)),
                 "{theme} 的放大还在"
             );
         }

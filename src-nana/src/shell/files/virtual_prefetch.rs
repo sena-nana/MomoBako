@@ -10,7 +10,7 @@ use std::collections::HashSet;
 
 use crate::backend::services::repository::FileBrowserSnapshot;
 
-use super::super::motion::PREFETCH_IDLE_MS;
+use super::thumbnail::PREFETCH_IDLE_MS;
 use super::{FileRow, FilesEffect, FilesState, normalize_path};
 
 /// 正在等空闲，或者已经发出、还没回来的下一页。

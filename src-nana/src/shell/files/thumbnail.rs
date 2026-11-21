@@ -9,9 +9,11 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::super::motion::PREFETCH_IDLE_MS;
 use super::super::thumbs::ThumbnailFrame;
 use super::{FileContext, FileRow, FilesEffect, FilesState};
+
+/// 虚拟列表滚动停下以后等这么久再预取：解码挂着的缩略图，或读来源目录的下一页（`virtual_prefetch.rs`）。
+pub(super) const PREFETCH_IDLE_MS: u64 = 420;
 
 impl FilesState {
     /// 虚拟列表还有下一页时，空闲 `PREFETCH_IDLE_MS` 后再解码缩略图。

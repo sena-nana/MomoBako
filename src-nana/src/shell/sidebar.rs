@@ -321,7 +321,7 @@ pub struct SidebarState {
     pub folder_delete_submitting: bool,
     pub hover_folder: Option<String>,
     pub hover_since_ms: Option<u64>,
-    /// 拖放悬停用的空闲时钟。动效时钟在没有轨道时不前进。
+    /// 拖放悬停用的空闲时钟。进度条填充的时钟在没有过渡时不前进，不能借用。
     hover_clock: u64,
     pub smart_delete_id: String,
     pub smart_delete_label: String,

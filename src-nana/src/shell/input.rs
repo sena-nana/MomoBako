@@ -409,6 +409,8 @@ pub struct InputState {
     pub model_drag: Option<(f32, f32)>,
     /// 列表上正在画的框选矩形。没在拖选框时藏着。
     pub(crate) selection_box: super::files_selection_box::SelectionBox,
+    /// 指针停在侧栏底部入口那一排上：整排从半透明亮起来（`sidebar_view.rs` 的底部入口）。
+    pub(crate) footer_hover: bool,
     /// 下载菜单已经点过，正在等目录对话框。
     pub pending_download: Option<source_prompt::PendingDownload>,
     /// 自定义缩略图正在等选文件对话框。

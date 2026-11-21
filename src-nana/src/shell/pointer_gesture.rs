@@ -232,6 +232,7 @@ fn directory_at(rows: &[RowMark], x: f32, y: f32, exclude: &str) -> Option<Strin
     folder_drop::directory_at(rows, x, y, exclude).map(|hit| hit.path)
 }
 
+/// 记下指针是不是停在侧栏底部入口那一排上。
 fn note_chrome_hover(
     model: &mut ShellViewModel,
     world: &UiWorld,
@@ -242,17 +243,8 @@ fn note_chrome_hover(
     let hover = world
         .pointer_hover(document_id, POINTER_ID)
         .or_else(|| position.and_then(|(x, y)| world.hit_test(document_id, x, y)));
-    let over_tools = hover.is_some_and(|id| {
-        label_in(
-            world,
-            id,
-            &["快捷方式", "快捷访问", "文件夹", "智能文件夹", "播放集"],
-        )
-    });
-    let over_footer = hover
+    model.input.footer_hover = hover
         .is_some_and(|id| label_in(world, id, &["设置", "拓展", "日志"]) || footer_task(world, id));
-    model.motion.set_tools_hover(over_tools);
-    model.motion.set_footer_hover(over_footer);
 }
 
 fn label_in(world: &UiWorld, id: StableNodeId, labels: &[&str]) -> bool {
