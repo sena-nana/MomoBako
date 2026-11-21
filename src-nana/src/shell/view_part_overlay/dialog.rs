@@ -16,15 +16,15 @@
 
 use std::sync::Arc;
 
-use nana_ui::icons_tabler::{LOADER_2, X};
+use nana_ui::icons_tabler::{ALERT_CIRCLE, X};
 use nana_ui::runtime::view::{
-    AnyView, El, EntityRef, FieldWrite, IntoProp, IntoView, Signal, entity_ref, fields, signal,
-    widget,
+    AnyView, El, EntityRef, FieldWrite, IntoProp, IntoView, Signal, callout, computed, entity_ref,
+    fields, signal, spinner, widget,
 };
 use nana_ui::runtime::{
     Activate, AlignSpec, AppContext, Button, ConfirmDialog, ConfirmIntent, Dialog,
     DialogCloseRequested, IconButton, IconGlyph, LengthSpec, ListItem, NodeStyle, OverlayHost,
-    PositionSpec, RadiusTier, SemanticColorRole, Stack, Text,
+    PositionSpec, RadiusTier, SemanticColorRole, Stack, StatusTone, Text,
 };
 use nana_ui::{ButtonKind, ControlSize, Icon};
 use nana_ui_core::{DialogClosePolicy, DialogSize};
@@ -400,31 +400,22 @@ pub(crate) fn paragraph(copy: impl IntoProp<String>, muted: bool, key: &'static 
         .into_any()
 }
 
-/// 正文里的错误：`--err` 12px，没有错误时不占位。
+/// 正文里的错误：NanaUI 的提示条（`callout`），危险色调，没有错误时不占位。
 pub(crate) fn error_line(copy: impl Fn() -> String + Send + 'static, key: &'static str) -> AnyView {
-    widget(wrapping_text(12.0, 19.0, SemanticColorRole::Danger))
+    let copy = computed(copy);
+    widget(Stack::column(0.0).width(LengthSpec::Fill))
+        .visible(move || copy.with(|copy| !copy.is_empty()))
+        .children((callout(ALERT_CIRCLE, StatusTone::Danger, copy),))
         .key(key)
-        .prop::<String, nana_ui::runtime::view::fields::HiddenWhenEmpty<fields::text::value>>(copy)
         .into_any()
 }
 
-/// 底栏左边的「处理中...」：转圈图标加 12px 弱色字，`visible` 为假时不占位。
+/// 底栏左边的「处理中...」：NanaUI 的转圈（`spinner`）带文字，`visible` 为假时不占位，转圈也停下。
 pub(crate) fn busy_note(visible: impl IntoProp<bool>, key: &'static str) -> AnyView {
-    widget(Stack::row(6.0).align(AlignSpec::Center))
+    spinner()
+        .label("处理中...")
         .visible(visible)
         .key(key)
-        .children((
-            widget(
-                IconGlyph::new(LOADER_2)
-                    .size(13.0)
-                    .role(SemanticColorRole::Muted),
-            ),
-            widget(
-                Text::new("处理中...")
-                    .font_size(12.0)
-                    .color(SemanticColorRole::Muted),
-            ),
-        ))
         .into_any()
 }
 

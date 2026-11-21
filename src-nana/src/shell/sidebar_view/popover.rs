@@ -13,14 +13,14 @@
 
 use std::sync::Arc;
 
-use nana_ui::icons_tabler::{CHECK, PLUS, SELECTOR, TRASH, X};
+use nana_ui::icons_tabler::{ALERT_CIRCLE, CHECK, PLUS, SELECTOR, TRASH, X};
 use nana_ui::runtime::view::{
-    AnyView, FieldWrite, IntoProp, IntoView, NodeRef, Signal, computed, each, fields, signal,
-    widget,
+    AnyView, FieldWrite, IntoProp, IntoView, NodeRef, Signal, callout, computed, each, fields,
+    signal, status_badge, widget,
 };
 use nana_ui::runtime::{
     Activate, AlignSpec, IconButton, LengthSpec, ListItem, Popover, PopoverAlignment,
-    PopoverToggled, RadiusTier, SemanticColorRole, Stack,
+    PopoverToggled, RadiusTier, SemanticColorRole, Stack, StatusTone,
 };
 use nana_ui::{ButtonKind, ControlSize, Icon};
 
@@ -339,18 +339,9 @@ fn repository_row(row: RepositoryRow) -> AnyView {
     .into_any()
 }
 
-/// 「丢失」小标记：`--err-soft` 胶囊、`--err` 11px 字。
+/// 「丢失」小标记：NanaUI 的状态徽章（`status_badge`），危险色调。
 fn missing_badge() -> AnyView {
-    widget(
-        Stack::row(0.0)
-            .padding_xy(5.0, 1.0)
-            .shrink(0.0)
-            .painter(super::super::shell_tint::SoftFill::err().pill()),
-    )
-    .children((widget(
-        parts::label_text("丢失", 11.0, 400, Some(SemanticColorRole::Danger)).line_height(15.0),
-    ),))
-    .into_any()
+    status_badge("丢失").tone(StatusTone::Danger).into_any()
 }
 
 /// 添加菜单里的一个来源后端。
@@ -663,21 +654,14 @@ fn backend_form(model: &ShellViewModel) -> AnyView {
     )
 }
 
-/// 弹层里的错误：`--err-soft` 底、`--err` 12px 字，没有错误时不占位。
-fn popover_error(error: impl Fn() -> String + Send + Clone + 'static) -> AnyView {
-    let shown = error.clone();
-    widget(
-        Stack::column(0.0)
-            .padding_xy(10.0, 8.0)
-            .painter(super::super::shell_tint::SoftFill::err()),
-    )
-    .visible(move || !shown().is_empty())
-    .children(
-        (widget(wrapping_text(12.0, 17.0, SemanticColorRole::Danger))
-            .key("repository-popover-error")
-            .prop::<String, fields::text::value>(error),),
-    )
-    .into_any()
+/// 弹层里的错误：NanaUI 的提示条（`callout`），危险色调，没有错误时不占位。
+fn popover_error(error: impl Fn() -> String + Send + 'static) -> AnyView {
+    let error = computed(error);
+    widget(Stack::column(0.0))
+        .visible(move || error.with(|error| !error.is_empty()))
+        .children((callout(ALERT_CIRCLE, StatusTone::Danger, error),))
+        .key("repository-popover-error")
+        .into_any()
 }
 
 /// 顶边一条 `--border-soft` 分隔线，线下留 `gap` 内边距。

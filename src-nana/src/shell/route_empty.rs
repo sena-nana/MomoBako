@@ -4,16 +4,18 @@
 //! 视图只建一次。拖着文件夹经过时面板换底色和描边、附加失败的错误条，都按字段绑定。
 //! 拖放处理器在事件到达时现读信号里的拖放条件，不抄建视图那一刻的值。
 //!
-//! 版式：标题、拖入说明和附加失败的错误。
+//! 版式：NanaUI 的空状态（图标、标题、拖入说明）和附加失败的提示条。
 
 use std::sync::Arc;
 
+use nana_ui::icons_tabler::{ALERT_CIRCLE, FOLDER};
 use nana_ui::runtime::view::{
-    AnyView, FieldWrite, IntoView, Signal, StyledComponent, fields, node_ref, signal, widget,
+    AnyView, FieldWrite, IntoView, Signal, StyledComponent, callout, empty_state, node_ref, signal,
+    widget,
 };
 use nana_ui::runtime::{
-    AlignSpec, FileDropEvent, JustifySpec, LengthSpec, RadiusTier, SemanticColorRole, Stack, Text,
-    TextHorizontalAlignment,
+    AlignSpec, FileDropEvent, JustifySpec, LengthSpec, RadiusTier, SemanticColorRole, Stack,
+    StatusTone,
 };
 
 use super::ShellViewModel;
@@ -68,53 +70,31 @@ pub(super) fn view(signals: EmptySignals) -> AnyView {
     )
 }
 
-/// 拖入引导：标题、说明和错误条。整节都是拖放目标，悬停和放下走同一条宿主拖放消息。
+/// 拖入引导：NanaUI 的空状态（`empty_state`，文件夹图标、标题和说明）和附加失败的提示条（`callout`）。
+/// 整节都是拖放目标，悬停和放下走同一条宿主拖放消息。
 fn panel(view: Signal<EmptyView>) -> AnyView {
-    let initial = view.get_untracked();
-    let mut copy = centered_text(
-        initial.error.clone(),
-        13.0,
-        400,
-        SemanticColorRole::Danger,
-        13.0 * 1.45,
-    );
-    Arc::make_mut(&mut copy.style.layout).width = Some(LengthSpec::Fill);
+    let error_text = move || view.with(|view| view.error.clone());
     let error = widget(
         Stack::column(0.0)
             .width(LengthSpec::Fill)
-            .padding_xy(10.0, 8.0)
-            .painter(super::shell_tint::SoftFill::err())
             .with_layout(|layout| layout.max_width = Some(LengthSpec::Px(420.0))),
     )
     .visible(move || view.with(|view| !view.error.is_empty()))
-    .children((widget(copy)
-        .prop::<String, fields::text::value>(move || view.with(|view| view.error.clone()))
-        .key("empty-error"),));
+    .children((callout(ALERT_CIRCLE, StatusTone::Danger, error_text),))
+    .key("empty-error");
     let panel = Stack::column(10.0)
         .width(LengthSpec::Fill)
         .min_height(LengthSpec::Px(220.0))
-        .padding_xy(16.0, 28.0)
+        .padding_xy(16.0, 12.0)
         .radius(RadiusTier::Md)
         .align(AlignSpec::Center)
         .justify(JustifySpec::Center)
         .with_layout(|layout| layout.max_width = Some(LengthSpec::Px(520.0)));
     let rows = (
-        widget(centered_text(
-            "还没有可用资源库",
-            18.0,
-            600,
-            SemanticColorRole::Text,
-            18.0 * 1.55,
-        ))
-        .key("empty-title"),
-        widget(centered_text(
-            "拖入一个本地文件夹创建资源库。",
-            13.0,
-            400,
-            SemanticColorRole::Muted,
-            13.0 * 1.55,
-        ))
-        .key("empty-detail"),
+        empty_state("还没有可用资源库")
+            .message(Some(Arc::<str>::from("拖入一个本地文件夹创建资源库。")))
+            .icon(Some(FOLDER))
+            .key("empty-state"),
         error,
     );
     let drop = node_ref();
@@ -131,23 +111,6 @@ fn panel(view: Signal<EmptyView>) -> AnyView {
             .key("empty-panel"),))
         .key("empty-repository-page")
         .into_any()
-}
-
-/// 居中的一段字，行高写成像素。
-fn centered_text(
-    value: impl Into<String>,
-    size: f32,
-    weight: u16,
-    color: SemanticColorRole,
-    line_height: f32,
-) -> Text {
-    let mut node = Text::new(value)
-        .font_size(size)
-        .font_weight(weight)
-        .color(color)
-        .line_height(line_height);
-    node.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
-    node
 }
 
 /// 拖着文件夹经过时的面板：`--accent-soft` 底、1px 强调色描边；平时没有底色和描边。

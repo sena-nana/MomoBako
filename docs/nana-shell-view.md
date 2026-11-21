@@ -121,7 +121,7 @@
 
 ## 全局状态区
 
-侧栏顶部的状态条对应 Vue `WorkspaceSidebarStatus.vue`。状态在 `status.rs`：`ShellViewModel::status` 只有一个槽位，记最近一次失败（来源 `FailureSource` 加文案），后记的顶替先记的；要提醒、但不算失败的结果（`StatusState::warn`）记进同一个槽位，投影成警告色的提醒条（`--warn-soft` 底、`--warn` 字，DESIGN.md 8.1 的 Warning）。投影 `StatusLine` 放进侧栏投影（`SidebarView::status`），顺序照 Vue：失败或提醒 > 忙碌 > 同步进度。视图里错误条、提醒条、忙碌行和同步进度四块都留着，按投影 `.visible` 互换，侧栏不重挂。
+侧栏顶部的状态条对应 Vue `WorkspaceSidebarStatus.vue`。状态在 `status.rs`：`ShellViewModel::status` 只有一个槽位，记最近一次失败（来源 `FailureSource` 加文案），后记的顶替先记的；要提醒、但不算失败的结果（`StatusState::warn`）记进同一个槽位，投影成警告色的提醒条（DESIGN.md 8.1 的 Warning）。投影 `StatusLine` 放进侧栏投影（`SidebarView::status`），顺序照 Vue：失败或提醒 > 忙碌 > 同步进度。视图里错误条、提醒条、忙碌行和同步进度四块都留着，按投影 `.visible` 互换，侧栏不重挂。四块都是 NanaUI 组件：错误条和提醒条是 `callout`（危险和警告色调），忙碌行是带文字的 `spinner`（转圈跟着行一起藏起来，藏着时不转），同步进度是一行文案加百分比、下面一条 `progress`。
 
 **记什么。** 只记没有就近显示的失败：
 
@@ -203,7 +203,7 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 - 换块：旧块的会话 `hide()` 写假，框架连退场一起关上它、把焦点还给打开前的位置；这块留在浮层层里放退场。新块在同一次同步里放进来、`show()` 写真。旧的先写、新的后写，刷新时先关旧的再开新的，焦点一路按打开的先后还回去（关闭确认压在新建文件夹上、取消以后新建文件夹回来，再关掉时焦点回到最初的搜索框）。
 - 退场放完：宿主清掉激活时（`settled()`），`OverlayPart::sweep` 卸掉这块，AppShell 跟着放开点击。`ShellView` 每次整体同步和每帧准备（`settle_overlays`）都调它；还有块在放退场时准备帧一直要帧（`window.demand`），放完的下一帧就卸。卸掉以前浮层层还挡着点击，和 Vue 离场过渡时一样。不要在关的时候连节点拿掉，那样没有退场。
 - 宿主自己关掉对话框（被同一宿主上别的浮层顶替、所在的块被停放）时发 `DialogToggled { open: false }`，`.model` 把开合信号写回假。不同步回 ViewModel：这不是用户的意思，开合只听归约。这块还是现在显示的块（ViewModel 还要它开着）时，下一帧 `sweep` 调 `show()` 再写真，放回树上以后重新打开，不发消息。只用 `.open(信号)` 不听回写的话，信号一直是真，再写真不算变化，就打不开了。
-- 字段、按钮、底栏、错误行用框架里的 `text_field` / `text_area_field` / `select_field` / `two_columns` / `action` / `footer` / `error_line` / `busy_note`，照 Vue `.dialog-field` 和 `.dialog-card__actions`。
+- 字段、按钮、底栏、错误行用框架里的 `text_field` / `text_area_field` / `select_field` / `two_columns` / `action` / `footer` / `error_line` / `busy_note`，照 Vue `.dialog-field` 和 `.dialog-card__actions`。错误行是危险色调的 NanaUI `callout`，没有错误时不占位；底栏左边的「处理中...」是带文字的 NanaUI `spinner`。
 
 **先后和 Escape。** `OverlayKey` 的顺序就是同时打开时谁显示：关闭确认最先；其后是原来浮层槽位里的对话框、弹层和菜单；文件页的导出和文件对话框原来画在主区、压在浮层槽位下面，排在最后。Escape 先关显示着的那一层：显示着的对话框已经打开，由运行时拿到 Escape、发自己的关闭请求（`prevent_default` 为真，全局 Escape 不再发）；在放退场的对话框已经关上，运行时不再把 Escape 交给它；显示着的右键菜单也已经激活，Escape 由框架交给它，不进 `escape_layer`；显示着的是仓库弹层时由 NanaUI 的 `Popover` 收下 Escape（提交中它不收，`escape_layer` 停在提交中的仓库弹层这一层，不越过它去关别的层）。等着的对话框不会先被关掉。
 
@@ -254,6 +254,8 @@ DialogFrame::new("folder-dialog", move || view.with(|view| view.title.to_string(
 - 元素上没有声明式的拖放目标，要靠 `on_mount` 调 `set_drop_target_node`。
 - （已补）AppShell 原来只在自己投影时按「有没有子节点」决定 overlay 槽位挡不挡点击，浮层块只好每次换块都换掉 overlay 槽位、重新装配。现在 AppShell 盯着槽位的子节点（增删、显隐都重新判断，隐藏的不算），浮层层改成常驻的槽位内容。
 - `TreeView` 是一个自绘节点：`nodes` 只能整份绑定，展开、计数变了都整树重投影；行不是节点，放不了行内按钮、右侧计数、右键菜单和行级无障碍。侧栏的文件夹树和智能文件夹树改成按显示顺序展开的扁平行，放进按键对照的 Store，用 `keyed(..).each` 建：展开只插子级，三角、当前目录和计数原地改。
+- 侧栏的快捷方式、快捷访问和「动作」入口是 NanaUI 的 `SidebarRow`（行图标、计数、当前和禁用合成一个 `SidebarRowState` 绑定）。分组没有换成 `SidebarSection`：它的标题工具只在指针悬停标题时显出，键盘焦点不会让它们出来，「新建」「刷新文件夹树」「新建播放集」就到不了；播放集的开合和空状态说明也由 ViewModel 决定（锁定时的说明随原因变），不是组件自己的开合和固定空文案。文件夹树的行也没有换成 `SidebarRow`：树行要按行接系统文件拖放（放下目标高亮）、三角和卡片分开激活、缩进导引线和右键菜单，智能文件夹行的三颗工具常驻。播放集行是两行（名称和「播放器 · N 项」），`SidebarRow` 是固定的单行高度。
+- 侧栏底部入口没有换成 `SidebarFooterButton`：它没有样式入口，底栏平时 0.44 透明度、悬停淡入和「任务」有任务时的强调色都写不进去；「任务」又必须是 `Popover` 的触发器，混用会是两套样子。任务数和标题栏筛选条件数的角标也留着自绘：`StatusBadge` 总带一个状态圆点，是一枚状态标签，不是压在图标角上的数字角标。
 - （已补）`ReorderList` 拖动时按自己的直接子节点取行的盒子（`reorder_row_boxes`），`each` 原来总会多一层容器，播放集页只好用按条目顺序做键的 `dynamic`，增删、重排时整个列表重建。现在 `each(..).container(元素)` 把行直接建进给定的元素，播放集条目用 Store 的 `keyed(..).each(..)` 建进 `ReorderList`，留下的行不重建。
 - （已补）`ReorderList` 原来按下行就开始拖动手势、把指针抓走，行里的按钮收不到点击，只能用 `.tools(节点)` 给一行标一块不拖的区域，播放集条目只好把扩展名方块、标题、播放和移除包成一段登记成 `tools`。NanaUI `b02eaa231` 起按在行里能获得焦点的控件上，不移动松开就是控件自己的点击，移动超过 4px 才拖这一行；`tools` 登记已删，整行都能拖，和 Vue 一样。
 - `#[derive(Store)]` 给每个字段生成同名访问器，但 `Item` 自己有 `id()`（键的哈希），名叫 `id` 的字段在行上读不到，行结构里的编号字段要换个名字（`playlist_id`、`item_id`）。

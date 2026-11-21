@@ -12,20 +12,21 @@
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{
-    ARCHIVE, BOOKMARK, CLIPBOARD_LIST, CLOCK_HOUR_3, FILE, LIST_TREE, LOADER_2, LOGS, PLAYER_PLAY,
-    PLUS, PUZZLE, REFRESH, SETTINGS, TAG, TRASH,
+    ALERT_CIRCLE, ALERT_TRIANGLE, ARCHIVE, BOOKMARK, CLIPBOARD_LIST, CLOCK_HOUR_3, FILE, LIST_TREE,
+    LOADER_2, LOGS, PLAYER_PLAY, PLUS, PUZZLE, REFRESH, SETTINGS, TAG, TRASH,
 };
 use nana_ui::runtime::view::{
-    AnyView, El, IntoView, Item, Signal, Store, StoreList, StorePath, each, fields, widget,
+    AnyView, El, IntoView, Item, Signal, Store, StoreList, StorePath, callout, each, fields,
+    progress, spinner, widget,
 };
 use nana_ui::runtime::{
     Activate, AlignSpec, IconButton, LengthSpec, ListItem, RadiusTier, SemanticColorRole,
-    SidebarFrame, Stack,
+    SidebarFrame, Stack, StatusTone,
 };
 use nana_ui::{ButtonKind, ControlSize, Icon};
 
 use super::SidebarMessage;
-use super::hot::{HotSignals, SpinField};
+use super::hot::HotSignals;
 use super::player_view::key_part;
 use super::sidebar::ShortcutId;
 use super::status::StatusLine;
@@ -86,7 +87,7 @@ pub fn sidebar_frame() -> SidebarFrame {
 pub(crate) fn sidebar(signals: SidebarSignals, hot: HotSignals) -> AnyView {
     widget(sidebar_frame())
         .top(sidebar_switcher(&signals))
-        .body(sidebar_sections(signals, hot.spinner))
+        .body(sidebar_sections(signals))
         .footer(sidebar_footer(signals.footer, signals.tasks, hot.footer))
         .into_any()
 }
@@ -107,14 +108,14 @@ fn sidebar_switcher(signals: &SidebarSignals) -> AnyView {
 }
 
 /// 文件管理区：状态、快捷方式、快捷访问、动作、播放集、文件夹和智能文件夹，分组间 10px。
-/// 没有内容的分组藏起来，不占间距。忙碌行的转圈读热信号 `spin`。
-fn sidebar_sections(signals: SidebarSignals, spin: Signal<f32>) -> AnyView {
+/// 没有内容的分组藏起来，不占间距。
+fn sidebar_sections(signals: SidebarSignals) -> AnyView {
     let head = signals.head;
     widget(Stack::column(10.0).with_layout(|layout| {
         layout.padding_right = Some(LengthSpec::Px(2.0));
     }))
     .children((
-        status_line(signals.status, spin),
+        status_line(signals.status),
         shortcut_group(signals.nav),
         quick_access_group(signals.quick, signals.nav),
         actions_group(signals.nav),
@@ -127,22 +128,22 @@ fn sidebar_sections(signals: SidebarSignals, spin: Signal<f32>) -> AnyView {
     .into_any()
 }
 
-/// 侧栏顶部的全局状态区：有失败时是错误条，
-/// 要提醒的结果是警告色的提醒条，没有这两样、在读资源库或素材详情时是忙碌行（转圈加
+/// 侧栏顶部的全局状态区：有失败时是错误提示条，
+/// 要提醒的结果是警告色的提示条，没有这两样、在读资源库或素材详情时是忙碌行（转圈加
 /// 「正在同步仓库状态」），再没有时是刷新文件夹树的同步进度，都没有时整块藏起来、
 /// 不占间距。四块都留着，按投影互换。
-fn status_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
+fn status_line(status: Signal<StatusLine>) -> AnyView {
     (
         notice_bar(status, false),
         notice_bar(status, true),
-        busy_line(status, spin),
-        progress_line(status, spin),
+        busy_line(status),
+        progress_line(status),
     )
         .into_any()
 }
 
-/// 失败条或提醒条：浅色语义底、同色 12px 字，文案可以折行。失败是错误色（`--err-soft` 底、
-/// `--err` 字）；提醒是 DESIGN.md 8.1 的 Warning（`--warn-soft` 底、`--warn` 字，和添加资源库弹层的提示一样）。
+/// 失败条或提醒条：NanaUI 的提示条（`callout`），失败是危险色调，提醒是警告色调，文案可以折行。
+/// 外面套一层带键的容器，按投影藏起来时不占间距。
 fn notice_bar(status: Signal<StatusLine>, warning: bool) -> AnyView {
     let message = move || {
         status.with(|status| match status {
@@ -151,66 +152,41 @@ fn notice_bar(status: Signal<StatusLine>, warning: bool) -> AnyView {
             _ => String::new(),
         })
     };
-    let role = if warning {
-        SemanticColorRole::Warning
-    } else {
-        SemanticColorRole::Danger
-    };
-    let mut copy = parts::label_text(message(), 12.0, 400, Some(role)).line_height(18.0);
-    {
-        let layout = Arc::make_mut(&mut copy.style.layout);
-        layout.width = Some(LengthSpec::Fill);
-        layout.text_ext.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
-    }
-    let bar = Stack::column(0.0)
-        .padding_xy(8.0, 6.0)
-        .min_height(LengthSpec::Px(30.0))
-        .justify(nana_ui::runtime::JustifySpec::Center)
-        .radius(RadiusTier::Sm)
-        .with_layout(state_margin);
-    let (bar, key, text_key) = if warning {
+    let (icon, tone, key) = if warning {
         (
-            bar.surface(SemanticColorRole::WarningSoft),
+            ALERT_TRIANGLE,
+            StatusTone::Warning,
             "sidebar-status-warning",
-            "sidebar-status-warning-text",
         )
     } else {
-        (
-            bar.painter(super::shell_tint::SoftFill::err()),
-            "sidebar-status",
-            "sidebar-status-error",
-        )
+        (ALERT_CIRCLE, StatusTone::Danger, "sidebar-status")
     };
-    widget(bar)
-        .visible(move || {
-            status.with(|status| match status {
-                StatusLine::Failure(_) => !warning,
-                StatusLine::Warning(_) => warning,
-                _ => false,
-            })
+    widget(
+        Stack::column(0.0)
+            .width(LengthSpec::Fill)
+            .with_layout(state_margin),
+    )
+    .visible(move || {
+        status.with(|status| match status {
+            StatusLine::Failure(_) => !warning,
+            StatusLine::Warning(_) => warning,
+            _ => false,
         })
-        .children((widget(copy)
-            .prop::<String, fields::text::value>(message)
-            .key(text_key),))
-        .key(key)
-        .into_any()
+    })
+    .children((callout(icon, tone, message),))
+    .key(key)
+    .into_any()
 }
 
-/// 同步进度：和忙碌行同一副底色和转圈，占满一行，左边是这一步的文案，
-/// 右边是弱色的百分比，靠右对齐。
-fn progress_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
-    let progress = move || {
+/// 同步进度：上面一行是这一步的文案和靠右的弱色百分比，下面是 NanaUI 的进度条（`progress`）。
+fn progress_line(status: Signal<StatusLine>) -> AnyView {
+    let progress_of = move || {
         status.with(|status| match status {
-            StatusLine::Progress { label, percent } => (label.clone(), format!("{percent}%")),
-            _ => (String::new(), String::new()),
+            StatusLine::Progress { label, percent } => (label.clone(), *percent),
+            _ => (String::new(), 0),
         })
     };
-    let (label, percent) = progress();
-    let mut glyph = nana_ui::runtime::IconGlyph::new(LOADER_2)
-        .size(16.0)
-        .role(SemanticColorRole::Muted);
-    Arc::make_mut(&mut glyph.style.layout).transforms.transform =
-        Some(super::motion::spin_transform(spin.get_untracked()));
+    let (label, percent) = progress_of();
     let mut text =
         parts::label_text(label, 12.0, 400, Some(SemanticColorRole::Muted)).line_height(18.0);
     {
@@ -219,67 +195,61 @@ fn progress_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
         layout.flex_shrink = Some(1.0);
         layout.min_width = Some(LengthSpec::Px(0.0));
     }
-    widget(
+    let head = widget(
         Stack::row(8.0)
             .align(AlignSpec::Center)
+            .width(LengthSpec::Fill),
+    )
+    .children((
+        widget(text)
+            .prop::<String, fields::text::value>(move || progress_of().0)
+            .key("sidebar-status-progress-label"),
+        widget(
+            parts::label_text(
+                format!("{percent}%"),
+                12.0,
+                400,
+                Some(SemanticColorRole::Faint),
+            )
+            .line_height(18.0),
+        )
+        .prop::<String, fields::text::value>(move || format!("{}%", progress_of().1))
+        .key("sidebar-status-progress-percent"),
+    ));
+    widget(
+        Stack::column(6.0)
             .width(LengthSpec::Fill)
-            .min_height(LengthSpec::Px(30.0))
-            .padding_xy(8.0, 0.0)
-            .radius(RadiusTier::Sm)
-            .surface(SemanticColorRole::Subtle)
+            .padding_xy(8.0, 6.0)
             .with_layout(state_margin),
     )
     .visible(move || status.with(|status| matches!(status, StatusLine::Progress { .. })))
     .children((
-        widget(glyph)
-            .prop::<f32, SpinField>(spin)
-            .key("sidebar-status-progress-spinner"),
-        widget(text)
-            .prop::<String, fields::text::value>(move || progress().0)
-            .key("sidebar-status-progress-label"),
-        widget(
-            parts::label_text(percent, 12.0, 400, Some(SemanticColorRole::Faint)).line_height(18.0),
-        )
-        .prop::<String, fields::text::value>(move || progress().1)
-        .key("sidebar-status-progress-percent"),
+        head,
+        progress(100.0)
+            .value(move || f64::from(progress_of().1))
+            .key("sidebar-status-progress-bar"),
     ))
     .key("sidebar-status-progress")
     .into_any()
 }
 
-/// 忙碌行：`--bg-subtle` 底、弱色 12px 字，前面一个 16px 的转圈，撑满侧栏宽。转圈的角度读热信号。
-fn busy_line(status: Signal<StatusLine>, spin: Signal<f32>) -> AnyView {
-    let mut glyph = nana_ui::runtime::IconGlyph::new(LOADER_2)
-        .size(16.0)
-        .role(SemanticColorRole::Muted);
-    Arc::make_mut(&mut glyph.style.layout).transforms.transform =
-        Some(super::motion::spin_transform(spin.get_untracked()));
+/// 忙碌行：NanaUI 的转圈（`spinner`）带「正在同步仓库状态」，撑满侧栏宽。
+/// 转圈自己也跟着藏起来：藏起来的转圈停掉动画，不为看不见的一圈让宿主一直醒着。
+fn busy_line(status: Signal<StatusLine>) -> AnyView {
+    let busy = move || status.with(|status| *status == StatusLine::Busy);
     widget(
-        Stack::row(8.0)
+        Stack::row(0.0)
             .align(AlignSpec::Center)
             .width(LengthSpec::Fill)
             .min_height(LengthSpec::Px(30.0))
             .padding_xy(8.0, 0.0)
-            .radius(RadiusTier::Sm)
-            .surface(SemanticColorRole::Subtle)
             .with_layout(state_margin),
     )
-    .visible(move || status.with(|status| *status == StatusLine::Busy))
-    .children((
-        widget(glyph)
-            .prop::<f32, SpinField>(spin)
-            .key("sidebar-status-spinner"),
-        widget(
-            parts::label_text(
-                "正在同步仓库状态",
-                12.0,
-                400,
-                Some(SemanticColorRole::Muted),
-            )
-            .line_height(18.0),
-        )
-        .key("sidebar-status-busy-text"),
-    ))
+    .visible(busy)
+    .children((spinner()
+        .label("正在同步仓库状态")
+        .visible(busy)
+        .key("sidebar-status-spinner"),))
     .key("sidebar-status-busy")
     .into_any()
 }

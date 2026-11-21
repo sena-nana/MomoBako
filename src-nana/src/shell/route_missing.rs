@@ -10,11 +10,11 @@
 use std::sync::Arc;
 
 use nana_ui::ButtonKind;
-use nana_ui::icons_tabler::ALERT_TRIANGLE;
-use nana_ui::runtime::view::{AnyView, IntoView, Signal, fields, signal, widget};
+use nana_ui::icons_tabler::{ALERT_CIRCLE, ALERT_TRIANGLE};
+use nana_ui::runtime::view::{AnyView, IntoView, Signal, callout, fields, signal, widget};
 use nana_ui::runtime::{
     Activate, AlignSpec, Button, IconGlyph, JustifySpec, LengthSpec, RadiusTier, SemanticColorRole,
-    Stack, TextChanged, TextInput,
+    Stack, StatusTone, TextChanged, TextInput,
 };
 
 use super::shell_tint::SoftFill;
@@ -216,27 +216,14 @@ fn path_box(view: Signal<MissingView>) -> AnyView {
     .into_any()
 }
 
-/// 错误条：重定向、刷新或删除失败时显示。
+/// 错误条：NanaUI 的提示条（`callout`），危险色调，重定向、刷新或删除失败时显示。
 fn error_block(view: Signal<MissingView>) -> AnyView {
-    let copy = wrapping(
-        view.with_untracked(|view| view.error.clone()),
-        12.0,
-        400,
-        SemanticColorRole::Danger,
-        17.4,
-    );
-    let error = widget(
-        Stack::column(0.0)
-            .width(LengthSpec::Fill)
-            .padding_xy(10.0, 8.0)
-            .painter(SoftFill::err()),
-    )
-    .children((widget(copy)
-        .prop::<String, fields::text::value>(move || view.with(|view| view.error.clone()))
-        .key("missing-error"),));
-    widget(margin(12.0, 0.0))
+    widget(margin(12.0, 0.0).width(LengthSpec::Fill))
         .visible(move || view.with(|view| !view.error.is_empty()))
-        .children((error,))
+        .children((callout(ALERT_CIRCLE, StatusTone::Danger, move || {
+            view.with(|view| view.error.clone())
+        }),))
+        .key("missing-error")
         .into_any()
 }
 

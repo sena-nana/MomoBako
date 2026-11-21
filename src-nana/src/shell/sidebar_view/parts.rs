@@ -1,8 +1,8 @@
 //! 侧栏零件：导航行、分组标题、标题工具、空状态说明和底部入口，以及常驻侧栏按信号改字段用的写入器。
 //!
-//! 尺寸、字号和状态色按组件的设计值：导航行 28px、分组标题 24px、标题工具 22px、底部入口 26px。
-//! 导航行按自己的 28px 画，不被全局按钮高度顶成 32px。
-//! 颜色只写语义角色，行里的图标和文字继承行的前景色，悬停和当前态由行的交互样式整体切换。
+//! 导航行是 NanaUI 的侧栏行（`SidebarRow`），高度、字号和当前态的底色按主题配方；其余零件按设计值：
+//! 分组标题 24px、标题工具 22px、底部入口 26px。
+//! 颜色只写语义角色，树行里的图标和文字继承行的前景色，悬停和当前态由行的交互样式整体切换。
 //!
 //! 侧栏常驻以后，导航行、标题工具和底部入口的当前态、禁用和计数都按信号绑定：建一次，之后只改
 //! 那几个字段。绑定的取值函数是可复制的闭包，同一行的几个字段各绑一份。
@@ -11,16 +11,14 @@ use std::sync::Arc;
 
 use nana_ui::runtime::view::{AnyView, El, FieldWrite, IntoProp, IntoView, Signal, fields, widget};
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, IconButton, IconGlyph, InteractionStyle, LengthSpec, ListItem,
-    NodeStyle, Popover, PopoverAlignment, PopoverPlacement, PopoverToggled, RadiusTier,
-    SemanticColorRole, SemanticPaint, Stack, Text, ViewContext,
+    Activate, AlignSpec, Button, IconButton, IconGlyph, InteractionStyle, LengthSpec, NodeStyle,
+    Popover, PopoverAlignment, PopoverPlacement, PopoverToggled, RadiusTier, SemanticColorRole,
+    SemanticPaint, SidebarRow, SidebarRowIcon, SidebarRowState, Stack, Text, ViewContext,
 };
 use nana_ui::{ControlSize, Icon};
 
 use crate::theme_map::{DISABLED_OPACITY, disabled_paint};
 
-/// 导航行高度。
-const NAV_ROW_HEIGHT: f32 = 28.0;
 /// 分组标题高度。
 const GROUP_HEADER_HEIGHT: f32 = 24.0;
 /// 标题工具：22×22。
@@ -154,25 +152,38 @@ pub(crate) struct NavLook {
     pub count: Option<usize>,
 }
 
-/// 快捷方式这类导航行：图标、名称，右侧计数。
+impl NavLook {
+    /// 导航行的状态：禁用压过当前态。
+    fn state(self) -> SidebarRowState {
+        if self.disabled {
+            SidebarRowState::Disabled
+        } else if self.active {
+            SidebarRowState::Active
+        } else {
+            SidebarRowState::Idle
+        }
+    }
+}
+
+/// 快捷方式这类导航行：NanaUI 的侧栏行（`SidebarRow`），前面是行图标，后面是计数。
 ///
-/// 行本身是可聚焦的列表项，无障碍名是行文字。`look` 现读信号，当前态、禁用（连同 0.45 透明度）
-/// 和计数各自绑定；有没有计数这一格按建行时的取值定。禁用的列表项收不到激活，处理器不再判断。
+/// 行本身可聚焦，无障碍名是行文字。`look` 现读信号，当前态和禁用合成一个行状态绑定，计数另绑；
+/// 有没有计数这一格按建行时的取值定。禁用的行收不到激活，处理器不再判断。
 pub(crate) fn nav_row(
     label: &str,
     icon: Option<Icon>,
     look: impl Fn() -> NavLook + Copy + Send + 'static,
     key: String,
-    on_activate: impl Fn(&mut ViewContext<ListItem>) + Send + 'static,
+    on_activate: impl Fn(&mut ViewContext<SidebarRow>) + Send + 'static,
 ) -> AnyView {
     let initial = look();
-    let mut parts: Vec<AnyView> = Vec::new();
+    let mut row = widget(SidebarRow::new(label).state(initial.state()))
+        .prop::<SidebarRowState, RowState>(move || look().state());
     if let Some(icon) = icon {
-        parts.push(widget(inherit_icon(icon, 15.0)).into_any());
+        row = row.leading(widget(SidebarRowIcon::new(icon)));
     }
-    parts.push(fill_label(label, 13.0, 500));
     if let Some(count) = initial.count {
-        parts.push(
+        row = row.trailing(
             widget(label_text(
                 count.to_string(),
                 12.0,
@@ -181,30 +192,27 @@ pub(crate) fn nav_row(
             ))
             .prop::<String, fields::text::value>(move || {
                 look().count.unwrap_or_default().to_string()
-            })
-            .into_any(),
+            }),
         );
     }
-    let content = widget(Stack::fill_row(8.0).align(AlignSpec::Center)).children(parts);
-    widget(
-        ListItem::new(label)
-            .selected(initial.active)
-            .disabled(initial.disabled)
-            .style(row_style(
-                NAV_ROW_HEIGHT,
-                8.0,
-                8.0,
-                8.0,
-                ActiveTone::Accent,
-                initial.disabled,
-            )),
-    )
-    .prop::<bool, fields::list_item::selected>(move || look().active)
-    .prop::<bool, DimmedRow>(move || look().disabled)
-    .content(content)
-    .key(key)
-    .on_cx(move |_, _: &Activate, cx| on_activate(cx))
-    .into_any()
+    row.key(key)
+        .on_cx(move |_, _: &Activate, cx| on_activate(cx))
+        .into_any()
+}
+
+/// 侧栏行的状态：当前、禁用或空闲。
+pub(crate) struct RowState;
+
+impl FieldWrite<SidebarRow, SidebarRowState> for RowState {
+    const FIELD: &'static str = "SidebarRow.state";
+
+    fn write(target: &mut SidebarRow, state: SidebarRowState) {
+        target.state = state;
+    }
+
+    fn differs(target: &SidebarRow, state: &SidebarRowState) -> bool {
+        target.state != *state
+    }
 }
 
 /// 分组标题：11px 粗体弱色字，右侧工具。
@@ -553,22 +561,5 @@ impl FieldWrite<IconButton, FooterLook> for FooterPaint {
             || style.background != background
             || style.interaction.hovered != hover
             || style.interaction.pressed != hover
-    }
-}
-
-/// 列表项的禁用：不可点，整行 0.45 透明度。
-pub(crate) struct DimmedRow;
-
-impl FieldWrite<ListItem, bool> for DimmedRow {
-    const FIELD: &'static str = "ListItem.disabled+style.layout.opacity";
-
-    fn write(target: &mut ListItem, disabled: bool) {
-        target.disabled = disabled;
-        Arc::make_mut(&mut target.style.layout).opacity = disabled.then_some(DISABLED_OPACITY);
-    }
-
-    fn differs(target: &ListItem, disabled: &bool) -> bool {
-        target.disabled != *disabled
-            || target.style.layout.opacity != disabled.then_some(DISABLED_OPACITY)
     }
 }

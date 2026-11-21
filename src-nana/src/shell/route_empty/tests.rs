@@ -68,8 +68,7 @@ fn unrelated_updates_keep_every_empty_node() {
         "workspace-empty-scroll",
         "empty-repository-page",
         "empty-panel",
-        "empty-title",
-        "empty-detail",
+        "empty-state",
         "empty-error",
     ];
     let nodes = keys.map(|key| {

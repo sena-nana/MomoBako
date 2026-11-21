@@ -7,20 +7,22 @@
 //!   步骤和日志用带 key 的 `each`，状态变了的那一行才重建；进度条直接绑热信号；
 //! - 按钮的事件处理器只发意图消息，不捕获任何会过期的值。
 //!
-//! 版式：眉题、步骤标题、「第 N / M 步」、6px 进度条、
-//! 步骤说明、四个步骤圆标、错误条、「加载日志」和失败后的「重试」。
+//! 版式：眉题、步骤标题、「第 N / M 步」、NanaUI 的进度条（`progress`）、
+//! 步骤说明、四个步骤圆标、错误提示条（`callout`）、「加载日志」和失败后的「重试」。
 
 use std::sync::Arc;
 
 use nana_ui::ButtonKind;
-use nana_ui::icons_tabler::REFRESH;
-use nana_ui::runtime::view::{AnyView, IntoView, Signal, each, fields, signal, widget};
+use nana_ui::icons_tabler::{ALERT_CIRCLE, REFRESH};
+use nana_ui::runtime::view::{
+    AnyView, IntoView, Signal, callout, each, fields, progress, signal, widget,
+};
 use nana_ui::runtime::{
     Activate, AlignSpec, Button, JustifySpec, LengthSpec, RadiusTier, ScrollAxes, ScrollView,
-    SemanticColorRole, Stack, Text, TextHorizontalAlignment,
+    SemanticColorRole, Stack, StatusTone, Text, TextHorizontalAlignment,
 };
 
-use super::hot::{FillPercentField, HotSignals};
+use super::hot::HotSignals;
 use super::shell_tint::SoftFill;
 use super::startup_view::{ROOT_LINE_HEIGHT, eyebrow, fill_section, line, margin, wrapping};
 use super::workspace::{StartupLog, StartupStatus, StartupStepItem, StartupStepState};
@@ -161,24 +163,12 @@ fn panel(signals: StartupSignals, hot: HotSignals) -> AnyView {
     let steps = widget(margin(2.0, 0.0)).children((each(signals.steps, step_key, step_row)
         .gap(8.0)
         .key("startup-steps"),));
-    let error = widget(
-        Stack::column(0.0)
-            .width(LengthSpec::Fill)
-            .padding_xy(12.0, 10.0)
-            .painter(SoftFill::err()),
-    )
-    .visible(move || text.with(|text| text.error.is_some()))
-    .children((widget(wrapping(
-        initial.error.clone().unwrap_or_default(),
-        13.0,
-        400,
-        SemanticColorRole::Danger,
-        13.0 * ROOT_LINE_HEIGHT,
-    ))
-    .prop::<String, fields::text::value>(move || {
-        text.with(|text| text.error.clone().unwrap_or_default())
-    })
-    .key("startup-error"),));
+    let error = widget(Stack::column(0.0).width(LengthSpec::Fill))
+        .visible(move || text.with(|text| text.error.is_some()))
+        .children((callout(ALERT_CIRCLE, StatusTone::Danger, move || {
+            text.with(|text| text.error.clone().unwrap_or_default())
+        }),))
+        .key("startup-error");
     let retry = Button::new("重试")
         .kind(ButtonKind::Ghost)
         .icon(REFRESH)
@@ -210,32 +200,12 @@ fn panel(signals: StartupSignals, hot: HotSignals) -> AnyView {
     .into_any()
 }
 
-/// 6px 进度条：`--bg-subtle` 胶囊轨道，强调色填充，最少露出 4px。填充宽度绑在热信号上，逐帧走动效。
+/// NanaUI 的进度条（`progress`），满格 100。数值绑在热信号上，逐帧走动效。
 fn progress_bar(percent: Signal<f32>) -> AnyView {
-    let fill = widget(
-        Stack::row(0.0)
-            .surface(SemanticColorRole::Accent)
-            .radius_px(999.0)
-            .with_layout(|layout| {
-                layout.min_width = Some(LengthSpec::Px(4.0));
-                layout.height = Some(LengthSpec::Fill);
-            }),
-    )
-    .prop::<f32, FillPercentField>(percent);
-    widget(
-        Stack::row(0.0)
-            .width(LengthSpec::Fill)
-            .height(LengthSpec::Px(6.0))
-            .surface(SemanticColorRole::Subtle)
-            .radius_px(999.0)
-            .with_layout(|layout| {
-                layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
-                layout.align_items = AlignSpec::Stretch;
-            }),
-    )
-    .children((fill,))
-    .key("startup-progress")
-    .into_any()
+    progress(100.0)
+        .value(move || f64::from(percent.get()))
+        .key("startup-progress")
+        .into_any()
 }
 
 /// 步骤行的身份：步号加状态。圆标的样式由状态决定，状态变了整行重建，别的行不动。
