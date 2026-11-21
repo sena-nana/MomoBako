@@ -26,8 +26,10 @@ use nana_ui::runtime::{
     PaintContext, Painter, RadiusTier, SemanticColorRole, SemanticPaint, Stack, TextChanged,
     TextInput, ValidationIntent, ValidationMessage,
 };
-use nana_ui_core::Icon;
+use nana_ui_core::{Icon, SpacingStep};
 use serde_json::Value;
+
+use crate::theme_map::tiers::{self, Edge};
 
 use crate::host_api::openable_url;
 
@@ -48,8 +50,12 @@ pub(super) use recorded::current_card_metadata;
 pub(super) use recorded::recorded_rows;
 use recorded::*;
 
-/// 点亮的星的金色。浅色深色主题同一个值。
-const STAR_GOLD: [f32; 4] = [212.0 / 255.0, 166.0 / 255.0, 61.0 / 255.0, 1.0];
+/// 点亮的星：主题的警告色（金色一档）。
+const STAR_GOLD: SemanticColorRole = SemanticColorRole::Warning;
+/// 星形图标 18px。主题没有图标尺寸档，照写像素。
+const STAR_ICON: f32 = 18.0;
+/// 一颗星的外框边长 34：控件档里没有这个高度，照写像素。
+const STAR_BOX: f32 = 34.0;
 
 /// 冲突说明和能不能编辑。
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -242,7 +248,7 @@ pub(super) fn metadata_panel(signals: MetadataSignals) -> AnyView {
             LibrarySection::clone,
             super::inspect_library::library_card,
         )
-        .gap(12.0)
+        .gap(tiers::space_px(SpacingStep::Xl))
         .visible(move || library.with(|sections| !sections.is_empty())),
         parts::candidate_section(signals),
         each(
@@ -257,15 +263,15 @@ pub(super) fn metadata_panel(signals: MetadataSignals) -> AnyView {
                 )
             },
         )
-        .gap(12.0)
+        .gap(tiers::space_px(SpacingStep::Xl))
         .key("inspect-custom")
         .visible(move || custom.with(|rows| !rows.is_empty())),
     );
     let panel = style::top_rule(
-        Stack::column(12.0)
+        style::column(SpacingStep::Xl)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
-        12.0,
+        SpacingStep::Xl,
     );
     widget(panel)
         .children(rows)
@@ -297,7 +303,8 @@ fn custom_fields(
 /// 放在注释前面，紧挨着被拒绝写入的字段，不沉到只读事实下面（DESIGN.md：冲突必须靠近字段出现）。
 fn conflict_notice(head: Signal<HeadView>) -> AnyView {
     let conflict = head.with_untracked(|head| head.conflict.clone());
-    let notice = Stack::bar(8.0)
+    let notice = Stack::bar(0.0)
+        .gap_theme(SpacingStep::Md)
         .align(AlignSpec::Center)
         .justify(JustifySpec::SpaceBetween)
         .width(LengthSpec::Fill)
@@ -379,19 +386,27 @@ fn inline_field(
     layout.flex_shrink = Some(1.0);
     layout.min_width = Some(LengthSpec::Px(0.0));
     layout.width = Some(LengthSpec::Fill);
-    layout.height = Some(LengthSpec::Px(32.0));
-    layout.padding_left = Some(LengthSpec::Px(10.0));
-    layout.padding_right = Some(LengthSpec::Px(10.0));
+    layout.height = Some(LengthSpec::Px(
+        style::TOOLBAR_HEIGHT - tiers::hairline_px() * 2.0,
+    ));
+    tiers::padding(layout, &Edge::X, SpacingStep::Lg);
     layout.border_width = Some(0.0);
-    let frame = Stack::row(8.0)
-        .align(AlignSpec::Center)
-        .width(LengthSpec::Fill)
-        .min_width(LengthSpec::Px(0.0))
-        .padding_xy(10.0, 0.0)
-        .min_height(LengthSpec::Px(34.0))
-        .surface(SemanticColorRole::Background)
-        .border(SemanticColorRole::BorderSoft, 1.0)
-        .radius(RadiusTier::Lg);
+    layout.theme.border_width = None;
+    let frame = style::hairline(
+        style::row(SpacingStep::Md)
+            .align(AlignSpec::Center)
+            .width(LengthSpec::Fill)
+            .min_width(LengthSpec::Px(0.0))
+            .with_layout(|layout| {
+                tiers::padding(layout, &Edge::X, SpacingStep::Lg);
+                layout.padding_top = Some(LengthSpec::Px(0.0));
+                layout.padding_bottom = Some(LengthSpec::Px(0.0));
+            })
+            .min_height(LengthSpec::Px(style::TOOLBAR_HEIGHT))
+            .surface(SemanticColorRole::Background),
+        SemanticColorRole::BorderSoft,
+    )
+    .radius(RadiusTier::Lg);
     widget(style::meta_row(first))
         .key(format!("{key}-row"))
         .children((
@@ -399,7 +414,7 @@ fn inline_field(
             widget(frame).key(format!("{key}-field")).children((
                 widget(
                     IconGlyph::new(icon)
-                        .size(14.0)
+                        .size(style::TOOLBAR_ICON)
                         .role(SemanticColorRole::Muted),
                 )
                 .key(format!("{key}-icon")),
@@ -415,7 +430,7 @@ fn inline_field(
         .into_any()
 }
 
-/// 评分：五颗 34 方的星，间距 4。到达当前分数的星是金色、浅强调底。再点同一颗回到 0。
+/// 评分：五颗 34 方的星，间距 `Xs`。到达当前分数的星是金色、浅强调底。再点同一颗回到 0。
 fn rating_row(signals: MetadataSignals) -> AnyView {
     let (rating, head) = (signals.rating, signals.head);
     let stars = (1_i64..=5)
@@ -448,14 +463,14 @@ fn rating_row(signals: MetadataSignals) -> AnyView {
         .key("inspect-rating-row")
         .children((
             widget(style::row_label("评分")).key("inspect-rating"),
-            widget(Stack::row(4.0).align(AlignSpec::Center))
+            widget(style::row(SpacingStep::Xs).align(AlignSpec::Center))
                 .key("inspect-rating-stars")
                 .children(stars),
         ))
         .into_any()
 }
 
-/// 一颗星的外框：34 方的圆，到达分数时浅强调底；不能编辑时淡到一半。
+/// 一颗星的外框：34 方的圆，到达分数时浅强调底；不能编辑时淡到主题的停用档。
 fn star_style(active: bool, locked: bool) -> NodeStyle {
     let mut style = NodeStyle::default();
     style.radius = None;
@@ -473,12 +488,12 @@ fn star_style(active: bool, locked: bool) -> NodeStyle {
         &mut layout.min_width,
         &mut layout.min_height,
     ] {
-        *edge = Some(LengthSpec::Px(34.0));
+        *edge = Some(LengthSpec::Px(STAR_BOX));
     }
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
-    layout.opacity = locked.then_some(0.5);
-    style.radius_px(999.0)
+    layout.opacity = locked.then_some(style::disabled_opacity());
+    style.radius(RadiusTier::Full)
 }
 
 /// 星形图标所在的一层：铺满外框，自绘星形。
@@ -490,7 +505,7 @@ fn star_glyph_style(active: bool) -> NodeStyle {
         .node_style()
 }
 
-/// 星形图标：18px 描边星，到达分数时金色，否则弱化色。
+/// 星形图标：18px 描边星，到达分数时警告色（金色），否则弱化色。
 #[derive(Clone, Copy, Debug)]
 struct StarPainter {
     active: bool,
@@ -500,15 +515,15 @@ impl Painter for StarPainter {
     fn paint(&self, cx: &mut PaintContext<'_>) {
         let bounds = cx.bounds();
         let rect = nana_ui::runtime::LayoutBox {
-            x: bounds.x + (bounds.width - 18.0) / 2.0,
-            y: bounds.y + (bounds.height - 18.0) / 2.0,
-            width: 18.0,
-            height: 18.0,
+            x: bounds.x + (bounds.width - STAR_ICON) / 2.0,
+            y: bounds.y + (bounds.height - STAR_ICON) / 2.0,
+            width: STAR_ICON,
+            height: STAR_ICON,
         };
         let color = if self.active {
             STAR_GOLD
         } else {
-            cx.color(SemanticColorRole::Muted)
+            SemanticColorRole::Muted
         };
         cx.icon(rect, STAR, color);
     }

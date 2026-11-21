@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use nana_ui::ButtonKind;
 use nana_ui::runtime::view::{AnyView, IntoView, fields, text, widget};
-use nana_ui::runtime::{Activate, Button, SelectOption, Stack};
+use nana_ui::runtime::{Activate, Button, SelectOption};
 use serde_json::{Map, Value};
 
 use super::super::admin::{AdminEffect, PluginCallOrigin};
@@ -502,10 +502,12 @@ pub(in crate::shell) fn candidate_card(
                 .into_any(),
         );
     }
-    widget(Stack::column(4.0))
-        .key(format!("inspect-asmr-candidate-card-{index}"))
-        .children(rows)
-        .into_any()
+    widget(super::super::files_view::style::column(
+        nana_ui_core::SpacingStep::Xs,
+    ))
+    .key(format!("inspect-asmr-candidate-card-{index}"))
+    .children(rows)
+    .into_any()
 }
 
 /// 候选区的消息：导入框、来源、作品 ID、导入、抓取和应用。播放列表的消息不归这里。

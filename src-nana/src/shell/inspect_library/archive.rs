@@ -96,7 +96,8 @@ pub(in super::super) fn archive_list(
     }
     rows.push(archive_split(list, stage));
     widget(
-        Stack::fill_column(8.0)
+        Stack::fill_column(0.0)
+            .gap_theme(SpacingStep::Md)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0))
             .min_height(LengthSpec::Px(0.0)),
@@ -109,7 +110,7 @@ pub(in super::super) fn archive_list(
 /// 工具条：面包屑在左，项数在右，计数和路径分开。
 pub(super) fn archive_toolbar(crumbs: AnyView, count: &str) -> AnyView {
     widget(
-        Stack::row(12.0)
+        files_style::row(SpacingStep::Xl)
             .align(AlignSpec::Center)
             .justify(JustifySpec::SpaceBetween)
             .width(LengthSpec::Fill)
@@ -171,16 +172,18 @@ pub(super) fn archive_stage_view(stage: ArchiveStage) -> AnyView {
     } else {
         SemanticColorRole::Text
     };
-    let mut title = typed_text(Text::new(stage.title), 13.0, TextWeight::Semibold)
-        .color(title_role)
-        .line_height(20.15);
+    let mut title = files_style::text(
+        stage.title,
+        13.0,
+        TextWeight::Semibold,
+        title_role,
+        13.0 * files_style::LINE_BODY,
+    );
     title.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
-    let mut detail = typed_text(Text::new(stage.detail), 12.0, TextWeight::Regular)
-        .color(SemanticColorRole::Muted)
-        .line_height(18.6);
+    let mut detail = files_style::small_muted(stage.detail);
     detail.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
     widget(
-        Stack::column(6.0)
+        files_style::column(SpacingStep::Sm)
             .align(AlignSpec::Center)
             .justify(JustifySpec::Center)
             .width(LengthSpec::Fill)
@@ -223,7 +226,7 @@ pub(super) fn archive_breadcrumbs(directory: &str, archive_name: &str) -> AnyVie
             ));
         }
     }
-    widget(Stack::row(4.0).align(AlignSpec::Center))
+    widget(files_style::row(SpacingStep::Xs).align(AlignSpec::Center))
         .children(crumbs)
         .key("inspect-archive-crumbs")
         .into_any()

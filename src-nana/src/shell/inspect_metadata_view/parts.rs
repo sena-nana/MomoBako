@@ -18,15 +18,16 @@ use nana_ui::runtime::{
     SelectChanged, SemanticColorRole, SettingsCard, Stack, TextChanged, TextInput, TextSubmitted,
 };
 use nana_ui::{ButtonKind, ControlSize};
-use nana_ui_core::{Icon, TextWeight};
+use nana_ui_core::{Icon, RadiusTier, SpacingRole, SpacingStep, TextWeight};
 
 use super::super::ShellMessage;
 use super::super::field_bind::GlyphIcon;
 use super::super::files::FilesMessage;
-use super::super::files_view::style::{self, ButtonLook};
+use super::super::files_view::style::{self, ButtonLook, Height, Inset};
 use super::super::inspect::InspectMessage;
 use super::super::inspect_asmr::{self, AsmrMessage, CandidateCard};
 use super::{MetadataSignals, TagGroupOption, inspect_message};
+use crate::theme_map::tiers;
 
 /// 标签区一行里的一片：标签，或者末尾的「+」。
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -56,13 +57,17 @@ pub(super) fn tags_row(signals: MetadataSignals) -> AnyView {
             }
         })
     };
-    let header = Stack::bar(10.0)
+    let header = Stack::bar(0.0)
+        .gap_theme(SpacingStep::Lg)
         .align(AlignSpec::Center)
         .justify(JustifySpec::SpaceBetween);
-    let mut item_style = NodeStyle::default();
+    let mut item_style = NodeStyle::default()
+        .control_height(nana_ui_core::ControlHeight::Exact(ControlSize::Medium));
     let layout = Arc::make_mut(&mut item_style.layout);
     layout.width = Some(LengthSpec::Fill);
-    layout.height = Some(LengthSpec::Px(32.0));
+    layout.height = Some(LengthSpec::Px(
+        ControlSize::Medium.height_in(nana_ui::theme::UI_METRICS),
+    ));
     layout.min_width = Some(LengthSpec::Px(0.0));
     let collapse = widget(ListItem::new("标签组").style(item_style))
         .content(
@@ -75,7 +80,7 @@ pub(super) fn tags_row(signals: MetadataSignals) -> AnyView {
                     21.7,
                 ))
                 .key("inspect-tag-group-label"),
-                widget(Stack::row(6.0).align(AlignSpec::Center)).children((
+                widget(style::row(SpacingStep::Sm).align(AlignSpec::Center)).children((
                     widget(style::text(
                         untrack(meta),
                         12.0,
@@ -87,7 +92,7 @@ pub(super) fn tags_row(signals: MetadataSignals) -> AnyView {
                     .key("inspect-tag-group-count"),
                     widget(
                         IconGlyph::new(untrack(chevron))
-                            .size(14.0)
+                            .size(style::TOOLBAR_ICON)
                             .role(SemanticColorRole::Muted),
                     )
                     .prop::<Icon, GlyphIcon>(chevron)
@@ -133,8 +138,8 @@ fn tag_panel(signals: MetadataSignals) -> AnyView {
         TagChip::Tag { index, tag } => tag_chip(index, &tag, locked.clone()),
         TagChip::Add => tag_menu(signals),
     })
-    .horizontal(8.0)
-    .css(css! { flex-wrap: wrap; row-gap: 8px; })
+    .horizontal(tiers::space_px(SpacingStep::Md))
+    .css(css! { flex-wrap: wrap; gap: theme(space-md); })
     .key("inspect-tags")
     .visible(move || tags.with(|view| view.expanded))
     .into_any()
@@ -175,7 +180,7 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
         let layout = Arc::make_mut(&mut input.style.layout);
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.min_height = Some(LengthSpec::Px(34.0));
+        layout.min_height = Some(LengthSpec::Px(style::TOOLBAR_HEIGHT));
     }
     let label = move || tags.with(|view| view.add_label.clone());
     let create_locked = locked.clone();
@@ -185,7 +190,7 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
             untrack(&label),
             None,
             ButtonLook {
-                height: 32.0,
+                height: Height::Control(ControlSize::Medium),
                 ..ButtonLook::TOOLBAR
             },
         )
@@ -201,14 +206,14 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
     });
     let groups = computed(move || tags.with(|view| view.groups.clone()));
     let group_locked = locked.clone();
-    let grouped = widget(Stack::column(8.0).width(LengthSpec::Fill))
+    let grouped = widget(style::column(SpacingStep::Md).width(LengthSpec::Fill))
         .visible(move || tags.with(|view| !view.groups.is_empty()))
         .children((
             widget(style::row_label("标签分组")).key("inspect-tag-groups-label"),
             each(groups, TagGroupOption::clone, move |group| {
                 tag_group(group, group_locked.clone())
             })
-            .gap(8.0)
+            .gap(tiers::space_px(SpacingStep::Md))
             .key("inspect-tag-groups-list"),
         ))
         .key("inspect-tag-groups");
@@ -216,7 +221,7 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
         tags.with(|view| view.options.iter().cloned().enumerate().collect::<Vec<_>>())
     });
     let option_locked = locked.clone();
-    let existing = widget(Stack::column(8.0).width(LengthSpec::Fill))
+    let existing = widget(style::column(SpacingStep::Md).width(LengthSpec::Fill))
         .visible(move || tags.with(|view| !view.options.is_empty()))
         .children((
             widget(style::row_label("已有标签")).key("inspect-tag-existing-label"),
@@ -231,12 +236,12 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
                     )
                 },
             )
-            .horizontal(8.0)
-            .css(css! { flex-wrap: wrap; row-gap: 8px; })
+            .horizontal(tiers::space_px(SpacingStep::Md))
+            .css(css! { flex-wrap: wrap; gap: theme(space-md); })
             .key("inspect-tag-existing-chips"),
         ))
         .key("inspect-tag-existing");
-    let draft_group = widget(Stack::column(6.0).width(LengthSpec::Fill))
+    let draft_group = widget(style::column(SpacingStep::Sm).width(LengthSpec::Fill))
         .key("inspect-tag-draft-group")
         .children((
             widget(style::row_label("新建标签")).key("inspect-tag-draft-label"),
@@ -255,15 +260,15 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
                     )));
                 }),
         ));
-    let body = widget(Stack::column(10.0).width(LengthSpec::Fill))
+    let body = widget(style::column(SpacingStep::Lg).width(LengthSpec::Fill))
         .children((draft_group, create, grouped, existing))
         .key("inspect-tag-menu-panel");
     let empty = move || tags.with(|view| view.tags.is_empty());
-    let trigger = widget(Stack::row(6.0).align(AlignSpec::Center))
+    let trigger = widget(style::row(SpacingStep::Sm).align(AlignSpec::Center))
         .children((
             widget(
                 IconGlyph::new(PLUS)
-                    .size(18.0)
+                    .size(TAG_ICON)
                     .role(SemanticColorRole::Muted),
             )
             .key("inspect-tag-menu-icon"),
@@ -300,20 +305,24 @@ fn tag_menu(signals: MetadataSignals) -> AnyView {
         .into_any()
 }
 
-/// 触发器：30 高的药丸，弱化色，悬停 `--bg-active` 底。
+/// 标签菜单触发器上的加号 18px。主题没有图标尺寸档，照写像素。
+const TAG_ICON: f32 = 18.0;
+/// 触发器的高度和最小宽度 30：控件档里没有这个高度，照写像素。
+const TAG_TRIGGER: f32 = 30.0;
+
+/// 触发器：30 高的药丸，左右 `Sm`，弱化色，悬停 `--bg-active` 底。
 fn tag_trigger_style() -> NodeStyle {
     let look = ButtonLook {
-        height: 30.0,
-        padding_x: 6.0,
+        height: Height::Px(TAG_TRIGGER),
+        padding_x: Inset::Step(SpacingStep::Sm),
         foreground: SemanticColorRole::Muted,
         hover: Some(SemanticColorRole::Active),
-        icon_size: 18.0,
+        icon_size: TAG_ICON,
+        radius: RadiusTier::Full,
         ..ButtonLook::TOOLBAR
     };
-    let mut style = style::styled_button("", Some(PLUS), look)
-        .style
-        .radius_px(999.0);
-    Arc::make_mut(&mut style.layout).min_width = Some(LengthSpec::Px(30.0));
+    let mut style = style::styled_button("", Some(PLUS), look).style;
+    Arc::make_mut(&mut style.layout).min_width = Some(LengthSpec::Px(TAG_TRIGGER));
     style
 }
 
@@ -332,7 +341,7 @@ impl FieldWrite<Popover, bool> for TagMenuOpen {
     }
 }
 
-/// 一个仓库标签分组：11px 半粗的分组名，下面是可加的标签片，行距 5。
+/// 一个仓库标签分组：11px 半粗的分组名，下面是可加的标签片；名字和标签片按「归属」关系隔 `Sm`。
 fn tag_group(group: TagGroupOption, locked: impl Fn() -> bool + Send + Clone + 'static) -> AnyView {
     let key = format!("inspect-tag-group-{}", style::key_part(&group.id));
     let chips = group
@@ -342,7 +351,8 @@ fn tag_group(group: TagGroupOption, locked: impl Fn() -> bool + Send + Clone + '
         .map(|(index, tag)| option_chip(&format!("{key}-{index}"), tag, locked.clone()))
         .collect::<Vec<_>>();
     widget(
-        Stack::column(5.0)
+        Stack::column(0.0)
+            .gap_theme(SpacingRole::Attach.step())
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
     )
@@ -352,17 +362,15 @@ fn tag_group(group: TagGroupOption, locked: impl Fn() -> bool + Send + Clone + '
             11.0,
             TextWeight::Semibold,
             SemanticColorRole::Muted,
-            11.0 * 1.55,
+            11.0 * style::LINE_BODY,
         ))
         .key(format!("{key}-name")),
         widget(
-            Stack::row(8.0)
+            style::row(SpacingStep::Md)
                 .wrap(true)
                 .width(LengthSpec::Fill)
                 .min_width(LengthSpec::Px(0.0))
-                .with_layout(|layout| {
-                    layout.row_gap = Some(LengthSpec::Px(8.0));
-                }),
+                .with_layout(|layout| tiers::row_gap(layout, SpacingStep::Md)),
         )
         .children(chips)
         .key(format!("{key}-chips")),
@@ -516,7 +524,7 @@ fn import_form(signals: MetadataSignals) -> AnyView {
             cx.dispatch_program_all(ShellMessage::Asmr(AsmrMessage::ImportCandidate))
         }),
     );
-    widget(Stack::column(8.0))
+    widget(style::column(SpacingStep::Md))
         .visible(move || view.with(|view| view.import_open))
         .key("inspect-asmr-import-form")
         .children(body)

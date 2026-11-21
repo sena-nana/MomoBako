@@ -2,24 +2,23 @@
 //!
 //! 色块要画元数据里的真实颜色，不能折成语义色，所以用 `PaintColor::Rgba`；
 //! 色块外圈是 70% 的 `--border-strong`。结果图标块是
-//! 135° 渐变底加 lucide `FileImage` 线框。
+//! 135° 渐变底加 lucide `FileImage` 线框：渐变从弱化色往主题的媒体遮罩色压暗，线框是媒体前景色，
+//! 深浅主题里都是暗底白线。
 
 use std::hash::{Hash, Hasher};
 
 use nana_ui::runtime::{
-    BoxPaint, LayoutBox, LineCap, LineJoin, PaintColor, PaintContext, PaintPath, Painter,
-    StrokeStyle,
+    BoxPaint, Gradient, LayoutBox, LineCap, LineJoin, PaintContext, PaintPath, Painter, StrokeStyle,
 };
-use nana_ui_core::{
-    BackgroundImage, CssGradient, GradientStop, LinearGradient, SemanticColorMix, SemanticColorRole,
-};
+use nana_ui_core::{RadiusTier, SemanticColorMix, SemanticColorRole};
 
+use super::super::files_view::style::mix_rgb;
 use super::presenter::SwatchColor;
 
-/// 色块直径 9px。
+/// 色块直径 9px：色块尺寸不是间距，照写像素。
 pub(crate) const SWATCH_SIZE: f32 = 9.0;
-/// 色块外圈宽度，对应 `box-shadow: 0 0 0 1px`。
-const SWATCH_RING: f32 = 1.0;
+/// 色块外圈宽度：一根发丝边，对应 `box-shadow: 0 0 0 1px`。
+const SWATCH_RING: f32 = crate::theme_map::tiers::hairline_px();
 
 /// 颜色芯片：先画芯片自己的外观，再在左内边距里画色块。色块左缘是芯片的发丝边框加主题的小号控件内边距。
 #[derive(Clone, Copy, Debug)]
@@ -49,23 +48,23 @@ impl Painter for SwatchChipPainter {
             height: SWATCH_SIZE,
         };
         let fill = match self.color {
-            SwatchColor::Rgb([red, green, blue]) => PaintColor::Rgba([
+            SwatchColor::Rgb([red, green, blue]) => nana_ui::runtime::PaintColor::Rgba([
                 f32::from(red) / 255.0,
                 f32::from(green) / 255.0,
                 f32::from(blue) / 255.0,
                 1.0,
             ]),
-            SwatchColor::Accent => PaintColor::Role(SemanticColorRole::Accent),
+            SwatchColor::Accent => nana_ui::runtime::PaintColor::Role(SemanticColorRole::Accent),
         };
         // 全圆角矩形走和控件相同的圆角着色，平滑圆角设置下是超椭圆。
         // 外圈按 70% 在 sRGB 里混进芯片底色。
-        let ring_color = PaintColor::Mix(SemanticColorMix::new(
+        let ring_color = SemanticColorMix::new(
             SemanticColorRole::BorderStrong,
             SemanticColorRole::Background,
             0.7,
-        ));
-        cx.rounded_rect(ring, 999.0, BoxPaint::fill(ring_color));
-        cx.rounded_rect(dot, 999.0, BoxPaint::fill(fill));
+        );
+        cx.rounded_rect(ring, RadiusTier::Full, BoxPaint::fill(ring_color));
+        cx.rounded_rect(dot, RadiusTier::Full, BoxPaint::fill(fill));
     }
 
     fn paint_key(&self) -> u64 {
@@ -78,26 +77,11 @@ impl Painter for SwatchChipPainter {
     }
 }
 
-/// 结果行图标块的渐变底：`linear-gradient(135deg, #8ba8b6 0%, #35525f 100%)`。
-/// 图标块自己用 `Lg` 圆角，渐变跟着圆角裁剪。
-pub(crate) fn hit_tile_background() -> BackgroundImage {
-    let stop = |position: f32, [red, green, blue]: [u8; 3]| GradientStop {
-        paint_color: None,
-        position,
-        color: [
-            f32::from(red) / 255.0,
-            f32::from(green) / 255.0,
-            f32::from(blue) / 255.0,
-            1.0,
-        ],
-    };
-    BackgroundImage::Gradient(CssGradient::Linear(LinearGradient {
-        angle_deg: 135.0,
-        stops: vec![stop(0.0, [0x8b, 0xa8, 0xb6]), stop(1.0, [0x35, 0x52, 0x5f])],
-    }))
-}
+/// 图标块渐变两端压进媒体遮罩色的比例：左上浅、右下深。
+const TILE_SHADE_FROM: f32 = 0.2;
+const TILE_SHADE_TO: f32 = 0.65;
 
-/// 结果行左侧 40px 图标块上的白色 18px 文件图片线框（lucide `FileImage`）。
+/// 结果行左侧 40px 图标块：`Lg` 圆角的 135° 渐变底，上面是白色 18px 文件图片线框（lucide `FileImage`）。
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct HitIconPainter;
 
@@ -110,14 +94,29 @@ impl Painter for HitIconPainter {
     fn paint(&self, cx: &mut PaintContext<'_>) {
         cx.draw_default();
         let [width, height] = cx.size();
+        let muted = cx.color(SemanticColorRole::Muted);
+        let scrim = cx.theme().effects().media_scrim.as_rgba_array();
+        // 135°：从左上角到右下角；正方形的渐变线就是对角线。
+        let tile = Gradient::linear([0.0, 0.0], [width, height])
+            .stop(0.0, mix_rgb(muted, scrim, TILE_SHADE_FROM))
+            .stop(1.0, mix_rgb(muted, scrim, TILE_SHADE_TO));
+        cx.rounded_rect(
+            LayoutBox {
+                x: 0.0,
+                y: 0.0,
+                width,
+                height,
+            },
+            RadiusTier::Lg,
+            BoxPaint::fill(tile),
+        );
         let scale = ICON_SIZE / ICON_VIEWBOX;
         let origin = [(width - ICON_SIZE) * 0.5, (height - ICON_SIZE) * 0.5];
         let stroke = StrokeStyle::new(2.0 * scale)
             .cap(LineCap::Round)
             .join(LineJoin::Round);
-        let white = PaintColor::Rgba([1.0, 1.0, 1.0, 1.0]);
         for path in file_image_paths(origin, scale) {
-            cx.stroke_path(&path, stroke.clone(), white);
+            cx.stroke_path(&path, stroke.clone(), SemanticColorRole::OnMedia);
         }
     }
 

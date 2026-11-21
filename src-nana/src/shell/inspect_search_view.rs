@@ -19,7 +19,13 @@ use nana_ui::runtime::{
     Activate, AlignSpec, EmptyState, JustifySpec, LengthSpec, List, ListItem, RadiusTier,
     SemanticColorRole, Spinner, Stack,
 };
-use nana_ui_core::{StatusTone, TextWeight};
+use nana_ui_core::{SpacingStep, StatusTone, TextWeight};
+
+use super::files_view::style as files_style;
+use crate::theme_map::tiers::{self, Edge};
+
+/// 结果行左侧图标块边长 40：图标块尺寸不是间距，照写像素。
+const HIT_TILE: f32 = 40.0;
 
 use super::ShellMessage;
 use super::inspect::InspectMessage;
@@ -50,18 +56,21 @@ pub(crate) fn resident_search_panel(signals: SearchPanelSignals) -> AnyView {
         widget(
             List::new()
                 .label("搜索结果")
-                .style(Stack::column(10.0).node_style()),
+                .style(files_style::column(SpacingStep::Lg).node_style()),
         )
         .visible(move || status.with(|status| status.listed))
         .key("search-workbench-results"),
     );
     widget(
-        Stack::column(16.0)
-            .padding(23.0)
-            .surface(SemanticColorRole::Surface)
-            .radius(RadiusTier::Xxl)
-            .grow(0.0)
-            .shrink(0.0),
+        files_style::pad(
+            files_style::column(SpacingStep::Xxxl),
+            SpacingStep::Page,
+            SpacingStep::Page,
+        )
+        .surface(SemanticColorRole::Surface)
+        .radius(RadiusTier::Xxl)
+        .grow(0.0)
+        .shrink(0.0),
     )
     .children((
         header(signals.head),
@@ -90,7 +99,7 @@ fn header(head: Signal<SearchHead>) -> AnyView {
         .key("search-workbench-scope"),
         widget(widgets::margin_top(
             widgets::label("搜索结果", 24.0, TextWeight::Bold, SemanticColorRole::Text),
-            4.0,
+            SpacingStep::Xs,
         ))
         .key("search-workbench-title"),
         widgets::bound(
@@ -101,14 +110,14 @@ fn header(head: Signal<SearchHead>) -> AnyView {
                     TextWeight::Regular,
                     SemanticColorRole::Muted,
                 ),
-                8.0,
+                SpacingStep::Md,
             ),
             move || head.with(|head| head.summary.clone()),
         )
         .key("search-workbench-summary"),
     ));
     let stats = widget(
-        Stack::row(10.0)
+        files_style::row(SpacingStep::Lg)
             .align(AlignSpec::Center)
             .wrap(true)
             .grow(0.0)
@@ -126,7 +135,8 @@ fn header(head: Signal<SearchHead>) -> AnyView {
     ))
     .key("search-workbench-stats");
     widget(
-        Stack::bar(16.0)
+        Stack::bar(0.0)
+            .gap_theme(SpacingStep::Xxxl)
             .align(AlignSpec::Start)
             .justify(JustifySpec::SpaceBetween),
     )
@@ -138,8 +148,7 @@ fn header(head: Signal<SearchHead>) -> AnyView {
 /// 搜索进行中的一行提示：NanaUI 的 `Spinner` 转圈，文字写在右边。
 fn searching_state(status: Signal<SearchStatus>) -> AnyView {
     widget(
-        state_box()
-            .border(SemanticColorRole::Border, 1.0)
+        files_style::hairline(state_box(), SemanticColorRole::Border)
             .surface(SemanticColorRole::Background),
     )
     .visible(move || status.with(|status| status.searching))
@@ -174,23 +183,24 @@ fn error_state(status: Signal<SearchStatus>) -> AnyView {
         .into_any()
 }
 
-/// 状态块上方留 16，左右各留 20。
+/// 状态块上方留 `Xxxl`，左右各留 `PageTight`。
 fn state_margin(frame: Stack) -> Stack {
     frame.min_width(LengthSpec::Px(0.0)).with_layout(|layout| {
-        layout.margin_top = Some(LengthSpec::Px(16.0));
-        layout.margin_left = Some(LengthSpec::Px(20.0));
-        layout.margin_right = Some(LengthSpec::Px(20.0));
+        tiers::margin(layout, &[Edge::Top], SpacingStep::Xxxl);
+        tiers::margin(layout, &Edge::X, SpacingStep::PageTight);
     })
 }
 
 /// 搜索中提示框：圆角小框，横排转圈和文字。
 fn state_box() -> Stack {
     state_margin(
-        Stack::row(8.0)
-            .align(AlignSpec::Center)
-            .padding_xy(12.0, 10.0)
-            .radius(RadiusTier::Xl)
-            .width(LengthSpec::Fill),
+        files_style::pad(
+            files_style::row(SpacingStep::Md).align(AlignSpec::Center),
+            SpacingStep::Xl,
+            SpacingStep::Lg,
+        )
+        .radius(RadiusTier::Xl)
+        .width(LengthSpec::Fill),
     )
 }
 
@@ -224,7 +234,7 @@ fn hit_text(item: HitItem, pick: fn(&HitRow) -> &String) -> impl Fn() -> String 
     move || item.try_with(|row| pick(row).clone()).unwrap_or_default()
 }
 
-/// 结果行右侧芯片的排版：`horizontal(6)` 之外补上和旧视图
+/// 结果行右侧芯片的排版：`horizontal(Sm)` 之外补上和旧视图
 /// `Stack::row(6).wrap(true).justify(End).grow(0).shrink(1)` 相同的字段。
 fn chips_style() -> nana_ui::runtime::view::InlineStyle {
     css! { flex-wrap: wrap; justify-content: flex-end; flex-grow: 0; flex-shrink: 1; }
@@ -234,7 +244,9 @@ fn chips_style() -> nana_ui::runtime::view::InlineStyle {
 /// 行的身份（仓库和素材 id）建行时就定了，处理器只带它们。
 fn result_row(item: HitItem) -> AnyView {
     let (key, repo_id, asset_id) = item.get_untracked().identity();
-    let mut list_item = ListItem::new(String::new()).auto_height(true).gap(12.0);
+    let mut list_item = ListItem::new(String::new())
+        .auto_height(true)
+        .gap(tiers::space_px(SpacingStep::Xl));
     {
         let style = &mut list_item.style;
         style.background = Some(SemanticColorRole::Background);
@@ -246,30 +258,24 @@ fn result_row(item: HitItem) -> AnyView {
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
         layout.min_height = None;
-        layout.padding_left = Some(LengthSpec::Px(17.0));
-        layout.padding_right = Some(LengthSpec::Px(17.0));
-        layout.padding_top = Some(LengthSpec::Px(15.0));
-        layout.padding_bottom = Some(LengthSpec::Px(15.0));
+        tiers::padding(layout, &Edge::ALL, SpacingStep::Xxxl);
         layout.white_space_nowrap = false;
         layout.text_overflow_ellipsis = false;
         crate::theme_map::control_weight(layout, TextWeight::Medium);
     }
     let tile = widget(
         Stack::row(0.0)
-            .width(LengthSpec::Px(40.0))
-            .height(LengthSpec::Px(40.0))
-            .min_width(LengthSpec::Px(40.0))
+            .width(LengthSpec::Px(HIT_TILE))
+            .height(LengthSpec::Px(HIT_TILE))
+            .min_width(LengthSpec::Px(HIT_TILE))
             .grow(0.0)
             .shrink(0.0)
             .radius(RadiusTier::Lg)
-            .with_layout(|layout| {
-                layout.paint.background_image = Some(paint::hit_tile_background())
-            })
             .painter(paint::HitIconPainter),
     )
     .key(format!("search-hit-icon-{key}"));
     let body = widget(
-        Stack::column(4.0)
+        files_style::column(SpacingStep::Xs)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0))
             .grow(1.0)
@@ -308,7 +314,7 @@ fn result_row(item: HitItem) -> AnyView {
             format!("search-hit-chip-{chip_key}-{}", chip.index),
         )
     })
-    .horizontal(6.0)
+    .horizontal(tiers::space_px(SpacingStep::Sm))
     .css(chips_style())
     .key(format!("search-hit-tags-{key}"));
     widget(list_item)

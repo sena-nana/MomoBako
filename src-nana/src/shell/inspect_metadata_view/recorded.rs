@@ -264,7 +264,7 @@ pub(super) fn recorded_grid(recorded: Signal<RecordedView>) -> AnyView {
         source_link_row(recorded, shown(|view| !view.source_url.is_empty())),
     );
     widget(
-        Stack::column(12.0)
+        style::column(SpacingStep::Xl)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
     )
@@ -316,7 +316,7 @@ pub(super) fn source_link_row(
     let mut value = style::value(recorded.with_untracked(|view| view.source_url.clone()));
     value.style.text_horizontal_alignment = nana_ui::runtime::TextHorizontalAlignment::End;
     let openable = move || recorded.with(|view| openable_url(&view.source_url));
-    let actions = widget(Stack::row(4.0).grow(0.0).shrink(0.0))
+    let actions = widget(style::row(SpacingStep::Xs).grow(0.0).shrink(0.0))
         .key("inspect-source-actions")
         .children((
             source_action(EXTERNAL_LINK, "inspect-source-open", "打开链接")
@@ -347,7 +347,7 @@ pub(super) fn source_link_row(
         .children((
             widget(style::row_label("来源链接")).key("inspect-source-label"),
             widget(
-                Stack::row(8.0)
+                style::row(SpacingStep::Md)
                     .align(AlignSpec::Start)
                     .justify(JustifySpec::End)
                     .width(LengthSpec::Fill)
@@ -365,11 +365,14 @@ pub(super) fn source_link_row(
         .into_any()
 }
 
+/// 来源链接旁按钮的边长。
+const SOURCE_ACTION: f32 = 26.0;
+
 /// 来源链接旁的 26 方按钮。`title` 是无障碍名和悬停提示。
 ///
-/// 平时弱色图标、`--bg` 底、`--border-soft` 细边。悬停时图标改正文色、边框改强调色。
-/// 打不开的链接停用时，图标和边框按 0.45 盖在按钮底色上，
-/// 深浅等同整枚 `opacity: 0.45`，但不再整枚淡一层。
+/// 平时弱色图标、`--bg` 底、`--border-soft` 发丝边。悬停时图标改正文色、边框改强调色。
+/// 打不开的链接停用时，图标和边框按主题的停用不透明度档盖在按钮底色上，
+/// 深浅等同整枚淡到这一档，但不再整枚淡一层。
 pub(super) fn source_action(icon: Icon, key: &str, title: &'static str) -> El<IconButton> {
     let mut button = IconButton::new(icon, title)
         .with_tooltip(title)
@@ -383,7 +386,8 @@ pub(super) fn source_action(icon: Icon, key: &str, title: &'static str) -> El<Ic
     button.style = button
         .style
         .clone()
-        .border(SemanticColorRole::BorderSoft, 1.0);
+        .border(SemanticColorRole::BorderSoft, tiers::hairline_px());
+    tiers::border(Arc::make_mut(&mut button.style.layout), 1);
     let hover = SemanticPaint {
         foreground: Some(SemanticColorRole::Text),
         border: Some(SemanticColorRole::Accent),
@@ -396,21 +400,22 @@ pub(super) fn source_action(icon: Icon, key: &str, title: &'static str) -> El<Ic
         foreground_mix: Some(nana_ui_core::SemanticColorMix::new(
             SemanticColorRole::Muted,
             SemanticColorRole::Background,
-            crate::theme_map::DISABLED_OPACITY,
+            style::disabled_opacity(),
         )),
         border_mix: Some(nana_ui_core::SemanticColorMix::new(
             SemanticColorRole::BorderSoft,
             SemanticColorRole::Background,
-            crate::theme_map::DISABLED_OPACITY,
+            style::disabled_opacity(),
         )),
         background: Some(SemanticColorRole::Background),
         ..SemanticPaint::default()
     };
     let layout = Arc::make_mut(&mut button.style.layout);
-    layout.width = Some(LengthSpec::Px(26.0));
-    layout.height = Some(LengthSpec::Px(26.0));
-    layout.min_width = Some(LengthSpec::Px(26.0));
-    layout.min_height = Some(LengthSpec::Px(26.0));
+    // 26 方：图标按钮档是 28，没有 26 这一档，照写像素。
+    layout.width = Some(LengthSpec::Px(SOURCE_ACTION));
+    layout.height = Some(LengthSpec::Px(SOURCE_ACTION));
+    layout.min_width = Some(LengthSpec::Px(SOURCE_ACTION));
+    layout.min_height = Some(LengthSpec::Px(SOURCE_ACTION));
     layout.padding_left = Some(LengthSpec::Px(0.0));
     layout.padding_right = Some(LengthSpec::Px(0.0));
     layout.padding_top = Some(LengthSpec::Px(0.0));
