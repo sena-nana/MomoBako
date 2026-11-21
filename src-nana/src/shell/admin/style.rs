@@ -1,28 +1,21 @@
 //! 设置、插件、日志和工具页的版式原语。
 //!
 //! 字号、字重、行高、内边距、间距和控件高度写成固定值；颜色只用主题角色。
-//! 带主题相关透明度或混色的柔和底色交给 [`SoftFill`]，在绘制时按当前
-//! 主题解析。圆角一律用 `RadiusTier`，形状和半径基数由渲染层统一生效。
+//! 圆角一律用 `RadiusTier`，形状和半径基数由渲染层统一生效。
 
-use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
 use nana_ui::runtime::view::{AnyView, El, IntoProp, IntoView, fields, widget};
 use nana_ui::runtime::{
-    AlignSpec, BoxPaint, Button, IconGlyph, InteractionStyle, JustifySpec, LengthSpec, NodeStyle,
-    PaintContext, Painter, SemanticPaint, Stack, Text, TextHorizontalAlignment, TextInput,
+    AlignSpec, Button, IconGlyph, InteractionStyle, JustifySpec, LengthSpec, NodeStyle,
+    SemanticPaint, Stack, Text, TextHorizontalAlignment, TextInput,
 };
-use nana_ui_core::{
-    Icon, LineHeightSpec, OverflowWrapSpec, RadiusTier, SemanticColorMix, SemanticColorRole as Role,
-};
+use nana_ui_core::{Icon, LineHeightSpec, OverflowWrapSpec, RadiusTier, SemanticColorRole as Role};
 
 /// 正文行高倍数。
 pub(crate) const LINE: f32 = 1.55;
 /// 等宽字体在 Windows 上用的字体。
 pub(crate) const MONO_FAMILY: &str = "Cascadia Mono";
-/// `border-radius: var(--radius-pill)`。
-pub(crate) const PILL: f32 = 999.0;
-
 /// 绑定文字：`value` 是常量、信号或闭包，其余版式照 `node`。
 pub(crate) fn bound(node: Text, value: impl IntoProp<String>) -> El<Text> {
     widget(node).prop::<String, fields::text::value>(value)
@@ -94,21 +87,6 @@ pub(crate) fn wrapping(mut text: Text) -> Text {
 pub(crate) fn align_end(mut text: Text) -> Text {
     text.style.text_horizontal_alignment = TextHorizontalAlignment::End;
     text
-}
-
-/// 固定 RGBA 的前景色。只给写死、两套主题共用的颜色（日志级别）用。
-pub(crate) fn fixed_color(mut text: Text, rgb: [u8; 3]) -> Text {
-    Arc::make_mut(&mut text.style.layout).color = Some(rgba(rgb));
-    text
-}
-
-fn rgba(rgb: [u8; 3]) -> [f32; 4] {
-    [
-        f32::from(rgb[0]) / 255.0,
-        f32::from(rgb[1]) / 255.0,
-        f32::from(rgb[2]) / 255.0,
-        1.0,
-    ]
 }
 
 /// 小图标。颜色跟随所在控件的前景角色。
@@ -294,21 +272,6 @@ pub(crate) fn pad(stack: Stack, top: f32, right: f32, bottom: f32, left: f32) ->
     })
 }
 
-/// 只画下边线的盒子，对应 `border-bottom: 1px solid var(--border-soft)`。
-pub(crate) fn bottom_rule(stack: Stack) -> Stack {
-    let mut style = stack.node_style();
-    style.border = Some(Role::BorderSoft);
-    {
-        let layout = Arc::make_mut(&mut style.layout);
-        layout.border_width = None;
-        layout.border_sides.top_width = Some(0.0);
-        layout.border_sides.left_width = Some(0.0);
-        layout.border_sides.right_width = Some(0.0);
-        layout.border_sides.bottom_width = Some(1.0);
-    }
-    stack.style(style)
-}
-
 /// 只画上边线的盒子，对应 `border-top: 1px solid var(--border-soft)`。
 pub(crate) fn top_rule(stack: Stack) -> Stack {
     let mut style = stack.node_style();
@@ -322,76 +285,6 @@ pub(crate) fn top_rule(stack: Stack) -> Stack {
         layout.border_sides.bottom_width = Some(0.0);
     }
     stack.style(style)
-}
-
-/// 圆角档位。`Pill` 是 `--radius-pill`。
-pub(crate) fn rounded(stack: Stack, tier: Option<RadiusTier>) -> Stack {
-    match tier {
-        Some(tier) => stack.radius(tier),
-        None => stack.radius_px(PILL),
-    }
-}
-
-/// 计数胶囊：高 26、左右 10、药丸、主背景、弱色 12/500。文字可以绑定。
-pub(crate) fn stat(text: impl IntoProp<String>, key: impl Into<String>) -> AnyView {
-    let body = fixed(row(0.0), None, Some(26.0));
-    widget(rounded(pad(body, 0.0, 10.0, 0.0, 10.0), None).surface(Role::Background))
-        .children((bound(label(String::new(), 12.0, 500, Role::Muted), text).key(key.into()),))
-        .into_any()
-}
-
-/// 提示芯片：高 28、左右 10、药丸、主背景、1px 边线、弱色 12/500。文字可以绑定；
-/// 返回元素，调用方还能再绑显隐。
-pub(crate) fn hint_chip(
-    text: impl IntoProp<String>,
-    key: impl Into<String>,
-) -> El<Stack, (El<Text>,)> {
-    let body = fixed(row(0.0), None, Some(28.0));
-    widget(
-        rounded(pad(body, 0.0, 10.0, 0.0, 10.0), None)
-            .surface(Role::Background)
-            .border(Role::Border, 1.0),
-    )
-    .children((bound(label(String::new(), 12.0, 500, Role::Muted), text).key(key.into()),))
-}
-
-/// 状态胶囊的四种语气。
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PillTone {
-    /// 已启用：`accent-soft` 底、强调色。
-    Accent,
-    /// 未启用：`bg-subtle` 底、弱色。
-    Ghost,
-    /// 错误或不可用：`err-soft` 底、危险色。
-    Danger,
-    /// 降级：强调色 14% 底、强调色。
-    Warning,
-}
-
-/// 状态胶囊的外框和字色：高 24、左右 8、药丸，底色按语气。
-pub(crate) fn pill_look(tone: PillTone) -> (Stack, Role) {
-    let body = rounded(
-        pad(fixed(row(0.0), None, Some(24.0)), 0.0, 8.0, 0.0, 8.0),
-        None,
-    );
-    match tone {
-        PillTone::Accent => (body.surface(Role::AccentSoft), Role::Accent),
-        PillTone::Ghost => (body.surface(Role::Subtle), Role::Muted),
-        PillTone::Danger => (
-            body.painter(SoftFill::new(Soft::Danger, None)),
-            Role::Danger,
-        ),
-        PillTone::Warning => (
-            body.painter(SoftFill::new(
-                Soft::Alpha {
-                    role: Role::Accent,
-                    alpha: 0.14,
-                },
-                None,
-            )),
-            Role::Accent,
-        ),
-    }
 }
 
 /// 工作区面板：`bg-elev` 底、`--radius-2xl`、1px 透明边加 22 内边距、竖排间距 16，
@@ -464,74 +357,6 @@ pub(crate) fn eyebrow_text(value: &str) -> Text {
         .text_ext
         .letter_spacing = Some(0.4);
     text
-}
-
-/// 提示块外层：外边距 16/20/0，内容靠左。
-pub(crate) type NoticeEl = El<Stack, (El<Stack, (El<Text>,)>,)>;
-
-/// 状态框：外边距 16/20/0、内边距 10/12、xl 圆角、1px 边线、弱色字。
-/// 错误时换成危险色柔和底和危险色字。文字可以绑定；返回元素，调用方还能再绑显隐。
-pub(crate) fn state_notice(
-    text: impl IntoProp<String>,
-    error: bool,
-    key: impl Into<String>,
-) -> NoticeEl {
-    let body = pad(row(8.0), 10.0, 12.0, 10.0, 12.0);
-    let (body, color) = if error {
-        (
-            body.painter(
-                SoftFill::new(Soft::Danger, Some(RadiusTier::Xl)).bordered(Role::Danger, 1.0),
-            ),
-            Role::Danger,
-        )
-    } else {
-        (
-            body.surface(Role::Background)
-                .border(Role::Border, 1.0)
-                .radius(RadiusTier::Xl),
-            Role::Muted,
-        )
-    };
-    let body = body.with_layout(|layout| {
-        layout.width = Some(LengthSpec::Shrink);
-        layout.max_width = Some(LengthSpec::Fill);
-    });
-    widget(pad(column(0.0), 16.0, 20.0, 0.0, 20.0).align(AlignSpec::Start)).children((widget(body)
-        .children(
-            (bound(wrapping(label(String::new(), 14.0, 400, color)), text).key(key.into()),),
-        ),))
-}
-
-/// 虚线空状态：标题和说明。
-pub(crate) type EmptyEl = El<Stack, (El<Text>, El<Text>)>;
-
-/// 空状态：虚线 `border-strong`、xl 圆角、内边距 24、`bg-subtle`，
-/// 18 号粗体标题和弱色说明竖排，间距 8，竖直居中并占满剩余高度。文字可以绑定。
-pub(crate) fn dashed_empty(
-    title: impl IntoProp<String>,
-    message: impl IntoProp<String>,
-    key: &'static str,
-) -> EmptyEl {
-    let frame = pad(Stack::fill_column(8.0), 24.0, 24.0, 24.0, 24.0)
-        .justify(JustifySpec::Center)
-        .surface(Role::Subtle)
-        .border(Role::BorderStrong, 1.0)
-        .radius(RadiusTier::Xl)
-        .with_layout(|layout| {
-            layout.border_style = Some(nana_ui_core::BorderStyle::Dashed);
-            layout.height = Some(LengthSpec::Shrink);
-            layout.flex_grow = Some(1.0);
-        });
-    widget(frame)
-        .children((
-            bound(label(String::new(), 18.0, 700, Role::Text), title).key(format!("{key}-title")),
-            bound(
-                wrapping(label(String::new(), 14.0, 400, Role::Muted)),
-                message,
-            )
-            .key(format!("{key}-detail")),
-        ))
-        .key(key)
 }
 
 /// 输入框外框：主背景、1px 边线、lg 圆角，最小高 38，左右 12，间距 8，弱色。
@@ -640,103 +465,4 @@ pub(crate) fn native_field_style(height: f32) -> NodeStyle {
         layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
     }
     style
-}
-
-/// 只能在绘制时按主题算的柔和底色。
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum Soft {
-    /// `--ok-soft`：浅色主题 10%、深色主题 14% 的成功色。
-    Success,
-    /// `--err-soft`：浅色主题 10%、深色主题 14% 的危险色。
-    Danger,
-    /// 某个角色按固定透明度，对应 `color-mix(in srgb, X N%, transparent)`。
-    Alpha { role: Role, alpha: f32 },
-    /// `color-mix(in srgb, <role> N%, <base>)`。
-    RoleMix { role: Role, ratio: f32, base: Role },
-    /// `color-mix(in srgb, #rrggbb N%, <base>)`，日志级别的固定色。
-    RgbMix {
-        rgb: [u8; 3],
-        ratio: f32,
-        base: Role,
-    },
-}
-
-/// 柔和底色绘制器。只画自身底色和可选描边，子节点照常绘制。
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct SoftFill {
-    soft: Soft,
-    /// `None` 是药丸；其余按主题圆角档位。
-    radius: Option<RadiusTier>,
-    border: Option<(Role, f32)>,
-}
-
-impl SoftFill {
-    pub(crate) fn new(soft: Soft, radius: Option<RadiusTier>) -> Self {
-        Self {
-            soft,
-            radius,
-            border: None,
-        }
-    }
-
-    /// 同时描一圈 1px 角色色边线。
-    pub(crate) fn bordered(mut self, role: Role, width: f32) -> Self {
-        self.border = Some((role, width));
-        self
-    }
-
-    fn resolve(&self, cx: &PaintContext<'_>) -> [f32; 4] {
-        let dark = crate::theme_map::is_dark(cx.theme_appearance());
-        match self.soft {
-            Soft::Success => cx.color(SemanticColorMix::alpha(
-                Role::Success,
-                if dark { 0.14 } else { 0.10 },
-            )),
-            Soft::Danger => cx.color(SemanticColorMix::alpha(
-                Role::Danger,
-                if dark { 0.14 } else { 0.10 },
-            )),
-            Soft::Alpha { role, alpha } => cx.color(SemanticColorMix::alpha(role, alpha)),
-            Soft::RoleMix { role, ratio, base } => mix(cx.color(role), cx.color(base), ratio),
-            Soft::RgbMix { rgb, ratio, base } => mix(rgba(rgb), cx.color(base), ratio),
-        }
-    }
-}
-
-/// sRGB 里按比例混两种颜色，等价于 CSS `color-mix(in srgb, a ratio, b)`。
-fn mix(first: [f32; 4], second: [f32; 4], ratio: f32) -> [f32; 4] {
-    let ratio = ratio.clamp(0.0, 1.0);
-    let alpha = first[3] * ratio + second[3] * (1.0 - ratio);
-    if alpha <= 0.0 {
-        return [0.0; 4];
-    }
-    let channel = |a: f32, b: f32| (a * first[3] * ratio + b * second[3] * (1.0 - ratio)) / alpha;
-    [
-        channel(first[0], second[0]),
-        channel(first[1], second[1]),
-        channel(first[2], second[2]),
-        alpha,
-    ]
-}
-
-impl Painter for SoftFill {
-    fn paint(&self, cx: &mut PaintContext<'_>) {
-        let fill = self.resolve(cx);
-        let radius = match self.radius {
-            Some(tier) => cx.radius(tier),
-            None => cx.size()[1] / 2.0,
-        };
-        let mut paint = BoxPaint::fill(fill);
-        if let Some((role, width)) = self.border {
-            paint = paint.border(role, width);
-        }
-        let bounds = cx.bounds();
-        cx.rounded_rect(bounds, radius, paint);
-    }
-
-    fn paint_key(&self) -> u64 {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        format!("{self:?}").hash(&mut hasher);
-        hasher.finish()
-    }
 }

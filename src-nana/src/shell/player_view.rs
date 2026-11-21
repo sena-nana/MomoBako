@@ -14,7 +14,6 @@ use super::{ShellMessage, ShellViewModel};
 
 pub(super) mod bar;
 pub(super) mod icons;
-pub(super) mod paint;
 pub(super) mod playlist;
 
 /// 拼进键的外部文本（条目编号、路径）：`/` 是键路径分隔符，`%` 和 `/` 转义成 `%25`、`%2F`，
