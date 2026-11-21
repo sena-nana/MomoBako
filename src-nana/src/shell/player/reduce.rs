@@ -137,6 +137,7 @@ fn reduce_player(model: &mut ShellViewModel, message: PlayerMessage) -> Option<S
             model.player.effects.push(PlayerEffect::PersistSettings);
         }
         PlayerMessage::ToggleQueue => model.player.queue_open = !model.player.queue_open,
+        PlayerMessage::QueueToggled(open) => model.player.queue_open = open,
         PlayerMessage::BarResized(width) => {
             // 半像素以内的抖动不算变化，避免排版回报来回重建。
             if width.is_finite() && (width - model.player.bar_width).abs() > 0.5 {

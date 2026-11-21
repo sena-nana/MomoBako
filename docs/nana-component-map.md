@@ -37,13 +37,13 @@
 
 目录外的公开类型用到 `SettingsCard`（`inspect_library.rs`、`src-nana/src/shell/inspect_metadata_view/parts.rs`）和 `List`（压缩包文件列表，`inspect_library.rs`）。文件列表用视图层的 `each_virtual` 按视口建行（`src-nana/src/shell/files_view/virtual_rows.rs`），不用 `VirtualListLayout`。
 
-其余已编译组件产品里没有用到，包括 `context-menu`、`tree-view`、`sidebar-row`、`sidebar-section`、`sidebar-footer`、`native-markdown`、`selectable-rich-text`、`image-viewer`、`gpu-view`、`progress`、`spinner`、`settings`、`settings-collapsible-card`、`appearance-section`。设置页、日志页、插件页和播放条由 `Stack`、`Text`、`Button`、`RangeField` 等拼成（`admin_*.rs`、`player_bar*.rs`）。
+其余已编译组件产品里没有用到，包括 `context-menu`、`tree-view`、`sidebar-row`、`sidebar-section`、`sidebar-footer`、`native-markdown`、`selectable-rich-text`、`image-viewer`、`gpu-view`、`progress`、`spinner`、`settings`、`settings-collapsible-card`、`appearance-section`。设置页、日志页和插件页由 `Stack`、`Text`、`Button`、`RangeField` 等拼成（`admin_*.rs`）。
 
 ## 探针结论
 
 `capability.rs` 的测试锁住下面几条：
 
-- `MediaTransportBar` 能从 `nana_ui::components` 构造，事件有播放暂停、提交 seek、拖动开始和结束、音量；它不在 `component_catalog` 里。产品的播放条没有用它，是 `IconButton`、`RangeField` 等拼的（`src-nana/src/shell/player_view/bar.rs`、`src-nana/src/shell/player_view/bar/parts.rs`）。
+- `MediaTransportBar` 能从 `nana_ui::components` 构造，事件有播放暂停、提交 seek、拖动开始和结束、音量；它不在 `component_catalog` 里。产品的播放条用它（`src-nana/src/shell/player_view/bar.rs`）：内联、藏起自己的播放钮、设置和全屏，前导槽放循环模式、上一首、播放 / 暂停、下一首和当前队列（`Popover`），第二行放图片停留时长（`RangeField`）和适应 / 填充（`SegmentedControl`）；媒体行和队列行是 `ListItem`。
 - `VirtualListLayout` 在 800px 视口、28px 行高、56px overscan 下，一万行的可见窗口少于 100 行。
 - `media-transport-bar`、`settings-card`、`settings-row`、`runtime-list` 是没有目录 id 的公开类型（`UNCATALOGUED_PUBLIC_WIDGETS`），进了目录测试会失败。
 - 壳层图标目录认得 `lucide-folder`、`lucide-search`、`lucide-settings`、`lucide-file`；`trash`、`player-play` 解析为空，这些图标用 Tabler 常量。

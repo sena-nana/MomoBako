@@ -1,27 +1,23 @@
-//! 播放条的零件：停留时长与画面适配设置行、当前队列浮层，以及几处共用的小部件。
+//! 播放条的零件：图片、视频的设置行，当前队列（`Popover`），以及媒体行、队列行共用的封面和文字。
 //!
-//! 浮层贴在卡片右上方，右侧内缩 14px、
-//! 底边离卡片 10px。绝对定位相对父级内容盒，所以偏移要把卡片内边距算进去。
 //! 队列封面和播放条自己的封面都只认条目上的 `thumbnailPath`：读得到本地图片就按 cover 画进方块，否则仍写类型字。
 
-use nana_ui::Icon;
-use nana_ui::runtime::view::{AnyView, IntoView, widget};
+use nana_ui::runtime::view::{AnyView, IntoView, segmented_option, widget};
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, IconButton, IconGlyph, JustifySpec, LengthSpec, RadiusTier,
-    RangeField, RangeInput, ScrollAxes, ScrollView, SemanticColorRole, Stack, Text,
-    TextHorizontalAlignment,
+    Activate, AlignSpec, JustifySpec, LengthSpec, ListItem, Popover, PopoverAlignment,
+    PopoverToggled, RadiusTier, RangeField, RangeInput, ScrollAxes, ScrollView, SegmentedControl,
+    SegmentedOptionChosen, SemanticColorRole, Stack, Text, TextHorizontalAlignment,
 };
+use nana_ui::{ControlSize, PopoverPlacement};
 
 use super::super::super::ShellMessage;
 use super::super::super::player::{PlayerMessage, QueueItem};
-use super::super::paint::{HoverSurface, SliderTrack};
 use super::{BarProps, display_title};
 
-/// 浮层上限高度。
-const QUEUE_MAX_HEIGHT: f32 = 320.0;
-/// 浮层内边距和行距。
-const QUEUE_PADDING: f32 = 10.0;
-const QUEUE_HEAD: f32 = 20.15;
+/// 队列面板宽。
+const QUEUE_WIDTH: f32 = 360.0;
+/// 队列条目滚动区的上限高度。
+const QUEUE_LIST_MAX_HEIGHT: f32 = 260.0;
 
 /// 单行文字：给定字号、字重、颜色和行高，超长省略。
 pub(super) fn line(
@@ -69,11 +65,6 @@ pub(crate) fn dim_surface(
         }
         None => stack.surface(role),
     }
-}
-
-/// 固定像素的图标字形。
-pub(super) fn icon(icon: Icon, size: f32, role: SemanticColorRole) -> IconGlyph {
-    IconGlyph::new(icon).size(size).role(role)
 }
 
 /// 没有缩略图时的类型方块：bg 底、10px 圆角、11px 粗体弱色字居中。
@@ -205,100 +196,31 @@ fn cover_image(
     widget(frame).key(key).into_any()
 }
 
-/// 盖满父级的透明可点区域。名字只给无障碍；悬停、按下时铺底色，内容由兄弟节点画在上面。
-/// 要放在兄弟节点前面，绘制顺序才在下层。绝对定位从父级内容盒算起，`inset` 是父级内边距，
-/// 往外扩回去才盖住整块。
-pub(crate) fn hit_area(label: &str, disabled: bool, radius: f32) -> IconButton {
-    let mut button = IconButton::new(super::icons::PLAY, label)
-        .colors_from_style()
-        .disabled(disabled);
-    button.style.background = None;
-    button.style.control_padding_x = None;
-    button.style.painter = Some(HoverSurface { radius }.into());
-    let layout = std::sync::Arc::make_mut(&mut button.style.layout);
-    layout.position = nana_ui_core::PositionSpec::Absolute;
-    layout.offset_left = Some(LengthSpec::Px(0.0));
-    layout.offset_top = Some(LengthSpec::Px(0.0));
-    layout.width = Some(LengthSpec::Percent(100.0));
-    layout.height = Some(LengthSpec::Percent(100.0));
-    button
-}
-
-/// 细滑杆：宽 `width`，压缩时最窄 `min_width`，高 20px。禁用时整条 0.45 不透明。
-#[allow(clippy::too_many_arguments)]
-pub(super) fn slider(
-    value: f64,
-    minimum: f64,
-    maximum: f64,
-    step: f64,
-    label: &str,
-    disabled: bool,
-    width: f32,
-    min_width: f32,
-) -> RangeField {
-    let mut range = RangeField::new(value, minimum, maximum, step)
-        .label(label)
-        .show_label(false)
-        .show_value(false)
-        .disabled(disabled);
-    let ratio = range.ratio();
-    range.style.painter = Some(
-        SliderTrack {
-            ratio,
-            dim: disabled,
-        }
-        .into(),
-    );
-    range.style.background = None;
-    range.style.border = None;
-    let layout = std::sync::Arc::make_mut(&mut range.style.layout);
-    layout.width = Some(LengthSpec::Px(width));
-    layout.min_width = Some(LengthSpec::Px(min_width));
-    layout.height = Some(LengthSpec::Px(20.0));
-    layout.min_height = Some(LengthSpec::Px(20.0));
-    layout.flex_grow = Some(0.0);
-    layout.flex_shrink = Some(1.0);
-    layout.padding_left = Some(LengthSpec::Px(0.0));
-    layout.padding_right = Some(LengthSpec::Px(0.0));
-    range
-}
-
-/// 图片、视频的设置行：图片多一条停留时长，两类都有适应 / 填充。宽窗靠右，窄窗两端对齐并可折行。
+/// 图片、视频的设置行，放在传输条的第二行：图片多一条停留时长（NanaUI 的 `RangeField`，读数写「N 秒」），
+/// 两类都有适应 / 填充（`SegmentedControl`）。宽窗靠右，窄窗两端对齐并可折行。
 pub(super) fn settings_row(props: &BarProps, narrow: bool) -> AnyView {
     let mut children: Vec<AnyView> = Vec::new();
     if props.file_class == "image" {
         let seconds = props.image_seconds.clamp(2, 30);
-        let duration = slider(
-            f64::from(seconds),
-            2.0,
-            30.0,
-            1.0,
-            "图片停留时长",
-            false,
-            120.0,
-            120.0,
-        );
+        let mut duration = RangeField::new(f64::from(seconds), 2.0, 30.0, 1.0)
+            .label("停留")
+            .unit("秒")
+            .size(ControlSize::Small);
+        let layout = std::sync::Arc::make_mut(&mut duration.style.layout);
+        layout.width = Some(LengthSpec::Px(240.0));
+        layout.min_width = Some(LengthSpec::Px(160.0));
+        layout.flex_shrink = Some(1.0);
+        // 拖动中每一格都写入。只听 `RangeInput`。
+        // 松手的 `RangeChanged` 是同一格的提交，再听一次会把这次拖动写两遍。
         children.push(
-            widget(Stack::row(8.0).align(AlignSpec::Center))
-                .children((
-                    widget(
-                        Text::new(format!("停留 {seconds} 秒"))
-                            .color(SemanticColorRole::Muted)
-                            .font_size(12.0)
-                            .line_height(18.6),
-                    )
-                    .key("player-duration-label"),
-                    // 拖动中每一格都写入。只听 `RangeInput`。
-                    // 松手的 `RangeChanged` 是同一格的提交，再听一次会把这次拖动写两遍。
-                    widget(duration)
-                        .key("player-duration")
-                        .on_cx(|_, event: &RangeInput, cx| {
-                            let seconds = event.value.round().clamp(2.0, 30.0) as u32;
-                            cx.dispatch_program_all(player_message(
-                                PlayerMessage::SetImageDuration(seconds * 1000),
-                            ));
-                        }),
-                ))
+            widget(duration)
+                .key("player-duration")
+                .on_cx(|_, event: &RangeInput, cx| {
+                    let seconds = event.value.round().clamp(2.0, 30.0) as u32;
+                    cx.dispatch_program_all(player_message(PlayerMessage::SetImageDuration(
+                        seconds * 1000,
+                    )));
+                })
                 .into_any(),
         );
     }
@@ -312,7 +234,6 @@ pub(super) fn settings_row(props: &BarProps, narrow: bool) -> AnyView {
         Stack::bar(12.0)
             .justify(justify)
             .align(AlignSpec::Center)
-            .min_height(LengthSpec::Px(34.0))
             .wrap(narrow),
     )
     .children(children)
@@ -320,65 +241,59 @@ pub(super) fn settings_row(props: &BarProps, narrow: bool) -> AnyView {
     .into_any()
 }
 
-/// 适应 / 填充两档。外框是 bg 底、border-soft 细边、8px 圆角；当前档铺 accent-soft、字用 accent。
+/// 适应 / 填充两档：NanaUI 的 `SegmentedControl`，选中哪档由 ViewModel 的设置决定。
 fn fit_switch(cover: bool) -> AnyView {
+    let option = |label: &'static str, active: bool, key: &'static str| {
+        segmented_option(label).selected(active).key(key).on_cx(
+            move |_, _: &SegmentedOptionChosen, cx| {
+                cx.dispatch_program_all(player_message(PlayerMessage::SetObjectFit {
+                    cover: key == "player-fit-cover",
+                }));
+            },
+        )
+    };
     widget(
-        Stack::row(2.0)
-            .align(AlignSpec::Center)
-            .padding(2.0)
-            .surface(SemanticColorRole::Background)
-            .border(SemanticColorRole::BorderSoft, 1.0)
-            .radius(RadiusTier::Md),
+        SegmentedControl::new()
+            .label("画面适配")
+            .size(ControlSize::Small),
     )
     .children((
-        widget(fit_option("适应", !cover))
-            .key("player-fit-contain")
-            .on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program_all(player_message(PlayerMessage::SetObjectFit {
-                    cover: false,
-                }));
-            }),
-        widget(fit_option("填充", cover))
-            .key("player-fit-cover")
-            .on_cx(|_, _: &Activate, cx| {
-                cx.dispatch_program_all(player_message(PlayerMessage::SetObjectFit {
-                    cover: true,
-                }));
-            }),
+        option("适应", !cover, "player-fit-contain"),
+        option("填充", cover, "player-fit-cover"),
     ))
     .key("player-fit")
     .into_any()
 }
 
-/// 一档适配按钮。按组件设计值 26px 高画，不用全局按钮的 32px。
-fn fit_option(label: &str, active: bool) -> Button {
-    let mut button = Button::new(label);
-    button.style.background = active.then_some(SemanticColorRole::AccentSoft);
-    button.style.foreground = Some(if active {
-        SemanticColorRole::Accent
-    } else {
-        SemanticColorRole::Muted
-    });
-    button.style.border = None;
-    button.style.radius = Some(RadiusTier::Sm);
-    button.style.control_height = None;
-    button.style.control_padding_x = None;
-    let layout = std::sync::Arc::make_mut(&mut button.style.layout);
-    layout.height = Some(LengthSpec::Px(26.0));
-    layout.min_height = Some(LengthSpec::Px(26.0));
-    layout.padding_left = Some(LengthSpec::Px(8.0));
-    layout.padding_right = Some(LengthSpec::Px(8.0));
-    layout.padding_top = Some(LengthSpec::Px(4.0));
-    layout.padding_bottom = Some(LengthSpec::Px(4.0));
-    layout.font_size = Some(12.0);
-    layout.font_weight = Some(500);
-    let style = button.style.clone();
-    Button::new(label).style(style)
-}
-
-/// 当前队列浮层。每一项是封面加两行字，当前项铺 accent-soft；不可播放的项变淡、不可点。
+/// 当前队列：NanaUI 的 `Popover`，触发器是传输按钮里的列表图标，面板在它上方靠右展开。
+///
+/// 开合写回 ViewModel（`QueueToggled`），播放条按 `queue_open` 重建，所以面板里的行只在开着时建。
+/// 每一项是封面加两行字，当前项是选中的行；不可播放的项停用、变淡。
 /// 封面看条目自己的 `thumbnailPath`，类型字仍是当前播放器的类别。
 pub(super) fn queue_popover(props: &BarProps) -> AnyView {
+    let mut popover = Popover::new()
+        .trigger_icon(super::icons::LIST_MUSIC, "当前队列")
+        .bare_trigger(true)
+        .placement(PopoverPlacement::Top)
+        .alignment(PopoverAlignment::End)
+        .width(QUEUE_WIDTH);
+    popover.open = props.queue_open;
+    let body: Vec<AnyView> = if props.queue_open {
+        vec![queue_body(props)]
+    } else {
+        Vec::new()
+    };
+    widget(popover)
+        .children(body)
+        .key("player-queue")
+        .on_cx(|_, toggled: &PopoverToggled, cx| {
+            cx.dispatch_program_all(player_message(PlayerMessage::QueueToggled(toggled.open)))
+        })
+        .into_any()
+}
+
+/// 队列面板里的内容：「当前队列」和项数，下面是纵向滚动的条目。
+fn queue_body(props: &BarProps) -> AnyView {
     let media = props.media_label();
     let rows = props
         .queue
@@ -402,7 +317,7 @@ pub(super) fn queue_popover(props: &BarProps) -> AnyView {
                 .color(SemanticColorRole::Text)
                 .font_size(13.0)
                 .font_weight(700)
-                .line_height(QUEUE_HEAD),
+                .line_height(20.15),
         )
         .key("player-queue-title"),
         widget(
@@ -414,50 +329,23 @@ pub(super) fn queue_popover(props: &BarProps) -> AnyView {
         .key("player-queue-count"),
     ))
     .into_any();
-    let list_limit = QUEUE_MAX_HEIGHT - QUEUE_PADDING * 2.0 - 2.0 - QUEUE_HEAD - 8.0;
     let list = widget(ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
         layout.width = Some(LengthSpec::Fill);
-        layout.max_height = Some(LengthSpec::Px(list_limit));
+        layout.max_height = Some(LengthSpec::Px(QUEUE_LIST_MAX_HEIGHT));
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(1.0);
     }))
-    .children((widget(Stack::column(6.0)).children(rows),))
+    .children((widget(Stack::column(4.0)).children(rows),))
     .key(props.queue_key.clone())
     .into_any();
-    widget(
-        Stack::column(8.0)
-            .padding(QUEUE_PADDING)
-            .surface(SemanticColorRole::Surface)
-            .border(SemanticColorRole::BorderStrong, 1.0)
-            .radius(RadiusTier::Xl)
-            .with_layout(|layout| {
-                layout.position = nana_ui_core::PositionSpec::Absolute;
-                // 设计值相对卡片的内边距盒：右 14、底边在卡片上沿再往上 10。
-                layout.offset_right = Some(LengthSpec::Px(14.0));
-                layout.offset_bottom = Some(LengthSpec::percent_offset(100.0, 10.0));
-                layout.width = Some(LengthSpec::Px(360.0));
-                layout.max_width = Some(LengthSpec::viewport_offset(
-                    nana_ui_core::ViewportAxis::Width,
-                    100.0,
-                    -48.0,
-                ));
-                layout.max_height = Some(LengthSpec::Px(QUEUE_MAX_HEIGHT));
-                layout.paint.box_shadows = vec![nana_ui_core::BoxShadowSpec {
-                    paint_color: None,
-                    offset_x: 0.0,
-                    offset_y: 14.0,
-                    blur_radius: 34.0,
-                    spread_radius: -18.0,
-                    color: [0.0, 0.0, 0.0, 0.6],
-                    inset: false,
-                }];
-            }),
-    )
-    .children((head, list))
-    .key("player-queue-popover")
-    .into_any()
+    widget(Stack::column(8.0).width(LengthSpec::Fill))
+        .children((head, list))
+        .key("player-queue-popover")
+        .into_any()
 }
 
+/// 队列里的一项：NanaUI 的 `ListItem`，行首 40px 封面，内容是文件名和路径（不可播放时写原因）。
+/// 当前项是选中的行、标题用 accent；不可播放的项停用，字和封面按 0.52 在面板底色上淡化。
 fn queue_row(item: &QueueItem, media: &'static str, active: bool) -> AnyView {
     let ready = item.status == "ready";
     let title = display_title(&item.filename, &item.extension);
@@ -468,49 +356,47 @@ fn queue_row(item: &QueueItem, media: &'static str, active: bool) -> AnyView {
             .clone()
             .unwrap_or_else(|| item.status.clone())
     };
-    let id = item.id.clone();
-    let hit = widget(hit_area(&title, !ready, 10.0))
-        .key(format!("player-queue-{}", super::super::key_part(&item.id)))
-        .on_cx(move |_, _: &Activate, cx| {
-            cx.dispatch_program_all(player_message(PlayerMessage::PlayItem {
-                item_id: id.clone(),
-            }));
-        });
     let title_role = if active {
         SemanticColorRole::Accent
     } else {
         SemanticColorRole::Text
     };
-    // 不可播放的条目整行按 0.52 淡化，在浮层底色上混出来。
     let dim = (!ready).then_some((SemanticColorRole::Surface, 0.52));
     let meta = widget(
         Stack::column(2.0)
-            .width(LengthSpec::Shrink)
             .min_width(LengthSpec::Px(0.0))
             .grow(1.0)
-            .shrink(1.0),
+            .shrink(1.0)
+            .with_layout(|layout| layout.flex_basis = Some(LengthSpec::Px(0.0))),
     )
     .children((
-        widget(dim_text(line(title, 14.0, 700, title_role, 21.7), dim)),
+        widget(dim_text(
+            line(title.clone(), 14.0, 700, title_role, 21.7),
+            dim,
+        )),
         widget(dim_text(
             line(detail, 11.667, 500, SemanticColorRole::Muted, 18.08),
             dim,
         )),
     ));
-    let surface = if active {
-        SemanticColorRole::AccentSoft
-    } else {
-        SemanticColorRole::Background
-    };
-    let row = Stack::row(10.0)
-        .align(AlignSpec::Start)
-        .padding(8.0)
-        .min_height(LengthSpec::Px(56.0))
-        .width(LengthSpec::Fill)
-        .radius(RadiusTier::Lg)
-        .with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative);
-    widget(dim_surface(row, surface, dim))
-        .children((hit, queue_cover(item, media, dim), meta))
+    let mut row = ListItem::new(title)
+        .auto_height(true)
+        .gap(10.0)
+        .selected(active)
+        .disabled(!ready);
+    let layout = std::sync::Arc::make_mut(&mut row.style.layout);
+    layout.width = Some(LengthSpec::Fill);
+    layout.min_width = Some(LengthSpec::Px(0.0));
+    let id = item.id.clone();
+    widget(row)
+        .leading(queue_cover(item, media, dim))
+        .content(meta)
+        .key(format!("player-queue-{}", super::super::key_part(&item.id)))
+        .on_cx(move |_, _: &Activate, cx| {
+            cx.dispatch_program_all(player_message(PlayerMessage::PlayItem {
+                item_id: id.clone(),
+            }));
+        })
         .into_any()
 }
 
@@ -695,6 +581,52 @@ mod tests {
         assert_player_word(&harness, "媒体");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 当前队列是 `Popover`：点触发器发 `QueueToggled(true)`，播放条按开着重建后面板留着、
+    /// 不因重建自己关上；点外面由框架收起，发 `QueueToggled(false)`。
+    #[test]
+    fn the_queue_popover_writes_its_open_state_back() {
+        let mut harness = ShellHarness::mount(scene());
+        settle(&mut harness);
+        show_cover(&mut harness, None);
+        let trigger = harness.keyed("player-queue").expect("当前队列");
+        let (x, y) = harness.center(trigger);
+        let messages = harness.click_messages(x, y);
+        let toggled = |messages: &[crate::shell::ShellMessage]| {
+            messages
+                .iter()
+                .filter_map(|message| match message {
+                    crate::shell::ShellMessage::Player(
+                        crate::shell::player::PlayerMessage::QueueToggled(open),
+                    ) => Some(*open),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(toggled(&messages), vec![true], "点触发器打开队列");
+        for message in messages {
+            harness.apply(message);
+        }
+        settle(&mut harness);
+        assert!(harness.model.player.queue_open, "重建后队列仍开着");
+        let row = harness.keyed("player-queue-now").expect("队列里的当前项");
+        let bounds = harness
+            .document()
+            .context()
+            .world()
+            .layout_box(row)
+            .expect("队列行的布局盒");
+        assert!(bounds.width > 0.0 && bounds.height > 0.0, "队列行排出来了");
+
+        let messages = harness.click_messages(4.0, 4.0);
+        assert_eq!(toggled(&messages), vec![false], "点外面收起队列");
+        for message in messages {
+            harness.apply(message);
+        }
+        settle(&mut harness);
+        assert!(!harness.model.player.queue_open);
+        assert!(harness.keyed("player-queue-popover").is_none(), "队列关上");
     }
 
     /// 换上当前这一条并重画播放条。队列保持关闭。

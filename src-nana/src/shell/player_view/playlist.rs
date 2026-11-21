@@ -2,7 +2,7 @@
 //!
 //! [`PlaylistPageView`] 是投影；[`PlaylistPageSignals`] 里页眉一个信号，条目放进按编号对照的 Store，
 //! 另有条目顺序。页眉的标题、状态行、「播放」的禁用和面板圆角按字段绑定；条目行的文件名、路径或原因、
-//! 能不能播放原地改；没点开时的虚线空框和面板用 `.visible` 互换。
+//! 能不能播放原地改；没点开时的空状态（`EmptyState`）和面板用 `.visible` 互换。
 //!
 //! 信号放在播放集路由的常驻信号里（`route_playlists.rs`），主区块同步时 [`PlaylistPageSignals::write`]；
 //! 播放条是那边登记的旧视图岛，这里只收它的占位节点。
@@ -27,9 +27,9 @@ use nana_ui::runtime::view::{
     fields, signal, store, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, Button, IconButton, JustifySpec, LengthSpec, RadiusTier, ReorderItem,
-    ReorderList, ReorderListEvent, SemanticColorRole, SemanticPaint, Stack, Text,
-    TextHorizontalAlignment,
+    Activate, AlignSpec, Button, EmptyState, IconButton, LengthSpec, ListItem, ListItemRole,
+    RadiusTier, ReorderItem, ReorderList, ReorderListEvent, SemanticColorRole, SemanticPaint,
+    Stack, Text, TextHorizontalAlignment,
 };
 use nana_ui::{ButtonKind, Icon};
 
@@ -38,8 +38,7 @@ use crate::backend::services::repository::PlaylistItem;
 use super::super::player::PlayerMessage;
 use super::super::row_sync::sync_rows;
 use super::super::{ShellMessage, ShellViewModel};
-use super::paint::GlyphButton;
-use super::{bar, icons, key_part, player_message, playlist_plugin_missing};
+use super::{icons, key_part, player_message, playlist_plugin_missing};
 
 /// 不能播放的条目整行的透明度。
 const UNREADY_OPACITY: f32 = 0.72;
@@ -71,7 +70,7 @@ pub(crate) struct PlaylistPageView {
     pub items: Vec<PlaylistEntry>,
 }
 
-/// 页眉和面板：没点开时只有空框。
+/// 页眉和面板：没点开时只有空状态。
 #[derive(Clone, Debug, PartialEq, Default)]
 pub(crate) struct PageHead {
     /// 已点开、详情已读回。
@@ -152,7 +151,7 @@ fn is_remote_thumbnail(path: &str) -> bool {
 }
 
 impl PlaylistPageView {
-    /// 从 ViewModel 取播放集页的投影。详情还没读回时只有空框。
+    /// 从 ViewModel 取播放集页的投影。详情还没读回时只有空状态。
     pub(crate) fn project(model: &ShellViewModel) -> Self {
         let Some(detail) = model.player.listed.as_ref() else {
             return Self {
@@ -199,7 +198,7 @@ type EntryItem = Item<Store<Vec<PlaylistEntry>>, String, PlaylistEntry>;
 pub(crate) struct PlaylistPageSignals {
     head: Signal<PageHead>,
     entries: Store<Vec<PlaylistEntry>>,
-    /// 投影里的条目顺序：拖动排序用的条目和「还是空的」空框读它，和 Store 里的顺序一致。
+    /// 投影里的条目顺序：拖动排序用的条目和「还是空的」空状态读它，和 Store 里的顺序一致。
     order: Signal<Vec<String>>,
 }
 
@@ -227,18 +226,18 @@ impl PlaylistPageSignals {
     }
 }
 
-/// 播放集页：没点开或详情还没读回时是虚线空框；点开后是 bg-elev、`--radius-2xl` 的面板，里面是页眉、
-/// 条目（或空框）和 `player_bar`。两块都留着，按是否点开互换。
+/// 播放集页：没点开或详情还没读回时是 NanaUI 的空状态；点开后是 bg-elev、`--radius-2xl` 的面板，里面是页眉、
+/// 条目（或空状态）和 `player_bar`。两块都留着，按是否点开互换。
 pub(crate) fn view(signals: PlaylistPageSignals, player_bar: AnyView) -> AnyView {
     let head = signals.head;
     let order = signals.order;
-    let unlisted = dashed_empty(
+    let unlisted = empty_frame(
         "选择一个播放集",
         "在左侧播放集区选择要查看或播放的列表。",
         "playlist-page-empty",
     )
     .visible(move || !head.with(|head| head.listed));
-    let no_items = dashed_empty(
+    let no_items = empty_frame(
         "播放集还是空的",
         "在文件浏览区右键文件，使用“加入播放列表”把内容加入这里。",
         "playlist-page-no-items",
@@ -505,37 +504,14 @@ fn entry_row(item: EntryItem, head: Signal<PageHead>) -> AnyView {
         .into_any()
 }
 
-/// 拖动柄：32px、`--radius-md`，16px 弱色竖握把。
+/// 拖动柄：NanaUI 的 `IconButton`，竖握把图标。
 ///
 /// 读屏名是「拖动排序」，不挂悬停提示。单击不打开预览；
 /// 400 毫秒内再点同一柄，和整行双击一样从这一条播放。不能播或没有播放插件时第二下不播。
 fn drag_handle(id: &str, item: EntryItem, head: Signal<PageHead>) -> AnyView {
     let play_id = id.to_string();
     let ready = move || item.try_with(|entry| entry.ready).unwrap_or(false);
-    let mut button = IconButton::new(icons::GRIP_VERTICAL, "拖动排序").colors_from_style();
-    button.style.foreground = Some(SemanticColorRole::Faint);
-    button.style.background = None;
-    button.style.border = None;
-    button.style.control_padding_x = None;
-    button.style.radius = Some(RadiusTier::Md);
-    button.style.painter = Some(
-        GlyphButton {
-            icon: icons::GRIP_VERTICAL,
-            size: 16.0,
-            color: SemanticColorRole::Faint,
-        }
-        .into(),
-    );
-    let layout = Arc::make_mut(&mut button.style.layout);
-    layout.width = Some(LengthSpec::Px(32.0));
-    layout.height = Some(LengthSpec::Px(32.0));
-    layout.min_width = Some(LengthSpec::Px(32.0));
-    layout.min_height = Some(LengthSpec::Px(32.0));
-    layout.padding_left = Some(LengthSpec::Px(0.0));
-    layout.padding_right = Some(LengthSpec::Px(0.0));
-    layout.flex_grow = Some(0.0);
-    layout.flex_shrink = Some(0.0);
-    widget(button)
+    widget(IconButton::new(icons::GRIP_VERTICAL, "拖动排序"))
         .key(format!("playlist-item-drag-{}", key_part(id)))
         .on_cx(move |_, _: &Activate, cx| {
             if !double_pressed(&play_id) {
@@ -655,9 +631,8 @@ fn cover_image(cover: &str) -> Option<nana_ui_core::BackgroundImage> {
     })
 }
 
-/// 文件名按钮：整行 32px 高的可点区域，14px 半粗正文色字靠左。单击打开这一条的预览，不开始播放。
+/// 文件名：NanaUI 的 `ListItem`（读屏报成按钮），文件名是主文本，过长省略。单击打开这一条的预览，不开始播放。
 /// 400 毫秒内再点同一行的文件名，和整行双击一样再从这一条播放；不能播或没有播放插件时只记日志，不播。
-/// 字不居中，按设计意图和下面的路径一起靠左。
 fn item_title(item: EntryItem, id: &str, title: &str, head: Signal<PageHead>) -> AnyView {
     let item_id = id.to_string();
     let play_id = id.to_string();
@@ -666,8 +641,12 @@ fn item_title(item: EntryItem, id: &str, title: &str, head: Signal<PageHead>) ->
             .unwrap_or_default()
     };
     let ready = move || item.try_with(|entry| entry.ready).unwrap_or(false);
-    let hit = widget(bar::hit_area(title, false, 6.0))
-        .prop::<Arc<str>, fields::icon_button::label>(move || Arc::from(filename()))
+    let mut row = ListItem::new(title).role(ListItemRole::Button);
+    let layout = Arc::make_mut(&mut row.style.layout);
+    layout.width = Some(LengthSpec::Fill);
+    layout.min_width = Some(LengthSpec::Px(0.0));
+    widget(row)
+        .prop::<String, fields::list_item::label>(filename)
         .key(format!("playlist-item-title-{}", key_part(id)))
         .on_cx(move |_, _: &Activate, cx| {
             cx.dispatch_program_all(player_message(PlayerMessage::OpenPreview {
@@ -683,28 +662,8 @@ fn item_title(item: EntryItem, id: &str, title: &str, head: Signal<PageHead>) ->
             } else {
                 eprintln!("Nana 播放集文件名连点两下，这一条不能播：{play_id}");
             }
-        });
-    let mut label = Text::new(title)
-        .color(SemanticColorRole::Text)
-        .font_size(14.0)
-        .font_weight(600)
-        .line_height(21.7)
-        .truncating();
-    Arc::make_mut(&mut label.style.layout).min_width = Some(LengthSpec::Px(0.0));
-    widget(
-        Stack::row(0.0)
-            .align(AlignSpec::Center)
-            .width(LengthSpec::Fill)
-            .min_width(LengthSpec::Px(0.0))
-            .height(LengthSpec::Px(32.0))
-            .min_height(LengthSpec::Px(32.0))
-            .with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative),
-    )
-    .children((
-        hit,
-        widget(label).prop::<String, fields::text::value>(filename),
-    ))
-    .into_any()
+        })
+        .into_any()
 }
 
 /// 12px 次行，超长省略。
@@ -750,38 +709,13 @@ fn toolbar_button(
     button
 }
 
-/// 虚线空框：bg-subtle 底、border-strong 虚线、12px 圆角，至少 280px 高，标题和说明居中。
-fn dashed_empty(
+/// 空状态：NanaUI 的 `EmptyState`，标题和说明居中。键是 `{key}-frame`。
+fn empty_frame(
     title: &str,
     message: &str,
     key: &'static str,
-) -> nana_ui::runtime::view::El<Stack, (AnyView, AnyView)> {
-    let mut heading = Text::new(title)
-        .color(SemanticColorRole::Text)
-        .font_size(18.0)
-        .font_weight(700)
-        .line_height(27.9);
-    heading.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
-    let mut note = Text::new(message)
-        .color(SemanticColorRole::Muted)
-        .font_size(13.0)
-        .line_height(20.15);
-    note.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
-    widget(
-        Stack::column(10.0)
-            .align(AlignSpec::Center)
-            .justify(JustifySpec::Center)
-            .surface(SemanticColorRole::Subtle)
-            .border(SemanticColorRole::BorderStrong, 1.0)
-            .radius(RadiusTier::Xl)
-            .min_height(LengthSpec::Px(280.0))
-            .with_layout(|layout| layout.border_style = Some(nana_ui_core::BorderStyle::Dashed)),
-    )
-    .children((
-        widget(heading).key(key).into_any(),
-        widget(note).key(format!("{key}-hint")).into_any(),
-    ))
-    .key(format!("{key}-frame"))
+) -> nana_ui::runtime::view::El<EmptyState> {
+    widget(EmptyState::new(title).message(message)).key(format!("{key}-frame"))
 }
 
 /// 工具栏按钮的禁用和字色：禁用时字色是正文色（危险操作是危险色）按 0.45 和底色混出来的。

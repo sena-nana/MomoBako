@@ -2,8 +2,8 @@
 //!
 //! NanaUI 的 `IconButton` 停用时只给按种类配色的按钮整枚淡到 50%（线性空间合成）；`colors_from_style` 的按钮
 //! 照自己写的 `style.interaction.disabled` 画，节点不透明度照写的来。壳层里会停用的图标按钮都走后一种：
-//! 侧栏标题工具、添加资源库表单和对话框的关闭位在样式里写好和所在底色在 sRGB 里混出的停用色，播放条的
-//! 传输按钮由自绘按 `PaintState::disabled` 混；节点都不再整体淡化。
+//! 侧栏标题工具、添加资源库表单和对话框的关闭位在样式里写好和所在底色在 sRGB 里混出的停用色，节点都不再
+//! 整体淡化。播放条的传输按钮是原生 `IconButton`，停用按主题配方画。
 
 use nana_ui::runtime::{Entity, IconButton, SemanticColorRole, StableNodeId};
 use nana_ui_core::SemanticColorMix;
@@ -87,19 +87,22 @@ fn assert_mixed_over_surface(harness: &ShellHarness, id: StableNodeId, label: &s
     );
 }
 
-/// 传输按钮是 `IconButton`，自绘按停用状态混好颜色；提示只有循环模式有。
+/// 传输按钮是原生 `IconButton`：不挂自绘，停用按主题配方画；提示只有循环模式有。
+/// 当前队列是 `Popover` 的触发器，没有条目时也能打开。
 #[test]
-fn disabled_player_buttons_are_dimmed_only_by_their_painter() {
+fn disabled_player_buttons_are_native_icon_buttons() {
     let harness = ShellHarness::mount(scene("live-files"));
     let context = harness.document().context();
-    for label in ["列表循环", "上一首", "播放", "下一首", "当前队列"] {
-        let id = harness.node(label);
+    for (label, key) in [
+        ("列表循环", "player-cycle-mode"),
+        ("上一首", "player-previous"),
+        ("播放", "player-play"),
+        ("下一首", "player-next"),
+    ] {
+        let id = harness
+            .keyed(key)
+            .unwrap_or_else(|| panic!("没有「{label}」"));
         assert!(disabled(&harness, id), "没有条目时「{label}」停用");
-        assert_eq!(
-            opacity(&harness, id),
-            None,
-            "「{label}」的停用色由自绘混好，节点不再整体淡化"
-        );
         let (own_colors, painted, tooltip) = context
             .read(Entity::<IconButton>::from_stable_id(id), |button| {
                 (
@@ -109,13 +112,23 @@ fn disabled_player_buttons_are_dimmed_only_by_their_painter() {
                 )
             })
             .unwrap_or_else(|_| panic!("「{label}」应该是 IconButton"));
-        assert!(own_colors && painted, "「{label}」颜色照写的来、由自绘画");
+        assert!(!own_colors && !painted, "「{label}」按主题配方画，不自绘");
         let expected = (label == "列表循环").then(|| label.to_string());
         assert_eq!(
             tooltip, expected,
             "「{label}」的提示照 Vue：只有循环模式写了 title"
         );
     }
+    let queue = harness.keyed("player-queue").expect("当前队列");
+    assert!(
+        context
+            .read(
+                Entity::<nana_ui::runtime::Popover>::from_stable_id(queue),
+                |popover| { popover.accessible_name.to_string() }
+            )
+            .is_ok(),
+        "当前队列是 Popover 的触发器"
+    );
 }
 
 #[test]

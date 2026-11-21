@@ -3,7 +3,8 @@
 //! 播放集页是一张 bg-elev 面板：眉题、标题、「播放器 · N 项」和右上角播放；下面每条是
 //! 白底圆角行（拖动柄、扩展名方块、文件名和路径、播放与移除），最后是播放条。
 //! 没点开播放集时只有虚线空框。播放集页本身（投影、信号和视图）在 `shell/player_view/playlist.rs`。
-//! 播放条仍是旧视图：文件页、预览页和播放集页都把它登记成岛，版本按 [`bar_stamp`] 算。
+//! 播放条（`shell/player_view/bar.rs`，NanaUI 的 `MediaTransportBar` 加媒体行）仍按整块重建：文件页、预览页
+//! 和播放集页都把它登记成岛，版本按 [`bar_stamp`] 算。
 
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -25,9 +26,10 @@ pub(crate) fn key_part(text: &str) -> String {
 /// 播放条岛的版本：播放条读到的状态（`shell/player_view/bar.rs` 的 `BarProps`、窗口是否不宽于 1120px）和岛该不该有内容
 /// （在不在预览、显不显示播放表面、点开的播放集）。
 ///
-/// 播放条量到自己的宽度后会发 `BarResized`。卡片宽窄不改变这一棵视图（窄卡片是音量挤出，不是另排三行），
+/// 播放条量到自己的宽度后会发 `BarResized`。卡片宽窄不改变这一棵视图（三行只看窗口断点），
 /// 所以宽度不进版本，避免量了又建、建了又量。这里不按 ViewModel 版本，只按它真正读到的值。
-/// 播放进度和时间走热信号，不在里面。播放条改读别的字段时这里跟着加。
+/// 播放进度走热信号，不在里面。音量也不在里面：音量只由传输条的音量弹层改，拖动时条自己先记下新值，
+/// 每一格都重建会把开着的弹层关掉；下次因别的原因重建时按会话里的音量写。播放条改读别的字段时这里跟着加。
 pub(super) fn bar_stamp(model: &ShellViewModel) -> u64 {
     let mut hasher = DefaultHasher::new();
     let player = &model.player;
@@ -51,13 +53,7 @@ pub(super) fn bar_stamp(model: &ShellViewModel) -> u64 {
         player.settings.object_fit_cover,
     )
         .hash(&mut hasher);
-    (
-        &session.status,
-        &session.error,
-        session.volume.to_bits(),
-        session.duration_ms,
-    )
-        .hash(&mut hasher);
+    (&session.status, &session.error, session.duration_ms).hash(&mut hasher);
     player
         .listed
         .as_ref()
@@ -112,12 +108,8 @@ pub(super) fn bar_stamp(model: &ShellViewModel) -> u64 {
             })
             .hash(&mut hasher);
     }
-    // 三行只看窗口断点。卡片变窄时音量溢出，树不用按卡片宽重建。
-    (
-        model.narrow_viewport(),
-        bar::volume_slider_width(model.viewport_width).to_bits(),
-    )
-        .hash(&mut hasher);
+    // 三行只看窗口断点，树不用按卡片宽重建。
+    model.narrow_viewport().hash(&mut hasher);
     hasher.finish()
 }
 

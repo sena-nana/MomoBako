@@ -274,7 +274,7 @@ fn playback_frames_only_touch_the_bound_bar_fields() {
     let mut harness = ShellHarness::mount(model);
     let time = harness.node("0:00 / 0:03");
     let seek = nana_ui::runtime::Entity::<nana_ui::runtime::RangeField>::from_stable_id(
-        harness.node("播放进度"),
+        harness.node("进度"),
     );
     let position = |harness: &ShellHarness| {
         harness

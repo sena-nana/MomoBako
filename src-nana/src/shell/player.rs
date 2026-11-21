@@ -123,6 +123,8 @@ pub enum PlayerMessage {
         cover: bool,
     },
     ToggleQueue,
+    /// 当前队列开了或关了（队列 `Popover` 发的 `PopoverToggled`）。
+    QueueToggled(bool),
     /// 播放条卡片排版后的宽度。只记下来；三行排版只看窗口是不是不宽于 1120。
     BarResized(f32),
     /// `repo_id` 为空时停止当前会话。仓库切换要带上被换掉的仓库。

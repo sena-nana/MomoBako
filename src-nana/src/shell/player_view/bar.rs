@@ -1,24 +1,24 @@
 //! 底部播放条。
 //!
-//! 卡片里自上而下是 8px 进度轨、「媒体 / 传输 / 时间与音量」三栏，以及图片、视频才有的
-//! 停留时长和适应 / 填充设置。只有窗口不宽于 1120px
-//! 才把三栏拆成三行。窗口更宽、卡片却窄于一行时，仍是这一行：音量滑杆按列的下限伸出卡片，
-//! 不把整条改成三行。当前队列浮在卡片右上方（`shell/player_view/bar/parts.rs`）。文件页、预览页和播放集页共用这一块。
+//! 卡片里上面是媒体行（封面、标题和次行，点了打开预览），下面是 NanaUI 的 `MediaTransportBar`：
+//! 前导槽放循环模式、上一首、播放 / 暂停、下一首和当前队列，条自己画进度、「当前 / 总长」和音量弹层，
+//! 图片、视频才有的停留时长和适应 / 填充放在条的第二行。窗口不宽于 1120px 时传输条换成 `Stacked`，
+//! 进度单独占一行。当前队列是挂在队列按钮上的 `Popover`（`shell/player_view/bar/parts.rs`）。
+//! 文件页、预览页和播放集页共用这一块。
 
-use nana_ui::Icon;
-use nana_ui::runtime::view::{AnyView, IntoView, fields, widget};
+use nana_ui::runtime::view::{AnyView, FieldWrite, IntoView, widget};
 use nana_ui::runtime::{
-    Activate, AlignSpec, IconButton, JustifySpec, LengthSpec, RadiusTier, RangeField, RangeInput,
-    SemanticColorRole, SizeChanged, Stack, Text,
+    Activate, AlignSpec, IconButton, LengthSpec, ListItem, MediaTransportBar,
+    MediaTransportDensity, MediaTransportEvent, MediaTransportIcons, MediaTransportPlacement,
+    RadiusTier, SemanticColorRole, SizeChanged, Stack,
 };
+use nana_ui::{ControlSize, Icon};
 
 use super::super::player::{PlaybackMode, PlayerMessage, QueueItem};
 use super::super::{ShellMessage, ShellViewModel, hot};
 use super::icons;
-use super::paint::{GlyphButton, Invisible, ProgressTrack};
 
 mod parts;
-pub(super) use parts::hit_area;
 
 /// 播放条要显示的全部状态。从壳层模型推导一次，视图只读这里。
 pub(crate) struct BarProps {
@@ -44,8 +44,6 @@ pub(crate) struct BarProps {
     /// 队列浮层滚动区的键：仓库和播放集，换播放集时列表回到顶部。
     pub queue_key: String,
     pub current_id: Option<String>,
-    /// 窗口逻辑宽。音量滑杆宽是 `min(120px, 18vw)`。
-    viewport_width: f32,
 }
 
 impl BarProps {
@@ -97,7 +95,6 @@ impl BarProps {
                 )
             ),
             current_id: player.current_id.clone(),
-            viewport_width: model.viewport_width,
             item,
         }
     }
@@ -134,6 +131,8 @@ impl BarProps {
         media_type_label(&self.file_class)
     }
 
+    /// 「当前 / 总长」。条上的读数由传输条自己按同一格式写，这里只给测试核对会话。
+    #[cfg(test)]
     pub(crate) fn time_text(&self) -> String {
         clock_parts(self.current_ms, self.duration_ms).1
     }
@@ -213,8 +212,8 @@ fn format_time(ms: u64) -> String {
     format!("{}:{:02}", total / 60, total % 60)
 }
 
-/// 随播放时钟变的三个值：进度轨比例、「当前 / 总长」和拖动条位置。没有时长时比例为 0，
-/// 拖动条按 1 毫秒的总长夹住。挂载和逐帧同步共用这一份算法。
+/// 随播放时钟变的三个值：进度比例、「当前 / 总长」和当前位置（毫秒）。没有时长时比例为 0，
+/// 位置按 1 毫秒的总长夹住。挂载和逐帧同步（热信号）共用这一份算法。
 pub(crate) fn clock_parts(current_ms: u64, duration_ms: u64) -> (f32, String, f64) {
     let ratio = if duration_ms == 0 {
         0.0
@@ -225,46 +224,20 @@ pub(crate) fn clock_parts(current_ms: u64, duration_ms: u64) -> (f32, String, f6
     (ratio, time, current_ms.min(duration_ms.max(1)) as f64)
 }
 
-/// 宽排版里媒体栏的下限（`minmax(220px, 1fr)` 的 220）。
-/// 卡片放不下一行时音量伸出卡片，不因此改成三行。
-const MEDIA_MIN_WIDTH: f32 = 220.0;
-
-/// 只有窗口不宽于 1120px 才排成三行。
-///
-/// 窗口更宽时不看卡片宽度，三栏仍是
-/// `grid-template-columns: minmax(220px, 1fr) max-content minmax(170px, 0.72fr)`：
-/// 卡片放不下一行时列停在下限，音量从卡片右边溢出去。媒体栏下限是 220px，
-/// 1200×800 标准文件页（卡片约 558）也会把音量挤出右内边距，传输仍和媒体同一行。
-fn narrow_layout(model: &ShellViewModel) -> bool {
-    model.narrow_viewport()
-}
-
-/// 播放条。窗口不宽于 1120px 时按 [`narrow_layout`] 拆成三行。卡片是 `--radius-2xl`，跟着主题变。
-/// 卡片不裁切：窗口仍宽、卡片放不下一行时，音量可以伸出右边。
+/// 播放条。卡片里上面是媒体行，下面是 NanaUI 的 `MediaTransportBar`；窗口不宽于 1120px 时传输条
+/// 换成 `Stacked`，进度单独占一行，整张卡片是媒体、进度、按钮三行。卡片是 `--radius-2xl`，跟着主题变。
 pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
     let props = BarProps::from_model(model);
-    let narrow = narrow_layout(model);
-    let mut rows: Vec<AnyView> = vec![progress(&props), body(&props, narrow)];
-    if props.shows_settings() {
-        rows.push(parts::settings_row(&props, narrow));
-    }
-    if props.queue_open {
-        rows.push(parts::queue_popover(&props));
-    }
+    let narrow = model.narrow_viewport();
     let card = Stack::column(10.0)
         .surface(SemanticColorRole::Surface)
         .border(SemanticColorRole::BorderStrong, 1.0)
         .radius(RadiusTier::Xxl)
-        .min_height(LengthSpec::Px(124.0))
         .with_layout(|layout| {
-            // 队列浮层按卡片的内边距盒定位。
-            layout.position = nana_ui_core::PositionSpec::Relative;
             layout.padding_top = Some(LengthSpec::Px(12.0));
             layout.padding_right = Some(LengthSpec::Px(16.0));
-            layout.padding_bottom = Some(LengthSpec::Px(16.0));
+            layout.padding_bottom = Some(LengthSpec::Px(12.0));
             layout.padding_left = Some(LengthSpec::Px(16.0));
-            layout.overflow_x = nana_ui_core::OverflowSpec::Visible;
-            layout.overflow_y = nana_ui_core::OverflowSpec::Visible;
             layout.paint.box_shadows = vec![nana_ui_core::BoxShadowSpec {
                 paint_color: None,
                 offset_x: 0.0,
@@ -276,7 +249,7 @@ pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
             }];
         });
     widget(card)
-        .children(rows)
+        .children((media(&props), transport_bar(&props, narrow)))
         .key("player-card")
         .on_cx(|_, event: &SizeChanged, cx| {
             cx.dispatch_program_all(player_message(PlayerMessage::BarResized(event.width)))
@@ -284,128 +257,86 @@ pub(crate) fn player_bar(model: &ShellViewModel) -> AnyView {
         .into_any()
 }
 
-/// 8px 进度轨。上面盖一层 22px 高的透明拖动区。
-fn progress(props: &BarProps) -> AnyView {
-    let seekable = props.has_item() && props.duration_ms > 0 && props.supports_seek;
-    let duration = props.duration_ms.max(1) as f64;
-    let (ratio, _, position) = clock_parts(props.current_ms, props.duration_ms);
-    let mut range = RangeField::new(position, 0.0, duration, 100.0)
-        .label("播放进度")
-        .show_label(false)
-        .show_value(false)
-        .disabled(!seekable);
-    range.style.painter = Some(Invisible.into());
-    range.style.background = None;
-    range.style.border = None;
-    let layout = std::sync::Arc::make_mut(&mut range.style.layout);
-    layout.position = nana_ui_core::PositionSpec::Absolute;
-    layout.offset_left = Some(LengthSpec::Px(0.0));
-    layout.offset_top = Some(LengthSpec::Px(-7.0));
-    layout.width = Some(LengthSpec::Percent(100.0));
-    layout.height = Some(LengthSpec::Px(22.0));
-    layout.min_height = Some(LengthSpec::Px(22.0));
-    layout.padding_left = Some(LengthSpec::Px(0.0));
-    layout.padding_right = Some(LengthSpec::Px(0.0));
-    // 进度轨比例和拖动条位置随播放时钟逐帧走，绑在热信号上，播放推进不重挂播放条。
-    // 拖动时每一格都跳转，不等松手。
-    // Nana 拖动中的取值是 `RangeInput`；`RangeChanged` 要等松手才提交。键盘步进也会先发出 `RangeInput`。
-    let seek = widget(range)
-        .prop::<f64, fields::slider::value>(hot::prop(|signals| signals.position, position))
-        .key("player-seek")
-        .on_cx(|_, event: &RangeInput, cx| {
-            cx.dispatch_program_all(player_message(PlayerMessage::Seek(
-                event.value.max(0.0) as u64
-            )));
+/// 传输条：进度、「当前 / 总长」和音量弹层由 `MediaTransportBar` 自己画，前导槽放循环模式、上一首、
+/// 播放 / 暂停、下一首和当前队列，第二行放图片、视频才有的设置。条自己的播放钮、设置菜单和全屏都藏起来。
+///
+/// 进度松手（或键盘每一步）才跳转，拖动中只预览读数；当前时间随播放时钟走热信号，播放推进不重挂播放条。
+/// 音量拖动中每一格都写入。没有条目、或播放器既不能跳转也不能调音量时，进度和音量一起停用。
+fn transport_bar(props: &BarProps, narrow: bool) -> AnyView {
+    let has_item = props.has_item();
+    let (_, _, position_ms) = clock_parts(props.current_ms, props.duration_ms);
+    let mut bar = MediaTransportBar::new()
+        .placement(MediaTransportPlacement::Inline)
+        .density(if narrow {
+            MediaTransportDensity::Stacked
+        } else {
+            MediaTransportDensity::Regular
+        })
+        .show_play(false)
+        .show_settings(false)
+        .show_fullscreen(false)
+        .seekable(has_item && props.duration_ms > 0 && props.supports_seek)
+        .icons(MediaTransportIcons {
+            play: icons::PLAY,
+            pause: icons::PAUSE,
+            volume: icons::VOLUME_2,
+            volume_muted: icons::VOLUME_X,
+            ..MediaTransportIcons::default()
         });
-    widget(
-        Stack::row(0.0)
-            .width(LengthSpec::Fill)
-            .height(LengthSpec::Px(8.0))
-            .min_height(LengthSpec::Px(8.0))
-            .painter(ProgressTrack { ratio })
-            .with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative),
-    )
-    .prop::<f32, hot::TrackRatioField>(hot::prop(|signals| signals.progress, ratio))
-    .children((seek,))
-    .key("player-progress")
-    .into_any()
-}
-
-/// 三栏：媒体、传输、时间和音量。窗口不宽于 1120px 时拆成三行，传输居中，时间和音量两端对齐。
-fn body(props: &BarProps, narrow: bool) -> AnyView {
-    let media = media(props);
-    let transport = transport(props);
-    if narrow {
-        let side = widget(
-            Stack::bar(10.0)
-                .justify(JustifySpec::SpaceBetween)
-                .align(AlignSpec::Center),
-        )
-        .children((time(props), volume(props)))
-        .key("player-side")
-        .into_any();
-        return widget(Stack::column(18.0))
-            .children((
-                media,
-                widget(Stack::bar(0.0).justify(JustifySpec::Center))
-                    .children((transport,))
-                    .into_any(),
-                side,
-            ))
-            .key("player-body")
-            .into_any();
+    bar.playing = props.playing;
+    bar.duration = props.duration_ms as f64 / 1000.0;
+    bar.position = position_ms / 1000.0;
+    bar.volume = f64::from(props.volume) * 100.0;
+    bar.disabled = !has_item || (!props.supports_seek && !props.supports_volume);
+    bar.volume_label = Some("音量".into());
+    let bar = widget(bar)
+        .prop::<f64, PositionMs>(hot::prop(|signals| signals.position, position_ms))
+        .leading(transport(props))
+        .key("player-transport-bar")
+        .on_cx(|_, event: &MediaTransportEvent, cx| match *event {
+            MediaTransportEvent::Seek(seconds) => {
+                cx.dispatch_program_all(player_message(PlayerMessage::Seek(
+                    (seconds.max(0.0) * 1000.0).round() as u64,
+                )));
+            }
+            MediaTransportEvent::Volume(volume) => {
+                cx.dispatch_program_all(player_message(PlayerMessage::SetVolume(
+                    (volume / 100.0).clamp(0.0, 1.0) as f32,
+                )));
+            }
+            _ => {}
+        });
+    if props.shows_settings() {
+        bar.secondary(parts::settings_row(props, narrow)).into_any()
+    } else {
+        bar.into_any()
     }
-    // 宽排版：媒体 1fr（至少 220）、传输 max-content、
-    // 时间音量 0.72fr（至少 170）。卡片比这些下限还窄时列不再缩短，音量从右边挤出卡片。
-    let media = widget(
-        Stack::row(0.0)
-            .grow(1.0)
-            .shrink(1.0)
-            .min_width(LengthSpec::Px(MEDIA_MIN_WIDTH))
-            .with_layout(|layout| layout.flex_basis = Some(LengthSpec::Px(0.0))),
-    )
-    .children((media,))
-    .into_any();
-    let side = widget(
-        Stack::row(10.0)
-            .justify(JustifySpec::End)
-            .align(AlignSpec::Center)
-            .grow(0.72)
-            .shrink(1.0)
-            .min_width(LengthSpec::Px(170.0))
-            .with_layout(|layout| layout.flex_basis = Some(LengthSpec::Px(0.0))),
-    )
-    .children((time(props), volume(props)))
-    .key("player-side")
-    .into_any();
-    widget(
-        Stack::bar(18.0)
-            .align(AlignSpec::Center)
-            .min_height(LengthSpec::Px(72.0))
-            .with_layout(|layout| {
-                layout.overflow_x = nana_ui_core::OverflowSpec::Visible;
-                layout.overflow_y = nana_ui_core::OverflowSpec::Visible;
-            }),
-    )
-    .children((media, transport, side))
-    .key("player-body")
-    .into_any()
 }
 
-/// 封面和两行字是同一个可点区域：点它打开当前条目的预览。没有条目时整块变淡、不可点。
+/// 传输条的当前时间。热信号给的是毫秒，条上按秒。
+struct PositionMs;
+
+impl FieldWrite<MediaTransportBar, f64> for PositionMs {
+    const FIELD: &'static str = "MediaTransportBar.position(ms)";
+
+    fn write(target: &mut MediaTransportBar, position_ms: f64) {
+        target.position = position_ms / 1000.0;
+    }
+
+    fn differs(target: &MediaTransportBar, position_ms: &f64) -> bool {
+        target.position != position_ms / 1000.0
+    }
+}
+
+/// 媒体行：NanaUI 的 `ListItem`，行首 58px 封面，内容是粗体标题和次行。点它打开当前条目的预览；
+/// 没有条目时整行停用，字和类型方块按 0.45 在卡片底色上淡化。
 fn media(props: &BarProps) -> AnyView {
     let title = props.title();
-    // 没有条目时整块按 0.45 淡化，在卡片底色上混出来。
     let dim = (!props.has_item()).then_some((
         SemanticColorRole::Surface,
         crate::theme_map::DISABLED_OPACITY,
     ));
-    let hit = widget(parts::hit_area(&title, !props.has_item(), 6.0))
-        .key("player-media")
-        .on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program_all(player_message(PlayerMessage::OpenPreview { item_id: None }))
-        });
-    // 两行字的宽度来自剩下的空间（基准 0、可伸缩），不换行，超出时省略号收尾。
+    // 两行字的宽度来自剩下的空间，不换行，超出时省略号收尾。
     let meta = widget(
         Stack::column(3.0)
             .min_width(LengthSpec::Px(0.0))
@@ -415,7 +346,7 @@ fn media(props: &BarProps) -> AnyView {
     )
     .children((
         widget(parts::dim_text(
-            parts::line(title, 14.0, 700, SemanticColorRole::Text, 21.7),
+            parts::line(title.clone(), 14.0, 700, SemanticColorRole::Text, 21.7),
             dim,
         ))
         .key("player-title"),
@@ -431,23 +362,28 @@ fn media(props: &BarProps) -> AnyView {
         ))
         .key("player-subtitle"),
     ));
-    widget(
-        Stack::row(12.0)
-            .width(LengthSpec::Fill)
-            .min_width(LengthSpec::Px(0.0))
-            .min_height(LengthSpec::Px(58.0))
-            .with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative),
-    )
-    .children((hit, cover(props, dim), meta))
-    .key("player-media-row")
-    .into_any()
+    let mut row = ListItem::new(title)
+        .auto_height(true)
+        .gap(12.0)
+        .disabled(!props.has_item());
+    let layout = std::sync::Arc::make_mut(&mut row.style.layout);
+    layout.width = Some(LengthSpec::Fill);
+    layout.min_width = Some(LengthSpec::Px(0.0));
+    widget(row)
+        .leading(cover(props, dim))
+        .content(meta)
+        .key("player-media")
+        .on_cx(|_, _: &Activate, cx| {
+            cx.dispatch_program_all(player_message(PlayerMessage::OpenPreview { item_id: None }))
+        })
+        .into_any()
 }
 
 /// 58px 封面。
 ///
 /// 当前条目的路径指向可读本地图片时按 `object-fit: cover` 画进去。路径空、只是 http(s)、
 /// 读失败、不是图片或编不成图时仍写类型字。不下载，也不等文件列表把纹理传上来。
-/// 没有条目时类型字随整行按 0.45 淡一次；有图时这一格不另淡，点击穿透，仍打开预览。
+/// 没有条目时类型字随整行按 0.45 淡一次；有图时这一格不另淡，点击穿透到媒体行，仍打开预览。
 fn cover(props: &BarProps, dim: Option<(SemanticColorRole, f32)>) -> AnyView {
     let path = props
         .item
@@ -459,9 +395,10 @@ fn cover(props: &BarProps, dim: Option<(SemanticColorRole, f32)>) -> AnyView {
     parts::type_cover(props.media_label(), 58.0, "player-cover", dim)
 }
 
-/// 循环模式、上一首、播放 / 暂停、下一首、当前队列。
+/// 前导槽里的循环模式、上一首、播放 / 暂停、下一首和当前队列，都是 NanaUI 的 `IconButton`
+/// （队列是 `Popover` 的图标触发器）。
 ///
-/// 只有循环模式有悬停提示（当前模式名）。五个按钮都给无障碍名，读屏读得出名字；另外四个不加提示。
+/// 只有循环模式有悬停提示（当前模式名）。每个按钮都有无障碍名，读屏读得出名字。
 fn transport(props: &BarProps) -> AnyView {
     let has_item = props.has_item();
     let skip_disabled = !has_item || !props.can_play;
@@ -477,44 +414,34 @@ fn transport(props: &BarProps) -> AnyView {
         (icons::PLAY, "播放")
     };
     widget(
-        Stack::row(6.0)
+        Stack::row(4.0)
             .grow(0.0)
             .shrink(0.0)
             .align(AlignSpec::Center),
     )
     .children((
-        widget(glyph_button(mode_icon, mode_label, 15.0, 32.0, !has_item).with_tooltip(mode_label))
+        widget(transport_button(mode_icon, mode_label, !has_item).with_tooltip(mode_label))
             .key("player-cycle-mode")
             .on_cx(|_, _: &Activate, cx| {
                 cx.dispatch_program_all(player_message(PlayerMessage::CycleMode))
             }),
-        widget(glyph_button(
-            icons::SKIP_BACK,
-            "上一首",
-            16.0,
-            32.0,
-            skip_disabled,
-        ))
-        .key("player-previous")
-        .on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program_all(player_message(PlayerMessage::PlayPrevious))
-        }),
-        widget(glyph_button(
+        widget(transport_button(icons::SKIP_BACK, "上一首", skip_disabled))
+            .key("player-previous")
+            .on_cx(|_, _: &Activate, cx| {
+                cx.dispatch_program_all(player_message(PlayerMessage::PlayPrevious))
+            }),
+        widget(transport_button(
             play_icon,
             play_label,
-            17.0,
-            36.0,
             skip_disabled && !props.retry,
         ))
         .key("player-play")
         .on_cx(move |_, _: &Activate, cx| {
             cx.dispatch_program_all(player_message(PlayerMessage::SetPlaying(!playing)))
         }),
-        widget(glyph_button(
+        widget(transport_button(
             icons::SKIP_FORWARD,
             "下一首",
-            16.0,
-            32.0,
             skip_disabled,
         ))
         .key("player-next")
@@ -523,156 +450,27 @@ fn transport(props: &BarProps) -> AnyView {
                 natural_end: false,
             }));
         }),
-        widget(glyph_button(
-            icons::LIST_MUSIC,
-            "当前队列",
-            16.0,
-            32.0,
-            !has_item,
-        ))
-        .key("player-queue")
-        .on_cx(|_, _: &Activate, cx| {
-            cx.dispatch_program_all(player_message(PlayerMessage::ToggleQueue))
-        }),
+        parts::queue_popover(props),
     ))
     .key("player-transport")
     .into_any()
 }
 
-/// 只有图标的传输按钮：`label` 是无障碍名，图标按给定的像素大小画，颜色是正文色，
-/// 外框 `box_size` 见方。
-///
-/// 外观全由 [`GlyphButton`] 画：它不调 `draw_default`，`IconButton` 的内建图标、悬停底和焦点底都不画；
-/// 停用时它按 `PaintState::disabled` 以 0.45 在 sRGB 里和卡片底色混。颜色照写的来
-/// （`colors_from_style`），NanaUI 不再把停用的按钮整枚淡化，只淡自绘这一次。
-pub(crate) fn glyph_button(
-    icon: Icon,
-    label: &str,
-    icon_size: f32,
-    box_size: f32,
-    disabled: bool,
-) -> IconButton {
-    let mut button = IconButton::new(icon, label)
-        .colors_from_style()
-        .disabled(disabled);
-    button.style.foreground = Some(SemanticColorRole::Text);
-    button.style.background = None;
-    button.style.control_padding_x = None;
-    button.style.painter = Some(
-        GlyphButton {
-            icon,
-            size: icon_size,
-            color: SemanticColorRole::Text,
-        }
-        .into(),
-    );
-    let layout = std::sync::Arc::make_mut(&mut button.style.layout);
-    layout.width = Some(LengthSpec::Px(box_size));
-    layout.height = Some(LengthSpec::Px(box_size));
-    layout.min_width = Some(LengthSpec::Px(box_size));
-    layout.min_height = Some(LengthSpec::Px(box_size));
-    layout.padding_left = Some(LengthSpec::Px(0.0));
-    layout.padding_right = Some(LengthSpec::Px(0.0));
-    layout.flex_grow = Some(0.0);
-    layout.flex_shrink = Some(0.0);
-    button
-}
-
-/// 12px 弱色时间。窄列里可以在「/」后面折行。
-///
-/// 数字用等宽字形。
-/// 没有在播曲目时仍是会话里的 `0:00 / 0:00`，不另写进度。
-fn time(props: &BarProps) -> AnyView {
-    let text = props.time_text();
-    let mut node = Text::new(text.clone())
-        .color(SemanticColorRole::Muted)
-        .font_size(12.0)
-        .line_height(18.6)
-        .with_min_width_zero();
-    // `tnum` 是 tabular-nums 的 OpenType 特性，分秒进位时字宽不跳。
-    std::sync::Arc::make_mut(&mut node.style.layout)
-        .text_ext
-        .font_features = Some(vec![nana_ui_core::FontFeatureSetting::new(*b"tnum", 1)]);
-    widget(node)
-        .prop::<String, fields::text::value>(hot::prop(|signals| signals.time, text))
-        .key("player-time")
-        .into_any()
-}
-
-/// 音量滑杆的首选宽度：`min(120px, 18vw)`，至少 72px。
-/// 窗口宽过约 667px 时仍是 120；再窄才按 18vw 缩短，最短 72。没有曲目时滑杆照样在，用会话里的音量。
-pub(super) fn volume_slider_width(viewport_width: f32) -> f32 {
-    const PREFERRED: f32 = 120.0;
-    const FLOOR: f32 = 72.0;
-    let from_viewport = if viewport_width.is_finite() && viewport_width > 0.0 {
-        viewport_width * 0.18
-    } else {
-        PREFERRED
-    };
-    from_viewport.min(PREFERRED).max(FLOOR)
-}
-
-/// 音量图标和滑杆。滑杆宽见 [`volume_slider_width`]，压缩时最窄 72px；没有条目或播放器不支持音量时变淡。
-fn volume(props: &BarProps) -> AnyView {
-    let disabled = !props.has_item() || !props.supports_volume;
-    let width = volume_slider_width(props.viewport_width);
-    let slider = parts::slider(
-        f64::from(props.volume),
-        0.0,
-        1.0,
-        0.01,
-        "音量",
-        disabled,
-        width,
-        72.0,
-    );
-    widget(
-        Stack::row(8.0)
-            .align(AlignSpec::Center)
-            .shrink(1.0)
-            .min_width(LengthSpec::Px(0.0)),
-    )
-    .children((
-        widget(parts::icon(icons::VOLUME_2, 15.0, SemanticColorRole::Muted)),
-        // 拖动中每一格都改音量。只听 `RangeInput`。
-        // 松手的 `RangeChanged` 是同一格的提交，再听一次会把这次拖动写两遍。键盘步进也会先发出 `RangeInput`。
-        widget(slider)
-            .key("player-volume")
-            .on_cx(|_, event: &RangeInput, cx| {
-                cx.dispatch_program_all(player_message(PlayerMessage::SetVolume(
-                    event.value.clamp(0.0, 1.0) as f32,
-                )));
-            }),
-    ))
-    .key("player-volume-row")
-    .into_any()
+/// 传输按钮：小号 `IconButton`，外观按主题配方。`label` 是无障碍名。
+fn transport_button(icon: Icon, label: &str, disabled: bool) -> IconButton {
+    IconButton::new(icon, label)
+        .size(ControlSize::Small)
+        .disabled(disabled)
 }
 
 fn player_message(message: PlayerMessage) -> ShellMessage {
     ShellMessage::Player(message)
 }
 
-/// `Text` 默认最小宽度是内容宽，三栏压缩时要能缩到 0 再折行。
-trait MinWidthZero {
-    fn with_min_width_zero(self) -> Self;
-}
-
-impl MinWidthZero for Text {
-    fn with_min_width_zero(mut self) -> Self {
-        let layout = std::sync::Arc::make_mut(&mut self.style.layout);
-        layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.flex_shrink = Some(1.0);
-        self
-    }
-}
-
 #[cfg(test)]
 pub(crate) fn props_for_test(model: &ShellViewModel) -> BarProps {
     BarProps::from_model(model)
 }
-
-#[cfg(test)]
-mod volume_width_tests;
 
 #[cfg(test)]
 mod narrow_card_layout_tests;

@@ -39,7 +39,7 @@ fn preview_page_keeps_its_own_player_bar_without_a_trailing_slot() {
     let bars = world
         .project_accessibility_in_viewport(document)
         .into_iter()
-        .filter(|node| node.label.as_deref() == Some("播放进度"))
+        .filter(|node| node.label.as_deref() == Some("进度"))
         .collect::<Vec<_>>();
     assert_eq!(bars.len(), 1, "预览页只有一条播放条");
     let mut ancestors = Vec::new();

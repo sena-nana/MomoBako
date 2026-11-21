@@ -806,9 +806,9 @@ fn bounds(harness: &ShellHarness, key: &str) -> (f32, f32, f32, f32) {
     (bounds.x, bounds.y, bounds.width, bounds.height)
 }
 
-/// 1200×800 的文件页（侧栏和右侧详情都在）：播放条卡片宽 558，窗口宽于 1120，仍是一行。
-/// 媒体栏下限 220px，音量越过卡片右内边距；文件列表因此不被三行排版挤矮，第二行卡片露得出来。
-/// 1180 仍宽于 1120，同样留在一行，音量溢出。三行只在窗口不宽于 1120 时出现。
+/// 1200×800 的文件页（侧栏和右侧详情都在）：播放条卡片宽 558，窗口宽于 1120，不拆三行：媒体行在上，
+/// 传输按钮和音量在下面同一行，都留在卡片里；文件列表仍露得出第二行卡片。1180 同样不拆三行。
+/// 三行只在窗口不宽于 1120 时出现。
 #[test]
 fn the_player_bar_stays_on_one_row_in_the_standard_files_page() {
     let mut harness = ShellHarness::mount(scene("files-multi-select"));
@@ -818,45 +818,55 @@ fn the_player_bar_stays_on_one_row_in_the_standard_files_page() {
         "卡片宽 {}",
         harness.model.player.bar_width
     );
-    let card = bounds(&harness, "file-player-slot");
-    let media = bounds(&harness, "player-media");
-    let play = bounds(&harness, "player-play");
-    let volume = bounds(&harness, "player-volume");
-    let centre = |(_, y, _, h): (f32, f32, f32, f32)| y + h / 2.0;
-    assert!(
-        (centre(media) - centre(play)).abs() < 8.0 && (centre(play) - centre(volume)).abs() < 8.0,
-        "媒体、传输和音量在同一行"
-    );
-    assert!(
-        volume.0 + volume.2 > card.0 + card.2 - 16.0,
-        "音量应挤出卡片右内边距：{volume:?} / {card:?}"
-    );
     let list = bounds(&harness, "file-browser-card");
     assert!(
-        list.1 + list.3 >= 630.0,
-        "文件列表和 Vue 一样到 637 左右：{list:?}"
+        list.1 + list.3 >= LIST_BOTTOM,
+        "文件列表到 {LIST_BOTTOM} 以下：{list:?}"
     );
+    for width in [1200.0, 1180.0] {
+        let mut harness = ShellHarness::mount_at(scene("files-multi-select"), width, 800.0);
+        settle(&mut harness);
+        assert!(harness.model.viewport_width > 1120.0);
+        let card = bounds(&harness, "file-player-slot");
+        let media = bounds(&harness, "player-media");
+        let play = bounds(&harness, "player-play");
+        let volume = volume_trigger(&harness);
+        let centre = |(_, y, _, h): (f32, f32, f32, f32)| y + h / 2.0;
+        assert!(
+            play.1 >= media.1 + media.3 - 1.0 && (centre(play) - centre(volume)).abs() < 8.0,
+            "{width}：媒体行下面一行传输：媒体 {media:?} 播放 {play:?} 音量 {volume:?}"
+        );
+        assert!(
+            volume.0 + volume.2 <= card.0 + card.2 + 0.5,
+            "{width}：音量留在卡片里：音量 {volume:?} 卡片 {card:?}"
+        );
+    }
+}
 
-    let mut narrower = ShellHarness::mount_at(scene("files-multi-select"), 1180.0, 800.0);
-    settle(&mut narrower);
-    assert!(narrower.model.viewport_width > 1120.0);
-    assert!(
-        narrower.model.player.bar_width < 554.0,
-        "卡片宽 {}",
-        narrower.model.player.bar_width
-    );
-    let card = bounds(&narrower, "file-player-slot");
-    let media = bounds(&narrower, "player-media");
-    let play = bounds(&narrower, "player-play");
-    let volume = bounds(&narrower, "player-volume");
-    assert!(
-        (centre(media) - centre(play)).abs() < 8.0,
-        "1180 仍宽于 1120，传输应和媒体同一行：媒体 {media:?} 播放 {play:?}"
-    );
-    assert!(
-        volume.0 + volume.2 > card.0 + card.2 - 16.0,
-        "1180 音量应挤出卡片右内边距：音量 {volume:?} 卡片 {card:?}"
-    );
+/// 播放条卡片改成媒体行加传输条以后，1200×800 文件列表的下沿（约 601，比一行的 Vue 卡片矮约 36）。
+const LIST_BOTTOM: f32 = 595.0;
+
+/// 传输条的音量弹层触发器。
+fn volume_trigger(harness: &ShellHarness) -> (f32, f32, f32, f32) {
+    let bar = harness
+        .keyed("player-transport-bar")
+        .expect("没有 player-transport-bar");
+    let id = harness
+        .document()
+        .context()
+        .read(
+            Entity::<nana_ui::runtime::MediaTransportBar>::from_stable_id(bar),
+            |bar| bar.slots().volume_menu,
+        )
+        .expect("读得到传输条")
+        .expect("音量弹层");
+    let bounds = harness
+        .document()
+        .context()
+        .world()
+        .layout_box(id)
+        .expect("音量弹层的布局盒");
+    (bounds.x, bounds.y, bounds.width, bounds.height)
 }
 
 /// 文件列的状态框（「正在处理文件」）和侧栏的忙碌行（「正在同步仓库状态」）撑满所在的列：

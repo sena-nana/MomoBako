@@ -1,4 +1,7 @@
-//! 窄窗口下播放条卡片排版的测试。
+//! 播放条卡片排版的测试：宽窗是媒体行加一行传输条，窗口不宽于 1120px 时传输条换成 `Stacked`，
+//! 整张卡片是媒体、进度、按钮三行。
+
+use nana_ui::runtime::{Entity, MediaTransportBar, MediaTransportSlots, StableNodeId};
 
 use crate::shell::ShellViewModel;
 use crate::shell::view_harness::ShellHarness;
@@ -21,85 +24,87 @@ fn settle(harness: &mut ShellHarness) {
     harness.flush();
 }
 
-fn bounds(harness: &ShellHarness, key: &str) -> (f32, f32, f32, f32) {
-    let id = harness.keyed(key).unwrap_or_else(|| panic!("没有 {key}"));
+type Bounds = (f32, f32, f32, f32);
+
+fn bounds_of(harness: &ShellHarness, id: StableNodeId) -> Bounds {
     let bounds = harness
         .document()
         .context()
         .world()
         .layout_box(id)
-        .unwrap_or_else(|| panic!("{key} 没有布局盒"));
+        .unwrap_or_else(|| panic!("{id:?} 没有布局盒"));
     (bounds.x, bounds.y, bounds.width, bounds.height)
 }
 
-fn centre_y((_, y, _, height): (f32, f32, f32, f32)) -> f32 {
+fn bounds(harness: &ShellHarness, key: &str) -> Bounds {
+    let id = harness.keyed(key).unwrap_or_else(|| panic!("没有 {key}"));
+    bounds_of(harness, id)
+}
+
+/// 传输条自己装配的节点：进度、音量弹层的触发器。
+pub(super) fn transport_slots(harness: &ShellHarness) -> MediaTransportSlots {
+    let id = harness
+        .keyed("player-transport-bar")
+        .expect("没有 player-transport-bar");
+    harness
+        .document()
+        .context()
+        .read(Entity::<MediaTransportBar>::from_stable_id(id), |bar| {
+            bar.slots().clone()
+        })
+        .expect("读得到传输条")
+}
+
+fn centre_y((_, y, _, height): Bounds) -> f32 {
     y + height / 2.0
 }
 
-/// 窗口宽于 1120、卡片窄于一行：仍是一行，音量越过卡片右内边距。
-/// 只有窗口不宽于 1120px 才把三栏改成一列。
+/// 宽窗：媒体行在上，传输按钮、进度和音量在下面同一行，都留在卡片里，不再从右边挤出去。
 #[test]
-fn a_wide_window_with_a_narrow_card_pushes_the_volume_out() {
-    let mut harness = ShellHarness::mount_at(scene("files-multi-select"), 1180.0, 800.0);
-    settle(&mut harness);
-    assert!(harness.model.viewport_width > 1120.0);
-    let width = harness.model.player.bar_width;
-    assert!(
-        width > 0.0 && width < 554.0,
-        "卡片宽 {width}，这一档才该把音量挤出去"
-    );
-    let card = bounds(&harness, "file-player-slot");
-    let media = bounds(&harness, "player-media");
-    let play = bounds(&harness, "player-play");
-    let volume = bounds(&harness, "player-volume");
-    assert!(
-        (centre_y(media) - centre_y(play)).abs() < 8.0,
-        "传输应和媒体同一行：媒体 {media:?} 播放 {play:?}"
-    );
-    let volume_right = volume.0 + volume.2;
-    let inner_right = card.0 + card.2 - 16.0;
-    assert!(
-        volume_right > inner_right,
-        "音量应挤出卡片右内边距：音量 {volume:?} 卡片 {card:?}"
-    );
+fn a_wide_window_keeps_transport_seek_and_volume_on_one_row_inside_the_card() {
+    for width in [1180.0, 1200.0] {
+        let mut harness = ShellHarness::mount_at(scene("files-multi-select"), width, 800.0);
+        settle(&mut harness);
+        assert!(harness.model.viewport_width > 1120.0);
+        let card = bounds(&harness, "file-player-slot");
+        let media = bounds(&harness, "player-media");
+        let play = bounds(&harness, "player-play");
+        let slots = transport_slots(&harness);
+        let seek = bounds_of(&harness, slots.seek.expect("进度"));
+        let volume = bounds_of(&harness, slots.volume_menu.expect("音量弹层"));
+        assert!(
+            play.1 >= media.1 + media.3 - 1.0,
+            "{width}：传输在媒体行下面：媒体 {media:?} 播放 {play:?}"
+        );
+        assert!(
+            (centre_y(play) - centre_y(volume)).abs() < 8.0,
+            "{width}：播放和音量同一行：播放 {play:?} 音量 {volume:?}"
+        );
+        assert!(
+            seek.0 > play.0 + play.2 && seek.0 + seek.2 < volume.0 && seek.2 > 40.0,
+            "{width}：进度夹在按钮和音量中间：播放 {play:?} 进度 {seek:?} 音量 {volume:?}"
+        );
+        assert!(
+            volume.0 + volume.2 <= card.0 + card.2 + 0.5,
+            "{width}：音量留在卡片里：音量 {volume:?} 卡片 {card:?}"
+        );
+    }
 }
 
-/// 1200 宽的标准文件页卡片约 558：仍是一行，音量越过卡片右内边距。
-/// 媒体栏下限 220 时，这一档的列下限之和已经超过卡片内容宽。
-#[test]
-fn the_standard_files_card_pushes_volume_past_the_padding() {
-    let mut harness = ShellHarness::mount_at(scene("files-multi-select"), 1200.0, 800.0);
-    settle(&mut harness);
-    assert!(
-        (harness.model.player.bar_width - 558.0).abs() < 1.0,
-        "卡片宽 {}",
-        harness.model.player.bar_width
-    );
-    let card = bounds(&harness, "file-player-slot");
-    let media = bounds(&harness, "player-media");
-    let play = bounds(&harness, "player-play");
-    let volume = bounds(&harness, "player-volume");
-    assert!(
-        (centre_y(media) - centre_y(play)).abs() < 8.0,
-        "标准文件页应留在一行：媒体 {media:?} 播放 {play:?}"
-    );
-    let volume_right = volume.0 + volume.2;
-    let inner_right = card.0 + card.2 - 16.0;
-    assert!(
-        volume_right > inner_right,
-        "音量应挤出卡片右内边距：音量 {volume:?} 卡片 {card:?}"
-    );
-}
-
-/// `@media (max-width: 1120px)` 仍是三行，传输在媒体下面。
+/// `@media (max-width: 1120px)`：媒体、进度、按钮三行。
 #[test]
 fn the_viewport_media_query_still_stacks_three_rows() {
     let mut harness = ShellHarness::mount_at(scene("files-multi-select"), 1120.0, 800.0);
     settle(&mut harness);
     let media = bounds(&harness, "player-media");
     let play = bounds(&harness, "player-play");
+    let seek = bounds_of(&harness, transport_slots(&harness).seek.expect("进度"));
     assert!(
-        play.1 > media.1 + media.3 - 1.0,
-        "1120 宽应是三行：媒体 {media:?} 播放 {play:?}"
+        seek.1 > media.1 + media.3 - 1.0,
+        "1120 宽进度在媒体下面：媒体 {media:?} 进度 {seek:?}"
+    );
+    assert!(
+        play.1 > seek.1 + seek.3 - 1.0,
+        "1120 宽按钮在进度下面：进度 {seek:?} 播放 {play:?}"
     );
 }
