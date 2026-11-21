@@ -124,7 +124,7 @@ pub(crate) struct FolderRow {
     pub branch: bool,
     /// 直属文件数。
     pub count: usize,
-    /// 拖放悬停正落在这个路径上：放置态高亮。
+    /// 内部条目拖动的悬停正落在这个路径上：放置态高亮。
     pub drop_target: bool,
 }
 
@@ -325,9 +325,8 @@ fn playlist_rows(model: &ShellViewModel) -> Vec<PlaylistRow> {
 /// 文件夹树按显示顺序展开：每个目录一行，展开了的目录后面跟着它的子级。
 fn folder_rows(model: &ShellViewModel) -> Vec<FolderRow> {
     fn walk(model: &ShellViewModel, folder: &SidebarFolder, depth: u16, rows: &mut Vec<FolderRow>) {
-        let dragging = model.input.internal_active
-            || model.input.dragging_files
-            || model.input.external_active;
+        // 系统文件拖过时悬停样子由 NanaUI 画在这一行上，这里只给内部条目拖动画放置态。
+        let dragging = model.input.internal_active;
         let hover = model.input.hover_folder.clone();
         let sidebar = &model.sidebar;
         let current = sidebar.current_directory.as_str();

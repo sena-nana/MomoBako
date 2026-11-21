@@ -30,7 +30,7 @@ use nana_ui::runtime::{
 use nana_ui_core::SemanticColorMix;
 
 use super::super::field_bind::StyleField;
-use super::super::input::{HostDragPhase, InputMessage, accept_file_drops};
+use super::super::input::{HostDragPhase, InputMessage};
 use super::super::pointer_gesture::{EntryKind, EntryNode, register_entry};
 
 use super::super::context_menu::{MenuAction, MenuChrome, MenuEntry, MenuView, context_menu};
@@ -96,16 +96,12 @@ pub(super) fn folder_group(
         })
         .into_any(),
     ];
-    let drop = node_ref();
-    accept_file_drops(drop);
     let tree = widget(
         Stack::column(0.0)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
     )
-    .node_ref(drop)
     .visible(move || state.with(|state| state.tree))
-    .on_cx(|_, event: &FileDropEvent, cx| cx.dispatch_program_all(sidebar_file_drag(event)))
     .children((rows
         .keyed(folder_key)
         .each(folder_row)
@@ -185,6 +181,7 @@ fn folder_row(item: FolderItem) -> AnyView {
     .content(content)
     .key(folder_row_key(&path))
     .node_ref(target)
+    .on_cx(|_, event: &FileDropEvent, cx| cx.dispatch_program_all(sidebar_file_drag(event)))
     .on_cx(move |_, _: &Activate, cx| {
         cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenFolder(
             open_path.clone(),
@@ -204,7 +201,7 @@ fn folder_row(item: FolderItem) -> AnyView {
     tree_row(row.depth, row.has_children, toggle, card.into_any())
 }
 
-/// 侧栏目录树收到的系统文件拖放，交给输入归约。悬停目标由坐标另记。
+/// 侧栏文件夹行收到的系统文件拖放，交给输入归约。悬停目标由坐标另记。
 fn sidebar_file_drag(event: &FileDropEvent) -> ShellMessage {
     let (phase, paths) = match event {
         FileDropEvent::Hovered { paths, .. } => (HostDragPhase::Over, owned_paths(paths)),

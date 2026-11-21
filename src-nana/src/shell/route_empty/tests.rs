@@ -1,5 +1,5 @@
-//! 常驻空库页的回归：投影取值；无关更新不换节点、不重挂；拖着文件夹经过时面板原地换底色和描边，
-//! 附加失败的错误条原地出现；拖放消息带的是事件到达时的仓库条件，不是建视图那一刻的；每一步都和
+//! 常驻空库页的回归：投影取值；无关更新不换节点、不重挂；拖着文件夹经过时悬停样子只由 NanaUI 画在
+//! 整节拖放目标上，面板自己不再描边，附加失败的错误条原地出现；拖放消息带的是事件到达时的仓库条件，不是建视图那一刻的；每一步都和
 //! 同一 ViewModel 新挂的一样。
 
 use std::path::PathBuf;
@@ -44,14 +44,13 @@ fn panel_paint(harness: &ShellHarness) -> (Option<SemanticColorRole>, Option<Sem
 }
 
 #[test]
-fn projection_follows_the_drag_state() {
+fn projection_follows_the_drop_flags() {
     let mut model = empty();
     let view = EmptyView::project(&model);
-    assert!(!view.dragging);
     assert!(view.error.is_empty());
     assert_eq!(EmptyView::project(&model), view, "同一状态的投影相等");
     model.reduce(host_drag(HostDragPhase::Over));
-    assert!(EmptyView::project(&model).dragging, "拖着文件夹经过");
+    assert_eq!(EmptyView::project(&model), view, "拖着经过不改投影");
     model.reduce(ShellMessage::SetWorkspacePanel(WorkspacePanel::Playlist));
     assert_ne!(
         EmptyView::project(&model).drop,
@@ -110,28 +109,32 @@ fn unrelated_updates_keep_every_empty_node() {
     harness.assert_same_as_fresh_mount();
 }
 
-/// 拖着文件夹经过时面板原地换样子，离开后恢复；附加失败的错误条原地出现。
+/// 拖着文件夹经过时 NanaUI 把悬停记在整节拖放目标上，面板自己不画第二层底色和描边，离开后清掉；
+/// 附加失败的错误条原地出现。
 #[test]
-fn drag_highlight_and_error_patch_in_place() {
+fn drag_hover_is_the_frameworks_and_error_patches_in_place() {
     let mut harness = ShellHarness::mount(empty());
     let panel = harness.keyed("empty-panel").expect("空库面板");
+    let section = harness.keyed("empty-repository-page").expect("拖放目标");
     assert_eq!(panel_paint(&harness), (None, None));
 
-    harness.apply(host_drag(HostDragPhase::Over));
-    harness.flush();
-    assert_eq!(harness.keyed("empty-panel"), Some(panel));
+    let point = center(&harness, section);
+    route_drag(&mut harness, FileDragKind::Hover, point);
+    let messages = harness.take_messages();
+    harness.settle(messages);
     assert_eq!(
-        panel_paint(&harness),
-        (
-            Some(SemanticColorRole::AccentSoft),
-            Some(SemanticColorRole::Accent)
-        )
+        harness.document().context().drop_hover().map(|(id, _)| id),
+        Some(section),
+        "悬停落在整节拖放目标上"
     );
+    assert_eq!(harness.keyed("empty-panel"), Some(panel));
+    assert_eq!(panel_paint(&harness), (None, None), "面板不再自己描边");
     harness.assert_same_as_fresh_mount();
 
-    harness.apply(host_drag(HostDragPhase::Leave));
-    harness.flush();
-    assert_eq!(panel_paint(&harness), (None, None));
+    route_drag(&mut harness, FileDragKind::Cancel, point);
+    let messages = harness.take_messages();
+    harness.settle(messages);
+    assert_eq!(harness.document().context().drop_hover(), None);
 
     harness.model.input.empty_repository_error = "附加失败：目录不可读".into();
     harness.sync();
@@ -142,6 +145,35 @@ fn drag_highlight_and_error_patch_in_place() {
     );
     assert_eq!(harness.keyed("empty-panel"), Some(panel));
     harness.assert_same_as_fresh_mount();
+}
+
+fn center(harness: &ShellHarness, id: nana_ui::runtime::StableNodeId) -> (f32, f32) {
+    let bounds = harness
+        .document()
+        .context()
+        .world()
+        .layout_box(id)
+        .expect("拖放目标的布局");
+    (
+        bounds.x + bounds.width / 2.0,
+        bounds.y + bounds.height / 2.0,
+    )
+}
+
+fn route_drag(harness: &mut ShellHarness, kind: FileDragKind, point: (f32, f32)) {
+    let document = harness.window.document.document();
+    let mut input = HeadlessInput::bind(harness.window.document.context_mut(), document);
+    input
+        .route(
+            harness.window.document.context_mut(),
+            InputPayload::FileDrag(FileDragInput {
+                kind,
+                paths: vec![PathBuf::from("C:\\library")],
+                position: Some(point),
+                modifiers: InputModifiers::default(),
+            }),
+        )
+        .expect("文件拖放");
 }
 
 /// 建好页面以后换了面板：放下文件夹时发出的消息带的是现在的条件。
