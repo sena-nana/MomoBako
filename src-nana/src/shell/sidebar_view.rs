@@ -51,7 +51,10 @@ pub use popover::repository_popover;
 pub use tree::folder_menu;
 pub(crate) use tree::folder_row_key;
 
-use nana_ui_core::TextWeight;
+use crate::theme_map::text_line_height;
+use crate::theme_map::tiers::{self, Edge};
+use nana_ui::runtime::view::css;
+use nana_ui_core::{SpacingRole, SpacingStep, TextWeight};
 use parts::{
     FooterLook, NavLook, PlayBase, bound_hint, footer_button, footer_popover, group_header,
     group_title, nav_row, tree_action, tree_action_titled,
@@ -69,16 +72,17 @@ const SHORTCUTS: [ShortcutId; 5] = [
 /// 播放集 Store 里的一行。
 type PlaylistItem = Item<Store<Vec<PlaylistRow>>, String, PlaylistRow>;
 
-/// 实况侧栏。内边距是 10px 8px，各块之间没有额外间距。
+/// 实况侧栏。内边距上下 `Lg`、左右 `Md`（默认 10px 8px），各块之间没有额外间距。
 /// 资源区比侧栏宽度少一条发丝间隙（见 `render::workbench`），右内边距同样扣掉这一条，
 /// 内容盒仍是 8..宽度-8。
 pub fn sidebar_frame() -> SidebarFrame {
     let mut frame = SidebarFrame::new().gap(0.0);
     let layout = Arc::make_mut(&mut frame.style.layout);
-    layout.padding_top = Some(LengthSpec::Px(10.0));
-    layout.padding_right = Some(LengthSpec::Px(8.0 - super::render::WORKBENCH_GAP_PX));
-    layout.padding_bottom = Some(LengthSpec::Px(10.0));
-    layout.padding_left = Some(LengthSpec::Px(8.0));
+    tiers::padding(layout, &Edge::Y, SpacingStep::Lg);
+    tiers::padding(layout, &[Edge::Left], SpacingStep::Md);
+    let gap = super::render::WORKBENCH_GAP_PX;
+    layout.padding_right = Some(LengthSpec::Px(tiers::space_px(SpacingStep::Md) - gap));
+    layout.theme.padding_right = Some(tiers::space_expr(SpacingStep::Md).offset(-gap));
     frame
 }
 
@@ -103,23 +107,30 @@ fn sidebar_switcher(signals: &SidebarSignals) -> AnyView {
     let switcher =
         popover::repository_switcher(signals.head, signals.repository, signals.popover_slot);
     let top = Stack::column(0.0).with_layout(|layout| {
-        layout.padding_bottom = Some(LengthSpec::Px(8.0));
-        layout.border_sides.bottom_width = Some(1.0);
+        tiers::padding(layout, &[Edge::Bottom], SpacingStep::Md);
+        crate::theme_map::border_side(layout, Edge::Bottom, 1);
     });
     let mut top_style = top.node_style();
     top_style.border = Some(SemanticColorRole::BorderSoft);
     widget(top.style(top_style))
-        .children((widget(Stack::column(0.0).padding_xy(2.0, 0.0)).children((switcher,)),))
+        .children((widget(Stack::column(0.0).with_layout(|layout| {
+            tiers::padding(layout, &Edge::X, SpacingStep::Xxs);
+        }))
+        .children((switcher,)),))
         .into_any()
 }
 
-/// 文件管理区：状态、快捷方式、快捷访问、动作、播放集、文件夹和智能文件夹，分组间 10px。
+/// 文件管理区：状态、快捷方式、快捷访问、动作、播放集、文件夹和智能文件夹，分组间 `Lg` 档（默认 10px）。
 /// 没有内容的分组藏起来，不占间距。
 fn sidebar_sections(signals: SidebarSignals) -> AnyView {
     let head = signals.head;
-    widget(Stack::column(10.0).with_layout(|layout| {
-        layout.padding_right = Some(LengthSpec::Px(2.0));
-    }))
+    widget(
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Lg)
+            .with_layout(|layout| {
+                tiers::padding(layout, &[Edge::Right], SpacingStep::Xxs);
+            }),
+    )
     .children((
         status_line(signals.status),
         shortcut_group(signals.nav),
@@ -193,13 +204,15 @@ fn progress_line(status: Signal<StatusLine>) -> AnyView {
         })
     };
     let (label, percent) = progress_of();
-    let mut text = parts::label_text(
-        label,
-        12.0,
-        TextWeight::Regular,
-        Some(SemanticColorRole::Muted),
-    )
-    .line_height(18.0);
+    let mut text = text_line_height(
+        parts::label_text(
+            label,
+            12.0,
+            TextWeight::Regular,
+            Some(SemanticColorRole::Muted),
+        ),
+        18.0,
+    );
     {
         let layout = Arc::make_mut(&mut text.style.layout);
         layout.flex_grow = Some(1.0);
@@ -207,7 +220,8 @@ fn progress_line(status: Signal<StatusLine>) -> AnyView {
         layout.min_width = Some(LengthSpec::Px(0.0));
     }
     let head = widget(
-        Stack::row(8.0)
+        Stack::row(0.0)
+            .gap_step(SpacingStep::Md)
             .align(AlignSpec::Center)
             .width(LengthSpec::Fill),
     )
@@ -215,22 +229,23 @@ fn progress_line(status: Signal<StatusLine>) -> AnyView {
         widget(text)
             .prop::<String, fields::text::value>(move || progress_of().0)
             .key("sidebar-status-progress-label"),
-        widget(
+        widget(text_line_height(
             parts::label_text(
                 format!("{percent}%"),
                 12.0,
                 TextWeight::Regular,
                 Some(SemanticColorRole::Faint),
-            )
-            .line_height(18.0),
-        )
+            ),
+            18.0,
+        ))
         .prop::<String, fields::text::value>(move || format!("{}%", progress_of().1))
         .key("sidebar-status-progress-percent"),
     ));
     widget(
-        Stack::column(6.0)
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Sm)
             .width(LengthSpec::Fill)
-            .padding_xy(8.0, 6.0)
+            .padding_step(SpacingStep::Md, SpacingStep::Sm)
             .with_layout(state_margin),
     )
     .visible(move || status.with(|status| matches!(status, StatusLine::Progress { .. })))
@@ -253,8 +268,10 @@ fn busy_line(status: Signal<StatusLine>) -> AnyView {
             .align(AlignSpec::Center)
             .width(LengthSpec::Fill)
             .min_height(LengthSpec::Px(30.0))
-            .padding_xy(8.0, 0.0)
-            .with_layout(state_margin),
+            .with_layout(|layout| {
+                tiers::padding(layout, &Edge::X, SpacingStep::Md);
+                state_margin(layout);
+            }),
     )
     .visible(busy)
     .children((spinner()
@@ -265,10 +282,9 @@ fn busy_line(status: Signal<StatusLine>) -> AnyView {
     .into_any()
 }
 
-/// 状态区上下各留 2px。
+/// 状态区上下各留 `Xxs` 档（默认 2px）。
 fn state_margin(layout: &mut nana_ui_core::LayoutStyle) {
-    layout.margin_top = Some(LengthSpec::Px(2.0));
-    layout.margin_bottom = Some(LengthSpec::Px(2.0));
+    tiers::margin(layout, &Edge::Y, SpacingStep::Xxs);
 }
 
 /// 五个快捷方式，无标题。当前项 `--accent-soft` 底、强调色，缺失仓库时整组禁用。
@@ -298,7 +314,7 @@ fn shortcut_group(nav: Signal<NavView>) -> AnyView {
             )
         })
         .collect::<Vec<_>>();
-    widget(Stack::column(1.0))
+    widget(Stack::column(0.0).gap_step(SpacingStep::Xxs))
         .children(rows)
         .key("sidebar-shortcuts")
         .into_any()
@@ -354,7 +370,7 @@ fn quick_access_group(quick: Signal<Vec<QuickRow>>, nav: Signal<NavView>) -> Any
             },
         )
     })
-    .gap(1.0);
+    .css(css! { gap: theme(space-xxs); });
     group(
         group_header(
             widget(group_title("快捷访问")).into_any(),
@@ -391,17 +407,17 @@ fn actions_group(nav: Signal<NavView>) -> AnyView {
             Vec::new(),
             "actions-header",
         ),
-        vec![widget(Stack::column(1.0)).children((row,)).into_any()],
+        vec![widget(Stack::column(0.0)).children((row,)).into_any()],
     )
     .visible(move || nav.with(|nav| nav.actions > 0))
     .into_any()
 }
 
-/// 一个侧栏分组：标题和正文，间距 4px。正文里藏起来的块不占间距。
+/// 一个侧栏分组：标题和正文，间距 `Xs` 档（默认 4px）。正文里藏起来的块不占间距。
 pub(super) fn group(header: AnyView, body: Vec<AnyView>) -> El<Stack, Vec<AnyView>> {
     let mut children = vec![header];
     children.extend(body);
-    widget(Stack::column(4.0)).children(children)
+    widget(Stack::column(0.0).gap_step(SpacingStep::Xs)).children(children)
 }
 
 /// 播放集分组。标题可点开合，默认收起；收起时只留标题。
@@ -425,7 +441,7 @@ fn playlist_group(state: Signal<PlaylistGroup>, rows: Store<Vec<PlaylistRow>>) -
     let list = rows
         .keyed(playlist_key)
         .each(playlist_row)
-        .gap(6.0)
+        .css(css! { gap: theme(space-sm); })
         .key("playlist-list")
         .visible(move || state.with(|state| state.expanded && state.hint.is_none()));
     group(
@@ -456,13 +472,25 @@ fn playlist_title(state: Signal<PlaylistGroup>) -> AnyView {
     Arc::make_mut(&mut count_text.style.layout)
         .text_ext
         .letter_spacing = Some(0.0);
-    let content = widget(Stack::row(6.0).align(AlignSpec::Center)).children((
+    let content = widget(
+        Stack::row(0.0)
+            .gap_step(SpacingStep::Sm)
+            .align(AlignSpec::Center),
+    )
+    .children((
         widget(group_title("播放集")),
         widget(count_text).prop::<String, fields::text::value>(move || {
             state.with(|state| state.count.to_string())
         }),
     ));
-    let mut style = parts::row_style(24.0, 0.0, 0.0, 6.0, parts::ActiveTone::Accent, false);
+    let mut style = parts::row_style(
+        24.0,
+        None,
+        None,
+        Some(SpacingStep::Sm),
+        parts::ActiveTone::Accent,
+        false,
+    );
     {
         let layout = Arc::make_mut(&mut style.layout);
         layout.width = Some(LengthSpec::Shrink);
@@ -504,7 +532,14 @@ fn playlist_row(item: PlaylistItem) -> AnyView {
     )
     .truncating();
     Arc::make_mut(&mut meta.style.layout).width = Some(LengthSpec::Fill);
-    let mut main_style = parts::row_style(42.0, 8.0, 8.0, 0.0, parts::ActiveTone::Accent, false);
+    let mut main_style = parts::row_style(
+        42.0,
+        Some(SpacingStep::Md),
+        Some(SpacingStep::Md),
+        None,
+        parts::ActiveTone::Accent,
+        false,
+    );
     {
         let layout = Arc::make_mut(&mut main_style.layout);
         layout.direction = Some(nana_ui_core::FlexDirection::Column);
@@ -532,7 +567,12 @@ fn playlist_row(item: PlaylistItem) -> AnyView {
         });
     let play_id = id.clone();
     let remove_id = id.clone();
-    let actions = widget(Stack::row(2.0).align(AlignSpec::Center)).children((
+    let actions = widget(
+        Stack::row(0.0)
+            .gap_step(SpacingRole::IconTools)
+            .align(AlignSpec::Center),
+    )
+    .children((
         // 悬停提示是「播放」，无障碍名是「播放播放集」。
         tree_action_titled(
             PLAYER_PLAY,
@@ -554,9 +594,10 @@ fn playlist_row(item: PlaylistItem) -> AnyView {
         }),
     ));
     widget(
-        Stack::bar(6.0)
+        Stack::bar(0.0)
+            .gap_step(SpacingStep::Sm)
             .align(AlignSpec::Center)
-            .padding(4.0)
+            .padding_step(SpacingStep::Xs, SpacingStep::Xs)
             .radius(RadiusTier::Md),
     )
     .background(move || item.active().get().then_some(SemanticColorRole::AccentSoft))
@@ -596,7 +637,7 @@ pub(super) fn danger_tree_action_titled(
         .into_any()
 }
 
-/// 设置、拓展、任务和日志。当前入口 `--accent-soft` 底，其余平时 0.44 透明度，悬停底栏时淡入到 1。
+/// 设置、拓展、任务和日志。当前入口 `--accent-soft` 底，其余平时半透明（`parts::FOOTER_DIM`），悬停底栏时淡入到 1。
 /// 任务入口外面套一层定位用的行，有任务时右上角显示数量角标，没有时角标藏起来。
 fn sidebar_footer(
     footer: Signal<FooterView>,
@@ -617,12 +658,13 @@ fn sidebar_footer(
             highlight: footer.tasks > 0,
         })
     };
-    let task = widget(
-        Stack::row(0.0)
-            .with_layout(|layout| layout.position = nana_ui_core::PositionSpec::Relative),
-    )
-    .class(parts::footer_styles::footer_entry)
-    .class_when(parts::footer_styles::lit, parts::footer_lit(tasks, hover))
+    let task_lit = parts::footer_lit(tasks, hover);
+    let task = widget(Stack::row(0.0).with_layout(move |layout| {
+        layout.position = nana_ui_core::PositionSpec::Relative;
+        layout.opacity = Some(parts::footer_opacity(task_lit()));
+    }))
+    .prop::<bool, parts::FooterLit>(task_lit)
+    .animate(parts::footer_fade())
     .children((
         footer_popover(
             CLIPBOARD_LIST,
@@ -640,52 +682,57 @@ fn sidebar_footer(
         task_badge(footer),
     ));
     // 整排接住悬停：停在按钮之间的空隙里也算在底栏上。
-    widget(Stack::row(2.0).align(AlignSpec::Center).hittable())
-        .key("sidebar-footer")
-        .on_cx(|_, event: &PointerHoverChanged, cx| {
-            cx.dispatch_program_all(ShellMessage::Input(InputMessage::FooterHover(
-                event.hovered,
-            )));
-        })
-        .children((
-            footer_button(
-                SETTINGS,
-                "设置",
-                "footer-settings",
-                look(|footer| footer.settings),
-                hover,
-                |cx| {
-                    cx.dispatch_program_all(ShellMessage::OpenSettings);
-                },
-            ),
-            footer_button(
-                PUZZLE,
-                "拓展",
-                "footer-extensions",
-                look(|footer| footer.extensions),
-                hover,
-                |cx| {
-                    cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(
-                        WorkspacePanel::Extensions,
-                    ));
-                },
-            ),
-            task,
-            footer_button(
-                LOGS,
-                "日志",
-                "footer-logs",
-                look(|footer| footer.logs),
-                hover,
-                |cx| {
-                    cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs));
-                },
-            ),
-        ))
-        .into_any()
+    widget(
+        Stack::row(0.0)
+            .gap_step(SpacingRole::IconTools)
+            .align(AlignSpec::Center)
+            .hittable(),
+    )
+    .key("sidebar-footer")
+    .on_cx(|_, event: &PointerHoverChanged, cx| {
+        cx.dispatch_program_all(ShellMessage::Input(InputMessage::FooterHover(
+            event.hovered,
+        )));
+    })
+    .children((
+        footer_button(
+            SETTINGS,
+            "设置",
+            "footer-settings",
+            look(|footer| footer.settings),
+            hover,
+            |cx| {
+                cx.dispatch_program_all(ShellMessage::OpenSettings);
+            },
+        ),
+        footer_button(
+            PUZZLE,
+            "拓展",
+            "footer-extensions",
+            look(|footer| footer.extensions),
+            hover,
+            |cx| {
+                cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(
+                    WorkspacePanel::Extensions,
+                ));
+            },
+        ),
+        task,
+        footer_button(
+            LOGS,
+            "日志",
+            "footer-logs",
+            look(|footer| footer.logs),
+            hover,
+            |cx| {
+                cx.dispatch_program_all(ShellMessage::SetWorkspacePanel(WorkspacePanel::Logs));
+            },
+        ),
+    ))
+    .into_any()
 }
 
-/// 任务入口右上角的数量角标：12px 高、强调色底、9px 粗体。
+/// 任务入口右上角的数量角标：12px 高、胶囊形强调色底、左右 `Xxs` 档内边距、9px 粗体。
 fn task_badge(footer: Signal<FooterView>) -> AnyView {
     let count = footer.with_untracked(|footer| footer.tasks);
     widget(
@@ -693,28 +740,27 @@ fn task_badge(footer: Signal<FooterView>) -> AnyView {
             .align(AlignSpec::Center)
             .justify(nana_ui::runtime::JustifySpec::Center)
             .surface(SemanticColorRole::Accent)
-            .radius_px(999.0)
+            .radius(RadiusTier::Full)
             .with_layout(|layout| {
                 layout.position = nana_ui_core::PositionSpec::Absolute;
                 layout.offset_top = Some(LengthSpec::Px(2.0));
                 layout.offset_right = Some(LengthSpec::Px(2.0));
                 layout.min_width = Some(LengthSpec::Px(12.0));
                 layout.height = Some(LengthSpec::Px(12.0));
-                layout.padding_left = Some(LengthSpec::Px(3.0));
-                layout.padding_right = Some(LengthSpec::Px(3.0));
+                tiers::padding(layout, &Edge::X, SpacingStep::Xxs);
                 layout.pointer_events = Some(nana_ui_core::PointerEventsSpec::None);
             }),
     )
     .visible(move || footer.with(|footer| footer.tasks > 0))
-    .children((widget(
+    .children((widget(text_line_height(
         parts::label_text(
             count.to_string(),
             9.0,
             TextWeight::Bold,
             Some(SemanticColorRole::AccentText),
-        )
-        .line_height(12.0),
-    )
+        ),
+        12.0,
+    ))
     .prop::<String, fields::text::value>(move || footer.with(|footer| footer.tasks.to_string())),))
     .key("footer-task-badge")
     .into_any()

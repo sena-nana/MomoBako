@@ -5,6 +5,8 @@
 //! 按分段 `.visible` 切换；加密开着时才显示密码。输入框、密码和输出路径各有一份草稿信号，
 //! 按 `ModelField` 的规矩回写，其余字段放在一个投影信号里。
 
+use crate::theme_map::tiers;
+use nana_ui_core::SpacingStep;
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{ALERT_TRIANGLE, ARCHIVE, DOWNLOAD, GIT_BRANCH};
@@ -112,94 +114,107 @@ pub(crate) fn export_dialog(model: &ShellViewModel) -> Option<AnyView> {
         ("maximum", "最大"),
     ]);
     let password = draft(model, |files| files.export.password.clone());
-    let archive_fields = widget(Stack::column(12.0).width(LengthSpec::Fill))
-        .visible(archive)
-        .key("export-archive-fields")
-        .children((
-            two_columns(
-                "export-archive-grid",
-                10.0,
-                vec![
-                    select_field(
-                        "格式",
-                        "export-format",
-                        move || Some(view.with(|view| view.format.clone())),
-                        move || formats.clone(),
-                        busy,
-                        export_field("format"),
-                    ),
-                    select_field(
-                        "压缩",
-                        "export-compression",
-                        move || Some(view.with(|view| view.compression.clone())),
-                        move || levels.clone(),
-                        busy,
-                        export_field("compression"),
-                    ),
-                ],
-            ),
-            output_field(draft(model, |files| files.export.output_path.clone()), busy),
-            encrypt_toggle(view),
-            widget(Stack::column(0.0).width(LengthSpec::Fill))
-                .visible(move || view.with(|view| view.encrypt))
-                .children((text_field(
-                    "密码",
-                    "export-password",
-                    password,
-                    "用于压缩包加密",
-                    true,
+    let archive_fields = widget(
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Xl)
+            .width(LengthSpec::Fill),
+    )
+    .visible(archive)
+    .key("export-archive-fields")
+    .children((
+        two_columns(
+            "export-archive-grid",
+            SpacingStep::Lg,
+            vec![
+                select_field(
+                    "格式",
+                    "export-format",
+                    move || Some(view.with(|view| view.format.clone())),
+                    move || formats.clone(),
                     busy,
-                    export_field("password"),
-                    Some(Arc::new(submit)),
-                ),)),
-        ));
-    let git_fields = widget(Stack::column(12.0).width(LengthSpec::Fill))
-        .visible(move || !archive())
-        .key("export-git-fields")
-        .children((
-            two_columns(
-                "export-git-grid",
-                10.0,
-                vec![
-                    text_field(
-                        "远端",
-                        "export-remote",
-                        draft(model, |files| files.export.remote.clone()),
-                        "origin",
-                        false,
-                        busy,
-                        export_field("remote"),
-                        None,
-                    ),
-                    text_field(
-                        "分支",
-                        "export-branch",
-                        draft(model, |files| files.export.branch.clone()),
-                        "默认当前分支",
-                        false,
-                        busy,
-                        export_field("branch"),
-                        None,
-                    ),
-                ],
-            ),
-            text_field(
-                "提交信息",
-                "export-git-message",
-                draft(model, |files| files.export.message.clone()),
-                "导出资源库",
-                false,
+                    export_field("format"),
+                ),
+                select_field(
+                    "压缩",
+                    "export-compression",
+                    move || Some(view.with(|view| view.compression.clone())),
+                    move || levels.clone(),
+                    busy,
+                    export_field("compression"),
+                ),
+            ],
+        ),
+        output_field(draft(model, |files| files.export.output_path.clone()), busy),
+        encrypt_toggle(view),
+        widget(Stack::column(0.0).width(LengthSpec::Fill))
+            .visible(move || view.with(|view| view.encrypt))
+            .children((text_field(
+                "密码",
+                "export-password",
+                password,
+                "用于压缩包加密",
+                true,
                 busy,
-                export_field("message"),
+                export_field("password"),
                 Some(Arc::new(submit)),
-            ),
-        ));
+            ),)),
+    ));
+    let git_fields = widget(
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Xl)
+            .width(LengthSpec::Fill),
+    )
+    .visible(move || !archive())
+    .key("export-git-fields")
+    .children((
+        two_columns(
+            "export-git-grid",
+            SpacingStep::Lg,
+            vec![
+                text_field(
+                    "远端",
+                    "export-remote",
+                    draft(model, |files| files.export.remote.clone()),
+                    "origin",
+                    false,
+                    busy,
+                    export_field("remote"),
+                    None,
+                ),
+                text_field(
+                    "分支",
+                    "export-branch",
+                    draft(model, |files| files.export.branch.clone()),
+                    "默认当前分支",
+                    false,
+                    busy,
+                    export_field("branch"),
+                    None,
+                ),
+            ],
+        ),
+        text_field(
+            "提交信息",
+            "export-git-message",
+            draft(model, |files| files.export.message.clone()),
+            "导出资源库",
+            false,
+            busy,
+            export_field("message"),
+            Some(Arc::new(submit)),
+        ),
+    ));
     let notice = widget(wrapping_text(13.0, 19.5, SemanticColorRole::Muted))
         .key("export-notice")
         .prop::<String, fields::HiddenWhenEmpty<fields::text::value>>(move || {
             view.with(|view| view.notice.clone())
         });
-    let body = widget(Stack::column(12.0).width(LengthSpec::Fill)).children((
+    let body = widget(
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Xl)
+            .width(LengthSpec::Fill),
+    )
+    .children((
         repository_box(view),
         segmented(view),
         archive_fields,
@@ -230,15 +245,17 @@ pub(crate) fn export_dialog(model: &ShellViewModel) -> Option<AnyView> {
 }
 
 /// `repository-export-dialog__repo`：仓库名 14px/700、路径 12px 弱色，都单行省略；`--bg` 底、
-/// `--border-soft` 描边、`Sm` 圆角，内边距 9 / 10。
+/// 一根发丝宽的 `--border-soft` 描边、`Sm` 圆角，内边距上下 `Md`、左右 `Lg` 档（默认 8 / 10）。
 fn repository_box(view: Signal<ExportView>) -> AnyView {
     widget(
-        Stack::column(2.0)
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Xxs)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0))
-            .padding_xy(10.0, 9.0)
+            .padding_step(SpacingStep::Lg, SpacingStep::Md)
             .surface(SemanticColorRole::Background)
-            .border(SemanticColorRole::BorderSoft, 1.0)
+            .border(SemanticColorRole::BorderSoft, tiers::hairline_px())
+            .with_layout(|layout| tiers::border(layout, 1))
             .radius(RadiusTier::Sm),
     )
     .children((

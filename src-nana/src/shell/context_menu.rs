@@ -27,6 +27,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use nana_ui::InputPayload;
 use nana_ui::icons_tabler::CHECK;
+use nana_ui::runtime::view::css;
 use nana_ui::runtime::view::{
     AnyView, El, EntityRef, FieldWrite, IntoView, Signal, computed, each, entity_ref, fields,
     widget,
@@ -34,13 +35,17 @@ use nana_ui::runtime::view::{
 use nana_ui::runtime::{
     ActionMenuItem, Activate, AlignSpec, AnchoredActionMenu, AnchoredMenuDismissed, AppContext,
     FocusWithinChanged, LengthSpec, OverlayHost, PointerHoverChanged, PositionSpec, RadiusTier,
-    SecondaryPress, SemanticColorRole, Stack,
+    SecondaryPress, SemanticColorRole, Stack, Text,
 };
-use nana_ui_core::{Icon, TextWeight};
+use nana_ui::runtime::{BoxPaint, PaintContext, Painter, Radius};
+use nana_ui_core::{
+    BorderWidth, ElevationRole, Icon, SpacingStep, TextWeight, ThemeExpr, ThemeToken,
+};
+
+use crate::theme_map::tiers::{self, Edge};
 
 use super::admin::AdminMessage;
 use super::files::{BranchSource, FilesMessage};
-use super::files_view::style;
 use super::input::InputMessage;
 use super::player::PlayerMessage;
 use super::sidebar::GapMessage;
@@ -57,14 +62,51 @@ pub(crate) struct MenuScrollSnapshot {
 
 /// 菜单的最小宽度。
 const MENU_MIN_WIDTH: f32 = 180.0;
-/// 子菜单离分组那一行右缘的距离。
-const SUBMENU_GAP: f32 = 4.0;
-/// 子菜单的内边距。
-const SUBMENU_PADDING: f32 = 4.0;
+/// 子菜单离分组那一行右缘的距离：`Xs` 档（默认 4）。
+const SUBMENU_GAP: SpacingStep = SpacingStep::Xs;
 /// 分组后面的箭头。
 const BRANCH_MARK: &str = "›";
-/// 行间距。
-const ITEM_GAP: f32 = 2.0;
+
+/// 菜单面板的内边距：主题菜单配方的面板内边距（默认 `Xs` 档 4px）。
+fn menu_padding_px() -> f32 {
+    tiers::space_px(SpacingStep::Xs)
+}
+
+/// 菜单里行与行的间距和面板内边距都取主题菜单配方的档（`MenuItemGap`、`MenuSurfacePadding`）。
+fn menu_spacing(layout: &mut nana_ui_core::LayoutStyle) {
+    layout.gap = Some(LengthSpec::Px(tiers::space_px(SpacingStep::Xxs)));
+    layout.theme.gap = Some(ThemeToken::MenuItemGap.into());
+    let padding = Some(LengthSpec::Px(tiers::space_px(SpacingStep::Xs)));
+    layout.padding_top = padding;
+    layout.padding_right = padding;
+    layout.padding_bottom = padding;
+    layout.padding_left = padding;
+    let inset = Some(ThemeExpr::from(ThemeToken::MenuSurfacePadding));
+    layout.theme.padding_top = inset.clone();
+    layout.theme.padding_right = inset.clone();
+    layout.theme.padding_bottom = inset.clone();
+    layout.theme.padding_left = inset;
+}
+
+/// 子菜单面板的外观：`--bg-elev` 底、一根发丝宽的 `--border-strong` 描边、`Md` 圆角，投影取主题的菜单
+/// 高度档（`ElevationRole::Menu`），和主菜单一样。都在画的时候按装上的主题解析。
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct SubmenuSurface;
+
+impl Painter for SubmenuSurface {
+    fn paint(&self, cx: &mut PaintContext<'_>) {
+        let hairline = cx.theme().border().resolve(BorderWidth::Hairline);
+        let paint = BoxPaint::fill(SemanticColorRole::Surface)
+            .border(SemanticColorRole::BorderStrong, hairline)
+            .shadow(ElevationRole::Menu);
+        let bounds = cx.bounds();
+        cx.rounded_rect(bounds, Radius::Tier(RadiusTier::Md), paint);
+    }
+
+    fn paint_key(&self) -> u64 {
+        0x5355_424d_454e_55
+    }
+}
 
 /// 点菜单项时发的消息，存成数据：能比较（按调试文本），条目变了就知道。`ShellMessage` 不能克隆，
 /// 每次点击现做一条。
@@ -447,7 +489,7 @@ pub(crate) fn context_menu(view: Signal<MenuView>, x: f32, y: f32, chrome: MenuC
         MenuRow::key,
         move |row: MenuRow| slot(view, row, chrome),
     )
-    .gap(ITEM_GAP);
+    .css(css! { gap: theme(space-xxs); });
     let close = chrome.close;
     let surface = widget(AnchoredActionMenu::new(x, y))
         .prop::<f32, MenuWidth>(move || view.with(|view| menu_width(&view.entries)))
@@ -606,8 +648,8 @@ fn slot(view: Signal<MenuView>, row: MenuRow, chrome: MenuChrome) -> AnyView {
         .into_any()
 }
 
-/// 分组的子菜单：贴在这一行右边 4px，顶边和这一行齐。中间的 4px 也算在子菜单里，指针从分组移过去不会
-/// 中途离开。分组禁用时不展开。
+/// 分组的子菜单：贴在这一行右边 `Xs` 档（默认 4px），顶边和这一行齐。中间这一段也算在子菜单里，
+/// 指针从分组移过去不会中途离开。分组禁用时不展开。
 fn submenu(view: Signal<MenuView>, entry: &MenuEntry, chrome: MenuChrome) -> AnyView {
     let id = entry.id.clone();
     let rows = entry
@@ -619,18 +661,20 @@ fn submenu(view: Signal<MenuView>, entry: &MenuEntry, chrome: MenuChrome) -> Any
                 .into_any()
         })
         .collect::<Vec<_>>();
-    let panel = Stack::column(ITEM_GAP)
+    let panel = Stack::column(0.0)
         .width(LengthSpec::Px(menu_width(&entry.children)))
-        .padding(SUBMENU_PADDING)
-        .surface(SemanticColorRole::Surface)
-        .border(SemanticColorRole::BorderStrong, 1.0)
-        .radius(RadiusTier::Md);
+        .radius(RadiusTier::Md)
+        .painter(SubmenuSurface)
+        .with_layout(|layout| {
+            menu_spacing(layout);
+            tiers::border(layout, 1);
+        });
     let bridge = Stack::column(0.0).hittable().with_layout(|layout| {
         layout.position = PositionSpec::Absolute;
-        layout.offset_top = Some(LengthSpec::Px(-SUBMENU_PADDING));
+        layout.offset_top = Some(LengthSpec::Px(-menu_padding_px()));
         layout.offset_left = Some(LengthSpec::Percent(100.0));
         layout.width = Some(LengthSpec::Shrink);
-        layout.padding_left = Some(LengthSpec::Px(SUBMENU_GAP));
+        tiers::padding(layout, &[Edge::Left], SUBMENU_GAP);
         layout.z_index = Some(1);
     });
     widget(bridge)
@@ -640,25 +684,9 @@ fn submenu(view: Signal<MenuView>, entry: &MenuEntry, chrome: MenuChrome) -> Any
                     && view.find(&id).is_some_and(|entry| !entry.disabled)
             })
         })
-        .children((widget(panel.with_layout(|layout| {
-            layout.paint.box_shadows = vec![submenu_shadow()];
-        }))
-        .children(rows),))
+        .children((widget(panel).children(rows),))
         .key(format!("{}-menu-sub-{}", chrome.prefix, entry.id))
         .into_any()
-}
-
-/// 子菜单的投影：往下 10、模糊 28、收 10，黑色 55%。
-fn submenu_shadow() -> nana_ui_core::BoxShadowSpec {
-    nana_ui_core::BoxShadowSpec {
-        paint_color: None,
-        offset_x: 0.0,
-        offset_y: 10.0,
-        blur_radius: 28.0,
-        spread_radius: -10.0,
-        color: [0.0, 0.0, 0.0, 0.55],
-        inset: false,
-    }
 }
 
 /// 点一项做什么：分组什么都不发，要点两次的项第一次只进入待确认，别的发这一项的消息。
@@ -723,25 +751,26 @@ fn item(
         })
 }
 
-/// 禁用项后面写原因的一行：左边和菜单项的文字对齐，弱色 12px。
+/// 禁用项后面写原因的一行：左边和菜单项的文字对齐（左右 `Lg` 档，默认 10px），弱色 12px。
 fn note(entry: &MenuEntry, key: String) -> AnyView {
     let row = Stack::row(0.0)
         .align(AlignSpec::Center)
         .with_layout(|layout| {
             layout.min_height = Some(LengthSpec::Px(24.0));
             layout.width = Some(LengthSpec::Fill);
-            layout.padding_left = Some(LengthSpec::Px(10.0));
-            layout.padding_right = Some(LengthSpec::Px(10.0));
+            tiers::padding(layout, &Edge::X, SpacingStep::Lg);
         });
     widget(row)
         .children((widget(
-            style::text(
-                entry.label.clone(),
-                12.0,
-                TextWeight::Regular,
-                SemanticColorRole::Faint,
+            crate::theme_map::text_line_height(
+                crate::theme_map::typed_text(
+                    Text::new(entry.label.clone()),
+                    12.0,
+                    TextWeight::Regular,
+                ),
                 18.0,
             )
+            .color(SemanticColorRole::Faint)
             .nowrap(true),
         ),))
         .key(key)

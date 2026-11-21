@@ -6,6 +6,8 @@
 //! 对话框常驻：同一种对话框打开期间只改绑定的字段，输入框用
 //! `.model` 加草稿信号受控；换一种对话框时浮层块按身份换块。
 
+use crate::theme_map::tiers;
+use nana_ui_core::SpacingStep;
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{ARCHIVE, COPY, FOLDER_OPEN, PENCIL};
@@ -266,11 +268,13 @@ fn hardlink_dialog(model: &ShellViewModel) -> Option<AnyView> {
         .key("file-hardlink-message")
         .prop::<String, fields::text::value>(move || view.with(|view| view.message.clone()));
     let paths = widget(
-        Stack::column(6.0)
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Sm)
             .width(LengthSpec::Fill)
-            .padding(10.0)
+            .padding_step(SpacingStep::Lg, SpacingStep::Lg)
             .surface(SemanticColorRole::Subtle)
-            .border(SemanticColorRole::BorderSoft, 1.0)
+            .border(SemanticColorRole::BorderSoft, tiers::hairline_px())
+            .with_layout(|layout| tiers::border(layout, 1))
             .radius(RadiusTier::Md),
     )
     .children((
@@ -282,7 +286,12 @@ fn hardlink_dialog(model: &ShellViewModel) -> Option<AnyView> {
         path_line(view, |view| view.new_path.clone(), "file-hardlink-new"),
     ))
     .key("file-hardlink-paths");
-    let body = widget(Stack::column(12.0).width(LengthSpec::Fill)).children((message, paths));
+    let body = widget(
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Xl)
+            .width(LengthSpec::Fill),
+    )
+    .children((message, paths));
     let buttons = vec![
         action("跳过", ButtonKind::Ghost, busy, "file-hardlink-skip", skip),
         action(

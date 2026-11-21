@@ -1,4 +1,5 @@
-//! 启动页和任务弹层进度条的填充：值变了按 `transition: width 0.18s ease` 从这一刻的值走到新值。
+//! 启动页和任务弹层进度条的填充：值变了按主题动效从这一刻的值走到新值，时长取浮层弹出档
+//! （`MotionRole::MenuPop`，默认 180ms），曲线取标准缓动档。
 //!
 //! 别的动效都交给 NanaUI：转圈和不确定进度由 `Spinner`、`Progress` 自己画，侧栏折叠是工作区自己的区域过渡，
 //! 底部入口的淡入淡出是样式表的 `transition`。进度条不行：NanaUI 的 `Progress` 收到新值直接画到新值，
@@ -9,8 +10,9 @@
 //! 减少动态效果跟 NanaUI 文档上下文的设置（`AppContext::reduced_motion`，默认跟系统）：准备帧每帧读一次，
 //! 打开时所有填充直接停在新值。
 
-/// 填充宽度过渡的时长：`transition: width 0.18s ease`。
-pub const PROGRESS_WIDTH_MS: u64 = 180;
+/// 填充宽度过渡的时长：主题动效的浮层弹出档（默认 180ms）。
+pub const PROGRESS_WIDTH_MS: u64 =
+    crate::theme_map::tiers::motion_ms(nana_ui_core::MotionRole::MenuPop) as u64;
 
 /// 一段还没走完的填充。走完以后 `value` 一直是 `to`。
 #[derive(Clone, Copy, Debug)]
@@ -39,7 +41,9 @@ impl Fill {
             return self.to;
         }
         let linear = now_ms.saturating_sub(self.started_ms) as f32 / PROGRESS_WIDTH_MS as f32;
-        self.from + (self.to - self.from) * ease(linear)
+        let eased =
+            crate::theme_map::tiers::easing(nana_ui_core::EasingRole::Standard).sample(linear);
+        self.from + (self.to - self.from) * eased
     }
 }
 
@@ -140,42 +144,12 @@ impl ProgressFills {
     }
 }
 
-/// CSS `ease`：`cubic-bezier(0.25, 0.1, 0.25, 1)` 在时间 `t` 上的进度。
-fn ease(t: f32) -> f32 {
-    const X1: f32 = 0.25;
-    const Y1: f32 = 0.1;
-    const X2: f32 = 0.25;
-    const Y2: f32 = 1.0;
-    let t = t.clamp(0.0, 1.0);
-    if t == 0.0 || t == 1.0 {
-        return t;
-    }
-    let component = |a: f32, b: f32, s: f32| {
-        let u = 1.0 - s;
-        3.0 * u * u * s * a + 3.0 * u * s * s * b + s * s * s
-    };
-    let slope = |a: f32, b: f32, s: f32| {
-        let u = 1.0 - s;
-        3.0 * u * u * a + 6.0 * u * s * (b - a) + 3.0 * s * s * (1.0 - b)
-    };
-    let mut guess = t;
-    for _ in 0..8 {
-        let error = component(X1, X2, guess) - t;
-        let rate = slope(X1, X2, guess);
-        if rate.abs() < 1.0e-4 {
-            break;
-        }
-        guess = (guess - error / rate).clamp(0.0, 1.0);
-    }
-    component(Y1, Y2, guess)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn fills_move_for_180ms_and_new_rows_land_at_once() {
+    fn fills_move_for_the_motion_duration_and_new_rows_land_at_once() {
         let mut fills = ProgressFills::default();
         fills.set_startup(50.0);
         assert_eq!(fills.startup(), 0.0, "启动条从 0 起步");

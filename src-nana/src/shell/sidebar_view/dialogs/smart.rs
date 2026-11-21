@@ -4,6 +4,7 @@
 //! 父级候选、两个下拉框的当前值、错误、主按钮文案和禁用放在一个投影信号里。正文是纵向滚动区，
 //! 高度由 NanaUI 对话框按窗口限定，底栏始终露在外面，800 高的窗口里也不被裁掉。
 
+use nana_ui_core::SpacingStep;
 use std::sync::Arc;
 
 use crate::shell::sidebar::{SidebarSmartFolder, SmartFolderField};
@@ -177,7 +178,7 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
         ),
         two_columns(
             "smart-filter-grid",
-            12.0,
+            SpacingStep::Xl,
             vec![
                 input(
                     SmartFolderField::Query,
@@ -239,7 +240,7 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
         ),
         two_columns(
             "smart-exclude-grid",
-            12.0,
+            SpacingStep::Xl,
             vec![
                 input(
                     SmartFolderField::ExcludeQuery,
@@ -295,7 +296,7 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
         ),
         two_columns(
             "smart-range-grid",
-            12.0,
+            SpacingStep::Xl,
             vec![
                 area(
                     SmartFolderField::ExcludeNumbers,
@@ -333,9 +334,16 @@ pub fn smart_folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
         ),
     ];
     // 正文竖排、间距 12，右边留 4 给滚动条。
-    let column = Stack::column(12.0)
+    let column = Stack::column(0.0)
+        .gap_step(SpacingStep::Xl)
         .width(LengthSpec::Fill)
-        .with_layout(|layout| layout.padding_right = Some(LengthSpec::Px(4.0)));
+        .with_layout(|layout| {
+            crate::theme_map::tiers::padding(
+                layout,
+                &[crate::theme_map::tiers::Edge::Right],
+                SpacingStep::Xs,
+            );
+        });
     let scroll = widget(ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
         layout.width = Some(LengthSpec::Fill);
         layout.min_height = Some(LengthSpec::Px(0.0));

@@ -7,6 +7,7 @@
 //!
 //! 版式：警示图标、眉题、仓库名、说明、路径框、错误和三个操作。
 
+use nana_ui_core::SpacingStep;
 use std::sync::Arc;
 
 use nana_ui::ButtonKind;
@@ -127,9 +128,19 @@ pub(super) fn view(signals: MissingSignals) -> AnyView {
     )
 }
 
-/// 给一个节点套上外边距，用来微调几处间距。
-fn with_margin(child: AnyView, top: f32, bottom: f32) -> AnyView {
+/// 给一个节点套上外边距，用来微调几处间距：上下各取一档，`None` 是不留。
+fn with_margin(child: AnyView, top: Option<SpacingStep>, bottom: Option<SpacingStep>) -> AnyView {
     widget(margin(top, bottom)).children((child,)).into_any()
+}
+
+/// 主操作按钮：低饱和蓝、半粗字重（DESIGN.md 5.1 的主操作）。按钮自带中等字重令牌，字重连令牌一起换。
+fn primary_button(label: impl Into<String>, busy: bool) -> Button {
+    let mut button = Button::new(label).kind(ButtonKind::Primary).disabled(busy);
+    crate::theme_map::control_weight(
+        Arc::make_mut(&mut button.style.layout),
+        TextWeight::Semibold,
+    );
+    button
 }
 
 /// 缺失仓库：图标、眉题、仓库名、说明、路径框、错误、重定向输入和三个操作。
@@ -179,20 +190,21 @@ fn panel(signals: MissingSignals) -> AnyView {
             }),
     )
     .children((
-        with_margin(icon.into_any(), 0.0, 14.0),
+        with_margin(icon.into_any(), None, Some(SpacingStep::Xxl)),
         eyebrow("资源库丢失", "missing-eyebrow"),
-        with_margin(name.into_any(), 4.0, 0.0),
-        with_margin(summary.into_any(), 12.0, 0.0),
-        with_margin(path_box(view), 16.0, 0.0),
+        with_margin(name.into_any(), Some(SpacingStep::Xs), None),
+        with_margin(summary.into_any(), Some(SpacingStep::Xl), None),
+        with_margin(path_box(view), Some(SpacingStep::Xxxl), None),
         error_block(view),
         editor(signals),
-        with_margin(actions(view), 18.0, 0.0),
+        with_margin(actions(view), Some(SpacingStep::Xxxl), None),
     ))
     .key("missing-panel")
     .into_any()
 }
 
-/// 路径框：`--bg` 底、`--border` 描边、等宽 12px、可在任意位置折行。
+/// 路径框：`--bg` 底、一根发丝宽的 `--border` 描边、内边距上下 `Lg` 左右 `Xl` 档、等宽 12px、
+/// 可在任意位置折行。
 fn path_box(view: Signal<MissingView>) -> AnyView {
     let mut node = wrapping(
         view.with_untracked(|view| view.path.clone()),
@@ -203,12 +215,15 @@ fn path_box(view: Signal<MissingView>) -> AnyView {
     );
     Arc::make_mut(&mut node.style.layout).text_ext.font_family = Some(MONO_FONTS.into());
     widget(
-        Stack::column(0.0)
-            .width(LengthSpec::Fill)
-            .padding_xy(12.0, 10.0)
-            .surface(SemanticColorRole::Background)
-            .border(SemanticColorRole::Border, 1.0)
-            .radius(RadiusTier::Sm),
+        crate::theme_map::bordered(
+            Stack::column(0.0)
+                .width(LengthSpec::Fill)
+                .padding_step(SpacingStep::Xl, SpacingStep::Lg)
+                .surface(SemanticColorRole::Background),
+            SemanticColorRole::Border,
+            1,
+        )
+        .radius(RadiusTier::Sm),
     )
     .children((widget(node)
         .prop::<String, fields::text::value>(move || view.with(|view| view.path.clone()))
@@ -218,7 +233,7 @@ fn path_box(view: Signal<MissingView>) -> AnyView {
 
 /// 错误条：NanaUI 的提示条（`callout`），危险色调，重定向、刷新或删除失败时显示。
 fn error_block(view: Signal<MissingView>) -> AnyView {
-    widget(margin(12.0, 0.0).width(LengthSpec::Fill))
+    widget(margin(Some(SpacingStep::Xl), None).width(LengthSpec::Fill))
         .visible(move || view.with(|view| !view.error.is_empty()))
         .children((callout(ALERT_CIRCLE, StatusTone::Danger, move || {
             view.with(|view| view.error.clone())
@@ -236,17 +251,20 @@ fn editor(signals: MissingSignals) -> AnyView {
         .on_cx(|_, event: &TextChanged, cx| {
             cx.dispatch_program_all(ShellMessage::MissingPathChanged(event.value.to_string()));
         });
-    let submit = widget(
-        Button::new("确认重定向")
-            .kind(ButtonKind::Primary)
-            .disabled(view.with_untracked(|view| view.busy)),
-    )
+    let submit = widget(primary_button(
+        "确认重定向",
+        view.with_untracked(|view| view.busy),
+    ))
     .prop::<bool, fields::button::disabled>(move || view.with(|view| view.busy))
     .key("missing-submit-path")
     .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::MissingSubmitPath));
-    let editor = widget(Stack::column(8.0).width(LengthSpec::Fill))
-        .children((input, widget(Stack::row(0.0)).children((submit,))));
-    widget(margin(12.0, 0.0))
+    let editor = widget(
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Md)
+            .width(LengthSpec::Fill),
+    )
+    .children((input, widget(Stack::row(0.0)).children((submit,))));
+    widget(margin(Some(SpacingStep::Xl), None))
         .visible(move || view.with(|view| view.prompt))
         .children((editor,))
         .into_any()
@@ -256,13 +274,14 @@ fn editor(signals: MissingSignals) -> AnyView {
 fn actions(view: Signal<MissingView>) -> AnyView {
     let initial = view.get_untracked();
     let busy = move || view.with(|view| view.busy);
-    widget(Stack::row(8.0).align(AlignSpec::Center).wrap(true))
-        .children((
-            widget(
-                Button::new(initial.primary)
-                    .kind(ButtonKind::Primary)
-                    .disabled(initial.busy),
-            )
+    widget(
+        Stack::row(0.0)
+            .gap_step(SpacingStep::Md)
+            .align(AlignSpec::Center)
+            .wrap(true),
+    )
+    .children((
+        widget(primary_button(initial.primary, initial.busy))
             .prop::<String, fields::button::label>(move || {
                 view.with(|view| view.primary.to_string())
             })
@@ -276,27 +295,25 @@ fn actions(view: Signal<MissingView>) -> AnyView {
                 };
                 cx.dispatch_program_all(message);
             }),
-            widget(
-                Button::new("刷新")
-                    .kind(ButtonKind::Ghost)
-                    .disabled(initial.busy),
-            )
-            .prop::<bool, fields::button::disabled>(busy)
-            .key("missing-refresh")
-            .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::MissingRefresh)),
-            widget(
-                Button::new(initial.delete)
-                    .kind(ButtonKind::Danger)
-                    .disabled(initial.busy),
-            )
-            .prop::<String, fields::button::label>(move || {
-                view.with(|view| view.delete.to_string())
-            })
-            .prop::<bool, fields::button::disabled>(busy)
-            .key("missing-delete")
-            .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::MissingOpenDelete)),
-        ))
-        .into_any()
+        widget(
+            Button::new("刷新")
+                .kind(ButtonKind::Ghost)
+                .disabled(initial.busy),
+        )
+        .prop::<bool, fields::button::disabled>(busy)
+        .key("missing-refresh")
+        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::MissingRefresh)),
+        widget(
+            Button::new(initial.delete)
+                .kind(ButtonKind::Danger)
+                .disabled(initial.busy),
+        )
+        .prop::<String, fields::button::label>(move || view.with(|view| view.delete.to_string()))
+        .prop::<bool, fields::button::disabled>(busy)
+        .key("missing-delete")
+        .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::MissingOpenDelete)),
+    ))
+    .into_any()
 }
 
 #[cfg(test)]

@@ -6,6 +6,8 @@
 //! 每个对话框常驻：打开时按投影建一次，之后浮层同步只把新的投影写进信号，文字、禁用和错误这些
 //! 字段原地改；输入框用 `.model` 加草稿信号受控。按钮和选项卡片的事件只发意图消息。
 
+use crate::theme_map::tiers::{self, Edge};
+use nana_ui_core::SpacingStep;
 use std::sync::Arc;
 
 use nana_ui::ButtonKind;
@@ -80,7 +82,12 @@ pub fn folder_dialog(model: &ShellViewModel) -> Option<AnyView> {
     });
     let busy = move || view.with(|view| view.busy);
     let submit = || gap(GapMessage::SubmitFolderDialog);
-    let body = widget(Stack::column(12.0).width(LengthSpec::Fill)).children((
+    let body = widget(
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Xl)
+            .width(LengthSpec::Fill),
+    )
+    .children((
         paragraph(
             move || view.with(|view| view.summary.clone()),
             true,
@@ -159,7 +166,12 @@ pub fn folder_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
     let view = signal(FolderDeleteView::project(model)?);
     Projected::register(view, FolderDeleteView::project);
     let busy = move || view.with(|view| view.busy);
-    let options = widget(Stack::column(10.0).width(LengthSpec::Fill)).children((
+    let options = widget(
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Lg)
+            .width(LengthSpec::Fill),
+    )
+    .children((
         option_card(
             "转移到上级目录",
             "保留内部文件和子文件夹，只删除当前这一层目录。",
@@ -181,7 +193,12 @@ pub fn folder_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
             || gap(GapMessage::ConfirmFolderDelete(FolderDeleteMode::Delete)),
         ),
     ));
-    let body = widget(Stack::column(12.0).width(LengthSpec::Fill)).children((
+    let body = widget(
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Xl)
+            .width(LengthSpec::Fill),
+    )
+    .children((
         paragraph(
             move || view.with(|view| view.copy.clone()),
             false,
@@ -214,8 +231,8 @@ pub fn folder_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
 }
 
 /// 带标题和说明的选项卡片，处理文件夹和删除资源库共用：
-/// 内边距 14px、`--radius-xl`、`--bg` 底，悬停 `--bg-hover`；危险项描一圈浅红、悬停浅红底。
-/// `detail` 和 `disabled` 可以读信号；禁用时整张卡 0.45 透明度，框架不派发点击。
+/// 内边距 `Xxl` 档（默认 14px）、`--radius-xl`、`--bg` 底，悬停 `--bg-hover`；危险项描一圈发丝宽的浅红、
+/// 悬停浅红底。`detail` 和 `disabled` 可以读信号；禁用时整张卡按主题的禁用不透明度淡化，框架不派发点击。
 fn option_card(
     title: &'static str,
     detail: impl IntoProp<String>,
@@ -224,19 +241,25 @@ fn option_card(
     key: impl Into<String>,
     message: impl Fn() -> ShellMessage + Send + Sync + 'static,
 ) -> AnyView {
-    let mut style = parts::row_style(0.0, 14.0, 14.0, 6.0, parts::ActiveTone::Accent, false);
+    let mut style = parts::row_style(
+        0.0,
+        Some(SpacingStep::Xxl),
+        Some(SpacingStep::Xxl),
+        Some(SpacingStep::Sm),
+        parts::ActiveTone::Accent,
+        false,
+    );
     {
         let layout = Arc::make_mut(&mut style.layout);
         layout.direction = Some(nana_ui_core::FlexDirection::Column);
         layout.align_items = AlignSpec::Stretch;
         layout.height = None;
         layout.min_height = None;
-        layout.padding_top = Some(LengthSpec::Px(14.0));
-        layout.padding_bottom = Some(LengthSpec::Px(14.0));
+        tiers::padding(layout, &Edge::Y, SpacingStep::Xxl);
         layout.white_space_nowrap = false;
         layout.text_overflow_ellipsis = false;
         if danger {
-            layout.border_width = Some(1.0);
+            tiers::border(layout, 1);
         }
     }
     style.radius = Some(RadiusTier::Xl);
@@ -248,7 +271,12 @@ fn option_card(
     }
     let detail_text = widget(wrapping_text(12.0, 18.0, SemanticColorRole::Muted))
         .prop::<String, nana_ui::runtime::view::fields::text::value>(detail);
-    let content = widget(Stack::column(6.0).width(LengthSpec::Fill)).children((
+    let content = widget(
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Sm)
+            .width(LengthSpec::Fill),
+    )
+    .children((
         widget(parts::label_text(
             title,
             14.0,
@@ -378,7 +406,12 @@ pub fn playlist_create_dialog(model: &ShellViewModel) -> Option<AnyView> {
             .playlist_dialog_open
             .then(|| model.new_playlist_name.clone())
     });
-    let body = widget(Stack::column(12.0).width(LengthSpec::Fill)).children((
+    let body = widget(
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Xl)
+            .width(LengthSpec::Fill),
+    )
+    .children((
         text_field(
             "名称",
             "playlist-dialog-name",
@@ -499,9 +532,19 @@ pub fn repository_delete_dialog(model: &ShellViewModel) -> Option<AnyView> {
         .enumerate()
         .map(|(index, mode)| delete_option(view, index, mode))
         .collect::<Vec<_>>();
-    let body = widget(Stack::column(12.0).width(LengthSpec::Fill)).children((
+    let body = widget(
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Xl)
+            .width(LengthSpec::Fill),
+    )
+    .children((
         summary,
-        widget(Stack::column(10.0).width(LengthSpec::Fill)).children(options),
+        widget(
+            Stack::column(0.0)
+                .gap_step(SpacingStep::Lg)
+                .width(LengthSpec::Fill),
+        )
+        .children(options),
         error_line(
             move || view.with(|view| view.error.clone()),
             "delete-dialog-error",

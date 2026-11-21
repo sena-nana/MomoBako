@@ -24,10 +24,15 @@ use nana_ui::runtime::{
 
 use super::hot::HotSignals;
 use super::shell_tint::SoftFill;
-use super::startup_view::{ROOT_LINE_HEIGHT, eyebrow, fill_section, line, margin, wrapping};
+use super::startup_view::{
+    ROOT_LINE_HEIGHT, eyebrow, fill_section, line, margin, pull_up, wrapping,
+};
 use super::workspace::{StartupLog, StartupStatus, StartupStepItem, StartupStepState};
 use super::{ShellMessage, ShellViewModel};
-use nana_ui_core::TextWeight;
+use nana_ui::runtime::view::css;
+use nana_ui_core::{SpacingRole, SpacingStep, TextWeight};
+
+use crate::theme_map::{bordered, tiers};
 
 /// 启动页内容最宽 680px。
 const PANEL_WIDTH: f32 = 680.0;
@@ -150,7 +155,7 @@ fn panel(signals: StartupSignals, hot: HotSignals) -> AnyView {
     ))
     .prop::<String, fields::text::value>(move || text.with(|text| text.meta.clone()))
     .key("startup-meta");
-    let detail = widget(margin(-2.0, 0.0))
+    let detail = widget(pull_up(SpacingStep::Xxs))
         .visible(move || text.with(|text| !text.detail.is_empty()))
         .children((widget(wrapping(
             initial.detail.clone(),
@@ -161,9 +166,13 @@ fn panel(signals: StartupSignals, hot: HotSignals) -> AnyView {
         ))
         .prop::<String, fields::text::value>(move || text.with(|text| text.detail.clone()))
         .key("startup-detail"),));
-    let steps = widget(margin(2.0, 0.0)).children((each(signals.steps, step_key, step_row)
-        .gap(8.0)
-        .key("startup-steps"),));
+    let steps = widget(margin(Some(SpacingStep::Xxs), None)).children((each(
+        signals.steps,
+        step_key,
+        step_row,
+    )
+    .css(css! { gap: theme(space-md); })
+    .key("startup-steps"),));
     let error = widget(Stack::column(0.0).width(LengthSpec::Fill))
         .visible(move || text.with(|text| text.error.is_some()))
         .children((callout(ALERT_CIRCLE, StatusTone::Danger, move || {
@@ -180,7 +189,8 @@ fn panel(signals: StartupSignals, hot: HotSignals) -> AnyView {
             .key("startup-retry")
             .on_cx(|_, _: &Activate, cx| cx.dispatch_program_all(ShellMessage::StartupRetry)),));
     widget(
-        Stack::column(12.0)
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Xl)
             .width(LengthSpec::Fill)
             .with_layout(|layout| {
                 layout.max_width = Some(LengthSpec::Px(PANEL_WIDTH));
@@ -201,7 +211,7 @@ fn panel(signals: StartupSignals, hot: HotSignals) -> AnyView {
     .into_any()
 }
 
-/// NanaUI 的进度条（`progress`），满格 100。数值绑在热信号上，按 0.18s 过渡到新值（`progress_fill.rs`）。
+/// NanaUI 的进度条（`progress`），满格 100。数值绑在热信号上，按主题动效过渡到新值（`progress_fill.rs`）。
 fn progress_bar(percent: Signal<f32>) -> AnyView {
     progress(100.0)
         .value(move || f64::from(percent.get()))
@@ -239,27 +249,28 @@ fn step_row(item: StartupStepItem) -> AnyView {
         .align(AlignSpec::Center)
         .justify(JustifySpec::Center);
     let badge = match item.state {
-        StartupStepState::Current => badge
-            .surface(SemanticColorRole::AccentSoft)
-            .border(SemanticColorRole::Accent, 1.0)
-            .radius_px(999.0),
-        StartupStepState::Done => badge.painter(
-            SoftFill::ok()
-                .border(SemanticColorRole::Success, 1.0)
-                .pill(),
-        ),
-        StartupStepState::Error => badge.painter(
-            SoftFill::err()
-                .border(SemanticColorRole::Danger, 1.0)
-                .pill(),
-        ),
-        StartupStepState::Pending => badge
-            .surface(SemanticColorRole::Subtle)
-            .border(SemanticColorRole::Border, 1.0)
-            .radius_px(999.0),
+        StartupStepState::Current => bordered(
+            badge.surface(SemanticColorRole::AccentSoft),
+            SemanticColorRole::Accent,
+            1,
+        )
+        .radius(RadiusTier::Full),
+        StartupStepState::Done => {
+            badge.painter(SoftFill::ok().border(SemanticColorRole::Success, 1).pill())
+        }
+        StartupStepState::Error => {
+            badge.painter(SoftFill::err().border(SemanticColorRole::Danger, 1).pill())
+        }
+        StartupStepState::Pending => bordered(
+            badge.surface(SemanticColorRole::Subtle),
+            SemanticColorRole::Border,
+            1,
+        )
+        .radius(RadiusTier::Full),
     };
     let copy = widget(
-        Stack::column(2.0)
+        Stack::column(0.0)
+            .gap_step(SpacingRole::Copy)
             .min_width(LengthSpec::Px(0.0))
             .grow(1.0)
             .shrink(1.0),
@@ -282,15 +293,19 @@ fn step_row(item: StartupStepItem) -> AnyView {
         ))
         .key(format!("startup-copy-{}", item.number)),
     ));
-    widget(Stack::bar(10.0).align(AlignSpec::Start))
-        .children((
-            widget(badge).children((widget(number).key(format!("startup-index-{}", item.number)),)),
-            copy,
-        ))
-        .into_any()
+    widget(
+        Stack::bar(0.0)
+            .gap_step(SpacingStep::Lg)
+            .align(AlignSpec::Start),
+    )
+    .children((
+        widget(badge).children((widget(number).key(format!("startup-index-{}", item.number)),)),
+        copy,
+    ))
+    .into_any()
 }
 
-/// 日志和表头共用的两列：左列 74px，右列占满，间距 10px。
+/// 日志和表头共用的两列：左列 74px，右列占满，间距 `Lg` 档（默认 10px）。
 fn log_columns(left: Text, right: AnyView) -> AnyView {
     let mut left = left;
     {
@@ -299,9 +314,13 @@ fn log_columns(left: Text, right: AnyView) -> AnyView {
         layout.min_width = Some(LengthSpec::Px(LOG_TIME_WIDTH));
         layout.flex_shrink = Some(0.0);
     }
-    widget(Stack::bar(10.0).align(AlignSpec::Start))
-        .children((widget(left).into_any(), right))
-        .into_any()
+    widget(
+        Stack::bar(0.0)
+            .gap_step(SpacingStep::Lg)
+            .align(AlignSpec::Start),
+    )
+    .children((widget(left).into_any(), right))
+    .into_any()
 }
 
 /// 「加载日志」：最近 8 条，新的在前。框体描边不动，里面的内容超过 240px 时滚动。没有日志时不占布局。
@@ -328,11 +347,12 @@ fn log_panel(logs: Signal<Vec<LogRow>>) -> AnyView {
         ),
         summary,
     );
-    let entries = each(logs, LogRow::clone, log_row).gap(7.0);
+    let entries = each(logs, LogRow::clone, log_row).css(css! { gap: theme(space-md); });
     let content = widget(
-        Stack::column(8.0)
+        Stack::column(0.0)
+            .gap_step(SpacingStep::Md)
             .width(LengthSpec::Fill)
-            .padding_xy(12.0, 10.0),
+            .padding_step(SpacingStep::Xl, SpacingStep::Lg),
     )
     .children((header, entries));
     let scroll = widget(
@@ -340,21 +360,26 @@ fn log_panel(logs: Signal<Vec<LogRow>>) -> AnyView {
             .label("首屏加载日志")
             .with_layout(|layout| {
                 layout.width = Some(LengthSpec::Fill);
-                layout.max_height = Some(LengthSpec::Px(LOG_PANEL_MAX_HEIGHT - 2.0));
+                layout.max_height = Some(LengthSpec::Px(
+                    LOG_PANEL_MAX_HEIGHT - 2.0 * tiers::hairline_px(),
+                ));
                 layout.min_height = Some(LengthSpec::Px(0.0));
             }),
     )
     .children((content,));
     widget(
-        Stack::column(0.0)
-            .width(LengthSpec::Fill)
-            .surface(SemanticColorRole::Subtle)
-            .border(SemanticColorRole::Border, 1.0)
-            .radius(RadiusTier::Sm)
-            .with_layout(|layout| {
-                layout.max_height = Some(LengthSpec::Px(LOG_PANEL_MAX_HEIGHT));
-                layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
-            }),
+        bordered(
+            Stack::column(0.0)
+                .width(LengthSpec::Fill)
+                .surface(SemanticColorRole::Subtle),
+            SemanticColorRole::Border,
+            1,
+        )
+        .radius(RadiusTier::Sm)
+        .with_layout(|layout| {
+            layout.max_height = Some(LengthSpec::Px(LOG_PANEL_MAX_HEIGHT));
+            layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
+        }),
     )
     .visible(move || logs.with(|logs| !logs.is_empty()))
     .children((scroll,))
@@ -393,7 +418,8 @@ fn log_row(row: LogRow) -> AnyView {
         );
     }
     let body = widget(
-        Stack::column(2.0)
+        Stack::column(0.0)
+            .gap_step(SpacingRole::Copy)
             .min_width(LengthSpec::Px(0.0))
             .grow(1.0)
             .shrink(1.0),

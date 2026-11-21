@@ -1,7 +1,7 @@
 //! 侧栏零件：导航行、分组标题、标题工具、空状态说明和底部入口，以及常驻侧栏按信号改字段用的写入器。
 //!
 //! 导航行是 NanaUI 的侧栏行（`SidebarRow`），高度、字号和当前态的底色按主题配方；其余零件按设计值：
-//! 分组标题 24px、标题工具 22px、底部入口 26px。
+//! 分组标题 24px、标题工具 22px、底部入口 26px（这几个尺寸主题没有对应档位）。间距、行高、圆角取主题档位。
 //! 颜色只写语义角色，树行里的图标和文字继承行的前景色，悬停和当前态由行的交互样式整体切换。
 //!
 //! 侧栏常驻以后，导航行、标题工具和底部入口的当前态、禁用和计数都按信号绑定：建一次，之后只改
@@ -10,17 +10,19 @@
 use std::sync::Arc;
 
 use nana_ui::runtime::view::{
-    AnyView, El, FieldWrite, IntoProp, IntoView, Signal, fields, stylesheet, widget,
+    AnyView, El, FieldWrite, Implicit, IntoProp, IntoView, Signal, fields, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, IconButton, IconGlyph, InteractionStyle, LengthSpec, NodeStyle, Popover,
-    PopoverAlignment, PopoverPlacement, PopoverToggled, RadiusTier, SemanticColorRole,
-    SemanticPaint, SidebarRow, SidebarRowIcon, SidebarRowState, Stack, Text, ViewContext,
+    Activate, AlignSpec, AnimatableProperty, IconButton, IconGlyph, InteractionStyle, LengthSpec,
+    NodeStyle, Popover, PopoverAlignment, PopoverPlacement, PopoverToggled, RadiusTier,
+    SemanticColorRole, SemanticPaint, SidebarRow, SidebarRowIcon, SidebarRowState, Stack, Text,
+    ViewContext,
 };
 use nana_ui::{ControlSize, Icon};
 
+use crate::theme_map::tiers::{self, Edge};
 use crate::theme_map::{DISABLED_OPACITY, disabled_paint};
-use nana_ui_core::TextWeight;
+use nana_ui_core::{EasingRole, LineRole, MotionRole, SpacingRole, SpacingStep, TextWeight};
 
 /// 分组标题高度。
 const GROUP_HEADER_HEIGHT: f32 = 24.0;
@@ -29,11 +31,49 @@ const TREE_ACTION_EDGE: f32 = 22.0;
 /// 底部入口：26×26。
 const FOOTER_BUTTON_EDGE: f32 = 26.0;
 
-stylesheet! {
-    pub(crate) mod footer_styles;
-    /* 底部入口平时 0.44 透明度，亮起（悬停底栏、当前入口、有任务）时为 1，按 0.35s ease 淡入淡出。 */
-    .footer-entry { opacity: 0.44; transition: opacity 350ms ease; }
-    .footer-entry.lit { opacity: 1; }
+/// 底部入口平时的透明度：主题状态层的禁用档（默认 0.5），压在正常墨色以下；亮起（悬停底栏、当前入口、
+/// 有任务）时为 1。
+pub(crate) const FOOTER_DIM: f32 = DISABLED_OPACITY;
+
+/// 底部入口亮暗之间的淡入淡出：主题动效的侧栏收起档（默认 260ms）、标准缓动。
+pub(crate) fn footer_fade() -> [Implicit; 1] {
+    [Implicit::new(
+        AnimatableProperty::Opacity,
+        tiers::motion(MotionRole::SidebarCollapse),
+    )
+    .ease(tiers::easing(EasingRole::Standard))]
+}
+
+/// 底部入口亮着时不透明，不亮时是 [`FOOTER_DIM`]。
+pub(crate) fn footer_opacity(lit: bool) -> f32 {
+    if lit { 1.0 } else { FOOTER_DIM }
+}
+
+/// 底部入口亮不亮：写节点透明度，亮暗之间由 [`footer_fade`] 过渡。
+pub(crate) struct FooterLit;
+
+impl FieldWrite<IconButton, bool> for FooterLit {
+    const FIELD: &'static str = "IconButton.style.layout.opacity";
+
+    fn write(target: &mut IconButton, lit: bool) {
+        Arc::make_mut(&mut target.style.layout).opacity = Some(footer_opacity(lit));
+    }
+
+    fn differs(target: &IconButton, lit: &bool) -> bool {
+        target.style.layout.opacity != Some(footer_opacity(*lit))
+    }
+}
+
+impl FieldWrite<Stack, bool> for FooterLit {
+    const FIELD: &'static str = "Stack.layout.opacity";
+
+    fn write(target: &mut Stack, lit: bool) {
+        target.layout_mut().opacity = Some(footer_opacity(lit));
+    }
+
+    fn differs(target: &Stack, lit: &bool) -> bool {
+        target.node_style().layout.opacity != Some(footer_opacity(*lit))
+    }
 }
 
 /// 侧栏行的状态色。`accent` 为 true 时当前态是强调色（快捷方式、底部入口），
@@ -44,12 +84,13 @@ pub(crate) enum ActiveTone {
     Neutral,
 }
 
-/// 侧栏行的节点样式。`height` 和左右内边距按行的种类给，悬停和当前态换底色和前景。
+/// 侧栏行的节点样式。`height` 和左右内边距、子项间距按行的种类给（间距取主题档位，`None` 是不留），
+/// 悬停和当前态换底色和前景。
 pub(crate) fn row_style(
     height: f32,
-    pad_left: f32,
-    pad_right: f32,
-    gap: f32,
+    pad_left: Option<SpacingStep>,
+    pad_right: Option<SpacingStep>,
+    gap: Option<SpacingStep>,
     tone: ActiveTone,
     disabled: bool,
 ) -> NodeStyle {
@@ -58,13 +99,19 @@ pub(crate) fn row_style(
         let layout = Arc::make_mut(&mut style.layout);
         layout.direction = Some(nana_ui_core::FlexDirection::Row);
         layout.align_items = AlignSpec::Center;
-        layout.gap = Some(LengthSpec::Px(gap));
+        if let Some(step) = gap {
+            tiers::gap(layout, step);
+        }
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
         layout.height = Some(LengthSpec::Px(height));
         layout.min_height = Some(LengthSpec::Px(height));
-        layout.padding_left = Some(LengthSpec::Px(pad_left));
-        layout.padding_right = Some(LengthSpec::Px(pad_right));
+        if let Some(step) = pad_left {
+            tiers::padding(layout, &[Edge::Left], step);
+        }
+        if let Some(step) = pad_right {
+            tiers::padding(layout, &[Edge::Right], step);
+        }
         crate::theme_map::control_font(layout, nana_ui_core::TypeRole::Body);
         crate::theme_map::control_weight(layout, TextWeight::Medium);
         layout.white_space_nowrap = true;
@@ -222,9 +269,13 @@ impl FieldWrite<SidebarRow, SidebarRowState> for RowState {
 /// `title` 可以是一段文字，也可以是播放集那样可点的标题按钮。
 pub(crate) fn group_header(title: AnyView, tools: Vec<AnyView>, key: &'static str) -> AnyView {
     let tools = (!tools.is_empty()).then(|| {
-        widget(Stack::row(2.0).align(AlignSpec::Center))
-            .children(tools)
-            .into_any()
+        widget(
+            Stack::row(0.0)
+                .gap_step(SpacingRole::IconTools)
+                .align(AlignSpec::Center),
+        )
+        .children(tools)
+        .into_any()
     });
     widget(
         Stack::bar(0.0)
@@ -232,8 +283,8 @@ pub(crate) fn group_header(title: AnyView, tools: Vec<AnyView>, key: &'static st
             .height(LengthSpec::Px(GROUP_HEADER_HEIGHT))
             .min_height(LengthSpec::Px(GROUP_HEADER_HEIGHT))
             .with_layout(|layout| {
-                layout.padding_left = Some(LengthSpec::Px(8.0));
-                layout.padding_right = Some(LengthSpec::Px(6.0));
+                tiers::padding(layout, &[Edge::Left], SpacingStep::Md);
+                tiers::padding(layout, &[Edge::Right], SpacingStep::Sm);
             }),
     )
     .children((title, widget(Stack::spacer()), tools))
@@ -258,7 +309,7 @@ pub(crate) fn group_title(value: &str) -> Text {
 /// 分组标题右侧的小图标按钮：22×22、`--radius-xs`、弱色 13px 图标。
 /// 禁用按 `disabled` 绑定，常量也行。返回元素本身，调用方还能再绑图标。
 ///
-/// 停用时按 0.45 把弱色和侧栏底色（`--bg-elev`）在 sRGB 里混成不透明色，
+/// 停用时按主题禁用档的不透明度把弱色和侧栏底色（`--bg-elev`）在 sRGB 里混成不透明色，
 /// 颜色照写的来（`colors_from_style`），NanaUI 不再整枚淡化。播放集行上的「播放」不走这一个底色，
 /// 选中时改和 `--accent-soft` 混，见 [`PlayBase`]。
 pub(crate) fn tree_action(
@@ -302,7 +353,7 @@ pub(crate) fn tree_action_titled(
 
 /// 播放集行「播放」的停用底色：这一行选中时是 `--accent-soft`，否则仍是侧栏底。
 ///
-/// 这个按钮底是透明的，字色 `--text-faint`，停用时整颗 0.45 不透明。
+/// 这个按钮底是透明的，字色 `--text-faint`，停用时整颗按主题禁用档淡化。
 /// 选中行的底是 `--accent-soft`（深色主题约 0.14、浅色约 0.10 的强调色），半透明字形会透出那一点强调色；
 /// 没选中时行没有这层底，透出来的是侧栏 `--bg-elev`。这里不改 NanaUI 的混合，只按行换 `disabled_paint`
 /// 的底色。`--accent-soft` 自己带透明度，和它混出的字色也带着透明度，画上去会再叠一行底。
@@ -379,9 +430,9 @@ fn hover_paint() -> SemanticPaint {
 }
 
 /// 分组里的空状态说明：
-/// 内边距 6px 8px，12px 弱色，行高 1.5。
+/// 内边距上下 `Sm`、左右 `Md`（默认 6px 8px），12px 弱色，行高 Tall 档。
 pub(crate) fn empty_hint(copy: &str, key: impl Into<String>) -> AnyView {
-    widget(Stack::column(0.0).padding_xy(8.0, 6.0))
+    widget(Stack::column(0.0).padding_step(SpacingStep::Md, SpacingStep::Sm))
         .children((widget(hint_text(copy)).key(key.into()),))
         .into_any()
 }
@@ -391,7 +442,7 @@ pub(crate) fn bound_hint(
     copy: impl Fn() -> Option<&'static str> + Copy + Send + 'static,
     key: &'static str,
 ) -> AnyView {
-    widget(Stack::column(0.0).padding_xy(8.0, 6.0))
+    widget(Stack::column(0.0).padding_step(SpacingStep::Md, SpacingStep::Sm))
         .visible(move || copy().is_some())
         .children((widget(hint_text(copy().unwrap_or_default()))
             .prop::<String, fields::text::value>(move || copy().unwrap_or_default().to_string())
@@ -399,16 +450,16 @@ pub(crate) fn bound_hint(
         .into_any()
 }
 
-/// 空状态说明的文字：12px 弱色、行高 18px，可在任意位置折行。
+/// 空状态说明的文字：12px 弱色、行高 Tall 档（默认 18px），可在任意位置折行。
 fn hint_text(copy: &str) -> Text {
     let mut node = label_text(
         copy,
         12.0,
         TextWeight::Regular,
         Some(SemanticColorRole::Faint),
-    )
-    .line_height(18.0);
+    );
     let layout = Arc::make_mut(&mut node.style.layout);
+    tiers::line(layout, LineRole::Tall);
     layout.width = Some(LengthSpec::Fill);
     layout.min_width = Some(LengthSpec::Px(0.0));
     layout.text_ext.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
@@ -423,10 +474,10 @@ pub(crate) struct FooterLook {
 }
 
 /// 底部入口按钮：26×26、14px 图标、`--text-muted`；
-/// 当前入口 `--accent-soft` 底、强调色，其余平时 0.44 透明度（悬停底栏时为 1）。
+/// 当前入口 `--accent-soft` 底、强调色，其余平时 [`FOOTER_DIM`] 透明度（悬停底栏时为 1）。
 ///
-/// 颜色按 `look` 绑定；透明度是样式表的 `footer-entry` 和 `lit`（[`footer_lit`]），亮暗之间由 NanaUI 按
-/// `transition: opacity 0.35s ease` 淡入淡出。
+/// 颜色按 `look` 绑定；透明度按 [`footer_lit`] 绑在 [`FooterLit`] 上，亮暗之间由 NanaUI 按 [`footer_fade`]
+/// 淡入淡出。
 pub(crate) fn footer_button(
     icon: Icon,
     label: &'static str,
@@ -444,10 +495,12 @@ pub(crate) fn footer_button(
         SemanticColorRole::Muted,
         None,
     );
+    let lit = footer_lit(look, hover);
+    Arc::make_mut(&mut button.style.layout).opacity = Some(footer_opacity(lit()));
     widget(button.colors_from_style())
         .prop::<FooterLook, FooterPaint>(look)
-        .class(footer_styles::footer_entry)
-        .class_when(footer_styles::lit, footer_lit(look, hover))
+        .prop::<bool, FooterLit>(lit)
+        .animate(footer_fade())
         .key(key)
         .on_cx(move |_, _: &Activate, cx| on_activate(cx))
         .into_any()
@@ -558,7 +611,7 @@ fn footer_paint(look: FooterLook) -> (SemanticColorRole, Option<SemanticColorRol
     (foreground, None, hover_paint())
 }
 
-/// 底部入口按状态换颜色：前景、底色、悬停和按下。透明度另由样式表的 `footer-entry` 给。
+/// 底部入口按状态换颜色：前景、底色、悬停和按下。透明度另由 [`FooterLit`] 给。
 pub(crate) struct FooterPaint;
 
 impl FieldWrite<IconButton, FooterLook> for FooterPaint {

@@ -6,6 +6,7 @@
 //!
 //! 版式：NanaUI 的空状态（图标、标题、拖入说明）和附加失败的提示条。
 
+use nana_ui_core::SpacingStep;
 use std::sync::Arc;
 
 use nana_ui::icons_tabler::{ALERT_CIRCLE, FOLDER};
@@ -77,10 +78,11 @@ fn panel(view: Signal<EmptyView>) -> AnyView {
     .visible(move || view.with(|view| !view.error.is_empty()))
     .children((callout(ALERT_CIRCLE, StatusTone::Danger, error_text),))
     .key("empty-error");
-    let panel = Stack::column(10.0)
+    let panel = Stack::column(0.0)
+        .gap_step(SpacingStep::Lg)
         .width(LengthSpec::Fill)
         .min_height(LengthSpec::Px(220.0))
-        .padding_xy(16.0, 12.0)
+        .padding_step(SpacingStep::Xxxl, SpacingStep::Xl)
         .radius(RadiusTier::Md)
         .align(AlignSpec::Center)
         .justify(JustifySpec::Center)

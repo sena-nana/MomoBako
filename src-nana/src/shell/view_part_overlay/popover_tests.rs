@@ -342,8 +342,8 @@ fn fill_width(harness: &ShellHarness, task_id: &str) -> f32 {
     }
 }
 
-/// 进度条的值按 `transition: width 0.18s ease` 过渡：新出现的行直接是目标值，进度推进时从原来的
-/// 值过渡过去，走完 180ms 停在新值；过渡只改进度条的值，不重建这一行。减少动态效果时直接跳到新值。
+/// 进度条的值按主题动效过渡：新出现的行直接是目标值，进度推进时从原来的
+/// 值过渡过去，走完过渡时长停在新值；过渡只改进度条的值，不重建这一行。减少动态效果时直接跳到新值。
 #[test]
 fn task_progress_widths_transition_smoothly() {
     let mut harness = ShellHarness::mount(scene("live-files-plain"));
@@ -375,7 +375,7 @@ fn task_progress_widths_transition_smoothly() {
     for _ in 0..12 {
         harness.frame();
     }
-    assert_eq!(fill_width(&harness, "task-1"), 80.0, "180ms 以后停在新值");
+    assert_eq!(fill_width(&harness, "task-1"), 80.0, "过渡走完以后停在新值");
     assert_eq!(
         harness.keyed("admin-task-task-1"),
         Some(row),

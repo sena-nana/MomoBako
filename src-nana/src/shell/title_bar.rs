@@ -6,7 +6,10 @@
 //! 窗口按钮用 `AppTitleBar` 自带的自定义控件：指针点击由 Nana 宿主执行（关闭经 `close_requested`
 //! 走关闭确认），键盘和读屏的激活由这里接到同一套窗口动作。
 
+use nana_ui_core::{ControlHeight, ControlPadding, SpacingStep};
 use std::sync::Arc;
+
+use crate::theme_map::tiers::{self, Edge};
 
 use nana_ui::icons_tabler::{
     ADJUSTMENTS_HORIZONTAL, LAYOUT_SIDEBAR_LEFT_COLLAPSE, LAYOUT_SIDEBAR_LEFT_EXPAND,
@@ -53,7 +56,12 @@ pub(super) fn title_bar(
             }),
     )
     .center(
-        widget(Stack::row(4.0).align(AlignSpec::Center)).children((
+        widget(
+            Stack::row(0.0)
+                .gap_step(SpacingStep::Xs)
+                .align(AlignSpec::Center),
+        )
+        .children((
             widget(search_field(initial_query))
                 .model(query)
                 .key("global-search")
@@ -184,28 +192,27 @@ fn filter_toggle(signals: TitleSignals) -> AnyView {
             .align(AlignSpec::Center)
             .justify(JustifySpec::Center)
             .surface(SemanticColorRole::Accent)
-            .radius_px(999.0)
+            .radius(RadiusTier::Full)
             .with_layout(|layout| {
                 layout.position = nana_ui_core::PositionSpec::Absolute;
                 layout.offset_top = Some(LengthSpec::Px(-4.0));
                 layout.offset_right = Some(LengthSpec::Px(-4.0));
                 layout.min_width = Some(LengthSpec::Px(14.0));
                 layout.height = Some(LengthSpec::Px(14.0));
-                layout.padding_left = Some(LengthSpec::Px(4.0));
-                layout.padding_right = Some(LengthSpec::Px(4.0));
+                tiers::padding(layout, &Edge::X, SpacingStep::Xs);
                 layout.pointer_events = Some(nana_ui_core::PointerEventsSpec::None);
             }),
     )
     .visible(move || count.get() > 0)
-    .children((widget(
+    .children((widget(crate::theme_map::text_line_height(
         parts::label_text(
             "0",
             10.0,
             TextWeight::Bold,
             Some(SemanticColorRole::Background),
-        )
-        .line_height(14.0),
-    )
+        ),
+        14.0,
+    ))
     .prop::<String, fields::text::value>(move || count.get().to_string()),))
     .key("filter-count");
     widget(
@@ -216,7 +223,8 @@ fn filter_toggle(signals: TitleSignals) -> AnyView {
     .into_any()
 }
 
-/// 搜索框：`--bg-subtle` 底、无描边、左右 10px、文字和占位居中；悬停或聚焦换 `--bg-hover`。
+/// 搜索框：小号控件高（默认 28）、`--bg-subtle` 底、无描边、左右标准控件内边距（默认 10px）、
+/// 文字和占位居中；悬停或聚焦换 `--bg-hover`。
 /// 之后的文字由 `.model` 绑定的信号给；用挂载时的查询建，光标和新建的输入框一样在末尾。
 fn search_field(initial_query: &str) -> TextInput {
     let field = TextInput::new(initial_query)
@@ -227,7 +235,8 @@ fn search_field(initial_query: &str) -> TextInput {
     style.background = Some(SemanticColorRole::Subtle);
     style.border = None;
     style.radius = Some(RadiusTier::Sm);
-    style.control_padding_x = None;
+    style.control_padding_x = Some(ControlPadding::Standard);
+    style.control_height = Some(ControlHeight::Exact(ControlSize::Small));
     let hover = SemanticPaint {
         background: Some(SemanticColorRole::Hover),
         ..SemanticPaint::default()
@@ -240,9 +249,6 @@ fn search_field(initial_query: &str) -> TextInput {
         layout.width = Some(LengthSpec::Px(SEARCH_WIDTH));
         layout.min_width = Some(LengthSpec::Px(SEARCH_WIDTH));
         layout.max_width = Some(LengthSpec::Px(SEARCH_WIDTH));
-        layout.height = Some(LengthSpec::Px(CONTROL_EDGE));
-        layout.padding_left = Some(LengthSpec::Px(10.0));
-        layout.padding_right = Some(LengthSpec::Px(10.0));
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(0.0);
         layout.border_width = Some(0.0);
