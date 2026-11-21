@@ -9,6 +9,7 @@ use nana_ui::{ApplicationWindow, HeadlessInput, NanaTextShaper, PointerPhase};
 
 use crate::acceptance_document_for_model;
 use crate::shell::view_host::prepare_registered as prepare_motion;
+use nana_ui::runtime::LayoutBox;
 
 include!("sidebar_drop_tests.rs");
 
@@ -25,6 +26,7 @@ fn live_folder_button_escape_and_prefetch_use_the_shell_path() {
     let mut input = bind(&mut window);
     let create = labeled_center(&window, "在当前目录新建文件夹");
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Down,
@@ -32,13 +34,13 @@ fn live_folder_button_escape_and_prefetch_use_the_shell_path() {
         create.1,
     );
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Up,
         create.0,
         create.1,
     );
-    reduce_queued(&mut model, &mut window);
     assert!(model.sidebar.folder_dialog.open);
     assert_eq!(model.sidebar.folder_dialog.title(), "新建文件夹");
 
@@ -98,35 +100,64 @@ fn live_folder_button_escape_and_prefetch_use_the_shell_path() {
     );
 }
 
+/// 拖动容差归 NanaUI（4px）：走不出容差就是普通点击。条目拖动走过 7px 才起步，
+/// 4–7px 之间松手仍按单击选中。空白处点一下清空选择，拖出框就是框选。
 #[test]
-fn live_pointer_drag_and_box_select_follow_the_vue_thresholds() {
+fn live_pointer_drag_and_box_select_keep_their_thresholds() {
     let mut model = files_model();
     let mut window = mounted(&model);
     let mut input = bind(&mut window);
     let cover = row_center(&window, "cover.png");
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Down,
         cover.0,
         cover.1,
     );
-    assert!(
-        prepare_motion_tracks(&mut model, &mut window),
-        "按下条目应该记住手势"
-    );
-    assert!(!model.input.internal_active);
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Move,
         cover.0 + 4.0,
         cover.1,
     );
-    assert!(prepare_motion_tracks(&mut model, &mut window));
+    assert!(
+        !prepare_motion_tracks(&mut model, &mut window),
+        "4px 还在框架的拖动容差里，不是拖动"
+    );
+    pointer(
+        &mut model,
+        &mut window,
+        &mut input,
+        PointerPhase::Move,
+        cover.0 + 6.0,
+        cover.1,
+    );
+    assert!(
+        prepare_motion_tracks(&mut model, &mut window),
+        "越过容差以后卡片收到拖动"
+    );
     assert!(
         !model.input.internal_active,
-        "4px 还没到 Vue 的 7px 拖动阈值"
+        "6px 还没到 7px 的条目拖动阈值"
+    );
+    pointer(
+        &mut model,
+        &mut window,
+        &mut input,
+        PointerPhase::Up,
+        cover.0 + 6.0,
+        cover.1,
+    );
+    assert!(!prepare_motion_tracks(&mut model, &mut window), "松手收尾");
+    assert!(!model.input.internal_active);
+    assert_eq!(
+        model.files.selected_paths(),
+        &["cover.png".to_string()],
+        "没到 7px 就松手仍按单击选中"
     );
 
     let mut model = files_model();
@@ -134,14 +165,15 @@ fn live_pointer_drag_and_box_select_follow_the_vue_thresholds() {
     let mut input = bind(&mut window);
     let cover = row_center(&window, "cover.png");
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Down,
         cover.0,
         cover.1,
     );
-    observe_live_pointer(&mut model, &window.document);
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Move,
@@ -158,18 +190,25 @@ fn live_pointer_drag_and_box_select_follow_the_vue_thresholds() {
     let mut input = bind(&mut window);
     let empty = empty_list_point(&window);
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Down,
         empty.0,
         empty.1,
     );
-    observe_live_pointer(&mut model, &window.document);
-    pointer(&mut window, &mut input, PointerPhase::Up, empty.0, empty.1);
+    pointer(
+        &mut model,
+        &mut window,
+        &mut input,
+        PointerPhase::Up,
+        empty.0,
+        empty.1,
+    );
     observe_live_pointer(&mut model, &window.document);
     assert!(
         model.files.selected_paths().is_empty(),
-        "没拖动的框选松手要清空选择"
+        "空白处点一下要清空选择"
     );
 
     let mut model = files_model();
@@ -178,14 +217,15 @@ fn live_pointer_drag_and_box_select_follow_the_vue_thresholds() {
     let empty = empty_list_point(&window);
     let cover = row_center(&window, "cover.png");
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Down,
         empty.0,
         empty.1,
     );
-    observe_live_pointer(&mut model, &window.document);
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Move,
@@ -193,6 +233,7 @@ fn live_pointer_drag_and_box_select_follow_the_vue_thresholds() {
         cover.1,
     );
     observe_live_pointer(&mut model, &window.document);
+    assert!(model.input.selection_box.visible, "框选时画出选框");
     let selected = model.files.selected_paths();
     assert!(
         selected.iter().any(|path| path == "cover.png"),
@@ -202,6 +243,20 @@ fn live_pointer_drag_and_box_select_follow_the_vue_thresholds() {
         selected.len() >= 2,
         "从列表空白拖到封面应该框住不止一行：{selected:?}"
     );
+    pointer(
+        &mut model,
+        &mut window,
+        &mut input,
+        PointerPhase::Up,
+        cover.0,
+        cover.1,
+    );
+    observe_live_pointer(&mut model, &window.document);
+    assert!(!model.input.selection_box.visible, "松手收起选框");
+    assert!(
+        model.files.selected_paths().len() >= 2,
+        "框选松手留下选择，不当成点空白"
+    );
 
     let mut model = files_model();
     let mut window = mounted(&model);
@@ -209,14 +264,15 @@ fn live_pointer_drag_and_box_select_follow_the_vue_thresholds() {
     let cover = row_center(&window, "cover.png");
     let photos = row_center(&window, "photos");
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Down,
         cover.0,
         cover.1,
     );
-    observe_live_pointer(&mut model, &window.document);
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Move,
@@ -225,6 +281,7 @@ fn live_pointer_drag_and_box_select_follow_the_vue_thresholds() {
     );
     observe_live_pointer(&mut model, &window.document);
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Up,
@@ -266,34 +323,40 @@ fn bind(window: &mut ApplicationWindow) -> HeadlessInput {
     HeadlessInput::bind(window.document.context_mut(), document_id)
 }
 
+/// 照生产路径送一次鼠标输入：运行时路由，`input_event` 看路由完的输入，再把排着的消息归约掉。
 fn pointer(
+    model: &mut ShellViewModel,
     window: &mut ApplicationWindow,
     input: &mut HeadlessInput,
     phase: PointerPhase,
     x: f32,
     y: f32,
 ) {
+    let payload = nana_ui::InputPayload::Pointer(nana_ui::PointerInput::mouse(phase, x, y));
     input
-        .pointer(window.document.context_mut(), phase, x, y)
+        .route(window.document.context_mut(), payload.clone())
         .expect("指针");
+    crate::shell::note_routed_input(model, &window.document, &payload);
+    for message in window.document.context_mut().take_program_messages() {
+        model.reduce(*message.downcast::<ShellMessage>().expect("壳层消息"));
+    }
 }
 
 fn row_center(window: &ApplicationWindow, path: &str) -> (f32, f32) {
-    let rows = marks(window);
-    let row = rows
-        .iter()
-        .find(|row| row.path == path && row.kind != "sidebar")
+    let (_, _, bounds) = targets::cards(&window.document)
+        .into_iter()
+        .find(|(_, row, _)| row == path)
         .unwrap_or_else(|| panic!("没有行 {path}"));
     (
-        row.bounds.x + row.bounds.width / 2.0,
-        row.bounds.y + row.bounds.height / 2.0,
+        bounds.x + bounds.width / 2.0,
+        bounds.y + bounds.height / 2.0,
     )
 }
 
-/// 列表滚动区里不压在卡片上的一点。先试上方两角（内容上边距里），从那里拖到卡片会扫过第一行。
+/// 列表框里不压在卡片上的一点。先试上方两角（内容上边距里），从那里拖到卡片会扫过第一行。
 fn empty_list_point(window: &ApplicationWindow) -> (f32, f32) {
-    let rows = marks(window);
-    let list = list_bounds(window.document.context().world(), &rows).expect("文件列表");
+    let cards = targets::cards(&window.document);
+    let (_, list) = targets::browser(&window.document).expect("文件列表");
     let candidates = [
         (list.x + list.width - 2.0, list.y + 2.0),
         (list.x + 2.0, list.y + 2.0),
@@ -303,14 +366,12 @@ fn empty_list_point(window: &ApplicationWindow) -> (f32, f32) {
     candidates
         .into_iter()
         .find(|(x, y)| {
-            contains(list, *x, *y) && rows.iter().all(|row| !contains(row.bounds, *x, *y))
+            contains(list, *x, *y)
+                && cards
+                    .iter()
+                    .all(|(_, _, bounds)| !contains(*bounds, *x, *y))
         })
-        .unwrap_or_else(|| {
-            panic!(
-                "列表里没有空白点：{list:?} {:?}",
-                rows.iter().map(|row| row.bounds).collect::<Vec<_>>()
-            )
-        })
+        .unwrap_or_else(|| panic!("列表里没有空白点：{list:?}"))
 }
 
 /// 悬停任一底部入口，整排从半透明淡入到不透明：样式表的 `footer-entry` 平时 0.44、`lit` 时 1，
@@ -341,6 +402,7 @@ fn hovering_a_footer_button_lights_up_the_whole_footer() {
     assert_eq!(opacity(&window, start), 0.44, "底部入口平时半透明");
     let settings = labeled_center(&window, "设置");
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Move,
@@ -384,6 +446,7 @@ fn live_popover_opens_under_the_anchor_inside_the_viewport() {
         anchor.y + anchor.height / 2.0,
     );
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Down,
@@ -391,13 +454,13 @@ fn live_popover_opens_under_the_anchor_inside_the_viewport() {
         center.1,
     );
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Up,
         center.0,
         center.1,
     );
-    reduce_queued(&mut model, &mut window);
     crate::shell::mount_shell(&mut window.document, &model).expect("挂上弹层");
     window
         .document
@@ -434,6 +497,7 @@ fn live_folder_hover_opens_after_the_idle_clock_reaches_450ms() {
     let cover = row_center(&window, "cover.png");
     let photos = row_center(&window, "photos");
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Down,
@@ -442,6 +506,7 @@ fn live_folder_hover_opens_after_the_idle_clock_reaches_450ms() {
     );
     prepare_motion(&mut model, &mut window);
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Move,
@@ -456,6 +521,7 @@ fn live_folder_hover_opens_after_the_idle_clock_reaches_450ms() {
     assert_eq!(model.current_directory, "photos");
     assert!(!tree_selects_folder(&window, "照片"), "按着的时候不拆树");
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Up,
@@ -495,6 +561,7 @@ fn live_folder_hover_opens_after_the_idle_clock_reaches_450ms() {
     let cover = row_center(&window, "cover.png");
     let photos = row_center(&window, "photos");
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Down,
@@ -503,6 +570,7 @@ fn live_folder_hover_opens_after_the_idle_clock_reaches_450ms() {
     );
     prepare_motion(&mut model, &mut window);
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Move,
@@ -511,6 +579,7 @@ fn live_folder_hover_opens_after_the_idle_clock_reaches_450ms() {
     );
     prepare_motion(&mut model, &mut window);
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Move,
@@ -521,6 +590,7 @@ fn live_folder_hover_opens_after_the_idle_clock_reaches_450ms() {
         prepare_motion(&mut model, &mut window);
     }
     pointer(
+        &mut model,
         &mut window,
         &mut input,
         PointerPhase::Move,
@@ -747,11 +817,6 @@ fn thumbnail_snapshot() -> FileBrowserSnapshot {
     shot.has_more = true;
     shot.entries[2].thumbnail_path = Some("cover.png".into());
     shot
-}
-
-fn marks(window: &ApplicationWindow) -> Vec<RowMark> {
-    let document = &window.document;
-    collect_rows(document.context().world(), document.document())
 }
 
 fn files_model() -> ShellViewModel {

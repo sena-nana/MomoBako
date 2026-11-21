@@ -41,48 +41,16 @@ const LOAD_MORE_MARGIN: f32 = 320.0;
 
 thread_local! {
     static LAST_ROW_CLICK: RefCell<Option<(String, Instant)>> = const { RefCell::new(None) };
-    /// 拖动已经起步的那一行。下一次点它时丢掉。
-    static SUPPRESS_ROW_CLICK: RefCell<Option<String>> = const { RefCell::new(None) };
-}
-
-/// 条目拖动越过 7px、会话真正开始以后，记下这一行。
-///
-/// 松手时这一行还会收到一次点击，那一下直接丢掉，不改选择，并且不把它算进
-/// 400 毫秒连点：7px 已经是拖动，不是双击。拖不动（回收站、不可写、不是本地目录）时不记。
-pub(crate) fn suppress_row_click(path: &str) {
-    if path.is_empty() {
-        eprintln!("Nana 拖动起步却没有条目路径，无法丢掉随后的点击");
-        return;
-    }
-    SUPPRESS_ROW_CLICK.with(|slot| *slot.borrow_mut() = Some(path.to_string()));
-}
-
-/// 这一下是不是拖动松手带出来的点击。是的话清掉记号，只吞这一次。
-fn take_suppressed_click(path: &str) -> bool {
-    SUPPRESS_ROW_CLICK.with(|slot| {
-        let mut slot = slot.borrow_mut();
-        if slot.as_deref() == Some(path) {
-            *slot = None;
-            true
-        } else {
-            false
-        }
-    })
 }
 
 /// 清掉离屏场景构造期间遗留的点击手势状态，避免一个场景的拖动影响另一个场景。
 #[cfg(test)]
 pub(crate) fn reset_row_click_state() {
     LAST_ROW_CLICK.with(|slot| *slot.borrow_mut() = None);
-    SUPPRESS_ROW_CLICK.with(|slot| *slot.borrow_mut() = None);
 }
 
 /// 400 毫秒内连点同一条算双击，第二次才进入目录或打开预览。
-/// 拖动松手带出的那一下返回 `None`：不改选择，也不推进连点计时。
-pub(super) fn row_activation(path: &str) -> Option<FilesMessage> {
-    if take_suppressed_click(path) {
-        return None;
-    }
+pub(super) fn row_activation(path: &str) -> FilesMessage {
     let open = LAST_ROW_CLICK.with(|slot| {
         let mut slot = slot.borrow_mut();
         let now = Instant::now();
@@ -92,11 +60,11 @@ pub(super) fn row_activation(path: &str) -> Option<FilesMessage> {
         *slot = Some((path.to_string(), now));
         open
     });
-    Some(if open {
+    if open {
         FilesMessage::OpenRow(path.to_string())
     } else {
         FilesMessage::ActivateRow(path.to_string())
-    })
+    }
 }
 
 /// 列表区现在显示什么。换了值整块换。
@@ -531,23 +499,22 @@ fn more_icon(loading: bool) -> Option<Icon> {
 
 #[cfg(test)]
 mod tests {
-    use super::{LAST_ROW_CLICK, SUPPRESS_ROW_CLICK, row_activation};
+    use super::{LAST_ROW_CLICK, row_activation};
     use crate::shell::input::InputMessage;
     use crate::shell::{FilesMessage, ShellMessage, ShellViewModel};
 
     fn reset_clicks() {
         LAST_ROW_CLICK.with(|slot| *slot.borrow_mut() = None);
-        SUPPRESS_ROW_CLICK.with(|slot| *slot.borrow_mut() = None);
     }
 
-    /// 本地可写仓库里开始拖这一行。`writable` 为假时拖不动，也不该记下要丢掉的点击。
-    fn begin_drag(model: &mut ShellViewModel, path: &str, writable: bool) {
+    /// 本地可写仓库里开始拖这一行。
+    fn begin_drag(model: &mut ShellViewModel, path: &str) {
         model.reduce(ShellMessage::Input(InputMessage::BeginEntryDrag {
             path: path.into(),
             selected: vec![path.into()],
             x: 0.0,
             y: 0.0,
-            writable,
+            writable: true,
             trash: false,
             smart_folder: false,
             backend_kind: "filesystem".into(),
@@ -557,39 +524,25 @@ mod tests {
         }));
     }
 
+    /// 拖动松手由 NanaUI 吞掉，不会再来一次激活；拖过的行下一次单击照常选中，
+    /// 400 毫秒内再点同一行才算连点打开。
     #[test]
-    fn dragging_a_row_swallows_the_release_click() {
+    fn a_drag_leaves_the_next_click_alone() {
         reset_clicks();
         let mut model = ShellViewModel::default();
-        assert!(
-            matches!(row_activation("cover.png"), Some(FilesMessage::ActivateRow(path)) if path == "cover.png"),
-            "第一次点击只选中"
-        );
-        begin_drag(&mut model, "cover.png", true);
+        begin_drag(&mut model, "cover.png");
         assert!(model.input.internal_active, "可写的本地目录拖动要起步");
         assert!(
-            row_activation("cover.png").is_none(),
-            "刚选中再拖过 7px，松手不能当成连点打开"
+            matches!(row_activation("cover.png"), FilesMessage::ActivateRow(path) if path == "cover.png"),
+            "拖过的那一行下一次单击只选中"
         );
-
-        reset_clicks();
-        begin_drag(&mut model, "cover.png", true);
         assert!(
-            matches!(row_activation("notes.pdf"), Some(FilesMessage::ActivateRow(path)) if path == "notes.pdf"),
+            matches!(row_activation("cover.png"), FilesMessage::OpenRow(path) if path == "cover.png"),
+            "紧接着再点同一行是连点"
+        );
+        assert!(
+            matches!(row_activation("notes.pdf"), FilesMessage::ActivateRow(path) if path == "notes.pdf"),
             "别的行照常单击选中"
-        );
-        assert!(
-            row_activation("cover.png").is_none(),
-            "拖过的那一行下一次点击才被丢掉"
-        );
-
-        reset_clicks();
-        let mut rejected = ShellViewModel::default();
-        begin_drag(&mut rejected, "cover.png", false);
-        assert!(!rejected.input.internal_active, "不可写时拖动不起步");
-        assert!(
-            matches!(row_activation("cover.png"), Some(FilesMessage::ActivateRow(path)) if path == "cover.png"),
-            "拖不动时点击照常选中"
         );
     }
 }

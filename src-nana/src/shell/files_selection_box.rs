@@ -1,17 +1,22 @@
 //! 文件列表的框选矩形。
 //!
-//! 在列表空白处按下，任一轴拖过 3px 以后画出圆角选框；松手选框消失，选择留下。
+//! 列表框接 NanaUI 的 `PointerDragged`：卡片自己接住按在卡片上的拖动，落到列表框的只有按在空白处的。
+//! 越过框架的拖动容差（4px）以后画出圆角选框；松手选框消失，选择留下。
 //! 选框盖在列表视口上，左上是指针范围相对列表视口的位置，并且不小于 0。指针事件穿透，卡片仍能被框住。
 //! 拖动进行中只同步热字段，选框的位置和显隐走热信号，不重挂列表。
 
-use nana_ui::runtime::view::{AnyView, FieldWrite, IntoView, Signal, StyledComponent, widget};
+use nana_ui::runtime::view::{
+    AnyView, FieldWrite, IntoView, Signal, StyledComponent, node_ref, widget,
+};
 use nana_ui::runtime::{
-    LayoutBox, LengthSpec, PositionSpec, RadiusTier, SemanticColorRole, SemanticPaint, Stack,
+    LayoutBox, LengthSpec, PointerDragged, PositionSpec, RadiusTier, SemanticColorRole,
+    SemanticPaint, Stack,
 };
 use nana_ui_core::{OverflowSpec, PointerEventsSpec, SemanticColorMix};
 
-use super::ShellViewModel;
-use super::input::LiveGesture;
+use super::input::{DragSample, InputMessage, LiveGesture};
+use super::pointer_gesture::{EntryKind, EntryNode, register_entry};
+use super::{ShellMessage, ShellViewModel};
 
 /// 选框在列表视口里的位置。`visible` 为假时不画。
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -83,28 +88,24 @@ pub(crate) fn clear(model: &mut ShellViewModel) {
     model.input.selection_box = SelectionBox::hidden();
 }
 
-/// 手势对应的选框。条目拖动和还没越过 3px 的按下都不画。
+/// 手势对应的选框。条目拖动和按下点还没结算的框选都不画。
 fn placed(gesture: &LiveGesture, list: Option<LayoutBox>) -> SelectionBox {
-    if gesture.row.is_some() || !gesture.armed {
+    if gesture.row.is_some() {
         return SelectionBox::hidden();
     }
+    let (Some((origin_x, origin_y)), Some((x, y))) = (gesture.origin, gesture.point()) else {
+        return SelectionBox::hidden();
+    };
     let Some(list) = list else {
         eprintln!("Nana 框选已经拖动，但没有列表区域，选框画不出来");
         return SelectionBox::hidden();
     };
-    match SelectionBox::from_drag(
-        gesture.origin_x,
-        gesture.origin_y,
-        gesture.x,
-        gesture.y,
-        list.x,
-        list.y,
-    ) {
+    match SelectionBox::from_drag(origin_x, origin_y, x, y, list.x, list.y) {
         Some(rect) => rect,
         None => {
             eprintln!(
-                "Nana 框选坐标无效，选框不画：({}, {}) -> ({}, {})，列表 ({}, {})",
-                gesture.origin_x, gesture.origin_y, gesture.x, gesture.y, list.x, list.y
+                "Nana 框选坐标无效，选框不画：({origin_x}, {origin_y}) -> ({x}, {y})，列表 ({}, {})",
+                list.x, list.y
             );
             SelectionBox::hidden()
         }
@@ -112,8 +113,20 @@ fn placed(gesture: &LiveGesture, list: Option<LayoutBox>) -> SelectionBox {
 }
 
 /// 把滚动列表包进定位框，选框叠在视口上。列表仍占满剩余高度。
+///
+/// 定位框整块参与命中，按在空白处的拖动落到它这里，就是框选；它也是条目拖放目标，
+/// 条目放在空白处就是放进当前目录。
 pub(crate) fn overlay(list: AnyView, selection: Signal<SelectionBox>) -> AnyView {
+    let frame_ref = node_ref();
+    register_entry(
+        frame_ref,
+        EntryNode {
+            kind: EntryKind::Browser,
+            path: String::new(),
+        },
+    );
     let frame = Stack::column(0.0)
+        .hittable()
         .width(LengthSpec::Fill)
         .min_width(LengthSpec::Px(0.0))
         .min_height(LengthSpec::Px(0.0))
@@ -126,8 +139,21 @@ pub(crate) fn overlay(list: AnyView, selection: Signal<SelectionBox>) -> AnyView
             layout.overflow_y = OverflowSpec::Hidden;
         });
     widget(frame)
+        .node_ref(frame_ref)
         .children((list, rectangle(selection)))
         .key("file-list-frame")
+        .on_cx(move |_, event: &PointerDragged, cx| {
+            cx.dispatch_program_all(ShellMessage::Input(InputMessage::PointerDrag(DragSample {
+                row: None,
+                anchor: frame_ref.get_untracked(),
+                phase: event.phase,
+                x: event.x,
+                y: event.y,
+                dx: event.dx,
+                dy: event.dy,
+                append: event.modifiers.control || event.modifiers.meta,
+            })));
+        })
         .into_any()
 }
 

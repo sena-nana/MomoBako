@@ -321,7 +321,8 @@ impl ApplicationState for MomoBakoApplication {
     /// 运行时路由完的每个输入。先记下按着的修饰键；Escape 没被控件处理掉、ViewModel 里还有能关的层时，
     /// 发一条消息关掉最上面一层。窗口失焦时收起右键菜单，拖动已经离开够远时交给系统拖放。
     /// 主键指针离开窗口时，同样把内部拖动交给已有的离开归约。外部文件拖放按坐标记下文件夹悬停，
-    /// 必须在本帧的宿主放下归约之前写好，放下才会进这个文件夹。这些消息和别的消息一样经 `update` 归约。
+    /// 必须在本帧的宿主放下归约之前写好，放下才会进这个文件夹；文件列表空白处的点按也在这里认。
+    /// 这些消息和别的消息一样经 `update` 归约。
     fn input_event(
         &mut self,
         id: nana_ui_platform::WindowId,
@@ -331,11 +332,9 @@ impl ApplicationState for MomoBakoApplication {
     ) -> Result<RuntimeProgramUpdate, FrameworkError> {
         window_host::note_modifiers(&mut self.shell, &input.event.payload);
         match windows.get(&id) {
-            Some(window) => shell::note_external_folder_drag(
-                &mut self.shell,
-                &window.document,
-                &input.event.payload,
-            ),
+            Some(window) => {
+                shell::note_routed_input(&mut self.shell, &window.document, &input.event.payload)
+            }
             None if matches!(input.event.payload, nana_ui::InputPayload::FileDrag(_)) => {
                 eprintln!("Nana 外部拖放时窗口不在，文件夹悬停不更新");
             }

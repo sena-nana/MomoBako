@@ -25,12 +25,13 @@ use nana_ui::runtime::view::{AnyView, IntoView, signal, widget};
 use nana_ui::runtime::view::{Item, Signal, Store, StoreList, StorePath, fields};
 use nana_ui::runtime::{
     Activate, AlignSpec, IconButton, LengthSpec, ListItem, NodeStyle, SecondaryPress,
-    SemanticColorRole, SemanticPaint, Stack, Text,
+    SemanticColorRole, SemanticPaint, Stack,
 };
 use nana_ui_core::SemanticColorMix;
 
 use super::super::field_bind::StyleField;
 use super::super::input::{HostDragPhase, InputMessage, accept_file_drops};
+use super::super::pointer_gesture::{EntryKind, EntryNode, register_entry};
 
 use super::super::context_menu::{MenuAction, MenuChrome, MenuEntry, MenuView, context_menu};
 use super::super::field_bind::GlyphIcon;
@@ -163,6 +164,14 @@ fn folder_row(item: FolderItem) -> AnyView {
     ));
     let open_path = path.clone();
     let menu_path = path.clone();
+    let target = node_ref();
+    register_entry(
+        target,
+        EntryNode {
+            kind: EntryKind::Sidebar,
+            path: path.clone(),
+        },
+    );
     let card = widget(
         ListItem::new(row.label.clone())
             .selected(row.active)
@@ -175,6 +184,7 @@ fn folder_row(item: FolderItem) -> AnyView {
     })
     .content(content)
     .key(folder_row_key(&path))
+    .node_ref(target)
     .on_cx(move |_, _: &Activate, cx| {
         cx.dispatch_program_all(sidebar_message(SidebarMessage::OpenFolder(
             open_path.clone(),
@@ -191,23 +201,7 @@ fn folder_row(item: FolderItem) -> AnyView {
             },
         )));
     });
-    tree_row(
-        row.depth,
-        row.has_children,
-        toggle,
-        card.into_any(),
-        Some(path_marker(&path)),
-    )
-}
-
-/// 隐藏的路径标记。父级是这一行的卡片，实况拖放按它认出侧栏文件夹。
-fn path_marker(path: &str) -> AnyView {
-    let mut marker = Text::new(format!("momobako-entry:sidebar:{path}"));
-    let layout = Arc::make_mut(&mut marker.style.layout);
-    layout.hidden = true;
-    layout.height = Some(LengthSpec::Px(0.0));
-    layout.width = Some(LengthSpec::Px(0.0));
-    widget(marker).into_any()
+    tree_row(row.depth, row.has_children, toggle, card.into_any())
 }
 
 /// 侧栏目录树收到的系统文件拖放，交给输入归约。悬停目标由坐标另记。
@@ -258,13 +252,7 @@ fn card_style(drop_target: bool) -> NodeStyle {
 }
 
 /// 一行：缩进导引线、折叠三角（没有子级时留空位）和卡片。
-fn tree_row(
-    depth: u16,
-    has_children: bool,
-    toggle: Option<AnyView>,
-    card: AnyView,
-    marker: Option<AnyView>,
-) -> AnyView {
+fn tree_row(depth: u16, has_children: bool, toggle: Option<AnyView>, card: AnyView) -> AnyView {
     let toggle = toggle.unwrap_or_else(|| {
         widget(
             Stack::row(0.0)
@@ -280,9 +268,6 @@ fn tree_row(
         .collect::<Vec<_>>();
     children.push(toggle);
     children.push(card);
-    if let Some(marker) = marker {
-        children.push(marker);
-    }
     widget(
         Stack::bar(0.0)
             .align(AlignSpec::Center)
@@ -476,7 +461,7 @@ fn smart_row(item: SmartItem, state: Signal<SmartGroup>) -> AnyView {
                 open_id.clone(),
             )))
         });
-    tree_row(row.depth, row.has_children, toggle, card.into_any(), None)
+    tree_row(row.depth, row.has_children, toggle, card.into_any())
 }
 
 /// 文件夹右键菜单的键前缀和关闭消息。没有分组，也没有要点两次的项。

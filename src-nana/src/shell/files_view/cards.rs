@@ -3,7 +3,8 @@
 //! 四种展示方式共用：白底、`Lg` 圆角、1px 边（常态透明），选中时底色混入 10% 强调色、
 //! 边线混入 34% 强调色；外部或内部拖到文件夹上时是放置态。网格固定 148×190，
 //! 自适应和瀑布流按缩略图宽高比算宽高，列表是缩略图、标题路径和右对齐元信息三栏。
-//! 卡片外面套一层框，框里放隐藏的路径标记，实况指针按它找到条目。
+//! 卡片自己接 NanaUI 的 `PointerDragged`：拖动采样带着条目路径交给输入归约；卡片登记在拖动节点表里，
+//! 目录卡片同时是条目拖放目标（`shell/pointer_gesture/targets.rs`）。
 //!
 //! 卡片常驻：按条目键建一次，字段绑在卡片仓里这一张的值上（[`CardView`]）。选中、放置态、
 //! 标题、元信息和缩略图到达都只改这一张卡片的字段，别的卡片不动。外框尺寸跟着所在的行走，
@@ -15,15 +16,19 @@ use nana_ui::TextureSlotName;
 use nana_ui::icons_tabler::{FILE, FILE_MUSIC, FOLDER, PHOTO, VIDEO};
 use nana_ui::runtime::view::fields::{self, HiddenWhenEmpty};
 use nana_ui::runtime::view::{
-    AnyView, IntoView, Item, Store, StoreList, StorePath, untrack, widget,
+    AnyView, IntoView, Item, NodeRef, Store, StoreList, StorePath, node_ref, untrack, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, ContentFit, JustifySpec, LengthSpec, ListItem, NodeStyle, RadiusTier,
-    SecondaryPress, SemanticColorRole, SemanticPaint, Stack, Text, Thumbnail,
+    Activate, AlignSpec, ContentFit, JustifySpec, LengthSpec, ListItem, NodeStyle,
+    PointerDragPhase, PointerDragged, RadiusTier, SecondaryPress, SemanticColorRole, SemanticPaint,
+    Stack, Text, Thumbnail,
 };
 use nana_ui_core::{Icon, LengthAtom, SemanticColorMix};
 
+use super::super::ShellMessage;
 use super::super::files::{DisplayMode, FileRow, FilesMessage, hardlink_label};
+use super::super::input::{DragSample, InputMessage};
+use super::super::pointer_gesture::{ENTRY_DRAG_PX, EntryKind, EntryNode, register_entry};
 use super::bind::StyleField;
 use super::file_message;
 use super::style::{self, PreviewPainter, Tone};
@@ -324,6 +329,17 @@ pub(super) fn card(cell: &CardCell, mode: DisplayMode, cards: Cards) -> AnyView 
     };
     let path = cell.path.to_string();
     let menu_path = cell.path.to_string();
+    let card_ref = node_ref();
+    register_entry(
+        card_ref,
+        EntryNode {
+            kind: EntryKind::Card {
+                directory: &*cell.kind == "directory",
+            },
+            path: path.clone(),
+        },
+    );
+    let drag = drag_handler(path.clone(), card_ref);
     let entry = ListItem::new(current.face.name.clone())
         .selected(current.selected)
         .style(card_style(mode, geometry, current.drop_target));
@@ -344,12 +360,11 @@ pub(super) fn card(cell: &CardCell, mode: DisplayMode, cards: Cards) -> AnyView 
         })
         .content(content)
         .key(view_key("file-row", &cell.key))
+        .node_ref(card_ref)
         .on_cx(move |_, _: &Activate, cx| {
-            // 拖动松手时没有消息：那一下已经被 `suppress_row_click` 丢掉。
-            if let Some(message) = super::grid::row_activation(&path) {
-                cx.dispatch_program_all(file_message(message));
-            }
+            cx.dispatch_program_all(file_message(super::grid::row_activation(&path)));
         })
+        .on_cx(drag)
         .on_cx(move |_, event: &SecondaryPress, cx| {
             cx.dispatch_program_all(file_message(FilesMessage::OpenEntryMenu {
                 path: menu_path.clone(),
@@ -370,9 +385,39 @@ pub(super) fn card(cell: &CardCell, mode: DisplayMode, cards: Cards) -> AnyView 
     if !list && mode != DisplayMode::Masonry {
         frame = frame.with_layout(|layout| layout.align_self = Some(AlignSpec::Start));
     }
-    widget(frame)
-        .children((entry, path_marker(&cell.kind, &cell.path)))
-        .into_any()
+    widget(frame).children((entry,)).into_any()
+}
+
+/// 卡片上的拖动：每个采样带着条目路径和卡片节点交给输入归约。
+///
+/// NanaUI 越过 4px 就算拖动，松手不再激活卡片；条目拖动要走过 [`ENTRY_DRAG_PX`] 才起步。
+/// 一直没走那么远就松手，仍按一次单击处理。
+fn drag_handler(
+    path: String,
+    card: NodeRef,
+) -> impl FnMut(&mut ListItem, &PointerDragged, &mut nana_ui::runtime::ViewContext<'_, ListItem>)
++ Send
++ 'static {
+    let mut farthest = 0.0_f32;
+    move |_, event, cx| {
+        if event.phase == PointerDragPhase::Started {
+            farthest = 0.0;
+        }
+        farthest = farthest.max(event.dx.hypot(event.dy));
+        cx.dispatch_program_all(ShellMessage::Input(InputMessage::PointerDrag(DragSample {
+            row: Some(path.clone()),
+            anchor: card.get_untracked(),
+            phase: event.phase,
+            x: event.x,
+            y: event.y,
+            dx: event.dx,
+            dy: event.dy,
+            append: event.modifiers.control || event.modifiers.meta,
+        })));
+        if event.phase == PointerDragPhase::Ended && farthest < ENTRY_DRAG_PX {
+            cx.dispatch_program_all(file_message(super::grid::row_activation(&path)));
+        }
+    }
 }
 
 /// 卡片仓里没有这一张时（不该发生）画的空卡片：只有键、类型和路径。
@@ -785,14 +830,4 @@ pub(super) fn entry_icon(row: &FileRow) -> Icon {
 /// 组装键不能带路径分隔符。`notes/page.pdf` 里的 `/` 会让整行挂载失败。
 pub(super) fn view_key(prefix: &str, key: &str) -> String {
     format!("{prefix}-{}", style::key_part(key))
-}
-
-/// 行上的隐藏路径。命中卡片后沿父节点找到它，实况指针才能对上条目。
-fn path_marker(kind: &str, path: &str) -> AnyView {
-    let mut marker = Text::new(format!("momobako-entry:{kind}:{path}"));
-    let layout = Arc::make_mut(&mut marker.style.layout);
-    layout.hidden = true;
-    layout.height = Some(LengthSpec::Px(0.0));
-    layout.width = Some(LengthSpec::Px(0.0));
-    widget(marker).into_any()
 }

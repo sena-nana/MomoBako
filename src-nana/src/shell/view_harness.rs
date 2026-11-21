@@ -382,6 +382,7 @@ impl ShellHarness {
             .route(self.window.document.context_mut(), payload.clone())
             .expect("指针");
         crate::window_host::note_modifiers(&mut self.model, &payload);
+        super::note_routed_input(&mut self.model, &self.window.document, &payload);
     }
 
     /// 在 `(x, y)` 按下再松开副键（右键），返回这次点击发出的消息，不归约。之前排着的消息留给调用方。

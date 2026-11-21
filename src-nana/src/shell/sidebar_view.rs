@@ -20,13 +20,14 @@ use nana_ui::runtime::view::{
     progress, spinner, widget,
 };
 use nana_ui::runtime::{
-    Activate, AlignSpec, IconButton, LengthSpec, ListItem, RadiusTier, SemanticColorRole,
-    SidebarFrame, Stack, StatusTone,
+    Activate, AlignSpec, IconButton, LengthSpec, ListItem, PointerHoverChanged, RadiusTier,
+    SemanticColorRole, SidebarFrame, Stack, StatusTone,
 };
 use nana_ui::{ButtonKind, ControlSize, Icon};
 
 use super::SidebarMessage;
 use super::hot::HotSignals;
+use super::input::InputMessage;
 use super::player_view::key_part;
 use super::sidebar::ShortcutId;
 use super::status::StatusLine;
@@ -622,8 +623,14 @@ fn sidebar_footer(
         ),
         task_badge(footer),
     ));
-    widget(Stack::row(2.0).align(AlignSpec::Center))
+    // 整排接住悬停：停在按钮之间的空隙里也算在底栏上。
+    widget(Stack::row(2.0).align(AlignSpec::Center).hittable())
         .key("sidebar-footer")
+        .on_cx(|_, event: &PointerHoverChanged, cx| {
+            cx.dispatch_program_all(ShellMessage::Input(InputMessage::FooterHover(
+                event.hovered,
+            )));
+        })
         .children((
             footer_button(
                 SETTINGS,
