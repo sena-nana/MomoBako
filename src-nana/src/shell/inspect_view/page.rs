@@ -1,7 +1,7 @@
 //! PDF / Office 的页纸。
 //!
-//! 滚动区 18px 内边距，底部一层 bg-subtle 渐变；上面一行翻页（上一页、页码、下一页），
-//! 下面是一张白纸：border-soft 细边、大投影，宽度铺满滚动区，高度按页面比例。一次只显示一页。
+//! 滚动区内边距取 `PageTight` 档，底部一层 bg-subtle 渐变；上面一行翻页（上一页、页码、下一页），
+//! 下面是一张白纸：border-soft 发丝边、主题覆盖层高度档的投影，宽度铺满滚动区，高度按页面比例。一次只显示一页。
 
 use nana_ui::runtime::view::{AnyView, IntoView, widget};
 use nana_ui::runtime::{
@@ -12,7 +12,8 @@ use super::super::ShellMessage;
 use super::super::inspect::InspectMessage;
 use super::body::Pixels;
 use super::frame::text;
-use nana_ui_core::TextWeight;
+use crate::theme_map::tiers::{self, Edge};
+use nana_ui_core::{ControlHeight, ControlSize, ElevationRole, SpacingStep, TextWeight};
 
 /// 用页位图画白纸。高度跟宽高比走，超出时滚动区滚动，不裁掉页底。编码失败时是一张空白的纸位。
 pub(super) fn page_bitmap(raster: &Pixels) -> AnyView {
@@ -33,28 +34,24 @@ pub(super) fn page_bitmap(raster: &Pixels) -> AnyView {
         sampling: nana_ui_core::ImageSampling::Resample,
     };
     let aspect = width as f32 / height as f32;
-    let frame = Stack::column(0.0)
-        .width(LengthSpec::Fill)
-        .min_width(LengthSpec::Px(0.0))
-        .grow(0.0)
-        .shrink(0.0)
-        .border(SemanticColorRole::BorderSoft, 1.0)
-        .with_layout(|layout| {
-            layout.aspect_ratio = Some(aspect);
-            // 纸张在深浅主题里都是白的。
-            layout.background = Some([1.0, 1.0, 1.0, 1.0]);
-            layout.margin_bottom = Some(LengthSpec::Px(14.0));
-            layout.paint.box_shadows = vec![nana_ui_core::BoxShadowSpec {
-                paint_color: None,
-                offset_x: 0.0,
-                offset_y: 18.0,
-                blur_radius: 48.0,
-                spread_radius: 0.0,
-                color: [0.0, 0.0, 0.0, 0.24],
-                inset: false,
-            }];
-            layout.paint.content_image = Some(image);
-        });
+    let frame = super::super::files_view::style::hairline(
+        Stack::column(0.0)
+            .width(LengthSpec::Fill)
+            .min_width(LengthSpec::Px(0.0))
+            .grow(0.0)
+            .shrink(0.0),
+        SemanticColorRole::BorderSoft,
+    )
+    // 纸张在深浅主题里都是白的：取媒体前景色，它在每套主题里都是白。
+    .surface(SemanticColorRole::OnMedia)
+    .painter(super::preview_paint::Elevated::square(
+        ElevationRole::Overlay,
+    ))
+    .with_layout(|layout| {
+        layout.aspect_ratio = Some(aspect);
+        tiers::margin(layout, &[Edge::Bottom], SpacingStep::Xxl);
+        layout.paint.content_image = Some(image);
+    });
     widget(frame).key("inspect-native-page").into_any()
 }
 
@@ -65,12 +62,13 @@ pub(super) fn page_scroller(page: AnyView, nav: Option<(usize, usize)>, key: Str
         children.push(page_nav(index, total));
     }
     children.push(page);
-    let sheet = widget(
+    let sheet = widget(super::super::files_view::style::pad(
         Stack::column(0.0)
-            .padding(18.0)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
-    )
+        SpacingStep::PageTight,
+        SpacingStep::PageTight,
+    ))
     .key("inspect-page-sheet")
     .children(children);
     let scroll = widget(ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
@@ -122,18 +120,21 @@ pub(super) fn page_nav(index: usize, total: usize) -> AnyView {
         .into_any()
 }
 
-/// 翻页按钮是基础按钮：32px 高、透明底、正文色。停用时在页纸底色上淡化。
+/// 翻页按钮是基础按钮：中号控件高、按钮自带的控件内边距、透明底、正文色。停用时在页纸底色上淡化。
 fn page_button(label: &str, disabled: bool) -> Button {
     let mut button = Button::new(label)
         .kind(nana_ui::ButtonKind::Ghost)
         .disabled(disabled);
     button.style.interaction.disabled =
         crate::theme_map::disabled_paint(SemanticColorRole::Text, SemanticColorRole::Background);
+    button.style.control_height = Some(ControlHeight::Exact(ControlSize::Medium));
+    let height = ControlSize::Medium.height_in(nana_ui::theme::UI_METRICS);
+    let padding = nana_ui_core::ControlPadding::Standard.resolve(nana_ui::theme::UI_METRICS);
     let layout = std::sync::Arc::make_mut(&mut button.style.layout);
-    layout.height = Some(LengthSpec::Px(32.0));
-    layout.min_height = Some(LengthSpec::Px(32.0));
-    layout.padding_left = Some(LengthSpec::Px(10.0));
-    layout.padding_right = Some(LengthSpec::Px(10.0));
+    layout.height = Some(LengthSpec::Px(height));
+    layout.min_height = Some(LengthSpec::Px(height));
+    layout.padding_left = Some(LengthSpec::Px(padding));
+    layout.padding_right = Some(LengthSpec::Px(padding));
     layout.width = Some(LengthSpec::Shrink);
     button
 }

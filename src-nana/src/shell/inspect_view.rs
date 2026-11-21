@@ -32,10 +32,11 @@ pub(super) fn preview_page(
     surface(vec![frame::preview_page(signals, metadata, bar)])
 }
 
-/// 预览页的外框：占满剩余高度，行距 8。
+/// 预览页的外框：占满剩余高度，行距 `Md`。
 fn surface(rows: Vec<AnyView>) -> AnyView {
     widget(
-        Stack::fill_column(8.0)
+        Stack::fill_column(0.0)
+            .gap_theme(nana_ui_core::SpacingStep::Md)
             .min_height(LengthSpec::Px(0.0))
             .grow(1.0)
             .shrink(1.0)

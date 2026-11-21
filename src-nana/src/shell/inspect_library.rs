@@ -29,7 +29,8 @@ use super::inspect::{ArchiveFileNotice, FileFacts, InspectState};
 use super::{InspectMessage, ShellMessage, ShellViewModel};
 
 use super::files::hardlink_label;
-use crate::theme_map::typed_text;
+use super::files_view::style as files_style;
+use nana_ui_core::SpacingStep;
 
 mod archive;
 
@@ -238,9 +239,17 @@ pub(super) fn document_toolbar_view(bar: &DocumentBar) -> AnyView {
         chips.push(label_tag(pages, false, "inspect-doc-pages"));
     }
     let row = super::workbench::with_bottom_divider(
-        Stack::row(8.0)
+        files_style::row(SpacingStep::Md)
             .align(AlignSpec::Center)
-            .padding_xy(0.0, 8.0)
+            .with_layout(|layout| {
+                crate::theme_map::tiers::padding(
+                    layout,
+                    &crate::theme_map::tiers::Edge::Y,
+                    SpacingStep::Md,
+                );
+                layout.padding_left = Some(LengthSpec::Px(0.0));
+                layout.padding_right = Some(LengthSpec::Px(0.0));
+            })
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
     );
@@ -326,7 +335,7 @@ impl FactsView {
 pub(super) fn fact_column(facts: Signal<FactsView>) -> AnyView {
     let read = move |pick: fn(&FactsView) -> String| move || facts.with(|view| pick(view));
     widget(
-        Stack::column(12.0)
+        files_style::column(SpacingStep::Xl)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
     )
@@ -365,7 +374,7 @@ pub(super) fn fact_column(facts: Signal<FactsView>) -> AnyView {
 }
 
 /// 一行统计：标签在上（11px 粗体弱色、字距 0.4），数值在下（14px 正文色，长值随处折行），
-/// 两者间距 6。`divided` 时行顶一条 border-soft 发丝线，线下留 12px；`shown` 为假时不占位。
+/// 两者间距 `Sm`。`divided` 时行顶一条 border-soft 发丝线，线下留 `Xl`；`shown` 为假时不占位。
 fn stacked_value(
     label: &str,
     value: impl Fn() -> String + Send + Clone + 'static,
@@ -374,29 +383,24 @@ fn stacked_value(
     shown: impl Fn() -> bool + Send + 'static,
 ) -> AnyView {
     let key = key.to_string();
-    let mut column = Stack::column(6.0)
+    let mut column = files_style::column(SpacingStep::Sm)
         .width(LengthSpec::Fill)
         .min_width(LengthSpec::Px(0.0));
     if divided {
-        let mut style = column.node_style();
-        style.border = Some(SemanticColorRole::BorderSoft);
-        let layout = std::sync::Arc::make_mut(&mut style.layout);
-        layout.border_sides.top_width = Some(1.0);
-        layout.padding_top = Some(LengthSpec::Px(12.0));
-        column = column.style(style);
+        column = files_style::top_rule(column, SpacingStep::Xl);
     }
-    let mut name = typed_text(Text::new(label), 11.0, TextWeight::Bold)
-        .color(SemanticColorRole::Faint)
-        .line_height(17.05);
-    std::sync::Arc::make_mut(&mut name.style.layout)
-        .text_ext
-        .letter_spacing = Some(0.4);
+    // 标签和眉题同一套：11px 粗体弱色、字距 0.4、1.55 倍行高。
+    let name = files_style::row_label(label);
     let mut text = Text::new(untrack(&value))
         .color(SemanticColorRole::Text)
-        .role(nana_ui_core::TypeRole::Section)
-        .line_height(21.7);
+        .role(nana_ui_core::TypeRole::Section);
     {
         let layout = std::sync::Arc::make_mut(&mut text.style.layout);
+        crate::theme_map::tiers::line_ratio(
+            layout,
+            nana_ui_core::TypeRole::Section,
+            files_style::LINE_BODY,
+        );
         layout.min_width = Some(LengthSpec::Px(0.0));
         layout.text_ext.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
     }

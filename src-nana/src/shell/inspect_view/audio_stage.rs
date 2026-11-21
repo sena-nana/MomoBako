@@ -10,13 +10,15 @@ use nana_ui::runtime::{
     ScrollAxes, ScrollOffset, ScrollView, ScrollViewportChanged, SemanticColorRole, StableNodeId,
     Stack, TextHorizontalAlignment,
 };
-use nana_ui_core::{ScrollEdgeFade, TextWeight};
+use nana_ui_core::{ScrollEdgeFade, SpacingStep, TextWeight};
 use serde_json::Value;
 
 use super::super::ShellMessage;
+use super::super::files_view::style as files_style;
 use super::super::player::PlayerMessage;
 use super::frame::text;
 use super::preview_paint::VinylRecord;
+use crate::theme_map::tiers;
 
 mod diameter;
 mod lyric_box;
@@ -27,7 +29,7 @@ mod pills;
 mod split;
 mod stage_pad;
 mod title_width;
-use lyric_box::{GAP as LYRIC_GAP, LINE as LYRIC_LINE};
+use lyric_box::{GAP as LYRIC_GAP, GAP_STEP as LYRIC_GAP_STEP, LINE as LYRIC_LINE};
 /// 窗口不宽于 820px 时，舞台和歌词改成上下排。
 const STACK_BREAKPOINT: f32 = 820.0;
 /// 歌词行：正文先和 `--bg` 按 0.42 混，再盖不透明度。背景是 `--bg` 时收成一次混合。
@@ -41,6 +43,11 @@ const LYRIC_INSET_INITIAL: f32 = 104.0;
 const LYRIC_FADE_TOP: f32 = 0.12;
 /// 歌词视口底下渐隐带占视口高度的比例。
 const LYRIC_FADE_BOTTOM: f32 = 0.14;
+/// 窄窗口里舞台和歌词之间的间距档。
+const STACKED_GAP: SpacingStep = SpacingStep::Xxl;
+/// 舞台卡片最宽 920、准备卡最宽 360：阅读宽度，不是间距，照写像素。
+const STAGE_MAX_WIDTH: f32 = 920.0;
+const LOADING_MAX_WIDTH: f32 = 360.0;
 /// 唱片舞台上的三行字：标题、副标题，以及非空时画在「音频」旁边的专辑。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct AudioCaption {
@@ -228,12 +235,12 @@ pub(super) fn cover_data_url(path: &str) -> Option<String> {
 
 /// 标题下的「音频」和专辑。
 ///
-/// 胶囊是可折行的横排，间距 8，在标题宽度里居中。
+/// 胶囊是可折行的横排，间距 `Md`，在标题宽度里居中。
 /// 两枚放不进这一宽时，专辑整枚换到下一行，字不收成省略号。
 /// 宽度和标题同一条；视口还没量到时这条长度解析不成像素，不另填 220 或 380。
 fn meta_row(chips: Vec<AnyView>, stacked: bool) -> AnyView {
     widget(
-        Stack::row(8.0)
+        files_style::row(SpacingStep::Md)
             .wrap(true)
             .justify(JustifySpec::Center)
             .align(AlignSpec::Center)
@@ -302,11 +309,13 @@ pub(super) fn audio_stage(
         chips.push(pills::pill(&caption.album, false, "inspect-audio-album"));
     }
     let meta = meta_row(chips, stacked);
-    let heading_block = widget(Stack::column(8.0).align(AlignSpec::Center).with_layout(
-        move |layout| {
-            title_width::pin_width(layout, stacked);
-        },
-    ))
+    let heading_block = widget(
+        files_style::column(SpacingStep::Md)
+            .align(AlignSpec::Center)
+            .with_layout(move |layout| {
+                title_width::pin_width(layout, stacked);
+            }),
+    )
     .children((
         widget(heading).key("inspect-audio-title"),
         widget(secondary).key("inspect-audio-artist"),
@@ -314,9 +323,10 @@ pub(super) fn audio_stage(
     ))
     .key("inspect-audio-caption")
     .into_any();
-    // 栏距：宽窗口 `clamp(24px, 4vw, 58px)`，窄窗口 14px。列和行的 minmax 用同一段间距。
+    // 栏距：宽窗口 `clamp(24px, 4vw, 58px)`（跟着窗口宽连续变，不是档位），窄窗口 `Xxl`。
+    // 列和行的 minmax 用同一段间距。
     let gap = if stacked {
-        14.0
+        tiers::space_px(STACKED_GAP)
     } else {
         (viewport * 0.04).clamp(24.0, 58.0)
     };
@@ -334,8 +344,10 @@ pub(super) fn audio_stage(
                 JustifySpec::Start
             })
             .min_width(LengthSpec::Px(0.0))
-            .padding(if lines.is_empty() { 18.0 } else { 0.0 })
             .with_layout(|layout| {
+                if lines.is_empty() {
+                    tiers::padding(layout, &tiers::Edge::ALL, SpacingStep::PageTight);
+                }
                 layout.flex_grow = Some(1.0);
                 layout.flex_shrink = Some(1.0);
                 layout.flex_basis = Some(LengthSpec::Px(0.0));
@@ -345,22 +357,31 @@ pub(super) fn audio_stage(
     .children((lyric_body(lines, active, pending),))
     .key("inspect-audio-lyrics")
     .into_any();
-    // 歌词列：宽窗口上下留白，空态的 18px 仍在歌词面板上。
+    // 歌词列：宽窗口上下留白，空态的 `PageTight` 仍在歌词面板上。
     let info = lyric_pad::info_view(stacked, gap, measured, lyrics);
     let layout = if stacked {
-        Stack::fill_column(gap)
+        Stack::fill_column(0.0).gap_theme(STACKED_GAP)
     } else {
         Stack::fill_row(gap).align(AlignSpec::Stretch)
     };
+    let shell_pad = if stacked {
+        SpacingStep::PageTight
+    } else {
+        SpacingStep::Page
+    };
     let shell = widget(
-        Stack::fill_column(0.0)
-            .surface(SemanticColorRole::Surface)
-            .border(SemanticColorRole::BorderSoft, 1.0)
-            .radius(RadiusTier::Xl)
-            .padding(if stacked { 18.0 } else { 22.0 })
-            .min_height(LengthSpec::Px(0.0))
-            .max_width(920.0)
-            .painter(super::preview_paint::AudioCardFace),
+        files_style::pad(
+            files_style::hairline(
+                Stack::fill_column(0.0).surface(SemanticColorRole::Surface),
+                SemanticColorRole::BorderSoft,
+            ),
+            shell_pad,
+            shell_pad,
+        )
+        .radius(RadiusTier::Xl)
+        .min_height(LengthSpec::Px(0.0))
+        .max_width(STAGE_MAX_WIDTH)
+        .painter(super::preview_paint::AudioCardFace),
     )
     .children((widget(
         layout
@@ -420,7 +441,7 @@ fn lyric_body(
         .map(|(index, line)| lyric_line(index, line, active))
         .collect::<Vec<_>>();
     let list = widget(
-        Stack::column(LYRIC_GAP)
+        files_style::column(LYRIC_GAP_STEP)
             .width(LengthSpec::Fill)
             .align(AlignSpec::Stretch)
             .grow(0.0)
@@ -778,7 +799,8 @@ fn record(art: Option<&str>, narrow: bool) -> AnyView {
     .into_any()
 }
 
-/// 准备卡：读取或解码时居中。落影是 `0 12px 32px` 的背景色 70%，进度按 1.05 秒从 -120% 扫到 250%。
+/// 准备卡：读取或解码时居中。落影取主题的表面高度档，进度轨是不定进度。
+/// 最宽 360，窄时左右各让出 `Xxxl`。
 pub(super) fn loading_card(name: &str, video: bool) -> AnyView {
     let name = if name.is_empty() {
         "准备播放".to_string()
@@ -791,16 +813,21 @@ pub(super) fn loading_card(name: &str, video: bool) -> AnyView {
         "准备音频"
     };
     let card = widget(
-        Stack::column(10.0)
-            .padding(14.0)
-            .surface(SemanticColorRole::Surface)
-            .border(SemanticColorRole::BorderSoft, 1.0)
-            .radius(RadiusTier::Md)
-            .max_width(360.0)
-            .painter(super::preview_paint::LoadingCardShadow)
-            .with_layout(|layout| {
-                layout.width = Some(LengthSpec::percent_offset(100.0, -32.0));
-            }),
+        files_style::pad(
+            files_style::hairline(
+                files_style::column(SpacingStep::Lg).surface(SemanticColorRole::Surface),
+                SemanticColorRole::BorderSoft,
+            ),
+            SpacingStep::Xxl,
+            SpacingStep::Xxl,
+        )
+        .radius(RadiusTier::Md)
+        .max_width(LOADING_MAX_WIDTH)
+        .painter(super::preview_paint::LoadingCardShadow)
+        .with_layout(|layout| {
+            let margin = tiers::space_px(SpacingStep::Xxxl);
+            layout.width = Some(LengthSpec::percent_offset(100.0, -margin * 2.0));
+        }),
     )
     .children((
         widget(

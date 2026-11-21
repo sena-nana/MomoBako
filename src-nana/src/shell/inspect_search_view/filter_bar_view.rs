@@ -24,6 +24,7 @@ use nana_ui_core::{
 
 use super::super::ShellMessage;
 use super::super::admin::style::key_part;
+use super::super::files_view::style as files_style;
 use super::super::hot::ModelField;
 use super::super::inspect::{
     AdvancedField, FilterList, InspectMessage, MetadataInput, SortDirection,
@@ -32,6 +33,15 @@ use super::super::inspect_shortcuts::SearchShortcut;
 use super::filter_state::{FilterBarSignals, FilterSelection};
 use super::presenter::{self, RATING_OPTIONS};
 use super::widgets::{self, CONTROL_HEIGHT, INPUT_WIDTH};
+use crate::theme_map::tiers::{self, Edge};
+use nana_ui_core::SpacingStep;
+
+/// 芯片、评分和高级格子之间的间距档。
+const OPTION_GAP: SpacingStep = SpacingStep::Sm;
+/// 组名列宽 42：组名的列宽不是间距，照写像素。
+const CAPTION_WIDTH: f32 = 42.0;
+/// 高级区格子最窄 132：列宽不是间距，照写像素。
+const ADVANCED_MIN_COLUMN: f32 = 132.0;
 
 /// 高级区一个输入：字段、稳定键、无障碍名称、占位文字和是否占两列。
 /// 键只用 ASCII，按键路径找得到。
@@ -135,21 +145,24 @@ const ADVANCED_INPUTS: [AdvancedInput; 12] = [
 /// 显隐跟着 `signals.open`（有仓库且筛选栏打开），藏起时节点留着、不占布局。
 pub(crate) fn resident_filter_bar(signals: FilterBarSignals) -> AnyView {
     widget(
-        Stack::column(10.0)
-            .padding_xy(14.0, 12.0)
-            .surface(SemanticColorRole::Surface)
-            .border(SemanticColorRole::BorderSoft, 1.0)
-            .radius(RadiusTier::Lg)
-            .grow(0.0)
-            .shrink(0.0)
-            .with_layout(|layout| {
-                layout.margin_bottom = Some(LengthSpec::Px(14.0));
-            }),
+        files_style::hairline(
+            files_style::pad(
+                files_style::column(SpacingStep::Lg),
+                SpacingStep::Xxl,
+                SpacingStep::Xl,
+            )
+            .surface(SemanticColorRole::Surface),
+            SemanticColorRole::BorderSoft,
+        )
+        .radius(RadiusTier::Lg)
+        .grow(0.0)
+        .shrink(0.0)
+        .with_layout(|layout| tiers::margin(layout, &[Edge::Bottom], SpacingStep::Xxl)),
     )
     .visible(signals.open)
     .children((
         head(signals),
-        widget(Stack::column(8.0))
+        widget(files_style::column(SpacingStep::Md))
             .children((
                 chip_group(
                     "格式",
@@ -199,7 +212,7 @@ fn head(signals: FilterBarSignals) -> AnyView {
             cx.dispatch_program_all(message(InspectMessage::CloseFilterBar))
         });
     let title = widget(
-        Stack::column(3.0)
+        files_style::column(SpacingStep::Xs)
             .width(LengthSpec::Shrink)
             .min_width(LengthSpec::Px(0.0))
             .grow(1.0)
@@ -219,14 +232,15 @@ fn head(signals: FilterBarSignals) -> AnyView {
         .key("workspace-filter-repository"),
     ));
     widget(
-        Stack::bar(12.0)
+        Stack::bar(0.0)
+            .gap_theme(SpacingStep::Xl)
             .align(AlignSpec::Start)
             .justify(JustifySpec::SpaceBetween),
     )
     .children((
         title,
         widget(
-            Stack::row(8.0)
+            files_style::row(SpacingStep::Md)
                 .align(AlignSpec::Center)
                 .grow(0.0)
                 .shrink(0.0)
@@ -240,7 +254,7 @@ fn head(signals: FilterBarSignals) -> AnyView {
     .into_any()
 }
 
-/// 一组：左边 42px 的组名，右边内容。组名在 26px 的行盒里垂直居中。
+/// 一组：左边 42px 的组名，隔 `Md` 是内容。组名在 26px 的行盒里垂直居中。
 fn group(
     title: &'static str,
     name: &'static str,
@@ -250,8 +264,8 @@ fn group(
     let caption = widget(
         Stack::row(0.0)
             .align(AlignSpec::Center)
-            .width(LengthSpec::Px(42.0))
-            .min_width(LengthSpec::Px(42.0))
+            .width(LengthSpec::Px(CAPTION_WIDTH))
+            .min_width(LengthSpec::Px(CAPTION_WIDTH))
             .min_height(LengthSpec::Px(CONTROL_HEIGHT))
             .grow(0.0)
             .shrink(0.0),
@@ -265,16 +279,20 @@ fn group(
     .key(format!("workspace-filter-{key}-title")),))
     .key(format!("workspace-filter-{key}-caption"))
     .into_any();
-    let style = Stack::bar(8.0).align(AlignSpec::Start).node_style();
+    let style = Stack::bar(0.0)
+        .gap_theme(SpacingStep::Md)
+        .align(AlignSpec::Start)
+        .node_style();
     widget(Toolbar::new().label(name).chrome(false).style(style))
         .children((caption, body))
         .key(format!("workspace-filter-{key}"))
 }
 
-/// 芯片行的排版：6px 间距、可折行、占满组名右侧。芯片行是 `each` 的容器，`horizontal(6)` 之外
-/// 补上和旧视图 `Stack::row(6).wrap(true).width(Fill).min_width(0).grow(1).shrink(1)` 相同的字段。
+/// 芯片行的排版：行列间距 `Sm`、可折行、占满组名右侧。芯片行是 `each` 的容器，`horizontal` 之外
+/// 补上和 `Stack::row(..).wrap(true).width(Fill).min_width(0).grow(1).shrink(1)` 相同的字段，
+/// 间距再写成主题档位，主题换刻度时跟着变。
 fn options_row_style() -> InlineStyle {
-    css! { flex-wrap: wrap; width: 100%; min-width: 0; flex-grow: 1; flex-shrink: 1; }
+    css! { flex-wrap: wrap; width: 100%; min-width: 0; flex-grow: 1; flex-shrink: 1; gap: theme(space-sm); }
 }
 
 /// 格式、标签：候选芯片，点一下切换。没有候选时整组不显示。
@@ -290,7 +308,7 @@ fn chip_group(
     let chips = each(options, String::clone, move |value| {
         toggle_chip(list, key, value, selected, None)
     })
-    .horizontal(6.0)
+    .horizontal(tiers::space_px(OPTION_GAP))
     .css(options_row_style())
     .key(format!("workspace-filter-{key}-options"));
     group(title, name, key, chips.into_any())
@@ -370,7 +388,7 @@ fn metadata_group(input: MetadataInput, signals: FilterBarSignals) -> AnyView {
         }
         MetadataItem::Field => metadata_field(input, key, draft),
     })
-    .horizontal(6.0)
+    .horizontal(tiers::space_px(OPTION_GAP))
     .css(options_row_style())
     .key(format!("workspace-filter-{key}-options"));
     group(title, name, key, row.into_any()).into_any()
@@ -443,7 +461,7 @@ fn rating_group(min_rating: Signal<Option<f64>>) -> AnyView {
         );
     }
     let row = widget(
-        Stack::row(6.0)
+        files_style::row(OPTION_GAP)
             .align(AlignSpec::Center)
             .wrap(true)
             .width(LengthSpec::Fill)
@@ -492,7 +510,7 @@ fn shortcut_group(shortcuts: Signal<Vec<SearchShortcut>>) -> AnyView {
             })
             .into_any()
     })
-    .horizontal(6.0)
+    .horizontal(tiers::space_px(OPTION_GAP))
     .css(options_row_style())
     .key("workspace-filter-shortcut-options");
     group("库类型", "库类型筛选", "shortcut", chips.into_any())
@@ -529,7 +547,7 @@ fn advanced_group(signals: FilterBarSignals) -> AnyView {
                     GridRepeatAuto {
                         kind: GridTrackListUnsupported::RepeatAutoFit,
                         tracks: vec![GridTrack::MinMax {
-                            min_px: 132.0,
+                            min_px: ADVANCED_MIN_COLUMN,
                             fr: 1.0,
                             max_px: None,
                         }],
@@ -537,8 +555,8 @@ fn advanced_group(signals: FilterBarSignals) -> AnyView {
                     }
                     .into(),
                 );
-                layout.row_gap = Some(LengthSpec::Px(6.0));
-                layout.column_gap = Some(LengthSpec::Px(6.0));
+                tiers::row_gap(layout, OPTION_GAP);
+                tiers::column_gap(layout, OPTION_GAP);
             }),
     )
     .children(cells)
@@ -596,13 +614,13 @@ fn sort_direction_select(direction: Signal<SortDirection>) -> AnyView {
     select.style.interaction.focused = Default::default();
     {
         let layout = Arc::make_mut(&mut select.style.layout);
-        layout.height = Some(LengthSpec::Px(CONTROL_HEIGHT - 2.0));
+        layout.height = Some(LengthSpec::Px(CONTROL_HEIGHT - tiers::hairline_px() * 2.0));
         layout.min_height = Some(LengthSpec::Px(0.0));
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
-        layout.padding_left = Some(LengthSpec::Px(8.0));
-        layout.padding_right = Some(LengthSpec::Px(8.0));
+        tiers::padding(layout, &Edge::X, SpacingStep::Md);
         layout.border_width = Some(0.0);
+        layout.theme.border_width = None;
         crate::theme_map::control_weight(layout, TextWeight::Regular);
         layout.flex_grow = Some(1.0);
     }

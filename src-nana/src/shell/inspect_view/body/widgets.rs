@@ -1,21 +1,27 @@
 //! 预览工具栏、图片与视频、文档与模型视图、覆盖层、状态层与字节数格式化等小部件。
 
 use super::*;
-use nana_ui_core::TextWeight;
+use crate::theme_map::tiers::{self, Edge};
+use nana_ui_core::{SpacingStep, TextWeight};
 
-/// 插件顶栏：42px 起，8/12 内边距，底边 border-soft，标签可折行。
+use super::super::super::files_view::style as files_style;
+
+/// 插件顶栏的最小高度 42：一行标签加上下内边距，不是间距档，照写像素。
+const TOOLBAR_MIN_HEIGHT: f32 = 42.0;
+/// 浮在预览框角上的小件离边的距离档。
+const CORNER_STEP: SpacingStep = SpacingStep::Xl;
+/// 失败原因的最大行宽 520：阅读宽度，不是间距，照写像素。
+const REASON_MAX_WIDTH: f32 = 520.0;
+
+/// 插件顶栏：42px 起，上下 `Md`、左右 `Xl` 内边距，底边 border-soft，标签可折行。
 pub(super) fn toolbar(chips: Vec<AnyView>, key: &'static str) -> AnyView {
     let bar = super::super::super::workbench::with_bottom_divider(
-        Stack::bar(8.0)
+        Stack::bar(0.0)
+            .gap_theme(SpacingStep::Md)
             .wrap(true)
             .align(AlignSpec::Center)
-            .min_height(LengthSpec::Px(42.0))
-            .with_layout(|layout| {
-                layout.padding_top = Some(LengthSpec::Px(8.0));
-                layout.padding_bottom = Some(LengthSpec::Px(8.0));
-                layout.padding_left = Some(LengthSpec::Px(12.0));
-                layout.padding_right = Some(LengthSpec::Px(12.0));
-            }),
+            .min_height(LengthSpec::Px(TOOLBAR_MIN_HEIGHT))
+            .with_layout(|layout| tiers::padding_xy(layout, SpacingStep::Xl, SpacingStep::Md)),
     );
     widget(bar).children(chips).key(key).into_any()
 }
@@ -30,23 +36,20 @@ pub(super) fn pixel_image(pixels: &Pixels, cover: bool, key: &'static str) -> An
     frame_pixels(pixels, cover, key, false)
 }
 
-/// 宿主纹理槽上的视频画面，和文件预览的 `inspect-video` 同一棵。近黑底，适应或填充跟 `cover`。
+/// 宿主纹理槽上的视频画面，和文件预览的 `inspect-video` 同一棵。底是主题的媒体遮罩色，适应或填充跟 `cover`。
 pub(in super::super) fn host_video(cover: bool) -> AnyView {
     let fit = if cover {
         ContentFit::Cover
     } else {
         ContentFit::Contain
     };
-    widget(
-        Stack::fill_column(0.0)
-            .with_layout(|layout| layout.background = Some([0.02, 0.02, 0.02, 1.0])),
-    )
-    .children((widget(GpuTextureView::new("file-preview").fit(fit)).key("inspect-video"),))
-    .key("inspect-video-frame")
-    .into_any()
+    widget(Stack::fill_column(0.0).painter(super::super::preview_paint::MediaBackdrop))
+        .children((widget(GpuTextureView::new("file-preview").fit(fit)).key("inspect-video"),))
+        .key("inspect-video-frame")
+        .into_any()
 }
 
-/// 把一块像素编成内容图。`video` 时底色是视频画面的近黑，否则是 bg。
+/// 把一块像素编成内容图。`video` 时底色是主题的媒体遮罩色，否则是 bg。
 /// 像素来自已经解出的缓冲区，编不成图时记日志并留空，不另涂一块同色矩形。
 pub(super) fn frame_pixels(
     pixels: &Pixels,
@@ -74,14 +77,11 @@ pub(super) fn frame_pixels(
         sampling: nana_ui_core::ImageSampling::Resample,
     };
     let stack = if video {
-        Stack::fill_column(0.0)
+        Stack::fill_column(0.0).painter(super::super::preview_paint::MediaBackdrop)
     } else {
         Stack::fill_column(0.0).surface(SemanticColorRole::Background)
     };
     widget(stack.with_layout(|layout| {
-        if video {
-            layout.background = Some([0.02, 0.02, 0.02, 1.0]);
-        }
         layout.paint.content_image = Some(image);
     }))
     .key(key)
@@ -114,12 +114,13 @@ pub(super) fn document_view(
     } else if let Some(error) = error {
         if let Some((index, total)) = nav {
             rows.push(
-                widget(
+                widget(files_style::pad(
                     Stack::column(0.0)
-                        .padding(18.0)
                         .width(LengthSpec::Fill)
                         .min_width(LengthSpec::Px(0.0)),
-                )
+                    SpacingStep::PageTight,
+                    SpacingStep::PageTight,
+                ))
                 .children((super::super::page::page_nav(index, total),))
                 .key(format!("inspect-page-failed-{scope}-{index}"))
                 .into_any(),
@@ -128,17 +129,21 @@ pub(super) fn document_view(
         rows.push(overlay("无法预览该文档", error, "inspect-native-error"));
     } else {
         rows.push(
-            widget(Stack::fill_column(0.0).padding(18.0))
-                .children((widget(text(
-                    body,
-                    13.0,
-                    TextWeight::Regular,
-                    SemanticColorRole::Text,
-                    20.15,
-                ))
-                .key("inspect-native"),))
-                .key("inspect-native-text")
-                .into_any(),
+            widget(files_style::pad(
+                Stack::fill_column(0.0),
+                SpacingStep::PageTight,
+                SpacingStep::PageTight,
+            ))
+            .children((widget(text(
+                body,
+                13.0,
+                TextWeight::Regular,
+                SemanticColorRole::Text,
+                20.15,
+            ))
+            .key("inspect-native"),))
+            .key("inspect-native-text")
+            .into_any(),
         );
     }
     // 插件根自带 bg 底，盖住预览框的插件光晕。
@@ -167,15 +172,19 @@ pub(super) fn model_view(
         .to_ascii_uppercase();
     let picture = match raster {
         Some(raster) => super::super::page::page_bitmap(raster),
-        None => widget(Stack::fill_column(0.0).padding(18.0))
-            .children((widget(text(
-                content,
-                13.0,
-                TextWeight::Regular,
-                SemanticColorRole::Muted,
-                20.15,
-            )),))
-            .into_any(),
+        None => widget(files_style::pad(
+            Stack::fill_column(0.0),
+            SpacingStep::PageTight,
+            SpacingStep::PageTight,
+        ))
+        .children((widget(text(
+            content,
+            13.0,
+            TextWeight::Regular,
+            SemanticColorRole::Muted,
+            20.15,
+        )),))
+        .into_any(),
     };
     let mut layers = vec![picture];
     let mut chips = Vec::new();
@@ -187,10 +196,9 @@ pub(super) fn model_view(
     }
     if !chips.is_empty() {
         layers.push(
-            widget(Stack::row(8.0).with_layout(|layout| {
+            widget(files_style::row(SpacingStep::Md).with_layout(|layout| {
                 layout.position = nana_ui_core::PositionSpec::Absolute;
-                layout.offset_left = Some(LengthSpec::Px(12.0));
-                layout.offset_bottom = Some(LengthSpec::Px(12.0));
+                files_style::offset(layout, &[Edge::Left, Edge::Bottom], CORNER_STEP);
             }))
             .children(chips)
             .key("inspect-model-hud")
@@ -255,10 +263,9 @@ pub(super) fn orbit_controls() -> AnyView {
             .into_any()
     })
     .collect::<Vec<_>>();
-    widget(Stack::row(4.0).with_layout(|layout| {
+    widget(files_style::row(SpacingStep::Xs).with_layout(|layout| {
         layout.position = nana_ui_core::PositionSpec::Absolute;
-        layout.offset_right = Some(LengthSpec::Px(12.0));
-        layout.offset_top = Some(LengthSpec::Px(12.0));
+        files_style::offset(layout, &[Edge::Right, Edge::Top], CORNER_STEP);
     }))
     .children(buttons)
     .key("inspect-orbit")
@@ -324,10 +331,14 @@ pub(super) fn failed_mask(
                 .into_any(),
         );
     }
-    let frame = Stack::fill_column(8.0)
-        .align(AlignSpec::Center)
-        .justify(JustifySpec::Center)
-        .padding(24.0);
+    let frame = files_style::pad(
+        Stack::fill_column(0.0)
+            .gap_theme(SpacingStep::Md)
+            .align(AlignSpec::Center)
+            .justify(JustifySpec::Center),
+        SpacingStep::Page,
+        SpacingStep::Page,
+    );
     let style = frame
         .node_style()
         .surface_mix(nana_ui_core::SemanticColorMix::alpha(
@@ -363,7 +374,7 @@ pub(super) fn overlay_reason(message: &str) -> Text {
     reason.style.text_horizontal_alignment = TextHorizontalAlignment::Center;
     {
         let layout = std::sync::Arc::make_mut(&mut reason.style.layout);
-        layout.max_width = Some(LengthSpec::Px(520.0));
+        layout.max_width = Some(LengthSpec::Px(REASON_MAX_WIDTH));
         layout.text_ext.line_break = Some(nana_ui_core::LineBreakSpec::Anywhere);
         layout.text_ext.overflow_wrap = Some(nana_ui_core::OverflowWrapSpec::Anywhere);
     }
@@ -373,7 +384,8 @@ pub(super) fn overlay_reason(message: &str) -> Text {
 /// 居中的两行状态：压缩包读取中用它。
 pub(super) fn centered_status(title: &str, detail: &str) -> AnyView {
     widget(
-        Stack::fill_column(8.0)
+        Stack::fill_column(0.0)
+            .gap_theme(SpacingStep::Md)
             .align(AlignSpec::Center)
             .justify(JustifySpec::Center),
     )
@@ -397,14 +409,21 @@ pub(super) fn centered_status(title: &str, detail: &str) -> AnyView {
     .into_any()
 }
 
-/// 状态胶囊盖在预览框左上角（PDF 在顶栏下面）。
+/// 状态胶囊盖在预览框左上角，离边 `Xl`（PDF 在顶栏下面再离 `Xl`）。
 pub(super) fn status_layer(pill: AnyView, toolbar: Option<AnyView>) -> AnyView {
-    let top = if toolbar.is_some() { 54.0 } else { 12.0 };
+    let below_toolbar = toolbar.is_some();
+    let corner = tiers::space_px(CORNER_STEP);
     let pill = widget(Stack::row(0.0).with_layout(move |layout| {
         layout.position = nana_ui_core::PositionSpec::Absolute;
-        layout.offset_left = Some(LengthSpec::Px(12.0));
-        layout.offset_top = Some(LengthSpec::Px(top));
-        layout.max_width = Some(LengthSpec::percent_offset(100.0, -24.0));
+        files_style::offset(layout, &[Edge::Left, Edge::Top], CORNER_STEP);
+        if below_toolbar {
+            layout.offset_top = Some(LengthSpec::Px(TOOLBAR_MIN_HEIGHT + corner));
+            layout.theme.offset_top = Some(nana_ui_core::ThemeExpr {
+                constant: TOOLBAR_MIN_HEIGHT,
+                terms: vec![(nana_ui_core::ThemeToken::Space(CORNER_STEP), 1.0)],
+            });
+        }
+        layout.max_width = Some(LengthSpec::percent_offset(100.0, -corner * 2.0));
     }))
     .children((pill,))
     .key("inspect-status-layer")
@@ -420,7 +439,7 @@ pub(super) fn status_layer(pill: AnyView, toolbar: Option<AnyView>) -> AnyView {
         .into_any()
 }
 
-/// 状态胶囊：底是 bg-elev 的 84%，border-soft 细边。图片读取多一条 132×6 的扫动进度。
+/// 状态胶囊：底是 bg-elev 的 84%，border-soft 发丝边，左右 `Md`、上下 `Sm`。图片读取多一条 132×6 的扫动进度。
 pub(super) fn status_pill(title: &str, detail: &str, progress: bool) -> AnyView {
     let mut children = vec![
         widget(text(
@@ -446,11 +465,15 @@ pub(super) fn status_pill(title: &str, detail: &str, progress: bool) -> AnyView 
     if progress {
         children.push(super::super::preview_paint::status_progress());
     }
-    let frame = Stack::row(8.0)
-        .align(AlignSpec::Center)
-        .padding_xy(8.0, 5.0)
-        .border(SemanticColorRole::BorderSoft, 1.0)
-        .radius(RadiusTier::Md);
+    let frame = files_style::hairline(
+        files_style::pad(
+            files_style::row(SpacingStep::Md).align(AlignSpec::Center),
+            SpacingStep::Md,
+            SpacingStep::Sm,
+        ),
+        SemanticColorRole::BorderSoft,
+    )
+    .radius(RadiusTier::Md);
     let fill = nana_ui_core::SemanticColorMix::alpha(SemanticColorRole::Surface, 0.84);
     let style = frame.node_style().surface_mix(fill);
     widget(frame.style(style))

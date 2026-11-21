@@ -8,8 +8,17 @@
 use std::collections::BTreeMap;
 
 use nana_ui::runtime::view::{AnyView, IntoView, widget};
-use nana_ui::runtime::{AlignSpec, JustifySpec, LengthSpec, RadiusTier, SemanticColorRole, Stack};
+use nana_ui::runtime::{AlignSpec, JustifySpec, RadiusTier, SemanticColorRole, Stack};
+use nana_ui_core::SpacingStep;
 use serde_json::Value;
+
+use super::files_view::style as files_style;
+use crate::theme_map::tiers;
+
+/// 色板药丸的宽高 34×12、元数据小方块的边长 14：色块尺寸不是间距，没有对应的档，照写像素。
+const PILL_WIDTH: f32 = 34.0;
+const PILL_HEIGHT: f32 = 12.0;
+const CHIP_SIDE: f32 = 14.0;
 
 use crate::backend::services::repository::MetadataEntry;
 
@@ -169,7 +178,7 @@ fn color_distance(hex: &str, rgb: (u8, u8, u8)) -> f64 {
     (dr * dr + dg * dg + db * db).sqrt()
 }
 
-/// 一排 34×12 的药丸，间距 8，带 `--border-soft` 描边。没有合法颜色时不占一行。
+/// 一排 34×12 的药丸，行列间距 `Md`，带 `--border-soft` 发丝边。没有合法颜色时不占一行。
 pub(super) fn swatches(colors: &[String], prefix: &str) -> Option<AnyView> {
     let chips: Vec<AnyView> = colors
         .iter()
@@ -179,7 +188,7 @@ pub(super) fn swatches(colors: &[String], prefix: &str) -> Option<AnyView> {
                 "{prefix}-{index}-{}",
                 color.trim_start_matches('#').to_ascii_uppercase()
             );
-            swatch(color, 34.0, 12.0, None, &key)
+            swatch(color, PILL_WIDTH, PILL_HEIGHT, None, &key)
         })
         .collect();
     if chips.is_empty() {
@@ -187,10 +196,10 @@ pub(super) fn swatches(colors: &[String], prefix: &str) -> Option<AnyView> {
     }
     Some(
         widget(
-            Stack::row(8.0)
+            files_style::row(SpacingStep::Md)
                 .wrap(true)
                 .align(AlignSpec::Center)
-                .with_layout(|layout| layout.row_gap = Some(LengthSpec::Px(8.0))),
+                .with_layout(|layout| tiers::row_gap(layout, SpacingStep::Md)),
         )
         .children(chips)
         .key(format!("{prefix}-row"))
@@ -198,7 +207,7 @@ pub(super) fn swatches(colors: &[String], prefix: &str) -> Option<AnyView> {
     )
 }
 
-/// 元数据「调色板」一行的值：右对齐的 14×14 小方块，间距 4，`Xs` 圆角。
+/// 元数据「调色板」一行的值：右对齐的 14×14 小方块，间距 `Xs`，`Xs` 圆角。
 pub(super) fn metadata_chips(colors: &[String], prefix: &str) -> Option<AnyView> {
     let chips: Vec<AnyView> = colors
         .iter()
@@ -206,8 +215,8 @@ pub(super) fn metadata_chips(colors: &[String], prefix: &str) -> Option<AnyView>
         .filter_map(|(index, color)| {
             swatch(
                 color,
-                14.0,
-                14.0,
+                CHIP_SIDE,
+                CHIP_SIDE,
                 Some(RadiusTier::Xs),
                 &format!("{prefix}-{index}"),
             )
@@ -218,7 +227,8 @@ pub(super) fn metadata_chips(colors: &[String], prefix: &str) -> Option<AnyView>
     }
     Some(
         widget(
-            Stack::bar(4.0)
+            Stack::bar(0.0)
+                .gap_theme(SpacingStep::Xs)
                 .justify(JustifySpec::End)
                 .align(AlignSpec::Center),
         )
@@ -228,7 +238,7 @@ pub(super) fn metadata_chips(colors: &[String], prefix: &str) -> Option<AnyView>
     )
 }
 
-/// 一枚色块：底色就是元数据里的颜色，描一圈 1px `--border-soft`。`radius` 为空时画成药丸。
+/// 一枚色块：底色就是元数据里的颜色，描一圈 `--border-soft` 发丝边。`radius` 为空时画成药丸。
 fn swatch(
     color: &str,
     width: f32,
@@ -236,16 +246,15 @@ fn swatch(
     radius: Option<RadiusTier>,
     key: &str,
 ) -> Option<AnyView> {
-    let Some(rgba) = super::files_view::style::hex_rgba(color) else {
+    let Some(rgba) = files_style::hex_rgba(color) else {
         eprintln!("Nana 色板颜色无效，跳过：{color}");
         return None;
     };
-    let mut frame = super::files_view::style::fixed(Stack::row(0.0), width, height)
-        .border(SemanticColorRole::BorderSoft, 1.0);
-    frame = match radius {
-        Some(tier) => frame.radius(tier),
-        None => frame.radius_px(999.0),
-    };
+    let frame = files_style::hairline(
+        files_style::fixed(Stack::row(0.0), width, height),
+        SemanticColorRole::BorderSoft,
+    )
+    .radius(radius.unwrap_or(RadiusTier::Full));
     let frame = frame.with_layout(move |layout| layout.background = Some(rgba));
     Some(widget(frame).key(key.to_string()).into_any())
 }

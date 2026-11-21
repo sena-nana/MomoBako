@@ -18,6 +18,8 @@ use super::super::ShellViewModel;
 use super::super::files::{DisplayMode, FileContext, FileRow, FilesState};
 use super::cards::{CardFace, CardView, Cards, card_key};
 use super::virtual_rows::{self, GroupLines, GroupShape};
+use crate::theme_map::tiers;
+use nana_ui_core::SpacingStep;
 
 /// 一组卡片的排法和行。
 #[derive(Clone, Copy)]
@@ -213,8 +215,8 @@ fn fingerprint(row: &FileRow, library: &str) -> u64 {
     hasher.finish()
 }
 
-/// 还没有布局回报时，按窗口宽估算列表内容宽：减去侧栏、主区左右 24、详情 300 和间距 18、
-/// 卡片描边和列表左右内边距。窗口不超过 900 时详情排到下面，不再减详情宽。
+/// 还没有布局回报时，按窗口宽估算列表内容宽：减去侧栏、主区左右各一档 `Page`、详情 300 和两列间距、
+/// 卡片两侧的发丝边和列表左右内边距。窗口不超过 900 时详情排到下面，不再减详情宽。
 pub(crate) fn estimated_list_width(model: &ShellViewModel) -> f32 {
     let workspace = &model.workspace;
     let sidebar = if workspace.sidebar_collapsed {
@@ -222,11 +224,18 @@ pub(crate) fn estimated_list_width(model: &ShellViewModel) -> f32 {
     } else {
         workspace.sidebar_width
     };
-    let detail = if model.viewport_width <= 900.0 {
+    let detail = if model.viewport_width <= super::STACKED_VIEWPORT_PX {
         0.0
     } else {
-        300.0 + 18.0
+        super::DETAIL_WIDTH + super::DETAIL_GAP
     };
-    (model.viewport_width - sidebar - 48.0 - detail - 2.0 - super::grid::LIST_PADDING_X * 2.0)
+    let main_padding = tiers::space_px(SpacingStep::Page) * 2.0;
+    let card_border = tiers::hairline_px() * 2.0;
+    (model.viewport_width
+        - sidebar
+        - main_padding
+        - detail
+        - card_border
+        - super::grid::LIST_PADDING_X * 2.0)
         .max(virtual_rows::MASONRY_COLUMN)
 }

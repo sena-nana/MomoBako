@@ -24,10 +24,15 @@ use nana_ui::runtime::{
 use serde_json::Value;
 
 use super::files::{EnsuredThumbnail, FileContext, FileRow, FilesMessage};
+use super::files_view::style as files_style;
 use super::inspect::support::display_value;
 use super::inspect_library::{asmr_enabled, matches_asmr};
 use super::{ShellMessage, ShellViewModel};
-use nana_ui_core::TextWeight;
+use crate::theme_map::tiers::{self, Edge};
+use nana_ui_core::{ControlHeight, ControlPadding, ControlSize, SpacingStep, TextWeight};
+
+/// 作品队列和播放列表最高 176：滚动视口的高度不是间距，照写像素。
+const QUEUE_MAX_HEIGHT: f32 = 176.0;
 
 mod candidates;
 mod cover;
@@ -328,7 +333,7 @@ pub(super) fn panels_view(panels: &AsmrPanels) -> AnyView {
         rows.push(playlist_view(playlist));
     }
     widget(
-        Stack::column(12.0)
+        files_style::column(SpacingStep::Xl)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
     )
@@ -416,17 +421,18 @@ fn playlist_view(playlist: &playlist::PlaylistPanel) -> AnyView {
     queue_card("inspect-asmr-playlist", rows)
 }
 
-/// 「加入作品」「随机」「清空」：间距 6、内边距 8×10、底边 border-soft。
+/// 「加入作品」「随机」「清空」：间距 `Sm`、上下 `Md` 左右 `Lg` 内边距、底边 border-soft。
 /// 是一条 NanaUI 工具栏，左右方向键在三个按钮之间走。
 fn playlist_actions(audio: bool, empty: bool) -> AnyView {
-    let row = super::workbench::with_bottom_divider(
-        Stack::row(6.0)
+    let row = super::workbench::with_bottom_divider(files_style::pad(
+        files_style::row(SpacingStep::Sm)
             .align(AlignSpec::Center)
             .wrap(true)
-            .padding_xy(10.0, 8.0)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
-    );
+        SpacingStep::Lg,
+        SpacingStep::Md,
+    ));
     widget(
         Toolbar::new()
             .chrome(false)
@@ -455,22 +461,24 @@ fn playlist_actions(audio: bool, empty: bool) -> AnyView {
     .into_any()
 }
 
-/// 队列操作钮：至少 28px 高，左右 8、上下 4，按钮自带的正文档字号，幽灵按钮样式。
+/// 队列操作钮：小号控件高、左右取小号控件内边距档、上下 `Xs`，按钮自带的正文档字号，幽灵按钮样式。
 fn queue_action(label: &str, disabled: bool) -> Button {
     let button = Button::new(label)
         .kind(ButtonKind::Ghost)
         .disabled(disabled);
     let mut style = button.style.clone();
-    style.control_height = None;
-    style.control_padding_x = None;
+    style.control_height = Some(ControlHeight::Exact(ControlSize::Small));
+    style.control_padding_x = Some(ControlPadding::Compact);
     style.control_padding_y = None;
+    let metrics = nana_ui::theme::UI_METRICS;
+    let height = ControlSize::Small.height_in(metrics);
+    let inset = ControlPadding::Compact.resolve(metrics);
     let layout = std::sync::Arc::make_mut(&mut style.layout);
-    layout.min_height = Some(LengthSpec::Px(28.0));
-    layout.height = Some(LengthSpec::Px(28.0));
-    layout.padding_left = Some(LengthSpec::Px(8.0));
-    layout.padding_right = Some(LengthSpec::Px(8.0));
-    layout.padding_top = Some(LengthSpec::Px(4.0));
-    layout.padding_bottom = Some(LengthSpec::Px(4.0));
+    layout.min_height = Some(LengthSpec::Px(height));
+    layout.height = Some(LengthSpec::Px(height));
+    layout.padding_left = Some(LengthSpec::Px(inset));
+    layout.padding_right = Some(LengthSpec::Px(inset));
+    tiers::padding(layout, &Edge::Y, SpacingStep::Xs);
     layout.flex_grow = Some(0.0);
     layout.flex_shrink = Some(0.0);
     layout.width = Some(LengthSpec::Shrink);
@@ -484,16 +492,17 @@ fn queue_empty(label: &str, key: &str) -> AnyView {
         .into_any()
 }
 
-/// 标题在左、计数在右，底边 border-soft，两端对齐。
+/// 标题在左、计数在右，四周 `Lg` 内边距，底边 border-soft，两端对齐。
 fn queue_head(label: &str, count: &str, key: &str) -> AnyView {
-    let row = super::workbench::with_bottom_divider(
-        Stack::row(12.0)
+    let row = super::workbench::with_bottom_divider(files_style::pad(
+        files_style::row(SpacingStep::Xl)
             .align(AlignSpec::Center)
             .justify(JustifySpec::SpaceBetween)
-            .padding_xy(10.0, 9.0)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
-    );
+        SpacingStep::Lg,
+        SpacingStep::Lg,
+    ));
     widget(row)
         .key(key.to_string())
         .children((
@@ -507,17 +516,20 @@ fn queue_head(label: &str, count: &str, key: &str) -> AnyView {
 }
 
 /// 条目列表最高 176px，多了就在卡片里滚动，整张队列仍留在页底播放条上方。
-/// 行放在带可访问名的 NanaUI `List` 里，读屏按列表念；列表四周留 4px，行的悬停和选中底不贴卡片边。
+/// 行放在带可访问名的 NanaUI `List` 里，读屏按列表念；列表四周留 `Xs`，行的悬停和选中底不贴卡片边。
 fn queue_list(items: Vec<AnyView>, label: &str, key: &str) -> AnyView {
     let list = List::new().label(label).style(
-        Stack::column(0.0)
-            .width(LengthSpec::Fill)
-            .min_width(LengthSpec::Px(0.0))
-            .padding(4.0)
-            .node_style(),
+        files_style::pad(
+            Stack::column(0.0)
+                .width(LengthSpec::Fill)
+                .min_width(LengthSpec::Px(0.0)),
+            SpacingStep::Xs,
+            SpacingStep::Xs,
+        )
+        .node_style(),
     );
     widget(ScrollView::new(ScrollAxes::Vertical).with_layout(|layout| {
-        layout.max_height = Some(LengthSpec::Px(176.0));
+        layout.max_height = Some(LengthSpec::Px(QUEUE_MAX_HEIGHT));
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
         layout.flex_grow = Some(0.0);
@@ -528,19 +540,21 @@ fn queue_list(items: Vec<AnyView>, label: &str, key: &str) -> AnyView {
     .into_any()
 }
 
-/// 队列卡片：bg-elev 底、border-soft 细边、中圆角，子项紧贴、不留段间距。
+/// 队列卡片：bg-elev 底、border-soft 发丝边、中圆角，子项紧贴、不留段间距。
 fn queue_card(key: &str, rows: Vec<AnyView>) -> AnyView {
     widget(
-        Stack::column(0.0)
-            .width(LengthSpec::Fill)
-            .min_width(LengthSpec::Px(0.0))
-            .surface(SemanticColorRole::Surface)
-            .border(SemanticColorRole::BorderSoft, 1.0)
-            .radius(RadiusTier::Md)
-            .with_layout(|layout| {
-                layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
-                layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
-            }),
+        files_style::hairline(
+            Stack::column(0.0)
+                .width(LengthSpec::Fill)
+                .min_width(LengthSpec::Px(0.0))
+                .surface(SemanticColorRole::Surface),
+            SemanticColorRole::BorderSoft,
+        )
+        .radius(RadiusTier::Md)
+        .with_layout(|layout| {
+            layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
+            layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
+        }),
     )
     .key(key.to_string())
     .children(rows)

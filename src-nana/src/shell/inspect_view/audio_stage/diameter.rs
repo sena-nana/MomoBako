@@ -239,6 +239,7 @@ mod tests {
             }
         }
         let (shadow, circle) = found.expect("唱片要有落影");
+        let token = nana_ui::theme::EffectTokens::DARK.shadow(nana_ui_core::ElevationRole::Overlay);
         assert_eq!(
             (
                 shadow.offset_x,
@@ -246,7 +247,13 @@ mod tests {
                 shadow.blur_radius,
                 shadow.spread_radius
             ),
-            (0.0, 22.0, 60.0, 0.0)
+            (
+                token.offset_x,
+                token.offset_y,
+                token.blur_radius,
+                token.spread_radius
+            ),
+            "唱片落影是主题覆盖层高度档"
         );
         assert!(
             (circle.width - bounds.width).abs() < 0.5

@@ -828,7 +828,7 @@ fn bounds(harness: &ShellHarness, key: &str) -> (f32, f32, f32, f32) {
     (bounds.x, bounds.y, bounds.width, bounds.height)
 }
 
-/// 1200×800 的文件页（侧栏和右侧详情都在）：播放条卡片宽 558，窗口宽于 1120，不拆三行：媒体行在上，
+/// 1200×800 的文件页（侧栏和右侧详情都在）：播放条卡片宽 556（两列间距是 `PageTight`），窗口宽于 1120，不拆三行：媒体行在上，
 /// 传输按钮和音量在下面同一行，都留在卡片里；文件列表仍露得出第二行卡片。1180 同样不拆三行。
 /// 三行只在窗口不宽于 1120 时出现。
 #[test]
@@ -836,7 +836,7 @@ fn the_player_bar_stays_on_one_row_in_the_standard_files_page() {
     let mut harness = ShellHarness::mount(scene("files-multi-select"));
     settle(&mut harness);
     assert!(
-        (harness.model.player.bar_width - 558.0).abs() < 1.0,
+        (harness.model.player.bar_width - 556.0).abs() < 1.0,
         "卡片宽 {}",
         harness.model.player.bar_width
     );

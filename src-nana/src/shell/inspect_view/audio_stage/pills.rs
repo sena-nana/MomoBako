@@ -7,9 +7,13 @@
 
 use nana_ui::runtime::view::{AnyView, IntoView, widget};
 use nana_ui::runtime::{LengthSpec, SemanticColorRole, Stack};
-use nana_ui_core::{SemanticColorMix, TextWeight};
+use nana_ui_core::{SemanticColorMix, SpacingStep, TextWeight};
 
+use super::super::super::files_view::style as files_style;
 use super::super::frame::text;
+
+/// 胶囊至少 26 高：一行字加上下内边距再加边，不是控件档，照写像素。
+const PILL_MIN_HEIGHT: f32 = 26.0;
 
 /// 唱片中间那枚「音频」的底：bg-elev 占 88%，其余透明。
 const CHIP_FILL: f32 = 0.88;
@@ -32,14 +36,19 @@ pub(super) fn pill(label: &str, chip: bool, key: &'static str) -> AnyView {
     } else {
         SemanticColorMix::alpha(SemanticColorRole::Background, META_FILL)
     };
-    let frame = Stack::row(0.0)
-        .align(nana_ui::runtime::AlignSpec::Center)
-        .min_height(LengthSpec::Px(26.0))
-        .padding_xy(8.0, 4.0)
-        .border(border, 1.0)
-        .radius_px(999.0)
-        .grow(0.0)
-        .shrink(0.0);
+    let frame = files_style::hairline(
+        files_style::pad(
+            Stack::row(0.0)
+                .align(nana_ui::runtime::AlignSpec::Center)
+                .min_height(LengthSpec::Px(PILL_MIN_HEIGHT))
+                .grow(0.0)
+                .shrink(0.0),
+            SpacingStep::Md,
+            SpacingStep::Xs,
+        ),
+        border,
+    )
+    .radius(nana_ui::runtime::RadiusTier::Full);
     // 这一版 NanaUI 的 `Stack` 没有 `surface_mix`，混合底写在节点样式上。
     let style = frame.node_style().surface_mix(fill);
     let mut label_text = text(

@@ -449,10 +449,11 @@ pub(super) fn text_plugin(
     };
     let mut body = Text::new(shown)
         .color(SemanticColorRole::Text)
-        .role(nana_ui_core::TypeRole::Body)
-        .line_height(21.45);
+        .role(nana_ui_core::TypeRole::Body);
     {
         let layout = std::sync::Arc::make_mut(&mut body.style.layout);
+        // 等宽原文 13px、1.65 倍行高，按正文字号档的倍数写。
+        crate::theme_map::tiers::line_ratio(layout, nana_ui_core::TypeRole::Body, 1.65);
         layout.text_ext.font_family = Some("monospace".into());
         layout.width = Some(LengthSpec::Fill);
         layout.min_width = Some(LengthSpec::Px(0.0));
@@ -461,22 +462,25 @@ pub(super) fn text_plugin(
         // `white-space: pre-wrap`：保留原文的换行和空格，长行在框内折行。
         layout.white_space = nana_ui_core::WhiteSpaceSpec::PreWrap;
     }
-    // 全局 `pre`：bg-subtle 底、border-soft 细边、8px 圆角、12/14 内边距，至少铺满内容区。
+    // 全局 `pre`：bg-subtle 底、border-soft 发丝边、`Md` 圆角、上下 `Xl` 左右 `Xxl` 内边距，至少铺满内容区。
     let sheet = widget(
-        Stack::column(0.0)
-            .width(LengthSpec::Fill)
-            .min_width(LengthSpec::Px(0.0))
-            .surface(SemanticColorRole::Subtle)
-            .border(SemanticColorRole::BorderSoft, 1.0)
-            .radius(RadiusTier::Md)
-            .with_layout(|layout| {
-                layout.padding_top = Some(LengthSpec::Px(12.0));
-                layout.padding_bottom = Some(LengthSpec::Px(12.0));
-                layout.padding_left = Some(LengthSpec::Px(14.0));
-                layout.padding_right = Some(LengthSpec::Px(14.0));
-                layout.min_height = Some(LengthSpec::Percent(100.0));
-                layout.flex_grow = Some(1.0);
-            }),
+        super::super::super::files_view::style::hairline(
+            Stack::column(0.0)
+                .width(LengthSpec::Fill)
+                .min_width(LengthSpec::Px(0.0))
+                .surface(SemanticColorRole::Subtle),
+            SemanticColorRole::BorderSoft,
+        )
+        .radius(RadiusTier::Md)
+        .with_layout(|layout| {
+            crate::theme_map::tiers::padding_xy(
+                layout,
+                nana_ui_core::SpacingStep::Xxl,
+                nana_ui_core::SpacingStep::Xl,
+            );
+            layout.min_height = Some(LengthSpec::Percent(100.0));
+            layout.flex_grow = Some(1.0);
+        }),
     )
     .children((widget(body).key("inspect-text"),))
     .key("inspect-text-sheet");
@@ -486,10 +490,11 @@ pub(super) fn text_plugin(
         layout.flex_basis = Some(LengthSpec::Px(0.0));
         layout.min_height = Some(LengthSpec::Px(0.0));
         layout.width = Some(LengthSpec::Fill);
-        layout.padding_top = Some(LengthSpec::Px(20.0));
-        layout.padding_bottom = Some(LengthSpec::Px(20.0));
-        layout.padding_left = Some(LengthSpec::Px(22.0));
-        layout.padding_right = Some(LengthSpec::Px(22.0));
+        crate::theme_map::tiers::padding_xy(
+            layout,
+            nana_ui_core::SpacingStep::Page,
+            nana_ui_core::SpacingStep::PageTight,
+        );
     }))
     .children((
         widget(Stack::fill_column(0.0).min_height(LengthSpec::Percent(100.0))).children((sheet,)),

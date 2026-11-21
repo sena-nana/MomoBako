@@ -2,21 +2,24 @@
 //!
 //! 圆角卡片上画
 //! `radial-gradient(circle at 28% 32%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 28%)`，
-//! 以及 `box-shadow: 0 18px 40px color-mix(in srgb, var(--bg) 84%, transparent)`。
-//! 圆心按 1px 边框内侧的内边距盒定位。圆的半径是到该盒最远角的像素距离，格子不是正方形时仍是正圆。
+//! 以及主题表面高度档的落影。
+//! 圆心按发丝边内侧的内边距盒定位。圆的半径是到该盒最远角的像素距离，格子不是正方形时仍是正圆。
 
 use super::AudioCardFace;
 use crate::shell::ShellViewModel;
 use crate::shell::view_harness::ShellHarness;
 use nana_ui::runtime::{
-    GradientShape, LayoutBox, PaintOp, PaintRecording, PaintState, Painter, ResolvedPaint,
+    ComponentElevation, GradientShape, LayoutBox, PaintOp, PaintRecording, PaintState, Painter,
+    ResolvedPaint,
 };
+use nana_ui::theme::EffectTokens;
 use nana_ui_core::{
-    RadiusTier, SemanticColorMix, SemanticColorRole, StyleModelRef, ThemeAppearance,
+    ElevationRole, RadiusTier, SemanticColorMix, SemanticColorRole, StyleModelRef,
+    ThemeAppearance,
 };
 
 /// 卡片上有浅光和落影。落影在底色下面，浅光在底色上面、内容下面。
-/// 浅色和深色各跟自己的背景色、强调色。800×240 不是正方形，圆仍按像素最远角。
+/// 浅色和深色各跟自己的高度档、强调色。800×240 不是正方形，圆仍按像素最远角。
 /// 没有面积时不编阴影，也不编浅光。
 #[test]
 fn audio_card_draws_its_glow_and_shadow() {
@@ -48,20 +51,9 @@ fn audio_card_draws_its_glow_and_shadow() {
         let recording = record_paint(painter, mode, size);
         let (shadow, shadow_rect, shadow_radii, glow) = layers(&recording.behind_children, theme);
         assert_eq!(
-            (
-                shadow.offset_x,
-                shadow.offset_y,
-                shadow.blur_radius,
-                shadow.spread_radius,
-                shadow.inset
-            ),
-            (0.0, 18.0, 40.0, 0.0, false),
-            "{theme}"
-        );
-        assert_eq!(
-            shadow.color.to_srgb(),
-            expected_background(mode),
-            "{theme} 应是背景色的 84%"
+            shadow,
+            expected_shadow(mode),
+            "{theme} 应是主题表面高度档的落影"
         );
         assert!(
             (shadow_rect.x).abs() < 0.05
@@ -151,11 +143,11 @@ fn audio_card_draws_its_glow_and_shadow() {
     );
 }
 
-/// 和 `color-mix(in srgb, var(--bg) 84%, transparent)` 同一条混合。比例写死。
-fn expected_background(mode: ThemeAppearance) -> [f32; 4] {
-    SemanticColorMix::alpha(SemanticColorRole::Background, 0.84)
-        .resolve(StyleModelRef::new(mode))
-        .as_rgba_array()
+/// 主题表面高度档的落影。档位写死，不跟着实现常量走。
+fn expected_shadow(mode: ThemeAppearance) -> ComponentElevation {
+    ComponentElevation::from_shadow(
+        EffectTokens::for_appearance(mode).shadow(ElevationRole::Surface),
+    )
 }
 
 /// 和 `color-mix(in srgb, var(--accent) 12%, transparent)` 同一条混合。比例写死。

@@ -13,21 +13,38 @@ use nana_ui::runtime::{
     SemanticColorRole, SemanticPaint, Stack, Text, TextHorizontalAlignment, TextInput,
 };
 use nana_ui_core::{
-    ControlPadding, LineHeightSpec, RadiusTier, SemanticColorMix, TextWeight, ThemeExpr, ThemeToken,
+    ControlHeight, ControlPadding, ControlSize, LineHeightSpec, LineRole, RadiusTier,
+    SemanticColorMix, SpacingStep, TextWeight, ThemeExpr, ThemeToken,
 };
 
+use super::super::files_view::style as files_style;
 use super::paint::SwatchChipPainter;
 use super::presenter::SwatchColor;
-use crate::theme_map::DISABLED_OPACITY;
+use crate::theme_map::tiers::{self, Edge};
 
 /// 行高倍数 1.55。
 pub(crate) const LINE_RATIO: f32 = 1.55;
-/// 筛选芯片、输入胶囊、计数胶囊和分组标签的高度。
+/// 筛选芯片、输入胶囊、计数胶囊和分组标签的高度 26：控件档里没有这个高度，照写像素。
 pub(crate) const CONTROL_HEIGHT: f32 = 26.0;
-/// 筛选栏「清除」「关闭」「应用」按钮的高度。
-pub(crate) const BAR_BUTTON_HEIGHT: f32 = 28.0;
-/// 色块和芯片文字之间的间距。
-const CHIP_GAP: f32 = 6.0;
+/// 筛选栏「清除」「关闭」「应用」按钮的高度档：小号控件。
+const BAR_BUTTON_SIZE: ControlSize = ControlSize::Small;
+/// 筛选栏按钮的高度（默认主题）。
+pub(crate) const BAR_BUTTON_HEIGHT: f32 = BAR_BUTTON_SIZE.height_in(nana_ui::theme::UI_METRICS);
+/// 色块和芯片文字之间的间距档。
+const CHIP_GAP: SpacingStep = SpacingStep::Sm;
+/// 胶囊里的输入框高：胶囊高减去上下两根发丝边。
+const PILL_INNER_HEIGHT: f32 = CONTROL_HEIGHT - tiers::hairline_px() * 2.0;
+/// 关闭按钮宽 32：和中号控件一样宽，照写像素。
+const CLOSE_WIDTH: f32 = 32.0;
+/// 输入框最窄 86（`minmax(86px, 120px)` 的下限）。
+const INPUT_MIN_WIDTH: f32 = 86.0;
+/// 眉题字距 0.4：主题没有字距档，照写像素。
+const EYEBROW_TRACKING: f32 = 0.4;
+
+/// 控件上的行高：按钮、输入框自带主题的行盒令牌，写数值行高不生效，这里直接取它们实际画出来的行盒档。
+fn control_line(layout: &mut nana_ui_core::LayoutStyle) {
+    tiers::line(layout, LineRole::Line);
+}
 /// 输入框宽度，`minmax(86px, 120px)` 的上限。
 pub(crate) const INPUT_WIDTH: f32 = 120.0;
 
@@ -41,8 +58,13 @@ pub(crate) fn label(
     let mut node =
         crate::theme_map::typed_text(Text::new(content.into()), size, weight).color(role);
     node.style.text_horizontal_alignment = TextHorizontalAlignment::Start;
+    let role = node.style.type_role;
     let layout = Arc::make_mut(&mut node.style.layout);
-    layout.line_height = Some(LineHeightSpec::Relative(LINE_RATIO));
+    match role {
+        // 行高按字号档的倍数写，主题换字阶时一起变。
+        Some(role) => tiers::line_ratio(layout, role, LINE_RATIO),
+        None => layout.line_height = Some(LineHeightSpec::Relative(LINE_RATIO)),
+    }
     node
 }
 
@@ -63,10 +85,9 @@ pub(crate) fn wrapping_label(
     node
 }
 
-/// 文字上方留出外边距，对应标题和摘要的 `margin-top`。
-pub(crate) fn margin_top(mut node: Text, px: f32) -> Text {
-    Arc::make_mut(&mut node.style.layout).margin_top = Some(LengthSpec::Px(px));
-    node
+/// 文字上方留出一档外边距，对应标题和摘要的 `margin-top`。
+pub(crate) fn margin_top(node: Text, step: SpacingStep) -> Text {
+    files_style::margin_top(node, step)
 }
 
 /// 眉题：11px、600 字重、弱色，字距 0.4px。
@@ -79,7 +100,7 @@ pub(crate) fn eyebrow(content: impl Into<String>) -> Text {
     );
     Arc::make_mut(&mut node.style.layout)
         .text_ext
-        .letter_spacing = Some(0.4);
+        .letter_spacing = Some(EYEBROW_TRACKING);
     node
 }
 
@@ -88,7 +109,7 @@ pub(crate) fn bound(node: Text, value: impl IntoProp<String>) -> El<Text> {
     widget(node).prop::<String, fields::text::value>(value)
 }
 
-/// 26px 高的计数胶囊，主表面底、12px 次要文字。文字可以绑定，
+/// 26px 高的计数胶囊，左右 `Lg`，主表面底、12px 次要文字。文字可以绑定，
 /// 返回元素，调用方还能再绑显隐。
 pub(crate) fn stat(
     content: impl IntoProp<String>,
@@ -99,9 +120,13 @@ pub(crate) fn stat(
         Stack::row(0.0)
             .align(AlignSpec::Center)
             .height(LengthSpec::Px(CONTROL_HEIGHT))
-            .padding_xy(10.0, 0.0)
+            .with_layout(|layout| {
+                tiers::padding(layout, &Edge::X, SpacingStep::Lg);
+                layout.padding_top = Some(LengthSpec::Px(0.0));
+                layout.padding_bottom = Some(LengthSpec::Px(0.0));
+            })
             .surface(SemanticColorRole::Background)
-            .radius_px(999.0)
+            .radius(RadiusTier::Full)
             .grow(0.0)
             .shrink(0.0),
     )
@@ -124,16 +149,20 @@ pub(crate) fn chip(content: &str, swatch: Option<SwatchColor>) -> Chip {
     let mut chip = Chip::new(content);
     if let Some(color) = swatch {
         chip.style.painter = Some(NodePainter::new(SwatchChipPainter { color }));
-        Arc::make_mut(&mut chip.style.layout).theme.padding_left = Some(
-            ThemeExpr::token(ThemeToken::ControlPadding(ControlPadding::Compact))
-                .offset(super::paint::SWATCH_SIZE + CHIP_GAP),
-        );
+        // 左内边距：小号控件内边距 + 色块 + 一档间距，三段都跟着主题。
+        Arc::make_mut(&mut chip.style.layout).theme.padding_left = Some(ThemeExpr {
+            constant: super::paint::SWATCH_SIZE,
+            terms: vec![
+                (ThemeToken::ControlPadding(ControlPadding::Compact), 1.0),
+                (ThemeToken::Space(CHIP_GAP), 1.0),
+            ],
+        });
     }
     chip
 }
 
-/// 筛选栏按钮：28px 高、左右 9px 的透明按钮，按钮正文档字号、中等字重、正文色。
-/// 悬停是 `--bg-hover`。禁用时文字按 45% 混进筛选栏底色：不透明度要按 sRGB 合成，
+/// 筛选栏按钮：小号控件高、左右取标准控件内边距档的透明按钮，按钮正文档字号、中等字重、正文色。
+/// 悬停是 `--bg-hover`。禁用时文字按主题的停用不透明度档混进筛选栏底色：不透明度要按 sRGB 合成，
 /// 直接给半透明文字会被渲染器按线性空间合成得更亮，所以先混成不透明色。
 pub(crate) fn bar_button(content: &str, disabled: bool) -> Button {
     let button = Button::new(content).disabled(disabled);
@@ -141,18 +170,19 @@ pub(crate) fn bar_button(content: &str, disabled: bool) -> Button {
     {
         let layout = Arc::make_mut(&mut style.layout);
         fixed_height(layout, BAR_BUTTON_HEIGHT);
-        layout.padding_left = Some(LengthSpec::Px(9.0));
-        layout.padding_right = Some(LengthSpec::Px(9.0));
-        layout.line_height = Some(LineHeightSpec::Relative(LINE_RATIO));
+        control_inset(layout);
+        control_line(layout);
     }
     clear_control_metrics(&mut style);
+    style.control_height = Some(ControlHeight::Exact(BAR_BUTTON_SIZE));
+    style.control_padding_x = Some(ControlPadding::Standard);
     style.radius = Some(RadiusTier::Sm);
     ghost_paint(&mut style);
     style.interaction.disabled = SemanticPaint {
         foreground_mix: Some(SemanticColorMix::new(
             SemanticColorRole::Text,
             SemanticColorRole::Surface,
-            DISABLED_OPACITY,
+            files_style::disabled_opacity(),
         )),
         ..SemanticPaint::default()
     };
@@ -168,15 +198,25 @@ pub(crate) fn close_button(name: &str) -> IconButton {
     {
         let layout = Arc::make_mut(&mut style.layout);
         fixed_height(layout, BAR_BUTTON_HEIGHT);
-        layout.width = Some(LengthSpec::Px(32.0));
-        layout.min_width = Some(LengthSpec::Px(32.0));
+        layout.width = Some(LengthSpec::Px(CLOSE_WIDTH));
+        layout.min_width = Some(LengthSpec::Px(CLOSE_WIDTH));
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(0.0);
     }
     style.control_padding_x = None;
+    style.control_height = Some(ControlHeight::Exact(BAR_BUTTON_SIZE));
     style.radius = Some(RadiusTier::Sm);
     ghost_paint(&mut style);
     button.style(style)
+}
+
+/// 按钮左右内边距：标准控件内边距档（默认 10）。
+fn control_inset(layout: &mut nana_ui_core::LayoutStyle) {
+    let padding = Some(LengthSpec::Px(
+        ControlPadding::Standard.resolve(nana_ui::theme::UI_METRICS),
+    ));
+    layout.padding_left = padding;
+    layout.padding_right = padding;
 }
 
 /// 透明底、正文色，悬停 `--bg-hover`、按下 `--bg-active`。
@@ -197,21 +237,23 @@ fn ghost_paint(style: &mut NodeStyle) {
     style.interaction.disabled = SemanticPaint::default();
 }
 
-/// 输入胶囊：26px 高，1px 边框、主表面底，里面放输入框和可选按钮。
+/// 输入胶囊：26px 高，一圈发丝边、主表面底，里面放输入框和可选按钮。
 pub(crate) fn input_pill(fill: bool) -> Stack {
-    let pill = Stack::row(0.0)
-        .align(AlignSpec::Stretch)
-        .height(LengthSpec::Px(CONTROL_HEIGHT))
-        .min_height(LengthSpec::Px(CONTROL_HEIGHT))
-        .surface(SemanticColorRole::Background)
-        .border(SemanticColorRole::Border, 1.0)
-        .radius_px(999.0)
-        .grow(0.0)
-        .shrink(0.0)
-        .with_layout(|layout| {
-            layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
-            layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
-        });
+    let pill = files_style::hairline(
+        Stack::row(0.0)
+            .align(AlignSpec::Stretch)
+            .height(LengthSpec::Px(CONTROL_HEIGHT))
+            .min_height(LengthSpec::Px(CONTROL_HEIGHT))
+            .surface(SemanticColorRole::Background),
+        SemanticColorRole::Border,
+    )
+    .radius(RadiusTier::Full)
+    .grow(0.0)
+    .shrink(0.0)
+    .with_layout(|layout| {
+        layout.overflow_x = nana_ui_core::OverflowSpec::Hidden;
+        layout.overflow_y = nana_ui_core::OverflowSpec::Hidden;
+    });
     if fill {
         pill.width(LengthSpec::Fill).min_width(LengthSpec::Px(0.0))
     } else {
@@ -219,7 +261,7 @@ pub(crate) fn input_pill(fill: bool) -> Stack {
     }
 }
 
-/// 胶囊里的输入框：透明、无边框，左右 8px，输入框正文档字号。宽度为 `None` 时填满胶囊。
+/// 胶囊里的输入框：透明、无边框，左右 `Md`，输入框正文档字号。宽度为 `None` 时填满胶囊。
 pub(crate) fn pill_input(
     value: &str,
     placeholder: &str,
@@ -232,19 +274,19 @@ pub(crate) fn pill_input(
     let mut style = input.style.clone();
     {
         let layout = Arc::make_mut(&mut style.layout);
-        layout.height = Some(LengthSpec::Px(CONTROL_HEIGHT - 2.0));
+        layout.height = Some(LengthSpec::Px(PILL_INNER_HEIGHT));
         layout.min_height = Some(LengthSpec::Px(0.0));
-        layout.padding_left = Some(LengthSpec::Px(8.0));
-        layout.padding_right = Some(LengthSpec::Px(8.0));
+        tiers::padding(layout, &Edge::X, SpacingStep::Md);
         layout.padding_top = Some(LengthSpec::Px(0.0));
         layout.padding_bottom = Some(LengthSpec::Px(0.0));
         layout.border_width = Some(0.0);
+        layout.theme.border_width = None;
         crate::theme_map::control_weight(layout, TextWeight::Regular);
-        layout.line_height = Some(LineHeightSpec::Relative(LINE_RATIO));
+        control_line(layout);
         match width {
             Some(width) => {
                 layout.width = Some(LengthSpec::Px(width));
-                layout.min_width = Some(LengthSpec::Px(86.0_f32.min(width)));
+                layout.min_width = Some(LengthSpec::Px(INPUT_MIN_WIDTH.min(width)));
                 layout.flex_grow = Some(0.0);
                 layout.flex_shrink = Some(1.0);
             }
@@ -272,27 +314,24 @@ pub(crate) fn pill_divider() -> Divider {
 }
 
 /// 胶囊右侧的「添加」：`--bg-subtle` 底，按钮正文档字号的次要色字，右端跟着胶囊的全圆角。
-/// 可用时悬停是柔和强调底、强调色字；输入为空时底和字都按 45% 混进胶囊底色。
+/// 可用时悬停是柔和强调底、强调色字；输入为空时底和字都按主题的停用不透明度档混进胶囊底色。
 pub(crate) fn pill_button(content: &str, disabled: bool) -> Button {
     let button = Button::new(content).disabled(disabled);
     let mut style = button.style.clone();
     {
         let layout = Arc::make_mut(&mut style.layout);
-        fixed_height(layout, CONTROL_HEIGHT - 2.0);
-        layout.padding_left = Some(LengthSpec::Px(9.0));
-        layout.padding_right = Some(LengthSpec::Px(9.0));
+        fixed_height(layout, PILL_INNER_HEIGHT);
+        control_inset(layout);
         layout.border_width = Some(0.0);
-        layout.line_height = Some(LineHeightSpec::Relative(LINE_RATIO));
+        layout.theme.border_width = None;
+        control_line(layout);
         layout.flex_grow = Some(0.0);
         layout.flex_shrink = Some(0.0);
-        layout.paint.border_radii = Some([
-            LengthSpec::Px(0.0),
-            LengthSpec::Px(999.0),
-            LengthSpec::Px(999.0),
-            LengthSpec::Px(0.0),
-        ]);
     }
     clear_control_metrics(&mut style);
+    style.control_padding_x = Some(ControlPadding::Standard);
+    // 右端两个角跟着胶囊的全圆角，左端是直角。
+    style.corner_radii = Some([None, Some(RadiusTier::Full), Some(RadiusTier::Full), None]);
     style.foreground = Some(SemanticColorRole::Muted);
     style.background = Some(SemanticColorRole::Subtle);
     style.border = None;
@@ -308,12 +347,12 @@ pub(crate) fn pill_button(content: &str, disabled: bool) -> Button {
         foreground_mix: Some(SemanticColorMix::new(
             SemanticColorRole::Muted,
             SemanticColorRole::Background,
-            DISABLED_OPACITY,
+            files_style::disabled_opacity(),
         )),
         background_mix: Some(SemanticColorMix::new(
             SemanticColorRole::Subtle,
             SemanticColorRole::Background,
-            DISABLED_OPACITY,
+            files_style::disabled_opacity(),
         )),
         ..SemanticPaint::default()
     };

@@ -1,17 +1,17 @@
 //! 音视频准备卡的落影和不定进度轨。
 //!
-//! 准备卡的落影是 `box-shadow: 0 12px 32px color-mix(in srgb, var(--bg) 70%, transparent)`。
+//! 准备卡的落影是主题表面高度档的落影。
 //! 进度轨是 NanaUI 的不定进度 `Progress`，扫动由组件自己的时间线驱动。
 
 use super::LoadingCardShadow;
 use crate::shell::ShellViewModel;
 use crate::shell::view_harness::ShellHarness;
 use nana_ui::runtime::{
-    Entity, LayoutBox, LengthSpec, PaintOp, PaintRecording, PaintState, Painter, Progress,
+    ComponentElevation, Entity, LayoutBox, LengthSpec, PaintOp, PaintRecording, PaintState,
+    Painter, Progress,
 };
-use nana_ui_core::{
-    RadiusTier, SemanticColorMix, SemanticColorRole, StyleModelRef, ThemeAppearance,
-};
+use nana_ui::theme::EffectTokens;
+use nana_ui_core::{ElevationRole, RadiusTier, SemanticColorRole, ThemeAppearance};
 
 /// 准备卡有落影，下面是铺满卡宽的 6px 不定进度轨。
 #[test]
@@ -38,20 +38,9 @@ fn loading_card_sweeps_and_drops_its_shadow() {
         let recording = record_paint(painter, mode, [360.0, 96.0]);
         let (shadow, rect) = only_shadow(&recording.behind_children, theme);
         assert_eq!(
-            (
-                shadow.offset_x,
-                shadow.offset_y,
-                shadow.blur_radius,
-                shadow.spread_radius,
-                shadow.inset
-            ),
-            (0.0, 12.0, 32.0, 0.0, false),
-            "{theme}"
-        );
-        assert_eq!(
-            shadow.color.to_srgb(),
-            expected_background(mode),
-            "{theme} 应是背景色的 70%"
+            shadow,
+            expected_shadow(mode),
+            "{theme} 应是主题表面高度档的落影"
         );
         assert!(
             (rect.width - 360.0).abs() < 0.05 && (rect.height - 96.0).abs() < 0.05,
@@ -93,11 +82,11 @@ pub(super) fn sweep_track(harness: &ShellHarness, key: &str) -> Progress {
         .unwrap_or_else(|_| panic!("{key} 应该是 NanaUI 的 Progress"))
 }
 
-/// `color-mix(in srgb, var(--bg) 70%, transparent)`。
-fn expected_background(mode: ThemeAppearance) -> [f32; 4] {
-    SemanticColorMix::alpha(SemanticColorRole::Background, 0.7)
-        .resolve(StyleModelRef::new(mode))
-        .as_rgba_array()
+/// 主题表面高度档的落影。档位写死，不跟着实现常量走。
+fn expected_shadow(mode: ThemeAppearance) -> ComponentElevation {
+    ComponentElevation::from_shadow(
+        EffectTokens::for_appearance(mode).shadow(ElevationRole::Surface),
+    )
 }
 
 fn only_shadow(ops: &[PaintOp], theme: &str) -> (nana_ui::runtime::ComponentElevation, LayoutBox) {

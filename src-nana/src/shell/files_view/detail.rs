@@ -28,7 +28,8 @@ use super::super::inspect_metadata_view::{self, MetadataSignals};
 use super::bind::{StyleField, fact_row, fill_container};
 use super::cards::{PreviewLook, preview_box};
 use super::style;
-use nana_ui_core::TextWeight;
+use crate::theme_map::tiers::{self, Edge};
+use nana_ui_core::{SpacingStep, TextWeight};
 
 /// 详情里现在显示哪一种卡片。和滚动区的键一起决定要不要换一整块。
 #[derive(Clone, Debug, PartialEq)]
@@ -407,10 +408,13 @@ fn scroller(key: &DetailKey, signals: DetailSignals, metadata: MetadataSignals) 
         DetailKind::Directory => (directory_card(signals.summary), false),
         DetailKind::Empty { smart, trash } => (empty_card(*smart, *trash), true),
     };
-    let mut content = Stack::column(14.0)
-        .width(LengthSpec::Fill)
-        .min_width(LengthSpec::Px(0.0))
-        .padding(19.0);
+    let mut content = style::pad(
+        style::column(SpacingStep::Xxl)
+            .width(LengthSpec::Fill)
+            .min_width(LengthSpec::Px(0.0)),
+        SpacingStep::PageTight,
+        SpacingStep::PageTight,
+    );
     if centered {
         content = content
             .height(LengthSpec::Fill)
@@ -431,7 +435,7 @@ fn scroller(key: &DetailKey, signals: DetailSignals, metadata: MetadataSignals) 
     .into_any()
 }
 
-/// 详情的标题段：标题 18px/700（上 4），路径 14px 弱化色（上 8，空时不占位）。
+/// 详情的标题段：标题 18px/700（上 `Xs`），路径 14px 弱化色（上 `Md`，空时不占位）。
 fn section(
     title: impl Fn() -> String + Send + Clone + 'static,
     subline: impl Fn() -> String + Send + Clone + 'static,
@@ -439,14 +443,20 @@ fn section(
     key: &str,
 ) -> AnyView {
     let mut rows = vec![
-        widget(style::margin_top(style::heading(untrack(&title)), 4.0))
-            .prop::<String, fields::text::value>(title)
-            .key(format!("{key}-title"))
-            .into_any(),
-        widget(style::margin_top(style::subline(untrack(&subline)), 8.0))
-            .prop::<String, HiddenWhenEmpty<fields::text::value>>(subline)
-            .key(format!("{key}-subline"))
-            .into_any(),
+        widget(style::margin_top(
+            style::heading(untrack(&title)),
+            SpacingStep::Xs,
+        ))
+        .prop::<String, fields::text::value>(title)
+        .key(format!("{key}-title"))
+        .into_any(),
+        widget(style::margin_top(
+            style::subline(untrack(&subline)),
+            SpacingStep::Md,
+        ))
+        .prop::<String, HiddenWhenEmpty<fields::text::value>>(subline)
+        .key(format!("{key}-subline"))
+        .into_any(),
     ];
     rows.extend(lead);
     widget(
@@ -505,9 +515,9 @@ fn entry_card(
     .visible(move || entry.with(|view| style::any_color(&view.palette)))
     .into_any();
     let lead = widget(
-        Stack::column(8.0)
+        style::column(SpacingStep::Md)
             .width(LengthSpec::Fill)
-            .with_layout(|layout| layout.margin_top = Some(LengthSpec::Px(12.0))),
+            .with_layout(|layout| tiers::margin(layout, &[Edge::Top], SpacingStep::Xl)),
     )
     .visible(move || entry.with(|view| !view.comment.is_empty() || !view.link.is_empty()))
     .children((
@@ -577,7 +587,7 @@ fn entry_card(
         thumbnail,
         palette,
         section,
-        widget(Stack::column(12.0).width(LengthSpec::Fill))
+        widget(style::column(SpacingStep::Xl).width(LengthSpec::Fill))
             .children(stats)
             .key("file-detail-stats")
             .into_any(),
@@ -596,7 +606,7 @@ fn lead_row(
 ) -> AnyView {
     let shown = value.clone();
     widget(
-        Stack::column(4.0)
+        style::column(SpacingStep::Xs)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
     )
@@ -620,7 +630,7 @@ fn lead_row(
 /// 没有选择：当前目录名（根目录写资源库名）、路径，以及直属计数。
 fn directory_card(summary: Signal<SummaryView>) -> AnyView {
     let read = move |pick: fn(&SummaryView) -> String| move || summary.with(|view| pick(view));
-    let stats = widget(Stack::column(12.0).width(LengthSpec::Fill))
+    let stats = widget(style::column(SpacingStep::Xl).width(LengthSpec::Fill))
         .children((
             fact_row(
                 "直属文件",
@@ -674,19 +684,20 @@ fn empty_card(smart: bool, trash: bool) -> AnyView {
             widget(style::eyebrow(eyebrow)).key("file-detail-empty-eyebrow"),
             widget(style::margin_top(
                 style::heading("选择一个文件或文件夹"),
-                4.0,
+                SpacingStep::Xs,
             ))
             .key("file-detail-empty-title"),
-            widget(style::margin_top(style::subline(message), 8.0)).key("file-detail-empty-copy"),
+            widget(style::margin_top(style::subline(message), SpacingStep::Md))
+                .key("file-detail-empty-copy"),
         ))
         .key("file-detail-empty")
         .into_any()
 }
 
-/// 详情卡片：各块之间 16。
+/// 详情卡片：各块之间 `Xxxl`。
 fn card(parts: Vec<AnyView>, key: &'static str) -> AnyView {
     widget(
-        Stack::column(16.0)
+        style::column(SpacingStep::Xxxl)
             .width(LengthSpec::Fill)
             .min_width(LengthSpec::Px(0.0)),
     )
